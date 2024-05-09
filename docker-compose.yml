@@ -1,0 +1,50 @@
+version: '3'
+
+services:
+  openresty:
+    container_name: webimpetus-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8090:80"
+    volumes:
+      - ./lua:/usr/local/openresty/nginx/lua
+      - ./lua.conf:/usr/local/openresty/nginx/conf/lua.conf
+    networks:
+      webimpetus-network:
+
+  postgres:
+    container_name: webimpetus-api-postgres
+    image: postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_DB: webimpetus-api
+    networks:
+      webimpetus-network:
+        ipv4_address: 172.18.0.10
+
+  mariadb:
+    image: mariadb
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: msroot
+      MYSQL_DATABASE: webimpetus-api
+      MYSQL_USER: msuser
+      MYSQL_PASSWORD: mspassword
+    networks:
+      webimpetus-network:
+        ipv4_address: 172.18.0.11
+
+networks:
+  webimpetus-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1
