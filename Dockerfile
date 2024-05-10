@@ -23,6 +23,7 @@ COPY ./lua /usr/local/openresty/nginx/lua
 
 COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 COPY lua.conf /usr/local/openresty/nginx/conf/lua.conf
+COPY database/migrations/ /opt/nginx/data/migrations/
 
 EXPOSE 80
 
