@@ -1,5 +1,5 @@
 local cjson = require "cjson"
-local tables = require "pg-tables"
+local pgTables = require "pg-tables"
 
 local function GetPayloads(body)
     local keyset = {}
@@ -27,37 +27,35 @@ local function handle_get_request(args, path)
     local uuid = string.match(path, pattern)
 
     if path == "/pgsql/create/table" then
-        tables.create(args)
+        pgTables.create(args)
     end
 end
 
 local function handle_post_request(args, path)
     local postData = GetPayloads(args)
+    local pattern = ".*/.*/.*/(.*)"
+    local pathSegment = string.match(path, pattern)
     if path == "/pgsql/create/table" then
-        tables.create(postData)
+        pgTables.create(postData)
     end
 end
 
 local function handle_put_request(args, path)
-    local pattern = ".*/(.*)"
-    local uuid = string.match(path, pattern)
-    if not uuid or uuid == nil or uuid == "" then
-        ngx.status = ngx.HTTP_BAD_REQUEST
-        ngx.say(cjson.encode({
-            data = {
-                message = "The uuid must be present while updating the data."
-            }
-        }))
-        ngx.exit(ngx.HTTP_BAD_REQUEST)
-        return
+    local pattern = ".*/.*/.*/(.*)"
+    local pathSegment = string.match(path, pattern)
+    local postData = GetPayloads(args)
+    if string.find(path, "/pgsql/alter/table", 1, true) then
+        pgTables.alter(postData, pathSegment)
     end
-
 end
 
 local function handle_delete_request(args, path)
-    local pattern = ".*/(.*)"
-    local uuid = string.match(path, pattern)
-
+    local pattern = ".*/.*/.*/(.*)"
+    local pathSegment = string.match(path, pattern)
+    local postData = GetPayloads(args)
+    if string.find(path, "/pgsql/drop/table", 1, true) then
+        pgTables.drop(postData, pathSegment)
+    end
 end
 
 local path = ngx.var.uri:match("^/opsapi/v1(.*)$")
