@@ -11,6 +11,7 @@ services:
     volumes:
       - ./lua:/usr/local/openresty/nginx/lua
       - ./lua.conf:/usr/local/openresty/nginx/conf/lua.conf
+      - ./database/migrations:/opt/nginx/data/migrations
     networks:
       webimpetus-network:
 
@@ -28,6 +29,7 @@ services:
         ipv4_address: 172.18.0.10
 
   mariadb:
+    container_name: webimpetus-mariadb
     image: mariadb
     ports:
       - "3307:3306"

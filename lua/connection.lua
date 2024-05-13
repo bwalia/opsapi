@@ -30,6 +30,7 @@ function connection.connectPgsql()
     user = user,
     password = password,
   })
+  assert(pg:connect())
   return pg
 end
 
