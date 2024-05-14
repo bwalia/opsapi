@@ -18,6 +18,7 @@ RUN luarocks install luaossl
 RUN luarocks install luasec
 
 RUN luarocks install pgmoon
+RUN luarocks install luafilesystem
 
 COPY ./lua /usr/local/openresty/nginx/lua
 

@@ -26,8 +26,8 @@ local function handle_get_request(args, path)
     local pattern = ".*/(.*)"
     local uuid = string.match(path, pattern)
 
-    if path == "/pgsql/create/table" then
-        pgTables.create(args)
+    if path == "/pgsql/migrate" then
+        pgTables.migrate()
     end
 end
 
@@ -50,11 +50,9 @@ local function handle_put_request(args, path)
 end
 
 local function handle_delete_request(args, path)
-    local pattern = ".*/.*/.*/(.*)"
-    local pathSegment = string.match(path, pattern)
     local postData = GetPayloads(args)
-    if string.find(path, "/pgsql/drop/table", 1, true) then
-        pgTables.drop(postData, pathSegment)
+    if path == "/pgsql/drop/table" then
+        pgTables.drop(postData)
     end
 end
 
