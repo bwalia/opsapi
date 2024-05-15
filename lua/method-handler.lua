@@ -36,7 +36,7 @@ local function handle_post_request(args, path)
     local pattern = ".*/.*/.*/(.*)"
     local pathSegment = string.match(path, pattern)
     if path == "/pgsql/create/table" then
-        pgTables.create(postData)
+        pgTables.create(postData, false)
     end
 end
 
@@ -45,7 +45,7 @@ local function handle_put_request(args, path)
     local pathSegment = string.match(path, pattern)
     local postData = GetPayloads(args)
     if string.find(path, "/pgsql/alter/table", 1, true) then
-        pgTables.alter(postData, pathSegment)
+        pgTables.alter(postData, pathSegment, false)
     end
 end
 

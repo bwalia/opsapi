@@ -44,21 +44,34 @@ local function contains(str, substr)
     return string.find(str, substr, 1, true) ~= nil
 end
 
-function pgTables.create(args)
+function pgTables.create(args, isMigration)
     local DB = connection.connectPgsql()
     if DB then
         local tableName = args.table
-        local tableFile = "/opt/nginx/data/migrations/" .. os.time() .. "-create_table_" .. tableName .. ".json"
-        local isDir = create_directory_if_not_exists("/opt/nginx/data/migrations")
-        if isDir then
-            local file, fileErr = io.open(tableFile, "w")
-            if fileErr then
-                ngx.log(ngx.ERR, fileErr)
-                ngx.exit(500)
+        local isDir, tableFile, timestamp = false, "", os.time()
+        if not isMigration then
+            tableFile = "/opt/nginx/data/migrations/" .. timestamp .. "-create_table_" .. tableName .. ".json"
+            isDir = create_directory_if_not_exists("/opt/nginx/data/migrations")
+        end
+        if isDir or isMigration then
+            local file, fileErr = false, ""
+            if isDir then
+                file, fileErr = io.open(tableFile, "w")
+                if fileErr then
+                    return ngx.say(cjson.encode({
+                        data = {
+                            message = "Something wrong while opening the migration file",
+                            error = fileErr
+                        },
+                        status = 500
+                    }))
+                end
             end
-            if file then
-                file:write(cjson.encode(args))
-                file:close()
+            if file or isMigration then
+                if file then
+                    file:write(cjson.encode(args))
+                    file:close()
+                end
                 local createQuery = string.format("CREATE TABLE IF NOT EXISTS %s (", tableName)
                 for i, column in ipairs(args.columns) do
                     createQuery = createQuery .. column.name .. " " .. (column.primary ~= true and column.type or "")
@@ -85,51 +98,91 @@ function pgTables.create(args)
 
                 local res, err = DB:query(createQuery)
                 if not res then
-                    ngx.say("Error executing SQL query: ", err)
-                    ngx.exit(500)
+                    return ngx.say(cjson.encode({
+                        data = {
+                            message = "Error executing SQL query while creating table " .. tableName,
+                            error = err
+                        },
+                        status = 500
+                    }))
                 else
                     local migrationQuery = "CREATE TABLE IF NOT EXISTS migrations"
                         .. " (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, created_at TIMESTAMP NOT NULL);"
                     local migRes, migErr = DB:query(migrationQuery)
                     if not migRes then
-                        ngx.say("Error executing SQL query: ", migErr)
-                        ngx.exit(500)
+                        return ngx.say(cjson.encode({
+                            data = {
+                                message = "Error executing SQL query while creating table migrations",
+                                error = migErr
+                            },
+                            status = 500
+                        }))
                     end
-                    local fileName = os.time() .. "-create_table_" .. tableName .. ".json"
+                    local fileName = isMigration and isMigration or timestamp .. "-create_table_" .. tableName .. ".json"
                     local insertQuery = "INSERT INTO migrations (name, created_at) VALUES ('" .. fileName .. "', NOW());"
                     local insertRes, insertErr = DB:query(insertQuery)
                     if not insertRes then
-                        ngx.say("Error executing SQL query: ", insertErr)
-                        ngx.exit(500)
+                        return ngx.say(cjson.encode({
+                            data = {
+                                message = "Error executing SQL query while inserting into migrations",
+                                error = insertErr
+                            },
+                            status = 500
+                        }))
                     end
-                    ngx.say("Table created successfully")
-                    ngx.exit(ngx.HTTP_OK)
+                    return ngx.say(cjson.encode({
+                        data = {
+                            message = "Table created successfully!",
+                        },
+                        status = 200
+                    }))
                 end
             end
         else
-            ngx.say("Table Migration already exists!")
-            ngx.exit(ngx.HTTP_BAD_GATEWAY)
+            return ngx.say(cjson.encode({
+                data = {
+                    message = "Table Migration already exists!",
+                },
+                status = 500
+            }))
         end
     else
-        ngx.log(ngx.ERR, "Failed to open file for writing.")
+        return ngx.say(cjson.encode({
+            data = {
+                message = "Failed to open file for writing.",
+            },
+            status = 500
+        }))
     end
 end
 
-function pgTables.alter(args, table)
+function pgTables.alter(args, table, isMigration)
     local DB = connection.connectPgsql()
     if DB then
-        local tableName = args.table
-        local tableFile = "/opt/nginx/data/migrations/" .. os.time() .. "-alter_table_" .. table .. ".json"
-        local isDir = create_directory_if_not_exists("/opt/nginx/data/migrations")
-        if isDir then
-            local file, fileErr = io.open(tableFile, "w")
-            if fileErr then
-                ngx.log(ngx.ERR, fileErr)
-                ngx.exit(500)
+        local tableName, isDir, tableFile, timestamp = args.table, false, "", os.time()
+        if not isMigration then
+            tableFile = "/opt/nginx/data/migrations/" .. timestamp .. "-alter_table_" .. table .. ".json"
+            isDir = create_directory_if_not_exists("/opt/nginx/data/migrations")
+        end
+        if isDir or isMigration then
+            local file, fileErr = false, ""
+            if isDir then
+                file, fileErr = io.open(tableFile, "w")
+                if fileErr then
+                    return ngx.say(cjson.encode({
+                        data = {
+                            message = "Something wrong while opening the migration file",
+                            error = fileErr
+                        },
+                        status = 500
+                    }))
+                end
             end
-            if file then
-                file:write(cjson.encode(args))
-                file:close()
+            if file or isMigration then
+                if file then
+                    file:write(cjson.encode(args))
+                    file:close()
+                end
                 local createQuery = string.format("ALTER TABLE %s ", tableName)
                 if args.clause == "add" then
                     for i, column in ipairs(args.columns) do
@@ -207,51 +260,86 @@ function pgTables.alter(args, table)
                 end
                 local res, err = DB:query(createQuery)
                 if not res then
-                    ngx.say("Error executing SQL query: ", err)
-                    ngx.exit(500)
+                    ngx.say(cjson.encode({
+                        data = {
+                            message = "Error executing SQL query while altering table " .. tableName,
+                            error = err
+                        },
+                        status = 500
+                    }))
                 else
-                    local fileName = os.time() .. "-alter_table_" .. table .. ".json"
+                    local fileName = isMigration and isMigration or timestamp .. "-alter_table_" .. table .. ".json"
                     local insertQuery = "INSERT INTO migrations (name, created_at) VALUES ('" .. fileName .. "', NOW());"
                     local insertRes, insertErr = DB:query(insertQuery)
                     if not insertRes then
-                        ngx.say("Error executing SQL query: ", insertErr)
-                        ngx.exit(500)
+                        ngx.say(cjson.encode({
+                            data = {
+                                message = "Error executing SQL query while inserting into migration",
+                                error = insertErr
+                            },
+                            status = 500
+                        }))
                     end
-
-                    ngx.say("Table has been altered!")
-                    ngx.exit(ngx.HTTP_OK)
+                    return ngx.say(cjson.encode({
+                        data = {
+                            message = "Table has been altered!",
+                        },
+                        status = 200
+                    }))
                 end
             end
         end
     end
 end
 
-function pgTables.drop(args)
+function pgTables.drop(args, isMigration)
     local DB = connection.connectPgsql()
     if DB then
         for _i, table in ipairs(args.tables) do
-            local tableFile = "/opt/nginx/data/migrations/delete_table_" .. table.name .. ".json"
-            local isDir = create_directory_if_not_exists("/opt/nginx/data/migrations")
-            if isDir then
-                local file, fileErr = io.open(tableFile, "w")
-                if fileErr then
-                    ngx.say(fileErr)
-                    ngx.exit(500)
+            local tableFile, isDir = "", false
+            if not isMigration then
+                tableFile = "/opt/nginx/data/migrations/" .. os.time() .. "-delete_table_" .. table.name .. ".json"
+                isDir = create_directory_if_not_exists("/opt/nginx/data/migrations")
+            end
+            if isDir or isMigration then
+                local file, fileErr = false, ""
+                if isDir then
+                    file, fileErr = io.open(tableFile, "w")
+                    if fileErr then
+                        return ngx.say(cjson.encode({
+                            data = {
+                                message = "Something wrong while opening the migration file",
+                                error = fileErr
+                            },
+                            status = 500
+                        }))
+                    end
                 end
-                if file then
-                    file:write(cjson.encode(args))
-                    file:close()
+                if file or isMigration then
+                    if file then
+                        file:write(cjson.encode(args))
+                        file:close()
+                    end
                     local createQuery = "DROP TABLE IF EXISTS " .. table.name
                     local res, err = DB:query(createQuery)
                     if not res then
-                        ngx.say("Error executing SQL query: ", err)
-                        ngx.exit(500)
+                        return ngx.say(cjson.encode({
+                            data = {
+                                message = "Error executing SQL query while deleting table " .. table.name,
+                                error = err
+                            },
+                            status = 500
+                        }))
                     end
                 end
             end
         end
-        ngx.say("Table has been deleted!")
-        ngx.exit(ngx.HTTP_OK)
+        return ngx.say(cjson.encode({
+            data = {
+                message = "Table has been deleted!",
+            },
+            status = 200
+        }))
     end
 end
 
@@ -272,18 +360,25 @@ function pgTables.migrate()
         end
     end
     local unMigratedFiles = sort_files_by_timestamp(unMigrated)
+    local response = {}
     for i, file in ipairs(unMigratedFiles) do
         local filePath = "/opt/nginx/data/migrations/" .. file
         local migrationFile = read_file(filePath)
         local isCreate = contains(file, "create_table")
+        local isAlter = contains(file, "alter_table")
+        local isDelete = contains(file, "delete_table")
         local payloads = cjson.decode(migrationFile)
         local table = payloads.table
         if isCreate then
-            pgTables.create(payloads)
-        else
-            pgTables.alter(payloads, table)
+            response = pgTables.create(payloads, file)
+        elseif isAlter then
+            response = pgTables.alter(payloads, table, file)
+        elseif isDelete then
+            response = pgTables.drop(payloads, file)
         end
+
     end
+    ngx.say(response)
 end
 
 return pgTables
