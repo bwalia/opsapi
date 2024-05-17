@@ -324,10 +324,19 @@ function pgTables.migrate()
         local query = string.format("SELECT id, name FROM migrations WHERE name='%s'", migration)
         local res, err, num = DB:query(query)
         if not res then
-            ngx.say("Error executing SQL query: ", err)
-            ngx.exit(500)
+            if helper.contains(err, 'relation "migrations" does not exist') then
+                table.insert(unMigrated, migration)
+            else
+                return ngx.say(cjson.encode({
+                    data = {
+                        message = "Error executing SQL query: ",
+                        error = err
+                    },
+                    status = 500
+                }))
+            end
         end
-        if next(res) == nil then
+        if res and next(res) == nil then
             table.insert(unMigrated, migration)
         end
     end

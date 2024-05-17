@@ -10,8 +10,8 @@ function msTables.create(args, isMigration)
         local tableName = args.table
         local isDir, tableFile, timestamp = false, "", os.time()
         if not isMigration then
-            tableFile = "/opt/nginx/data/migrations/msql/" .. timestamp .. "-create_table_" .. tableName .. ".json"
-            isDir = helper.create_directory_if_not_exists("/opt/nginx/data/migrations/msql")
+            tableFile = "/opt/nginx/data/migrations/mysql/" .. timestamp .. "-create_table_" .. tableName .. ".json"
+            isDir = helper.create_directory_if_not_exists("/opt/nginx/data/migrations/mysql")
         end
         if isDir or isMigration then
             local file, fileErr = false, ""
@@ -34,7 +34,7 @@ function msTables.create(args, isMigration)
                 end
                 local createQuery = string.format("CREATE TABLE IF NOT EXISTS %s (", tableName)
                 for i, column in ipairs(args.columns) do
-                    createQuery = createQuery .. column.name .. " " .. (column.primary ~= true and column.type or "")
+                    createQuery = createQuery .. column.name .. " " .. column.type
                     if column.default ~= "" then
                         createQuery = createQuery .. " DEFAULT " .. column.default
                     end
@@ -42,10 +42,10 @@ function msTables.create(args, isMigration)
                         createQuery = createQuery .. " AUTO_INCREMENT"
                     end
                     if column.primary then
-                        createQuery = createQuery .. " PRIMARY KEY (" .. column.name .. ")"
+                        createQuery = createQuery .. " PRIMARY KEY"
                     end
                     if column.unique then
-                        createQuery = createQuery .. " UNIQUE (" .. column.name .. ")"
+                        createQuery = createQuery .. " UNIQUE"
                     end
                     if column.not_null then
                         createQuery = createQuery .. " NOT NULL"
@@ -55,7 +55,6 @@ function msTables.create(args, isMigration)
                     end
                 end
                 createQuery = createQuery .. ");"
-
                 local res, err = DB:query(createQuery)
                 if not res then
                     return ngx.say(cjson.encode({
@@ -121,8 +120,8 @@ function msTables.alter(args, table, isMigration)
     if DB then
         local tableName, isDir, tableFile, timestamp = args.table, false, "", os.time()
         if not isMigration then
-            tableFile = "/opt/nginx/data/migrations/msql/" .. timestamp .. "-alter_table_" .. table .. ".json"
-            isDir = helper.create_directory_if_not_exists("/opt/nginx/data/migrations/msql")
+            tableFile = "/opt/nginx/data/migrations/mysql/" .. timestamp .. "-alter_table_" .. table .. ".json"
+            isDir = helper.create_directory_if_not_exists("/opt/nginx/data/migrations/mysql")
         end
         if isDir or isMigration then
             local file, fileErr = false, ""
@@ -147,7 +146,7 @@ function msTables.alter(args, table, isMigration)
                 if args.clause == "add" then
                     for i, column in ipairs(args.columns) do
                         createQuery = createQuery ..
-                            "ADD COLUMN " .. column.name .. " " .. (column.primary ~= true and column.type or "")
+                            "ADD COLUMN " .. column.name .. " " .. column.type
                         if column.default ~= "" then
                             createQuery = createQuery .. " DEFAULT " .. column.default
                         end
@@ -155,10 +154,10 @@ function msTables.alter(args, table, isMigration)
                             createQuery = createQuery .. " AUTO_INCREMENT"
                         end
                         if column.primary then
-                            createQuery = createQuery .. " PRIMARY KEY (" .. column.name .. ")"
+                            createQuery = createQuery .. " PRIMARY KEY"
                         end
                         if column.unique then
-                            createQuery = createQuery .. " UNIQUE (" .. column.name .. ")"
+                            createQuery = createQuery .. " UNIQUE"
                         end
                         if column.not_null then
                             createQuery = createQuery .. " NOT NULL"
@@ -191,22 +190,18 @@ function msTables.alter(args, table, isMigration)
                             createQuery = createQuery .. " " .. column.type
                         end
                         if column.default ~= "" then
-                            createQuery = createQuery .. ", MODIFY COLUMN " .. column.name
                             createQuery = createQuery .. " DEFAULT " .. column.default
                         end
                         if column.auto_increment then
                             createQuery = createQuery .. " AUTO_INCREMENT"
                         end
                         if column.primary then
-                            createQuery = createQuery .. ", MODIFY COLUMN " .. column.name
-                            createQuery = createQuery .. " ADD PRIMARY KEY (" .. column.name .. ")"
+                            createQuery = createQuery .. " ADD PRIMARY KEY"
                         end
                         if column.unique then
-                            createQuery = createQuery .. ", MODIFY COLUMN " .. column.name
-                            createQuery = createQuery .. " ADD UNIQUE (" .. column.name .. ")"
+                            createQuery = createQuery .. " ADD UNIQUE"
                         end
                         if column.not_null then
-                            createQuery = createQuery .. ", MODIFY COLUMN " .. column.name
                             createQuery = createQuery .. " NOT NULL"
                         end
                         if i < #args.columns then
@@ -254,8 +249,8 @@ function msTables.drop(args, isMigration)
         for _i, table in ipairs(args.tables) do
             local tableFile, isDir = "", false
             if not isMigration then
-                tableFile = "/opt/nginx/data/migrations/msql/" .. os.time() .. "-delete_table_" .. table.name .. ".json"
-                isDir = helper.create_directory_if_not_exists("/opt/nginx/data/migrations/msql")
+                tableFile = "/opt/nginx/data/migrations/mysql/" .. os.time() .. "-delete_table_" .. table.name .. ".json"
+                isDir = helper.create_directory_if_not_exists("/opt/nginx/data/migrations/mysql")
             end
             if isDir or isMigration then
                 local file, fileErr = false, ""
@@ -302,24 +297,33 @@ end
 function msTables.migrate()
     local DB = connection.connectMysql()
     if DB then
-        local directory = "/opt/nginx/data/migrations/msql"
+        local directory = "/opt/nginx/data/migrations/mysql"
         local files = helper.get_files_in_directory(directory)
         local unMigrated = {}
         for _i, migration in ipairs(files) do
             local query = string.format("SELECT id, name FROM migrations WHERE name='%s'", migration)
             local res, err, num = DB:query(query)
             if not res then
-                ngx.say("Error executing SQL query: ", err)
-                ngx.exit(500)
+                if helper.contains(err, ".migrations' doesn't exist") then
+                    table.insert(unMigrated, migration)
+                else
+                    return ngx.say(cjson.encode({
+                        data = {
+                            message = "Error executing SQL query: ",
+                            error = err
+                        },
+                        status = 500
+                    }))
+                end
             end
-            if next(res) == nil then
+            if res and next(res) == nil then
                 table.insert(unMigrated, migration)
             end
         end
         local unMigratedFiles = helper.sort_files_by_timestamp(unMigrated)
         local response = {}
         for i, file in ipairs(unMigratedFiles) do
-            local filePath = "/opt/nginx/data/migrations/msql/" .. file
+            local filePath = "/opt/nginx/data/migrations/mysql/" .. file
             local migrationFile = helper.read_file(filePath)
             local isCreate = helper.contains(file, "create_table")
             local isAlter = helper.contains(file, "alter_table")

@@ -1,0 +1,1 @@
+{"table":"newonw","columns":[{"primary":true,"name":"id","type":"int","auto_increment":true,"not_null":true,"unique":true,"default":""},{"primary":false,"name":"uuid","type":"VARCHAR(26)","auto_increment":false,"not_null":true,"unique":false,"default":""}]}
