@@ -42,6 +42,16 @@ services:
       webimpetus-network:
         ipv4_address: 172.18.0.11
 
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    environment:
+      ADMINER_DEFAULT_SERVER: mariadb
+    ports:
+      - 7777:8080
+    networks:
+      webimpetus-network:
+
 networks:
   webimpetus-network:
     driver: bridge

@@ -1,0 +1,1 @@
+{"clause":"alter_column","table":"test","columns":[{"name":"message","auto_increment":false,"not_null":true,"type":"VARCHAR(255)","unique":false,"default":"","primary":false}]}

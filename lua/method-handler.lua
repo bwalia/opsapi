@@ -1,5 +1,6 @@
 local cjson = require "cjson"
 local pgTables = require "pg-tables"
+local msTables = require "ms-tables"
 
 local function GetPayloads(body)
     local keyset = {}
@@ -26,8 +27,11 @@ local function handle_get_request(args, path)
     local pattern = ".*/(.*)"
     local uuid = string.match(path, pattern)
 
-    if path == "/pgsql/create/table" then
-        pgTables.create(args)
+    if path == "/pgsql/migrate" then
+        pgTables.migrate()
+    end
+    if path == "/mysql/migrate" then
+        msTables.migrate()
     end
 end
 
@@ -35,8 +39,12 @@ local function handle_post_request(args, path)
     local postData = GetPayloads(args)
     local pattern = ".*/.*/.*/(.*)"
     local pathSegment = string.match(path, pattern)
+
     if path == "/pgsql/create/table" then
-        pgTables.create(postData)
+        pgTables.create(postData, false)
+    end
+    if path == "/mysql/create/table" then
+        msTables.create(postData, false)
     end
 end
 
@@ -45,16 +53,20 @@ local function handle_put_request(args, path)
     local pathSegment = string.match(path, pattern)
     local postData = GetPayloads(args)
     if string.find(path, "/pgsql/alter/table", 1, true) then
-        pgTables.alter(postData, pathSegment)
+        pgTables.alter(postData, pathSegment, false)
+    end
+    if string.find(path, "/mysql/alter/table", 1, true) then
+        msTables.alter(postData, pathSegment, false)
     end
 end
 
 local function handle_delete_request(args, path)
-    local pattern = ".*/.*/.*/(.*)"
-    local pathSegment = string.match(path, pattern)
     local postData = GetPayloads(args)
-    if string.find(path, "/pgsql/drop/table", 1, true) then
-        pgTables.drop(postData, pathSegment)
+    if path == "/pgsql/drop/table" then
+        pgTables.drop(postData)
+    end
+    if path == "/mysql/drop/table" then
+        msTables.drop(postData)
     end
 end
 

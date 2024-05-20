@@ -1,0 +1,1 @@
+{"clause":"add","columns":[{"default":"","auto_increment":true,"not_null":true,"name":"id","unique":true,"type":"int","primary":true},{"default":"","auto_increment":false,"not_null":true,"name":"uuid","unique":false,"type":"VARCHAR(26)","primary":false}],"table":"test"}
