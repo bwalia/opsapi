@@ -2,7 +2,7 @@ version: '3'
 
 services:
   openresty:
-    container_name: webimpetus-api
+    container_name: opsapi
     build:
       context: .
       dockerfile: Dockerfile
@@ -13,20 +13,20 @@ services:
       - ./lua.conf:/usr/local/openresty/nginx/conf/lua.conf
       - ./database/migrations:/opt/nginx/data/migrations
     networks:
-      webimpetus-network:
+      opsapi-network:
 
   postgres:
-    container_name: webimpetus-api-postgres
+    container_name: opsapi-postgres
     image: postgres
     ports:
       - "5433:5432"
     environment:
       POSTGRES_USER: pguser
       POSTGRES_PASSWORD: pgpassword
-      POSTGRES_DB: webimpetus-api
+      POSTGRES_DB: opsapi
     networks:
-      webimpetus-network:
-        ipv4_address: 172.18.0.10
+      opsapi-network:
+        ipv4_address: 172.19.0.10
 
   mariadb:
     container_name: webimpetus-mariadb
@@ -35,12 +35,12 @@ services:
       - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: msroot
-      MYSQL_DATABASE: webimpetus-api
+      MYSQL_DATABASE: opsapi
       MYSQL_USER: msuser
       MYSQL_PASSWORD: mspassword
     networks:
-      webimpetus-network:
-        ipv4_address: 172.18.0.11
+      opsapi-network:
+        ipv4_address: 172.19.0.11
 
   adminer:
     image: adminer:latest
@@ -50,13 +50,13 @@ services:
     ports:
       - 7777:8080
     networks:
-      webimpetus-network:
+      opsapi-network:
 
 networks:
-  webimpetus-network:
+  opsapi-network:
     driver: bridge
     ipam:
       driver: default
       config:
-        - subnet: 172.18.0.0/16
-          gateway: 172.18.0.1
+        - subnet: 172.19.0.0/16
+          gateway: 172.19.0.1
