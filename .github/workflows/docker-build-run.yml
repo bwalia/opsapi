@@ -40,10 +40,10 @@ jobs:
 
       - name: Install LuaRocks packages
         run: |
-          luarocks install luaossl
-          luarocks install luasec
-          luarocks install pgmoon
-          luarocks install luafilesystem
+         sudo  luarocks install luaossl
+         sudo luarocks install luasec
+         sudo  luarocks install pgmoon
+         sudo luarocks install luafilesystem
 
       - name: Verify LuaRocks packages
         run: |
