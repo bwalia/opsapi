@@ -8,12 +8,26 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: 'Please choose the Target environment'
+        default: 'int'
+        required: true
+        options:
+            - int
+            - test
+            - acc
+            - prod
+
 env:
     IMAGE_REGISTRY: bwalia
     TARGET_STACK: openresty_lua
     IMAGE_NAME: opsapi
     TARGET_IMAGE_TAG: latest
-    
+    TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -41,3 +55,14 @@ jobs:
       run: |
             sleep 10 # Give some time for the server to start
             curl -I http://localhost:80
+
+    - name: Slack Notification for OPSAPI release 
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_CHANNEL: general
+        SLACK_COLOR: ${{ job.status }}
+        SLACK_ICON: https://github.com/rtCamp.png?size=48
+        SLACK_MESSAGE: 'Workstation CRM deployed to https://${{ env.TARGET_ENV }}-my.workstation.co.uk/ (${{ env.TARGET_ENV }}) env :rocket:'
+        SLACK_TITLE: Workstation CRM deployment status
+        SLACK_USERNAME: rtCamp
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}            
