@@ -17,75 +17,74 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget make gcc libc-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget make gcc libc-dev
 
-    - name: Download and install Luarocks
-      run: |
-        wget https://luarocks.org/releases/luarocks-3.11.0.tar.gz
-        tar zxpf luarocks-3.11.0.tar.gz
-        cd luarocks-3.11.0
-        ./configure
-        make
-        sudo make install
-        cd ..
-        rm -rf luarocks-3.11.0 luarocks-3.11.0.tar.gz
+      - name: Download and install Luarocks
+        run: |
+          wget https://luarocks.org/releases/luarocks-3.11.0.tar.gz
+          tar zxpf luarocks-3.11.0.tar.gz
+          cd luarocks-3.11.0
+          ./configure
+          make
+          sudo make install
+          cd ..
+          rm -rf luarocks-3.11.0 luarocks-3.11.0.tar.gz
 
-    - name: Verify Luarocks installation
-      run: |
-        luarocks --version
+      - name: Verify Luarocks installation
+        run: |
+          luarocks --version
 
-    - name: Install LuaRocks packages
-      run: |
-        luarocks install luaossl
-        luarocks install luasec
-        luarocks install pgmoon
-        luarocks install luafilesystem
+      - name: Install LuaRocks packages
+        run: |
+          luarocks install luaossl
+          luarocks install luasec
+          luarocks install pgmoon
+          luarocks install luafilesystem
 
-    - name: Verify LuaRocks packages
-      run: |
-        luarocks list
+      - name: Verify LuaRocks packages
+        run: |
+          luarocks list
 
-    - name: Copy NGINX  and LUA configuration
+      - name: Copy NGINX and LUA configuration
         run: |
           sudo cp nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
           sudo cp lua.conf /usr/local/openresty/nginx/conf/lua.conf
-          sudo cp -r  database/migrations/ /opt/nginx/data/migrations/
-          sudo cp lua /usr/local/openresty/nginx/lua
+          sudo cp -r database/migrations/ /opt/nginx/data/migrations/
+          sudo cp -r lua /usr/local/openresty/nginx/lua
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
 
-    - name: Cache Docker layers
-      uses: actions/cache@v2
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
 
-     - name: Log in to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }} 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-   - name: Build Docker image
-      id: docker_build
-      uses: docker/build-push-action@v2
-      with:
-        context: .
-        file: ./Dockerfile
-        push: false
-        tags: user/opsapi:latest
+      - name: Build Docker image
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: user/opsapi:latest
 
-    - name: Run Docker container
-      run: |
-        docker run -d -p 80:80 user/opsapi:latest openresty -g "daemon off;"
+      - name: Run Docker container
+        run: |
+          docker run -d -p 80:80 user/opsapi:latest openresty -g "daemon off;"
 
-    - name: Verify OpenResty is running
-      run: |
-        sleep 10 # Give some time for the server to start
-        curl -I http://localhost:80
-
+      - name: Verify OpenResty is running
+        run: |
+          sleep 10 # Give some time for the server to start
+          curl -I http://localhost:80
