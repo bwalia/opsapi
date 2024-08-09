@@ -8,6 +8,12 @@ on:
     branches:
       - main
 
+env:
+    IMAGE_REGISTRY: bwalia
+    TARGET_STACK: openresty_lua
+    IMAGE_NAME: opsapi
+    TARGET_IMAGE_TAG: latest
+    
 jobs:
   build:
     runs-on: ubuntu-latest
