@@ -49,6 +49,9 @@ jobs:
         run: |
           luarocks list
 
+       - name: Install Openresty
+        run: sudo apt-get update && sudo apt-get install -y openresty
+    
       - name: Copy NGINX and LUA configuration
         run: |
           sudo cp nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
