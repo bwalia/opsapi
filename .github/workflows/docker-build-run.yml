@@ -3,10 +3,10 @@ name: Docker Image build
 on:
   push:
     branches:
-      - opsapi-workflow-creation
+      - workflow-opsapi
   pull_request:
     branches:
-      - opsapi-workflow-creation
+      - workflow-opsapi
 
 jobs:
   build:
