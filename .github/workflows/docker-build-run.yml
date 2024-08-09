@@ -19,7 +19,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget make gcc libc-dev
+          sudo apt-get install -y wget make gcc libc-dev lua5.1 lua5.1-dev
+          sudo ln -sf /usr/bin/lua5.1 /usr/bin/lua
+          sudo ln -sf /usr/bin/luac5.1 /usr/bin/luac
 
       - name: Download and install Luarocks
         run: |
