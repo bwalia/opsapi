@@ -62,7 +62,7 @@ jobs:
         SLACK_CHANNEL: general
         SLACK_COLOR: ${{ job.status }}
         SLACK_ICON: https://github.com/rtCamp.png?size=48
-        SLACK_MESSAGE: 'Workstation CRM deployed to https://${{ env.TARGET_ENV }}-my.workstation.co.uk/ (${{ env.TARGET_ENV }}) env :rocket:'
-        SLACK_TITLE: Workstation CRM deployment status
+        SLACK_MESSAGE: 'OPSAPI deployed to https://${{ env.TARGET_ENV }}.opsapi.io/ (${{ env.TARGET_ENV }}) env :rocket:'
+        SLACK_TITLE: OPSAPI deployment status
         SLACK_USERNAME: rtCamp
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}            
