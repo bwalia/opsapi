@@ -89,7 +89,7 @@ jobs:
       - name: Run Docker container
         run: |
           docker run -d -p 80:80 user/opsapi:latest openresty -g "daemon off;"
-¯
+
       - name: Verify OpenResty is running
         run: |
           sleep 10 # Give some time for the server to start
