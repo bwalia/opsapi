@@ -1,0 +1,97 @@
+name: OPSAPI Validate the build syntax error unit test
+# This workflow is triggered on pushes to the main branch and pull requests to the main branch
+# Checks if openresty -t is valid for our build syntax (just like nginx -t)
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget make gcc libc-dev lua5.1 lua5.1-dev
+          sudo ln -sf /usr/bin/lua5.1 /usr/bin/lua
+          sudo ln -sf /usr/bin/luac5.1 /usr/bin/luac
+
+      - name: Download and install Luarocks
+        run: |
+          wget https://luarocks.org/releases/luarocks-3.11.0.tar.gz
+          tar zxpf luarocks-3.11.0.tar.gz
+          cd luarocks-3.11.0
+          sudo ./configure --with-lua=/usr --with-lua-bin=/usr/bin --lua-version=5.1 --rocks-tree=/usr/local/lib/luarocks
+          make
+          sudo make install
+          cd ..
+          rm -rf luarocks-3.11.0 luarocks-3.11.0.tar.gz
+
+      - name: Verify Luarocks installation
+        run: |
+          luarocks --version
+
+      - name: Install LuaRocks packages
+        run: |
+         sudo  luarocks install luaossl
+         sudo luarocks install luasec
+         sudo  luarocks install pgmoon
+         sudo luarocks install luafilesystem
+
+      - name: Verify LuaRocks packages
+        run: |
+          luarocks list
+
+      - name: Install Openresty
+        run: |
+         sudo apt-get update && sudo apt-get install -y openresty
+    
+      - name: Copy NGINX and LUA configuration
+        run: |
+          sudo cp nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+          sudo cp lua.conf /usr/local/openresty/nginx/conf/lua.conf
+          sudo cp -r database/migrations/ /opt/nginx/data/migrations/
+          sudo cp -r lua /usr/local/openresty/nginx/lua
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: user/opsapi:latest
+
+      - name: Run Docker container
+        run: |
+          docker run -d -p 80:80 user/opsapi:latest openresty -g "daemon off;"
+
+      - name: Verify OpenResty is running
+        run: |
+          sleep 10 # Give some time for the server to start
+          curl -I http://localhost:80
