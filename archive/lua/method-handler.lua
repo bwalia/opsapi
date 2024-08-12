@@ -1,22 +1,7 @@
-local cjson = require "cjson"
 local pgTables = require "pg-tables"
 local msTables = require "ms-tables"
-
-local function GetPayloads(body)
-    local keyset = {}
-    local n = 0
-    for k, v in pairs(body) do
-        n = n + 1
-        if type(v) == "string" then
-            if v ~= nil and v ~= "" then
-                table.insert(keyset, cjson.decode(k .. v))
-            end
-        else
-            table.insert(keyset, cjson.decode(k))
-        end
-    end
-    return keyset[1]
-end
+local helper = require "helper-functions"
+local roles = require "api.roles"
 
 local function handle_get_request(args, path)
     local delimiter = "/"
@@ -33,10 +18,13 @@ local function handle_get_request(args, path)
     if path == "/mysql/migrate" then
         msTables.migrate()
     end
+    if helper.contains(path, "/roles/") then
+        roles.show(uuid)
+    end
 end
 
 local function handle_post_request(args, path)
-    local postData = GetPayloads(args)
+    local postData = helper.GetPayloads(args)
     local pattern = ".*/.*/.*/(.*)"
     local pathSegment = string.match(path, pattern)
 
@@ -46,12 +34,15 @@ local function handle_post_request(args, path)
     if path == "/mysql/create/table" then
         msTables.create(postData, false)
     end
+    if path == "/roles" then
+        roles.create(postData)
+    end
 end
 
 local function handle_put_request(args, path)
     local pattern = ".*/.*/.*/(.*)"
     local pathSegment = string.match(path, pattern)
-    local postData = GetPayloads(args)
+    local postData = helper.GetPayloads(args)
     if string.find(path, "/pgsql/alter/table", 1, true) then
         pgTables.alter(postData, pathSegment, false)
     end
@@ -61,7 +52,7 @@ local function handle_put_request(args, path)
 end
 
 local function handle_delete_request(args, path)
-    local postData = GetPayloads(args)
+    local postData = helper.GetPayloads(args)
     if path == "/pgsql/drop/table" then
         pgTables.drop(postData)
     end

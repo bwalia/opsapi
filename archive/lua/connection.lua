@@ -4,7 +4,7 @@ local connection = {}
 function connection.connectPgsql()
   local hostname = os.getenv("Host")
   if hostname == nil then
-    hostname = "172.18.0.10"
+    hostname = "172.19.0.10"
   end
   local port = os.getenv("Port")
   if port == nil then
@@ -12,7 +12,7 @@ function connection.connectPgsql()
   end
   local database = os.getenv("Database")
   if database == nil then
-    database = "webimpetus-api"
+    database = "opsapi"
   end
   local user = os.getenv("Username")
   if user == nil then
@@ -38,7 +38,7 @@ function connection.connectMysql()
   local mysql = require "resty.mysql"
   local hostname = os.getenv("Host")
   if hostname == nil then
-    hostname = "172.18.0.11"
+    hostname = "172.19.0.11"
   end
   local port = os.getenv("Port")
   if port == nil then
@@ -46,7 +46,7 @@ function connection.connectMysql()
   end
   local database = os.getenv("Database")
   if database == nil then
-    database = "webimpetus-api"
+    database = "opsapi"
   end
   local user = os.getenv("Username")
   if user == nil then

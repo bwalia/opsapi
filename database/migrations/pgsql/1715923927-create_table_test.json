@@ -1,1 +1,0 @@
-{"columns":[{"unique":true,"type":"int","primary":true,"default":"","auto_increment":true,"not_null":true,"name":"id"},{"unique":false,"type":"VARCHAR(36)","primary":false,"default":"","auto_increment":false,"not_null":true,"name":"uuid"}],"table":"test"}

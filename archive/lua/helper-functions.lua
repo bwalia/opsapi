@@ -42,4 +42,29 @@ function helper.contains(str, substr)
     return string.find(str, substr, 1, true) ~= nil
 end
 
+function helper.GetPayloads(body)
+    local keyset = {}
+    local n = 0
+    for k, v in pairs(body) do
+        n = n + 1
+        if type(v) == "string" then
+            if v ~= nil and v ~= "" then
+                table.insert(keyset, cjson.decode(k .. v))
+            end
+        else
+            table.insert(keyset, cjson.decode(k))
+        end
+    end
+    return keyset[1]
+end
+
+function helper.generate_uuid()
+    local random = math.random(1000000000)
+    local timestamp = os.time()
+    local hash = ngx.md5(tostring(random) .. tostring(timestamp))
+    local uuid = string.format("%s-%s-%s-%s-%s", string.sub(hash, 1, 8), string.sub(hash, 9, 12),
+        string.sub(hash, 13, 16), string.sub(hash, 17, 20), string.sub(hash, 21, 32))
+    return uuid
+end
+
 return helper

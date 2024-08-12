@@ -1,1 +1,0 @@
-{"columns":[{"unique":false,"type":"VARCHAR(255)","primary":false,"default":"","auto_increment":false,"not_null":true,"name":"name"},{"unique":false,"type":"TEXT","primary":false,"default":"","auto_increment":false,"not_null":false,"name":"message"}],"table":"test","clause":"add"}
