@@ -1,15 +1,17 @@
-version: '3.8'
+version: '3'
 
 services:
-  lapis:
+  openresty:
     container_name: opsapi
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "8010:8080"
+      - "8090:80"
     volumes:
-      - .:/app
-    environment:
-      - LAPIS_ENVIRONMENT=development
+      - ./lua:/usr/local/openresty/nginx/lua
+      - ./lua.conf:/usr/local/openresty/nginx/conf/lua.conf
+      - ./database/migrations:/opt/nginx/data/migrations
     networks:
       opsapi-network:
 
