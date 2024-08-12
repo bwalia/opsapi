@@ -1,0 +1,68 @@
+name: Docker OPSAPI Image build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: 'Please choose the Target environment'
+        default: 'int'
+        required: true
+        options:
+            - int
+            - test
+            - acc
+            - prod
+
+env:
+    IMAGE_REGISTRY: bwalia
+    TARGET_STACK: openresty_lua
+    IMAGE_NAME: opsapi
+    TARGET_IMAGE_TAG: latest
+    TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Build OPSAPI Docker image based on the TARGET PLATFORM Image and push to Docker Hub
+      run: |
+        echo "OPSAPI Docker image builder!"
+        echo "Build, tag, and push image to the given Docker Registry."
+        docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWD }}
+        docker build -f Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
+        docker tag test-${{ env.TARGET_STACK }} ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
+        docker push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
+      shell: bash        
+
+    - name: Run Docker container
+      run: |
+            docker run -d -p 80:80 bwalia/opsapi:latest openresty -g "daemon off;"
+
+    - name: Verify OpenResty is running
+      run: |
+            sleep 10 # Give some time for the server to start
+            curl -I http://localhost:80
+
+    - name: Slack Notification for OPSAPI release 
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_CHANNEL: general
+        SLACK_COLOR: ${{ job.status }}
+        SLACK_ICON: https://github.com/rtCamp.png?size=48
+        SLACK_MESSAGE: 'OPSAPI deployed to https://${{ env.TARGET_ENV }}.opsapi.io/ (${{ env.TARGET_ENV }}) env :rocket:'
+        SLACK_TITLE: OPSAPI deployment status
+        SLACK_USERNAME: rtCamp
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}            
