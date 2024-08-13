@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenResty
+
+[Service]
+User={{ openresty_user }}
+Group={{ openresty_group }}
+WorkingDirectory={{ openresty_dir }}
+ExecStart={{ openresty_bin }} -g 'daemon on; master_worker_processes auto;'
+ExecReload=/usr/sbin/kill -USR1 $MAINPID
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

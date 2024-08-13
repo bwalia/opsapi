@@ -1,0 +1,35 @@
+ - name: Update and upgrade apt packages
+   apt:
+    upgrade: yes
+    update_cache: yes
+    cache_valid_time: 86400
+   tags: [ubuntu]
+
+ - name: Install luarocks
+   apt:
+    name: luarocks 
+    state: present
+   tags: [ luarocks,openresty ]
+
+ - name: Copy openresty script
+   become: yes
+   become_user: root
+   copy:
+    src:  /Users/sreejit/opsapi/openresty.sh 
+    dest: /root/openresty.sh 
+    mode: 0777
+   tags: [ luarocks,openresty]
+ 
+ - name: Execute the script
+   become: yes
+   become_user: root   
+   shell:  sh /root/openresty.sh
+   tags: [ luarocks,openresty]
+ 
+ - name: copy openresty systemd template
+   template:
+      src: openresty.service.j2
+      dest: /etc/systemd/system/openresty.service
+   notify: restart openresty
+   tags: [ luarocks,openresty]
+  
