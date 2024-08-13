@@ -1,5 +1,6 @@
 local Model = require("lapis.db.model").Model
 local Json = require("cjson")
+local Global = require "helper.global"
 
 local Users = Model:extend("users", {
     timestamp = true
@@ -7,6 +8,10 @@ local Users = Model:extend("users", {
 local UserModel = {}
 
 function UserModel.create(userData)
+    if userData.uuid == nil then
+        userData.uuid = Global.generateUUID()
+    end
+    userData.password = Global.hashPassword(userData.password)
     return Users:create(userData, {
         returning = "*"
     })
@@ -36,5 +41,12 @@ function UserModel.update(id, params)
     return user:update(params, {
         returning = "*"
     })
+end
+
+function UserModel.destroy(id)
+    local user = Users:find({
+        uuid = id
+    })
+    return user:delete()
 end
 return UserModel
