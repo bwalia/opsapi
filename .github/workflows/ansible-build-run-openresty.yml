@@ -17,8 +17,11 @@ jobs:
     steps:
       - name: Checkout code 1
         uses: actions/checkout@v3
+      - uses: webfactory/ssh-agent@v0.5.2
+        with:
+          ssh-private-key: ${{ secrets.SR_SREE }}
       - name: Install dependencies
         run: |
           sudo apt-get install -y ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
-          ansible-playbook installopenresty.yml  --private-key <(echo -n '${{ secrets.SR_SREE }}') -i hosts
+          ansible-playbook installopenresty.yml  -i hosts
