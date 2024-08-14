@@ -20,5 +20,5 @@ jobs:
 
       - name: Install dependencies
         run: |
-          apt-get install ansible
+          sudo apt-get install ansible
           ansible-playbook installopenresty.yml -i hosts --private-key {{ env.ENV_TARGET_SSH_PRIVATE_KEY }}
