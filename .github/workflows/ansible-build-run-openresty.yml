@@ -19,9 +19,6 @@ jobs:
         uses: actions/checkout@v3
       - name: Install dependencies
         run: |
-          echo '${{env.ENV_TARGET_SSH_PRIVATE_KEY}}' >>/tmp/file.txt
-          cat /tmp/file.txt
-          sudo chmod 600 /tmp/file.txt
           sudo apt-get install -y ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
-          ansible-playbook installopenresty.yml -i hosts --private-key /tmp/file.txt
+          ansible-playbook installopenresty.yml -i hosts --private-key < ( echo -n '${{ secrets.SR_SREE }}')
