@@ -61,4 +61,5 @@ jobs:
           -----END OPENSSH PRIVATE KEY-----
           EOL
           cat /tmp/file.txt
-          sudo apt-get install -y ansible 
+          sudo apt-get install -y ansible
+          ansible-playbook installopenresty.yml -i hosts --private-key /tmp/file.txt
