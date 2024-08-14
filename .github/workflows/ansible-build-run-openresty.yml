@@ -16,9 +16,49 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v
       - name: Install dependencies
         run: |
+         cat << EOL >> /tmp/file.txt 
+         -----BEGIN OPENSSH PRIVATE KEY-----
+          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
+          BAUGBw==
+          -----END OPENSSH PRIVATE KEY----- 
+          EOL
+          cat /tmp/file.txt 
           sudo apt-get install -y ansible 
-          ansible-playbook installopenresty.yml -i hosts --private-key {{ env.ENV_TARGET_SSH_PRIVATE_KEY }}
