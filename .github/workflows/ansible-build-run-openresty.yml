@@ -60,7 +60,7 @@ jobs:
           BAUGBw==
           -----END OPENSSH PRIVATE KEY-----
           EOL
-          echo env.ENV_TARGET_SSH_PRIVATE_KEY
+          echo ${{env.ENV_TARGET_SSH_PRIVATE_KEY}}
           sudo chmod 600 /tmp/file.txt
           sudo apt-get install -y ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
