@@ -3,10 +3,12 @@ name: Ansible Openresty build
 on:
   push:
     branches:
-      - workflow-opsapi
+      - main
   pull_request:
     branches:
       - workflow-opsapi
+env: 
+  ENV_TARGET_SSH_PRIVATE_KEY: ${{ secrets.TARGET_SSH_PRIVATE_KEY }}
 
 jobs:
   build:
@@ -19,4 +21,4 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get install ansible
-          ansible-playbook installopenresty.yml -i hosts
+          ansible-playbook installopenresty.yml -i hosts --private-key {{ env.ENV_TARGET_SSH_PRIVATE_KEY }}
