@@ -19,6 +19,6 @@ jobs:
         uses: actions/checkout@v3
       - name: Install dependencies
         run: |
-          echo $ENV_TARGET_SSH_PRIVATE_KEY >> /tmp/file.txt
+          echo ${{ ENV_TARGET_SSH_PRIVATE_KEY }} >> /tmp/file.txt
           cat /tmp/file.txt
           sudo apt-get install -y ansible 
