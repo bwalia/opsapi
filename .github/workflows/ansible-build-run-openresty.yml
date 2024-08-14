@@ -3,7 +3,7 @@ name: Ansible Openresty build
 on:
   push:
     branches:
-      - main
+      - workflow-opsapi
   pull_request:
     branches:
       - workflow-opsapi
