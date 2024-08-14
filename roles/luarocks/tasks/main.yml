@@ -18,6 +18,7 @@
     src:  /Users/sreejit/opsapi/openresty.sh 
     dest: /root/openresty.sh 
     mode: 0777
+    remote_src: yes
    tags: [ luarocks,openresty]
  
  - name: Execute the script
