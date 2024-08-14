@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenResty Service
+After=network.target
+
+[Service]
+Type=simple
+User={{ openresty_user }}
+Group={{ openresty_group }}
+ExecStart={{ openresty_exec_start }}
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
