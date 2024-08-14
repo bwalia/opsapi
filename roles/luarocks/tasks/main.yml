@@ -15,10 +15,9 @@
    become: yes
    become_user: root
    copy:
-    src:  /Users/sreejit/opsapi/openresty.sh 
+    src:  openresty.sh 
     dest: /root/openresty.sh 
     mode: 0777
-    remote_src: yes
    tags: [ luarocks,openresty]
  
  - name: Execute the script
