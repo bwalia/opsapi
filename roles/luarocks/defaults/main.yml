@@ -1,2 +1,1 @@
----
-# defaults file for luarocks
+nginx_port: 80

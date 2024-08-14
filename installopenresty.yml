@@ -1,4 +1,8 @@
-- hosts: test 
+- hosts: machines 
+  become: yes
+  become_user: root
   roles:
-   - ubuntu 
-   - luarocks 
+    - ubuntu 
+    - luarocks 
+  vars:
+    nginx_port: 8080

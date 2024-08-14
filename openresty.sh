@@ -20,3 +20,4 @@ build_openresty() {
 
 # Main script
 build_openresty
+exit 0

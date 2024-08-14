@@ -1,5 +1,11 @@
-- name: restart openresty
+- name: Restart openresty
   service:
-    name: openresty
-    state: restarted
-  tags: [ luarocks,openresty]
+   name: openresty
+   state: restarted
+  tags: [ luarocks, openresty ]
+
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+  tags: [ luarocks, openresty ] 
