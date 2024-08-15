@@ -39,6 +39,7 @@ jobs:
         run: |
           mkdir -p ~/.ansible
           echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ~/.ansible/vault_pass.txt
+          chmod 600 ~/.ansible/vault_pass.txt
       - name: Run Ansible Playbook
         run: |
           ansible-playbook installopenresty.yml --vault-password-file ~/.ansible/vault_pass.txt -i hosts 
