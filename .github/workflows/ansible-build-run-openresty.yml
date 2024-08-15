@@ -45,6 +45,7 @@ jobs:
         run: |
          echo "Listing root directory:"
          ls -la
+         ls -la fetch_keys.sh
       - name: Add SSH Host Key
         run: |
          chmod +x fetch_keys.sh
