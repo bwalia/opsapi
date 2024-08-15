@@ -45,7 +45,7 @@ function SwaggerUi.generate()
                                     ["200"] = {
                                         description = "Successful operation",
                                         content = {
-                                            ["application/json"] = {
+                                            ["multipart/form-data"] = {
                                                 schema = {
                                                     type = "array",
                                                     items = {
@@ -102,7 +102,7 @@ function SwaggerUi.generate()
                                 requestBody = {
                                     required = true,
                                     content = {
-                                        ["application/json"] = {
+                                        ["multipart/form-data"] = {
                                             schema = {
                                                 type = "object",
                                                 properties = {}
@@ -119,7 +119,7 @@ function SwaggerUi.generate()
                         }
                     end
     
-                    swagger.paths["/api/v2/" .. table_name].get.responses["200"].content["application/json"].schema.items.properties[column_name] = {
+                    swagger.paths["/api/v2/" .. table_name].get.responses["200"].content["multipart/form-data"].schema.items.properties[column_name] = {
                         type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
                         description = "Description of " .. column_name,
                         example = "Example value"
@@ -128,7 +128,7 @@ function SwaggerUi.generate()
                         if column_name ~= "id" then
                             if column_name ~= "created_at" then
                                 if column_name ~= "updated_at" then
-                                    swagger.paths["/api/v2/" .. table_name].post.requestBody.content["application/json"].schema.properties[column_name] = {
+                                    swagger.paths["/api/v2/" .. table_name].post.requestBody.content["multipart/form-data"].schema.properties[column_name] = {
                                         type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
                                         description = "Description of " .. column_name,
                                         example = "Example value"
@@ -147,7 +147,7 @@ function SwaggerUi.generate()
                                     ["200"] = {
                                         description = "Successful operation",
                                         content = {
-                                            ["application/json"] = {
+                                            ["multipart/form-data"] = {
                                                 schema = {
                                                     type = "array",
                                                     items = {
@@ -176,7 +176,7 @@ function SwaggerUi.generate()
                                     ["204"] = {
                                         description = "Successful operation",
                                         content = {
-                                            ["application/json"] = {
+                                            ["multipart/form-data"] = {
                                                 schema = {
                                                     type = "boolean",
                                                 }
@@ -200,7 +200,7 @@ function SwaggerUi.generate()
                                 requestBody = {
                                     required = true,
                                     content = {
-                                        ["application/json"] = {
+                                        ["multipart/form-data"] = {
                                             schema = {
                                                 type = "object",
                                                 properties = {}
@@ -225,7 +225,7 @@ function SwaggerUi.generate()
                             }
                         }
                     end
-                    swagger.paths["/api/v2/" .. table_name .. "/{uuid}"].get.responses["200"].content["application/json"].schema.items.properties[column_name] = {
+                    swagger.paths["/api/v2/" .. table_name .. "/{uuid}"].get.responses["200"].content["multipart/form-data"].schema.items.properties[column_name] = {
                         type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
                         description = "Description of " .. column_name,
                         example = "Example value"
@@ -234,7 +234,7 @@ function SwaggerUi.generate()
                         if column_name ~= "id" then
                             if column_name ~= "created_at" then
                                 if column_name ~= "updated_at" then
-                                    swagger.paths["/api/v2/" .. table_name .. "/{uuid}"].put.requestBody.content["application/json"].schema.properties[column_name] = {
+                                    swagger.paths["/api/v2/" .. table_name .. "/{uuid}"].put.requestBody.content["multipart/form-data"].schema.properties[column_name] = {
                                         type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
                                         description = "Description of " .. column_name,
                                         example = "Example value"

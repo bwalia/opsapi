@@ -48,4 +48,11 @@ function RoleModel.destroy(id)
     })
     return role:delete()
 end
+
+function RoleModel.roleByName(name)
+    return Roles:find({
+        role_name = tostring(name)
+    })
+end
+
 return RoleModel

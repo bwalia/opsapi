@@ -14,6 +14,7 @@ RUN apk add --no-cache openssl-dev
 RUN luarocks install luaossl
 RUN luarocks install luasec
 RUN luarocks install lapis
+RUN luarocks install bcrypt
 
 WORKDIR /app
 
