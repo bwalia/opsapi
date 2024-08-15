@@ -1,14 +1,10 @@
  - name: Update and upgrade apt packages
-   become: yes
-   become_user: root 
    apt:
     upgrade: yes
     update_cache: yes
     cache_valid_time: 86400 
    tags: [ubuntu]
  - name: Install dependency packages for installing openresty
-   become: yes
-   become_user: root
    apt:
      name: "{{ item }}"
      state: present
