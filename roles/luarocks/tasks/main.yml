@@ -16,7 +16,7 @@
    become_user: root
    copy:
     src:  openresty.sh 
-    dest: /root/openresty.sh 
+    dest: /tmp/openresty.sh 
     mode: 0777
    tags: [ luarocks,openresty]
  
