@@ -41,6 +41,6 @@ jobs:
           echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ~/.ansible/vault_pass.txt
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook installopenresty.yml --vault-password-file ~/.ansible/vault_pass.txt 
+          ansible-playbook installopenresty.yml --vault-password-file ~/.ansible/vault_pass.txt -i hosts 
         env:
           ANSIBLE_CONFIG: ansible.cfg
