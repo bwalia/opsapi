@@ -35,7 +35,6 @@ jobs:
       - name: Install Ansible on Ubuntu Latest
         run: |
           sudo apt-get install -y ansible
-          export ANSIBLE_HOST_KEY_CHECKING=False
       - name: Decrypt Ansible Vault file
         run: |
           mkdir -p ~/.ansible
