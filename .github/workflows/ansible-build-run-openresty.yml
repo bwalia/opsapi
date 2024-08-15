@@ -43,8 +43,7 @@ jobs:
           ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
       - name: Add SSH Host Key
         run: |
-         chmod +x fetch_keys.sh
-         ./fetch_keys.sh hosts
+        ssh-keyscan -H `cat  hosts | grep ansible_user | awk '{print $1}'` >> ~/.ssh/known_hosts
       - name: Run Ansible Playbook
         run: |
           ansible-playbook installopenresty.yml -i hosts 
