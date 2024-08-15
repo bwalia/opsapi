@@ -20,4 +20,10 @@ function Global.matchPassword(password, hashedPassword)
     return bcrypt.verify(password, hashedPassword)
 end
 
+function Global.removeBykey(table, key)
+    local element = table[key]
+    table[key] = nil
+    return element
+ end
+
 return Global
