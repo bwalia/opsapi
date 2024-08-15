@@ -42,6 +42,6 @@ jobs:
           chmod 600 ~/.ansible/vault_pass.txt
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook installopenresty.yml --vault-password-file ~/.ansible/vault_pass.txt -i hosts 
+          ansible-playbook installopenresty.yml --ssh-common-args='-o StrictHostKeyChecking=no' --vault-password-file ~/.ansible/vault_pass.txt -i hosts 
         env:
           ANSIBLE_CONFIG: ansible.cfg
