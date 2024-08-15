@@ -43,3 +43,5 @@ jobs:
       - name: Run Ansible Playbook
         run: |
           ansible-playbook installopenresty.yml --vault-password-file ~/.ansible/vault_pass.txt  -i hosts
+        env:
+          ANSIBLE_CONFIG: ansible.cfg
