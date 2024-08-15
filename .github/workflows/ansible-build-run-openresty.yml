@@ -24,19 +24,19 @@ on:
 env:
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
   API_DOMAINNAME_ENDPOINT:  ${{ github.event.inputs.TARGET_ENV || 'int' }}.opsapi.org
-  ENV_TARGET_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_PRIVATE_KEY }}
+  ENV_TARGET_SSH_PRIVATE_KEY: ${{ secrets.TARGET_SSH_PRIVATE_KEY }}
     
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code 1
+      - name: Checkout code from repository
         uses: actions/checkout@v3
       - uses: webfactory/ssh-agent@v0.5.2
         with:
-          ssh-private-key: ${{ secrets.ANSIBLE_PRIVATE_KEY }}
-      - name: Install dependencies
+          ssh-private-key: ${{ env.ENV_TARGET_SSH_PRIVATE_KEY }}
+      - name: Install Ansible on Ubuntu Latest
         run: |
           sudo apt-get install -y ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
