@@ -1,0 +1,9 @@
+- name: update dns on cloudflare
+  community.general.cloudflare_dns:
+    zone: "{{ cloudflare_zone }}"
+    record: "{{ cloudflare_record_name }}"
+    type: "{{ cloudflare_record_type }}"
+    value: "{{ cloudflare_record_value }}"
+    account_email: "{{ cloudflare_account_email }}"
+    account_api_key: "{{ cloudflare_account_api_key }}"
+  register: record
