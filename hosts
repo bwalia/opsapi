@@ -1,6 +1,6 @@
 [machines]
-#212.227.236.48 ansible_user=root 
-94.72.96.175 ansible_user=bwalia 
+212.227.236.48 ansible_user=root 
+#94.72.96.175 ansible_user=bwalia 
 
 
 #[local]
