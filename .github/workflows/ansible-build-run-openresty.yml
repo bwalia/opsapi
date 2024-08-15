@@ -36,11 +36,12 @@ jobs:
         run: |
           sudo apt-get install -y ansible
       - name: Decrypt Ansible Vault file
+        env:
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
-          mkdir -p ~/.ansible
-          echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ~/.ansible/vault_pass.txt
-          chmod 600 ~/.ansible/vault_pass.txt
-          export ANSIBLE_HOST_KEY_CHECKING=False
+          ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook installopenresty.yml --ssh-common-args='-o StrictHostKeyChecking=accept-new'  --vault-password-file ~/.ansible/vault_pass.txt -i hosts 
+          ansible-playbook installopenresty.yml -i hosts 
+        env:
+          ANSIBLE_PRIVATE_KEY_FILE: id_rsa
