@@ -3,7 +3,7 @@ name: Ansible compile from source and install Openresty
 on:
   push:
     branches:
-      - main
+      - workflow-secure 
   pull_request:
     branches:
       - workflow-opsapi
@@ -24,7 +24,6 @@ on:
 env:
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
   API_DOMAINNAME_ENDPOINT:  ${{ github.event.inputs.TARGET_ENV || 'int' }}.opsapi.org
-  ENV_TARGET_SSH_PRIVATE_KEY: ${{ secrets.TARGET_SSH_PRIVATE_KEY }}
     
 jobs:
   build:
@@ -33,11 +32,14 @@ jobs:
     steps:
       - name: Checkout code from repository
         uses: actions/checkout@v3
-      - uses: webfactory/ssh-agent@v0.5.2
-        with:
-          ssh-private-key: ${{ env.ENV_TARGET_SSH_PRIVATE_KEY }}
       - name: Install Ansible on Ubuntu Latest
         run: |
           sudo apt-get install -y ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
-          ansible-playbook installopenresty.yml  -i hosts
+      - name: Decrypt Ansible Vault file
+        run: |
+          mkdir -p ~/.ansible
+          echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > ~/.ansible/vault_pass.txt
+      - name: Run Ansible Playbook
+        run: |
+          ansible-playbook installopenresty.yml --vault-password-file ~/.ansible/vault_pass.txt  -i hosts
