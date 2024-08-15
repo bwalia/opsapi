@@ -1,4 +1,4 @@
-name: Ansible Openresty build
+name: Ansible compile from source and install Openresty
 
 on:
   push:
@@ -7,9 +7,25 @@ on:
   pull_request:
     branches:
       - workflow-opsapi
-env: 
-  ENV_TARGET_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_PRIVATE_KEY }}
 
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: 'Please choose the Target environment'
+        default: 'int'
+        required: true
+        options:
+            - int
+            - test
+            - acc
+            - prod
+
+env:
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  API_DOMAINNAME_ENDPOINT:  ${{ github.event.inputs.TARGET_ENV || 'int' }}.opsapi.org
+  ENV_TARGET_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_PRIVATE_KEY }}
+    
 jobs:
   build:
     runs-on: ubuntu-latest
