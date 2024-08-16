@@ -12,18 +12,14 @@
    tags: [ luarocks,openresty ]
 
  - name: Copy openresty script
-   become: yes
-   become_user: root
-   copy:
-    src:  openresty.sh 
+   template:
+    src:  openresty.sh.j2 
     dest: /tmp/openresty.sh 
     mode: 0777
    tags: [ luarocks,openresty]
  
  - name: Execute the script
-   become: yes
-   become_user: root   
-   shell: /root/openresty.sh
+   shell: /tmp/openresty.sh
    tags: [ luarocks,openresty]
  
  - name: Deploy OpenResty systemd service file
