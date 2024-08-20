@@ -2,6 +2,7 @@
 
 ## Configuration
 
+Tag: `cloudflare`
 ```shell
 CLOUDFLARE_ZONE: 
 CLOUDFLARE_RECORD_NAME: 
