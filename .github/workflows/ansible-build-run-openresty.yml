@@ -46,10 +46,10 @@ jobs:
       - name: Add SSH Host Key for hosts
         run: |
          mkdir -p ~/.ssh
-         ssh-keyscan -H `cat hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
+         ssh-keyscan -H `cat devops/ansible/hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook installopenresty.yml -i hosts 
+          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts 
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
