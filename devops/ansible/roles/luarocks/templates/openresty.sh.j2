@@ -16,6 +16,7 @@ build_openresty() {
   ./configure --prefix=$OPENRESTY_SRC_DIR
   make
   make install
+  ln -s /usr/local/openresty/bin/openresty /usr/bin/openresty
 }
 
 # Main script
