@@ -3,11 +3,11 @@
 ## Configuration
 
 ```shell
-cloudflare_zone: 
-cloudflare_record_name: 
-cloudflare_record_type: 
-cloudflare_record_value: 
-cloudflare_account_email: 
-cloudflare_account_api_key:
+CLOUDFLARE_ZONE: 
+CLOUDFLARE_RECORD_NAME: 
+CLOUDFLARE_RECORD_TYPE: 
+CLOUDFLARE_RECORD_VALUE: 
+CLOUDFLARE_ACCOUNT_EMAIL: 
+CLOUDFLARE_ACCOUNT_API_KEY:
 
 ```
