@@ -4,6 +4,6 @@
   roles:
     - ubuntu 
     - luarocks 
-#   - cloudflare
+    - cloudflare
   vars:
     nginx_port: 8080
