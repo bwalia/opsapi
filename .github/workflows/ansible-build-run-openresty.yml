@@ -41,15 +41,15 @@ jobs:
         env:
           VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
-          ansible-vault decrypt ../../devops/ansible/id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
+          ansible-vault decrypt devops/ansible/id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
 
       - name: Add SSH Host Key for hosts
         run: |
          mkdir -p ~/.ssh
-         ssh-keyscan -H `cat ../../devops/ansible/hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
+         ssh-keyscan -H `cat devops/ansible/hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook ../../devops/ansible/installopenresty.yml -i hosts 
+          ansible-playbook devops/ansible/installopenresty.yml -i hosts 
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
