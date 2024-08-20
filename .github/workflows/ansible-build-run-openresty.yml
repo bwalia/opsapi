@@ -43,7 +43,7 @@ jobs:
         run: |
           ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
 
-      - name: Add SSH Host Key
+      - name: Add SSH Host Key for hosts
         run: |
          mkdir -p ~/.ssh
          ssh-keyscan -H `cat hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
