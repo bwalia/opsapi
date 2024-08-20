@@ -3,7 +3,7 @@ name: Ansible compile from source and install Openresty
 on:
   push:
     branches:
-      - main 
+      - workflow-opsapi 
   pull_request:
     branches:
       - workflow-opsapi
@@ -41,7 +41,7 @@ jobs:
         env:
           VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
-          ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
+          ansible-vault decrypt ../../devops/ansible/id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
 
       - name: Add SSH Host Key for hosts
         run: |
@@ -50,6 +50,6 @@ jobs:
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook installopenresty.yml -i hosts 
+          ansible-playbook ../../devops/ansible/installopenresty.yml -i hosts 
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
