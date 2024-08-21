@@ -50,7 +50,7 @@ jobs:
         env:
           VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
-          ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
+          ansible-vault decrypt devops/ansible/id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
 
       - name: Add SSH Host Key for hosts
         run: |
