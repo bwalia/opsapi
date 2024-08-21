@@ -29,9 +29,9 @@ on:
             - 94.72.96.175
             - 74.208.63.104
             - 212.227.236.48
-            - 94.72.96.175
 env:
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  TARGET_HOST: ${{ github.event.inputs.TARGET_HOST || '94.72.96.175' }}
   API_DOMAINNAME_ENDPOINT:  ${{ github.event.inputs.TARGET_ENV || 'int' }}.opsapi.org
     
 jobs:
