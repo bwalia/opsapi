@@ -1,2 +1,8 @@
 ---
-# vars file for roles/cloudflare
+CLOUDFLARE_ZONE: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_ZONE') }}"
+CLOUDFLARE_RECORD_NAME: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_RECORD_NAME') }}"
+CLOUDFLARE_RECORD_TYPE: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_RECORD_TYPE') }}"
+CLOUDFLARE_RECORD_VALUE: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_RECORD_VALUE') }}"
+CLOUDFLARE_ACCOUNT_EMAIL: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_ACCOUNT_EMAIL') }}"
+CLOUDFLARE_ACCOUNT_API_KEY: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_ACCOUNT_API_KEY') }}"
+

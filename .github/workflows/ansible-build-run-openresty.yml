@@ -62,3 +62,9 @@ jobs:
           ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts -l ${{ env.TARGET_HOST }}
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
+          CLOUDFLARE_ZONE: ${{ secrets.CLOUDFLARE_ZONE }}
+          CLOUDFLARE_RECORD_NAME: ${{ secrets.CLOUDFLARE_RECORD_NAME }}
+          CLOUDFLARE_RECORD_TYPE: ${{ secrets.CLOUDFLARE_RECORD_TYPE }}
+          CLOUDFLARE_RECORD_VALUE: ${{ secrets.CLOUDFLARE_RECORD_VALUE }}
+          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
+          CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
