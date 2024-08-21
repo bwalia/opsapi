@@ -3,42 +3,42 @@
     upgrade: yes
     update_cache: yes
     cache_valid_time: 86400
-   tags: [ubuntu]
+   tags: [ ubuntu,openresty,lapis ]
 
  - name: Install luarocks
    apt:
     name: luarocks 
     state: present
-   tags: [ luarocks,openresty ]
+   tags: [ openresty,lapis ]
 
  - name: Copy openresty script
    template:
     src:  openresty.sh.j2 
     dest: /tmp/openresty.sh 
     mode: 0777
-   tags: [ luarocks,openresty]
+   tags: [ openresty,lapis ] 
  
  - name: Execute the script
    shell: /tmp/openresty.sh
-   tags: [ luarocks,openresty]
+   tags: [ openresty,lapis ]
  
  - name: Deploy OpenResty systemd service file
    template:
       src: openresty.service.j2
       dest: /etc/systemd/system/openresty.service
    notify: Reload systemd
-   tags: [luarocks,openresty]
+   tags: [ openresty,lapis ]
 
  - name: copy nginx conf file
    template:
       src: nginx.conf.j2
       dest: /usr/local/openresty/nginx/conf/nginx.conf 
    notify: Restart openresty
-   tags: [luarocks,openresty]
+   tags: [ openresty,lapis ]
 
  - name: Enable and start OpenResty service
    systemd:
        name: openresty
        state: started
        enabled: yes 
-   tags: [ luarocks,openresty]
+   tags: [ openresty,lapis ]
