@@ -59,6 +59,6 @@ jobs:
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts 
+          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts -l ${{ env.TARGET_HOST }}
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
