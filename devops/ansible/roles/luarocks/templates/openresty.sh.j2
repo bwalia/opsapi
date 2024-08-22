@@ -3,8 +3,17 @@
 # Set OpenResty source directory
 OPENRESTY_SRC_DIR=/usr/local/openresty
 
+mkdir -p /usr/local/openresty/nginx/logs/
+chmod 777 -R /usr/local/openresty/nginx/logs/
 
 mkdir  -p $OPENRESTY_SRC_DIR
+
+apt-get install ldconfig -y
+
+source ~/.bashrc
+
+apt-get install libpcre3-dev \
+    libssl-dev perl make build-essential curl zlib1g-dev -y
 
 apt-get install make gcc  -y
 
