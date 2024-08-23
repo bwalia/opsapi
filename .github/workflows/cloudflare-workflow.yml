@@ -1,4 +1,4 @@
-name: Ansible compile from source and install Openresty
+name: cloudflare workflow
 
 on:
   push:
