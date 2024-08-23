@@ -1,19 +1,21 @@
 #!/bin/bash
 
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh
-source ~/.bashrc
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-
-nvm install 18
-
-npm install --global yarn
+# For ubuntu 22 or above
+if (lsb_release -r | grep -q "22"); then
+  echo "Ubuntu 22 or above"
+  rm -f /usr/share/keyrings/openresty.gpg
+  wget -O - https://openresty.org/package/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openresty.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openresty.gpg] http://openresty.org/package/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/openresty.list > /dev/null
+  apt-get update
+  apt-get -y install openresty-opm openresty-resty openresty-restydoc openresty-restydoc-pdf openresty-restydoc-html openresty-restydoc-epub openresty-restydoc-md openresty-restydoc-txt openresty-rest
+fi
 
 opm get bungle/lua-resty-session
 opm get ip2location/ip2location-resty
 opm get bungle/lua-resty-template
 opm get thibaultcha/lua-resty-mlcache
 opm get 3scale/lua-resty-env
+
 luarocks install lua-resty-jwt
 luarocks install lua-resty-session
 luarocks install lua-resty-http
@@ -26,7 +28,25 @@ luarocks install luafilesystem
 luarocks install lua-resty-auto-ssl
 luarocks install pgmoon
 
+mkdir -p /opt/nginx/data/
+chmod 777 /opt/nginx/data/
 
-cd openresty-admin
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh
+source ~/.bashrc
+export NVM_DIR="/home/bwalia/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+
+nvm install 18
+nvm use 18
+npm install --global yarn
+
+cd /usr/local/openresty/nginx/html/openresty-admin/
+
+if [ -f "/tmp/.env" ]; then
+  cp /tmp/.env /usr/local/openresty/nginx/html/openresty-admin/.env
+fi
+
 yarn install
 yarn build
+
+

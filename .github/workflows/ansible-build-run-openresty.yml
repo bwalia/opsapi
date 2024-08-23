@@ -46,6 +46,11 @@ jobs:
           sudo apt-get install -y ansible
           export ANSIBLE_HOST_KEY_CHECKING=False
 
+      - name: Save ENV variables to file
+        if : ${{ env.TARGET_ENV }} == "int"
+        run: |
+          echo "${{ secrets.BRAHMSTRA_ENV_INT }}" | base64 -d > /tmp/.env
+
       - name: Decrypt Ansible Vault file
         env:
           VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
