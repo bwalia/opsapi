@@ -10,6 +10,13 @@
     name: luarocks 
     state: present
    tags: [ openresty,lapis ]
+ 
+ - name: Copy cdn dependencies  script
+   template:
+    src:  cdn-dependencies.sh.j2
+    dest: /tmp/cdn-dependencies.sh
+    mode: 0777
+   tags: [ openresty,lapis ]
 
  - name: Copy openresty script
    template:
