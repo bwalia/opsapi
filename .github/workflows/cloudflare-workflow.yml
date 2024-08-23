@@ -33,7 +33,7 @@ jobs:
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts tags="cloudflare" -l 94.72.96.175
+          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts --tags "cloudflare" -l 94.72.96.175
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
           CLOUDFLARE_ZONE: ${{ secrets.CLOUDFLARE_ZONE }}
