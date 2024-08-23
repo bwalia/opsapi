@@ -20,7 +20,7 @@ jobs:
           export ANSIBLE_HOST_KEY_CHECKING=False
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts tags="cloudflare" -l 94.72.96.175
+          ansible-playbook -i "localhost," devops/ansible/playbook_openresty.yml tags="cloudflare"
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
 
