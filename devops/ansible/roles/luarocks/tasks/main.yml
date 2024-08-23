@@ -10,25 +10,43 @@
     name: luarocks 
     state: present
    tags: [ openresty,lapis ]
- 
- - name: Copy cdn dependencies  script
+
+ - name: Copy openresty bootstrap script
+   template:
+    src:  openresty.sh.j2 
+    dest: /tmp/openresty.sh 
+    mode: 0777
+   tags: [ openresty,lapis ] 
+
+ - name: Copy cdn dependencies script
    template:
     src:  cdn-dependencies.sh.j2
     dest: /tmp/cdn-dependencies.sh
     mode: 0777
    tags: [ openresty,lapis ]
 
- - name: Copy openresty script
+ - name: Copy Settings Config file
    template:
-    src:  openresty.sh.j2 
-    dest: /tmp/openresty.sh 
+    src:  /tmp/settings.json
+    dest: /opt/nginx/data/settings.json
     mode: 0777
-   tags: [ openresty,lapis ] 
- 
- - name: Execute the script
-   shell: /tmp/openresty.sh
    tags: [ openresty,lapis ]
+
+ - name: Copy Environment file
+   template:
+    src:  /tmp/.env
+    dest: /tmp/.env
+    mode: 0777
+   tags: [ openresty,lapis ]
+
+ - name: Execute the openresty.sh bootstrap script
+   shell: /tmp/openresty.sh
+   tags: [ test,openresty,lapis ]
  
+ - name: Execute the cdn-dependencies.sh script
+   shell: /tmp/cdn-dependencies.sh
+   tags: [ openresty,lapis ]
+
  - name: Deploy OpenResty systemd service file
    template:
       src: openresty.service.j2
