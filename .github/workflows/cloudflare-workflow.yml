@@ -1,0 +1,38 @@
+name: Ansible compile from source and install Openresty
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code from repository
+        uses: actions/checkout@v3
+      - name: Install Ansible on Ubuntu Latest
+        run: |
+          sudo apt-get install -y ansible
+          export ANSIBLE_HOST_KEY_CHECKING=False
+
+      - name: Decrypt Ansible Vault file
+        env:
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          ansible-vault decrypt id_rsa --vault-password-file=<(echo $VAULT_PASSWORD)
+
+      - name: Add SSH Host Key for hosts
+        run: |
+         mkdir -p ~/.ssh
+         ssh-keyscan -H `cat devops/ansible/hosts | grep ansible_user | awk '{print $1}'`  >> ~/.ssh/known_hosts
+
+      - name: Run Ansible Playbook
+        run: |
+          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts tags="cloudflare" -l 94.72.96.175
+        env:
+          ANSIBLE_PRIVATE_KEY_FILE: id_rsa
+
