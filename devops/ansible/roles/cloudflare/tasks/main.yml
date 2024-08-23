@@ -4,6 +4,7 @@
     record: "{{ CLOUDFLARE_RECORD_NAME }}"
     type: "{{ CLOUDFLARE_RECORD_TYPE }}"
     value: "{{ CLOUDFLARE_RECORD_VALUE }}"
+    proxied: "{{ CLOUDFLARE_PROXIED }}"
     account_email: "{{ CLOUDFLARE_ACCOUNT_EMAIL }}"
     account_api_key: "{{ CLOUDFLARE_ACCOUNT_API_KEY }}"
   register: record
