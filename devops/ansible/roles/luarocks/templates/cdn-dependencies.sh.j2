@@ -31,22 +31,5 @@ luarocks install pgmoon
 mkdir -p /opt/nginx/data/
 chmod 777 /opt/nginx/data/
 
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh
-source ~/.bashrc
-export NVM_DIR="/home/bwalia/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-
-nvm install 18
-nvm use 18
-npm install --global yarn
-
-cd /usr/local/openresty/nginx/html/openresty-admin/
-
-if [ -f "/tmp/.env" ]; then
-  cp /tmp/.env /usr/local/openresty/nginx/html/openresty-admin/.env
-fi
-
-yarn install
-yarn build
 
 

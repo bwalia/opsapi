@@ -25,6 +25,15 @@
     mode: 0777
    tags: [ openresty,lapis ]
 
+ - name: Make sure the nginx data directory exists
+   ansible.builtin.file:
+    path: /opt/nginx/data/
+    state: directory
+    owner: bwalia
+    group: root
+    mode: 0775
+   tags: [ openresty,lapis ]
+
  - name: Copy Settings Config file
    template:
     src:  /tmp/settings.json
@@ -37,7 +46,7 @@
     src:  /tmp/.env
     dest: /tmp/.env
     mode: 0777
-   tags: [ openresty,lapis ]
+   tags: [ openresty,lapis,codebase ]
 
  - name: Execute the openresty.sh bootstrap script
    shell: /tmp/openresty.sh
@@ -54,16 +63,47 @@
    notify: Reload systemd
    tags: [ openresty,lapis ]
 
+#  - ansible.posix.synchronize:
+#     src: ../../api/
+#     dest: /usr/local/openresty/nginx/html/api
+#    notify: Restart openresty
+#    register: sync_files
+#    tags: [ openresty,lapis,codebase ]
+
+#  - debug:
+#      var: sync_files.stdout_lines
+#    tags: [ openresty,lapis,codebase ]
+
+#  - ansible.posix.synchronize:
+#     src: ../../html/
+#     dest: /usr/local/openresty/nginx/html
+#    register: sync_files
+#    tags: [ openresty,lapis,codebase ]
+
+#  - debug:
+#      var: sync_files.stdout_lines
+#    tags: [ openresty,lapis,codebase ]
+
+#  - ansible.posix.synchronize:
+#     src: ../../openresty-admin/
+#     dest: /usr/local/openresty/nginx/html/openresty-admin
+#    register: sync_files
+#    tags: [ openresty,lapis,codebase ]
+
+#  - debug:
+#      var: sync_files.stdout_lines
+#    tags: [ openresty,lapis,codebase ]
+
  - name: copy nginx conf file
    template:
       src: nginx.conf.j2
       dest: /usr/local/openresty/nginx/conf/nginx.conf 
    notify: Restart openresty
-   tags: [ openresty,lapis ]
+   tags: [ openresty,lapis,codebase ]
 
  - name: Enable and start OpenResty service
    systemd:
        name: openresty
        state: started
        enabled: yes 
-   tags: [ openresty,lapis ]
+   tags: [ openresty,lapis,codebase ]
