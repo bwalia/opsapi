@@ -1,0 +1,8 @@
+# defaults file for roles/varnish_cache
+
+# Define the varnish listening port
+varnish_cache_listening_port: 80
+# Define the varnish malloc size
+varnish_cache_malloc_size: 2g
+varnish_cache_vcl_host: "127.0.0.1"
+varnish_cache_existing_webserver_vcl_port: 8080

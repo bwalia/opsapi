@@ -1,0 +1,132 @@
+---
+# tasks file for roles/varnish_cache
+- name: Check if Nginx is installed
+  ansible.builtin.command: which nginx
+  register: nginx_installed
+  changed_when: false
+  ignore_errors: true
+  tags: varnish_cache
+- name: Fail if Nginx is not installed
+  ansible.builtin.fail:
+    msg: "Nginx is not installed on the target machine."
+  when: nginx_installed.rc != 0
+# task fot sudo apt-get update
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Add varnishcache repository
+  ansible.builtin.shell: curl -s https://packagecloud.io/install/repositories/varnishcache/varnish75/script.deb.sh | sudo bash
+  become: true
+  become_user: root
+  tags: varnish_cache
+  changed_when: false
+  # Add varnishcache preferences
+- name: Add varnishcache preferences
+  ansible.builtin.shell: |
+    sudo tee /etc/apt/preferences.d/varnishcache > /dev/null <<-EOF
+    Package: varnish varnish-*
+    Pin: release o=packagecloud.io/varnishcache/*
+    Pin-Priority: 1000
+    EOF
+  become: true
+  become_user: root
+  tags: varnish_cache
+  changed_when: false
+  # Install varnish 7.5
+- name: Install varnish 7.5
+  ansible.builtin.apt:
+    name: varnish
+    state: present
+  become: true
+  become_user: root
+  tags: varnish_cache
+  changed_when: false
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+
+- name: Copy varnish.service to /etc/systemd/system/varnish.service
+  ansible.builtin.template:
+    src: roles/varnish_cache/templates/varnish.service
+    dest: /etc/systemd/system/varnish.service
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  become_user: root
+  tags: varnish_cache
+  # ensure copy above step (/etc/systemd/system/varnish.service)
+  # is done before this step
+
+
+- name: Copy default.vcl to /etc/varnish/default.vcl
+  ansible.builtin.template:
+    src: roles/varnish_cache/templates/default.vcl
+    dest: /etc/varnish/default.vcl
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+
+- name: Change nginx listening port
+  ansible.builtin.shell: |
+    find /etc/nginx -name '*.conf' -exec sed -r -i 's/\blisten ([^:]+:)?{{ varnish_cache_listening_port }}\b([^;]*);/listen \1{{ varnish_cache_existing_webserver_vcl_port }}\2;/g' {} ';'
+    sudo find /etc/nginx/sites-available -type f -exec sed -r -i 's/\blisten ([^:]+:)?{{ varnish_cache_listening_port }}\b([^;]*);/listen \1{{ varnish_cache_existing_webserver_vcl_port }}\2;/g' {} \;
+    sudo find /etc/nginx/sites-available -type f -exec sed -r -i 's/\blisten (\[::\]:)?{{ varnish_cache_listening_port }}\b([^;]*);/listen \1{{ varnish_cache_existing_webserver_vcl_port }}\2;/g' {} \;
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+- name: Restart nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+  tags: varnish_cache
+
+- name: Enable varnish
+  ansible.builtin.systemd:
+    name: varnish
+    enabled: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+- name: Restart varnish
+  ansible.builtin.systemd:
+    name: varnish
+    state: restarted
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+- name: Check varnish status
+  ansible.builtin.systemd:
+    name: varnish
+    state: started
+  become: true
+  become_user: root
+  tags: varnish_cache
+
