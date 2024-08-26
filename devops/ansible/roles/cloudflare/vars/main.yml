@@ -3,6 +3,7 @@ CLOUDFLARE_ZONE: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_ZONE') }}"
 CLOUDFLARE_RECORD_NAME: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_RECORD_NAME') }}"
 CLOUDFLARE_RECORD_TYPE: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_RECORD_TYPE') }}"
 CLOUDFLARE_RECORD_VALUE: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_RECORD_VALUE') }}"
+CLOUDFLARE_PROXIED: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_PROXIED', default='false') }}"
 CLOUDFLARE_ACCOUNT_EMAIL: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_ACCOUNT_EMAIL') }}"
 CLOUDFLARE_ACCOUNT_API_KEY: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_ACCOUNT_API_KEY') }}"
 
