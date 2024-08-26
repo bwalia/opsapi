@@ -31,6 +31,10 @@ chmod 777 /opt/nginx/data/
 mkdir -p /tmp/letsencrypt
 chmod 777 /tmp/letsencrypt
 
+#Download the IP2LOCATION database and make available to openresty
+cd /tmp/ && wget https://edgeone-public.s3.eu-west-2.amazonaws.com/src/openresty/IP2LOCATION-LITE-DB11.IPV6.BIN/IP2LOCATION-LITE-DB11.IPV6.BIN -O /tmp/IP2LOCATION-LITE-DB11.IPV6.BIN
+mv /tmp/IP2LOCATION-LITE-DB11.IPV6.BIN /usr/local/openresty/nginx/IP2LOCATION-LITE-DB11.IPV6.BIN
+
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh
 source ~/.bashrc
 export NVM_DIR="$HOME/.nvm"
