@@ -30,6 +30,12 @@
     src:  /tmp/settings.json
     dest: /opt/nginx/data/settings.json
     mode: 0777
+   tags: [ openresty,lapis ] 
+ 
+ - name: Execute the script
+   shell: /tmp/openresty.sh
+   async: 1800
+   poll: 1800
    tags: [ openresty,lapis ]
 
  - name: Copy Environment file

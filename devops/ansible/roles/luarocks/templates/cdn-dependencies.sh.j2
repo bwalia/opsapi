@@ -3,8 +3,11 @@
 # For ubuntu 22 or above
 if (lsb_release -r | grep -q "22"); then
   echo "Ubuntu 22 or above"
+<<<<<<< HEAD
+=======
   rm -f /usr/share/keyrings/openresty.gpg
   wget -O - https://openresty.org/package/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openresty.gpg
+>>>>>>> origin/main
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openresty.gpg] http://openresty.org/package/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/openresty.list > /dev/null
   apt-get update
   apt-get -y install openresty-opm openresty-resty openresty-restydoc openresty-restydoc-pdf openresty-restydoc-html openresty-restydoc-epub openresty-restydoc-md openresty-restydoc-txt openresty-rest
@@ -30,22 +33,23 @@ luarocks install pgmoon
 
 mkdir -p /opt/nginx/data/
 chmod 777 /opt/nginx/data/
+mkdir -p /tmp/letsencrypt
+chmod 777 /tmp/letsencrypt
+
+#Download the IP2LOCATION database and make available to openresty
+cd /tmp/ && wget https://edgeone-public.s3.eu-west-2.amazonaws.com/src/openresty/IP2LOCATION-LITE-DB11.IPV6.BIN/IP2LOCATION-LITE-DB11.IPV6.BIN -O /tmp/IP2LOCATION-LITE-DB11.IPV6.BIN
+mv /tmp/IP2LOCATION-LITE-DB11.IPV6.BIN /usr/local/openresty/nginx/IP2LOCATION-LITE-DB11.IPV6.BIN
 
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh
 source ~/.bashrc
-export NVM_DIR="/home/bwalia/.nvm"
+export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 
 nvm install 18
-nvm use 18
+
 npm install --global yarn
 
 cd /usr/local/openresty/nginx/html/openresty-admin/
-
-if [ -f "/tmp/.env" ]; then
-  cp /tmp/.env /usr/local/openresty/nginx/html/openresty-admin/.env
-fi
-
 yarn install
 yarn build
 
