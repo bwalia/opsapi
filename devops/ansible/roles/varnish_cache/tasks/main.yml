@@ -18,7 +18,7 @@
   become_user: root
   tags: varnish_cache
 - name: Add varnishcache repository
-  ansible.builtin.shell: curl -s https://packagecloud.io/install/repositories/varnishcache/varnish75/script.deb.sh | sudo bash
+  ansible.builtin.shell: curl -s https://packagecloud.io/install/repositories/varnishcache/varnish{{ varnish_cache_version | replace(".", "") }}/script.deb.sh | sudo bash
   become: true
   become_user: root
   tags: varnish_cache
@@ -35,8 +35,7 @@
   become_user: root
   tags: varnish_cache
   changed_when: false
-  # Install varnish 7.5
-- name: Install varnish 7.5
+- name: Install varnish {{ varnish_cache_version }}
   ansible.builtin.apt:
     name: varnish
     state: present
@@ -129,4 +128,55 @@
   become: true
   become_user: root
   tags: varnish_cache
+- name: Install rsync on the remote machine
+  ansible.builtin.package:
+    name: rsync
+    state: present
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+
+- name: Synchronize files to the remote machine
+  ansible.posix.synchronize:
+    src: "{{ varnish_cache_additional_conf_files }}"
+    dest: /etc/varnish/
+  become: true
+  register: sync_files
+  become_user: root
+  when: varnish_cache_additional_conf_files is defined
+  tags: varnish_cache, sync_files
+
+- name: Debug synchronized files
+  ansible.builtin.debug:
+    var: sync_files
+  tags: varnish_cache, sync_files
+- name: Find all VCL files in the directory
+  ansible.builtin.find:
+    paths: /etc/varnish/
+    patterns: '*.vcl'
+    exclude: default.vcl
+  register: vcl_files
+  tags: varnish_cache, sync_files
+
+- name: Load each VCL file using varnishadm
+  ansible.builtin.shell: |
+    varnishadm vcl.load {{ item.path | basename | replace('.vcl', '') }} {{ item.path }}
+    varnishadm vcl.use {{ item.path | basename | replace('.vcl', '') }}
+  loop: "{{ vcl_files.files }}"
+  when: vcl_files.matched > 0
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+
+- name: List and debug all loaded VCL files in Varnish Cache
+  ansible.builtin.shell: varnishadm vcl.list
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+  register: vcl_list
+- name: Debug VCL list
+  ansible.builtin.debug:
+    var: vcl_list
+  tags: varnish_cache, sync_files
+
 
