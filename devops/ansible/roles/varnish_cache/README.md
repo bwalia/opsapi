@@ -26,6 +26,8 @@ varnish_cache_listening_port: 80
 varnish_cache_malloc_size: 2g
 varnish_cache_vcl_host: "127.0.0.1"
 varnish_cache_existing_webserver_vcl_port: 8080
+varnish_cache_version: 7.5
+varnish_cache_additional_conf_files: conf/  #leave empty if no additional vcl/conf files
   ```
 Example Playbook
 ----------------
