@@ -28,11 +28,7 @@ on:
         CLOUDFLARE_PROXIED:
             description: 'Proxy the Cloudflare'
             required: false
-            type: choice
-            default: 'false'
-            options:
-              - false
-              - true
+            type: boolean
 
 
 jobs:
@@ -60,7 +56,7 @@ jobs:
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts --tags "cloudflare" -l 94.72.96.175 -vv
+          ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts --tags "cloudflare" -l 94.72.96.175
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
           CLOUDFLARE_ZONE: ${{ github.event.inputs.CLOUDFLARE_ZONE || secrets.CLOUDFLARE_ZONE }}
