@@ -2,6 +2,7 @@
 - name: Set the packagecloud repository name based on the version.
   ansible.builtin.set_fact:
     varnish_packagecloud_repo: "varnish{{ varnish_cache_version | replace('.', '') }}"
+  tags: varnish_cache
 - name: Configure packagecloud.io repository
   tags: varnish_cache
   become: true
@@ -107,7 +108,7 @@
     src: "{{ item }}"
     dest: "/etc/varnish/{{ item | basename }}"
   with_fileglob:
-    - "{{ varnish_cache_additional_conf_files }}"
+    - "{{ varnish_cache_vcl_conf_files_path }}"
   become: true
   become_user: root
   tags: varnish_cache, sync_files
