@@ -65,4 +65,4 @@ jobs:
           CLOUDFLARE_RECORD_VALUE: ${{ github.event.inputs.CLOUDFLARE_RECORD_VALUE || secrets.CLOUDFLARE_RECORD_VALUE }}
           CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
           CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
-          CLOUDFLARE_PROXIED: ${{ github.event.inputs.CLOUDFLARE_PROXIED || secrets.CLOUDFLARE_PROXIED || 'false' | string }}
+          CLOUDFLARE_PROXIED: ${{ github.event.inputs.CLOUDFLARE_PROXIED | string || secrets.CLOUDFLARE_PROXIED || 'false' }}
