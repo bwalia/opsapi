@@ -25,6 +25,11 @@ on:
             required: true
             default: ${{ secrets.CLOUDFLARE_ZONE }}
             type: string
+        CLOUDFLARE_PROXIED:
+            description: 'Please provide the Cloudflare Proxied Eg: true'
+            required: false
+            type: boolean
+
 
 jobs:
   build:
@@ -60,4 +65,5 @@ jobs:
           CLOUDFLARE_RECORD_VALUE: ${{ secrets.CLOUDFLARE_RECORD_VALUE }}
           CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
           CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
+          CLOUDFLARE_PROXIED: ${{ secrets.CLOUDFLARE_PROXIED }}
 
