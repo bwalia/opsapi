@@ -2,6 +2,9 @@
   become: yes
   become_user: root
   roles:
+    - ubuntu
+    - luarocks
+    - cloudflare
     - unattended
   vars:
     nginx_port: 8080
