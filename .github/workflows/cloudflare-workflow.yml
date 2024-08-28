@@ -8,7 +8,7 @@ on:
         CLOUDFLARE_RECORD_NAME:
             description: 'Please provide the Cloudflare Record Name Eg: test'
             required: true
-            default: ${{ secrets.CLOUDFLARE_RECORD_NAME }}
+            default: "${{ secrets.CLOUDFLARE_RECORD_NAME }}"
             type: string
         CLOUDFLARE_RECORD_TYPE:
             description: 'Please provide the Cloudflare Record Type Eg: A'
@@ -26,7 +26,7 @@ on:
             default: ${{ secrets.CLOUDFLARE_ZONE }}
             type: string
         CLOUDFLARE_PROXIED:
-            description: 'Please provide the Cloudflare Proxied Eg: true'
+            description: 'Proxy the Cloudflare'
             required: false
             type: boolean
 
