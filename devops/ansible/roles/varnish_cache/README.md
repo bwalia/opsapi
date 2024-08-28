@@ -36,7 +36,9 @@ varnish_cache_default_vcl_file: root.vcl
   
   ```
 Varnishadm labeling.
+--------------------
 
+- vcl file name with prefix `label_` will be used as a label for the vcl file. Avoid using whitespaces in the vcl file name.
 
 Example Playbook
 ----------------
