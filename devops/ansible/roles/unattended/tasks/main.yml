@@ -1,0 +1,62 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  become_user: root
+  tags: unattended
+
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+  become: true
+  become_user: root
+  tags: unattended
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  become_user: root
+  tags: unattended
+
+- name: Add unattended-upgrades preferences
+  ansible.builtin.shell: |
+    sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<-EOF
+    APT::Periodic::Update-Package-Lists "1";
+    APT::Periodic::Download-Upgradeable-Packages "1";
+    APT::Periodic::AutocleanInterval "7";
+    APT::Periodic::Unattended-Upgrade "1";
+    EOF
+  become: true
+  become_user: root
+  tags: unattended
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  become_user: root
+  tags: unattended
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  become_user: root
+  tags: unattended
+
+# check restart needed or not in unattended-upgrades
+- name: Check if restart is needed
+  ansible.builtin.shell: cat /var/run/reboot-required
+  register: restart_needed
+  changed_when: false
+  ignore_errors: true
+  tags: unattended
+
+- name: Fail if restart is needed
+  ansible.builtin.fail:
+    msg: "A restart is needed on the target machine."
+  when: restart_needed.rc == 0
+  tags: unattended
