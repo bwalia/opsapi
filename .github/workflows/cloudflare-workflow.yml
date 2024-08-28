@@ -28,7 +28,11 @@ on:
         CLOUDFLARE_PROXIED:
             description: 'Proxy the Cloudflare'
             required: false
-            type: boolean
+            type: choice
+            default: 'false'
+            options:
+              - false
+              - true
 
 
 jobs:
@@ -65,4 +69,4 @@ jobs:
           CLOUDFLARE_RECORD_VALUE: ${{ github.event.inputs.CLOUDFLARE_RECORD_VALUE || secrets.CLOUDFLARE_RECORD_VALUE }}
           CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
           CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
-          CLOUDFLARE_PROXIED: ${{ github.event.inputs.CLOUDFLARE_PROXIED | string || secrets.CLOUDFLARE_PROXIED || 'false' }}
+          CLOUDFLARE_PROXIED: ${{ github.event.inputs.CLOUDFLARE_PROXIED || secrets.CLOUDFLARE_PROXIED || 'false' }}
