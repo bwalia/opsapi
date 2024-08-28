@@ -8,22 +8,22 @@ on:
         CLOUDFLARE_RECORD_NAME:
             description: 'Please provide the Cloudflare Record Name Eg: test'
             required: true
-            default: "${{ secrets.CLOUDFLARE_RECORD_NAME }}"
+            default: ''
             type: string
         CLOUDFLARE_RECORD_TYPE:
             description: 'Please provide the Cloudflare Record Type Eg: A'
             required: true
-            default: ${{ secrets.CLOUDFLARE_RECORD_TYPE }}
+            default: ''
             type: string
         CLOUDFLARE_RECORD_VALUE:
             description: 'Please provide the Cloudflare Record Value Eg: 127.0.0.1'
             required: true
-            default: ${{ secrets.CLOUDFLARE_RECORD_VALUE }}
+            default: ''
             type: string
         CLOUDFLARE_ZONE:
             description: 'Please provide the Cloudflare Zone Eg: opsapi.org'
             required: true
-            default: ${{ secrets.CLOUDFLARE_ZONE }}
+            default: ''
             type: string
         CLOUDFLARE_PROXIED:
             description: 'Proxy the Cloudflare'
@@ -59,11 +59,11 @@ jobs:
           ansible-playbook devops/ansible/playbook_openresty.yml -i devops/ansible/hosts --tags "cloudflare" -l 94.72.96.175
         env:
           ANSIBLE_PRIVATE_KEY_FILE: id_rsa
-          CLOUDFLARE_ZONE: ${{ secrets.CLOUDFLARE_ZONE }}
-          CLOUDFLARE_RECORD_NAME: ${{ secrets.CLOUDFLARE_RECORD_NAME }}
-          CLOUDFLARE_RECORD_TYPE: ${{ secrets.CLOUDFLARE_RECORD_TYPE }}
-          CLOUDFLARE_RECORD_VALUE: ${{ secrets.CLOUDFLARE_RECORD_VALUE }}
+          CLOUDFLARE_ZONE: ${{ github.event.inputs.CLOUDFLARE_ZONE || secrets.CLOUDFLARE_ZONE }}
+          CLOUDFLARE_RECORD_NAME: ${{ github.event.inputs.CLOUDFLARE_RECORD_NAME || secrets.CLOUDFLARE_RECORD_NAME }}
+          CLOUDFLARE_RECORD_TYPE: ${{ github.event.inputs.CLOUDFLARE_RECORD_TYPE || secrets.CLOUDFLARE_RECORD_TYPE }}
+          CLOUDFLARE_RECORD_VALUE: ${{ github.event.inputs.CLOUDFLARE_RECORD_VALUE || secrets.CLOUDFLARE_RECORD_VALUE }}
           CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
           CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
-          CLOUDFLARE_PROXIED: ${{ secrets.CLOUDFLARE_PROXIED }}
+          CLOUDFLARE_PROXIED: ${{ github.event.inputs.CLOUDFLARE_PROXIED || secrets.CLOUDFLARE_PROXIED }}
 
