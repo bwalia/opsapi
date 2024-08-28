@@ -1,0 +1,165 @@
+---
+- name: Set the packagecloud repository name based on the version.
+  ansible.builtin.set_fact:
+    varnish_packagecloud_repo: "varnish{{ varnish_cache_version | replace('.', '') }}"
+  tags: varnish_cache
+- name: Configure packagecloud.io repository
+  tags: varnish_cache
+  become: true
+  become_user: root
+  block:
+    - name: Ensure dependencies are present.
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - gnupg2
+        state: present
+
+    - name: Add packagecloud.io Varnish apt key.
+      ansible.builtin.apt_key:
+        url: https://packagecloud.io/varnishcache/{{ varnish_packagecloud_repo }}/gpgkey
+        state: present
+
+    - name: Add packagecloud.io Varnish apt repository.
+      ansible.builtin.apt_repository:
+        repo: deb https://packagecloud.io/varnishcache/{{ varnish_packagecloud_repo }}/{{ ansible_distribution | lower }}/ {{ ansible_distribution_release }} main
+        state: present
+- name: "Ensure Varnish is installed. Version: {{ varnish_cache_version }}"
+  ansible.builtin.apt:
+    name: varnish
+    state: present
+  tags: varnish_cache
+  become: true
+  become_user: root
+
+# tasks file for roles/varnish_cache
+- name: Check if Nginx is installed
+  ansible.builtin.command: which nginx
+  register: nginx_installed
+  changed_when: false
+  ignore_errors: true
+  tags: varnish_cache
+- name: Fail if Nginx is not installed
+  ansible.builtin.fail:
+    msg: "Nginx is not installed on the target machine."
+  when: nginx_installed.rc != 0
+# task fot sudo apt-get update
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Copy varnish.service to /etc/systemd/system/varnish.service
+  ansible.builtin.template:
+    src: roles/varnish_cache/templates/varnish.service
+    dest: /etc/systemd/system/varnish.service
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+  become_user: root
+  tags: varnish_cache
+  # ensure copy above step (/etc/systemd/system/varnish.service)
+  # is done before this step
+
+- name: Change nginx listening port
+  ansible.builtin.shell: |
+    find /etc/nginx -name '*.conf' -exec sed -r -i 's/\blisten ([^:]+:)?{{ varnish_cache_listening_port }}\b([^;]*);/listen \1{{ varnish_cache_existing_webserver_vcl_port }}\2;/g' {} ';'
+    find /etc/nginx/sites-available -type f -exec sed -r -i 's/\blisten ([^:]+:)?{{ varnish_cache_listening_port }}\b([^;]*);/listen \1{{ varnish_cache_existing_webserver_vcl_port }}\2;/g' {} \;
+    find /etc/nginx/sites-available -type f -exec sed -r -i 's/\blisten (\[::\]:)?{{ varnish_cache_listening_port }}\b([^;]*);/listen \1{{ varnish_cache_existing_webserver_vcl_port }}\2;/g' {} \;
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+
+- name: Restart nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+  tags: varnish_cache
+
+- name: Enable varnish
+  ansible.builtin.systemd:
+    name: varnish
+    enabled: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Install rsync on the remote machine
+  ansible.builtin.package:
+    name: rsync
+    state: present
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+- name: Remove all .vcl files under /etc/varnish
+  ansible.builtin.shell: rm -f /etc/varnish/*.vcl
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+- name: Create task to synchronize templates from local teamplates/conf to remote /etc/varnish
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/varnish/{{ item | basename }}"
+  with_fileglob:
+    - "{{ varnish_cache_vcl_conf_files_path }}"
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+
+- name: Find all VCL files in the directory
+  ansible.builtin.find:
+    paths: /etc/varnish/
+    patterns: '*.vcl'
+  register: vcl_files
+  tags: varnish_cache, sync_files
+- name: Debug VCL files - by looping through the files
+  ansible.builtin.debug:
+    var: item.path
+  loop: "{{ vcl_files.files }}"
+  tags: varnish_cache, sync_files
+- name: Restart varnish
+  ansible.builtin.systemd:
+    name: varnish
+    state: restarted
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  become_user: root
+  tags: varnish_cache
+- name: Load each VCL file using varnishadm
+  ansible.builtin.shell: |
+    varnishadm vcl.load {{ item.path | basename | replace('.vcl', '') }} {{ item.path }}
+    varnishadm vcl.label label_{{ item.path | basename | replace('.vcl', '') | replace(' ', '-') }} {{ item.path | basename | replace('.vcl', '') }}
+  loop: "{{ vcl_files.files }}"
+  when: vcl_files.matched > 0
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+- name: load varnishadm {{ varnish_cache_default_vcl_file }}
+  ansible.builtin.shell: varnishadm vcl.use label_{{ varnish_cache_default_vcl_file | replace('.vcl', '') | replace(' ', '-') }}
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+
+- name: List and debug all loaded VCL files in Varnish Cache
+  ansible.builtin.shell: varnishadm vcl.list
+  become: true
+  become_user: root
+  tags: varnish_cache, sync_files
+  register: vcl_list
+- name: Debug VCL list
+  ansible.builtin.debug:
+    var: vcl_list
+  tags: varnish_cache, sync_files
+
