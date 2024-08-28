@@ -1,12 +1,31 @@
 name: cloudflare workflow
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  # Run manually using workflow_dispatch
+  # workflow_dispatch collects CLOUDFLARE_RECORD_NAME and overrides secrets.CLOUDFLARE_RECORD_NAME if provided
+    workflow_dispatch:
+      inputs:
+        CLOUDFLARE_RECORD_NAME:
+            description: 'Please provide the Cloudflare Record Name Eg: test'
+            required: true
+            default: ${{ secrets.CLOUDFLARE_RECORD_NAME }}
+            type: string
+        CLOUDFLARE_RECORD_TYPE:
+            description: 'Please provide the Cloudflare Record Type Eg: A'
+            required: true
+            default: ${{ secrets.CLOUDFLARE_RECORD_TYPE }}
+            type: string
+        CLOUDFLARE_RECORD_VALUE:
+            description: 'Please provide the Cloudflare Record Value Eg: 127.0.0.1'
+            required: true
+            default: ${{ secrets.CLOUDFLARE_RECORD_VALUE }}
+            type: string
+        CLOUDFLARE_ZONE:
+            description: 'Please provide the Cloudflare Zone Eg: opsapi.org'
+            required: true
+            default: ${{ secrets.CLOUDFLARE_ZONE }}
+            type: string
+
 jobs:
   build:
     runs-on: ubuntu-latest
