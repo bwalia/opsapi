@@ -7,22 +7,22 @@ on:
       inputs:
         CLOUDFLARE_RECORD_NAME:
             description: 'Please provide the Cloudflare Record Name Eg: test'
-            required: true
+            required: false
             default: ''
             type: string
         CLOUDFLARE_RECORD_TYPE:
             description: 'Please provide the Cloudflare Record Type Eg: A'
-            required: true
+            required: false
             default: ''
             type: string
         CLOUDFLARE_RECORD_VALUE:
             description: 'Please provide the Cloudflare Record Value Eg: 127.0.0.1'
-            required: true
+            required: false
             default: ''
             type: string
         CLOUDFLARE_ZONE:
             description: 'Please provide the Cloudflare Zone Eg: opsapi.org'
-            required: true
+            required: false
             default: ''
             type: string
         CLOUDFLARE_PROXIED:
