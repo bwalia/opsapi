@@ -145,8 +145,8 @@
   become: true
   become_user: root
   tags: varnish_cache, sync_files
-- name: load varnishadm {{ varnish_cache_defaule_vcl_file }}
-  ansible.builtin.shell: varnishadm vcl.use label_{{ varnish_cache_defaule_vcl_file | replace('.vcl', '') | replace(' ', '-') }}
+- name: load varnishadm {{ varnish_cache_default_vcl_file }}
+  ansible.builtin.shell: varnishadm vcl.use label_{{ varnish_cache_default_vcl_file | replace('.vcl', '') | replace(' ', '-') }}
   become: true
   become_user: root
   tags: varnish_cache, sync_files

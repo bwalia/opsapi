@@ -25,7 +25,7 @@ ExecStart=/usr/sbin/varnishd \
 	  -a :{{ varnish_cache_listening_port }} \
 	  -a localhost:8443,PROXY \
 	  -p feature=+http2 \
-	  -f /etc/varnish/{{ varnish_cache_defaule_vcl_file }} \
+	  -f /etc/varnish/{{ varnish_cache_default_vcl_file }} \
 	  -s malloc,{{ varnish_cache_malloc_size }}
 ExecReload=/usr/sbin/varnishreload
 
