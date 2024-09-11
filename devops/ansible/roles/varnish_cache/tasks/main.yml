@@ -1,4 +1,8 @@
 ---
+
+# load sync_files.yml if only the tag `load_vcl_files` is used
+- include_tasks: sync_files.yml
+  tags: varnish_cache, load_vcl_files
 - name: Set the packagecloud repository name based on the version.
   ansible.builtin.set_fact:
     varnish_packagecloud_repo: "varnish{{ varnish_cache_version | replace('.', '') }}"
@@ -103,7 +107,7 @@
   become: true
   become_user: root
   tags: varnish_cache, sync_files
-- name: Create task to synchronize templates from local teamplates/conf to remote /etc/varnish
+- name: Create task to synchronize templates from local templates/conf to remote /etc/varnish
   ansible.builtin.template:
     src: "{{ item }}"
     dest: "/etc/varnish/{{ item | basename }}"
@@ -130,13 +134,13 @@
     state: restarted
   become: true
   become_user: root
-  tags: varnish_cache
+  tags: varnish_cache sync_files
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
   become_user: root
-  tags: varnish_cache
+  tags: varnish_cache sync_files
 - name: Load each VCL file using varnishadm
   ansible.builtin.shell: |
     varnishadm vcl.load {{ item.path | basename | replace('.vcl', '') }} {{ item.path }}

@@ -1,0 +1,46 @@
+---
+# Task to copy all files under remote folder /opt/varnish/conf.d/dir/ to remote folder /etc/varnish/
+- name: Copy all files under remote folder /opt/varnish/conf.d/dir/ to remote folder /etc/varnish/
+  ansible.builtin.find:
+    paths: /opt/varnish/conf.d/dir/
+    patterns: '*.vcl'
+  register: vcl_files
+  become: true
+  become_user: root
+  tags: varnish_cache, load_vcl_files
+
+
+- name: Copy VCL files to /etc/varnish/
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/etc/varnish/{{ item.path | basename }}"
+    remote_src: yes
+    force: yes
+  with_items: "{{ vcl_files.files }}"
+  become: true
+  become_user: root
+  tags: varnish_cache, load_vcl_files
+- name: Debug VCL files - by looping through the files
+  ansible.builtin.debug:
+    var: item.path
+  loop: "{{ vcl_files.files }}"
+  tags: varnish_cache, load_vcl_files
+- name: Load each VCL file using varnishadm
+  ansible.builtin.shell: |
+    varnishadm vcl.load {{ item.path | basename | replace('.vcl', '') }} /etc/varnish/{{ item.path| basename }}
+    varnishadm vcl.label label_{{ item.path | basename | replace('.vcl', '') | replace(' ', '-') }} {{ item.path | basename | replace('.vcl', '') }}
+  loop: "{{ vcl_files.files }}"
+  when: vcl_files.matched > 0
+  become: true
+  become_user: root
+  tags: load_vcl_files
+- name: load varnishadm {{ varnish_cache_default_vcl_file }}
+  ansible.builtin.shell: varnishadm vcl.use label_{{ varnish_cache_default_vcl_file | replace('.vcl', '') | replace(' ', '-') }}
+  become: true
+  become_user: root
+  tags: load_vcl_files
+
+- name: End play if load_vcl_files tag matches
+  meta: end_play
+  when: "'load_vcl_files' in ansible_run_tags"
+  tags: load_vcl_files
