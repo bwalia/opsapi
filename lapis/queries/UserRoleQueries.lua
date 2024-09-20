@@ -1,13 +1,11 @@
-local Model = require("lapis.db.model").Model
-local RoleModel = require "model.RoleModel"
+local RoleModel = require "models.RoleModel"
 local Global = require "helper.global"
 local Json = require("cjson")
-local UserRoles = Model:extend("user__roles", {
-    timestamp = true
-})
-local UserRolesModel = {}
+local UserRoles = require "models.UserRoleModel"
 
-function UserRolesModel.addRole(userId, roleName)
+local UserRolesQueries = {}
+
+function UserRolesQueries.addRole(userId, roleName)
     local role = RoleModel.roleByName(roleName)
     if role then
         local data = {
@@ -21,4 +19,4 @@ function UserRolesModel.addRole(userId, roleName)
     end
 end
 
-return UserRolesModel
+return UserRolesQueries

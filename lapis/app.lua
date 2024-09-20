@@ -1,7 +1,7 @@
 local lapis = require("lapis")
 local respond_to = require("lapis.application").respond_to
-local UserModel = require "model.UserModel"
-local RoleModel = require "model.RoleModel"
+local UserQueries = require "queries.UserQueries"
+local RoleQueries = require "queries.RoleQueries"
 local Json = require("cjson")
 local SwaggerUi = require "api-docs.swaggerUi"
 local File = require "helper.file"
@@ -20,35 +20,35 @@ end)
 app:match("users", "/api/v2/users", respond_to({
   GET = function(self)
     self.params.timestamp = true
-    local users = UserModel.all(self.params)
+    local users = UserQueries.all(self.params)
     return { json = users, status = 200}
   end,
   POST = function(self)
-    local user = UserModel.create(self.params)
+    local user = UserQueries.create(self.params)
     return { json = user, status = 201 }
   end
 }))
 
 app:match("edit_user", "/api/v2/users/:id", respond_to({
   before = function(self)
-    self.user = UserModel.show(tostring(self.params.id))
+    self.user = UserQueries.show(tostring(self.params.id))
     if not self.user then
       self:write({ "Not Found", status = 404 })
     end
   end,
   GET = function(self)
-    local user = UserModel.show(tostring(self.params.id))
+    local user = UserQueries.show(tostring(self.params.id))
     return {
       json = user,
       status = 200
     }
   end,
   PUT = function(self)
-    local user = UserModel.update(tostring(self.params.id), self.params)
+    local user = UserQueries.update(tostring(self.params.id), self.params)
     return { json = user, status = 204 }
   end,
   DELETE = function(self)
-    local user = UserModel.destroy(tostring(self.params.id))
+    local user = UserQueries.destroy(tostring(self.params.id))
     return { json = user, status = 204 }
   end
 }))
@@ -56,35 +56,35 @@ app:match("edit_user", "/api/v2/users/:id", respond_to({
 app:match("roles", "/api/v2/roles", respond_to({
   GET = function(self)
     self.params.timestamp = true
-    local roles = RoleModel.all(self.params)
+    local roles = RoleQueries.all(self.params)
     return { json = roles }
   end,
   POST = function(self)
-    local roles = RoleModel.create(self.params)
+    local roles = RoleQueries.create(self.params)
     return { json = roles, status = 201 }
   end
 }))
 
 app:match("edit_role", "/api/v2/roles/:id", respond_to({
   before = function(self)
-    self.role = RoleModel.show(tostring(self.params.id))
+    self.role = RoleQueries.show(tostring(self.params.id))
     if not self.role then
       self:write({ "Not Found", status = 404 })
     end
   end,
   GET = function(self)
-    local role = RoleModel.show(tostring(self.params.id))
+    local role = RoleQueries.show(tostring(self.params.id))
     return {
       json = role,
       status = 200
     }
   end,
   PUT = function(self)
-    local role = RoleModel.update(tostring(self.params.id), self.params)
+    local role = RoleQueries.update(tostring(self.params.id), self.params)
     return { json = role, status = 204 }
   end,
   DELETE = function(self)
-    local role = RoleModel.destroy(tostring(self.params.id))
+    local role = RoleQueries.destroy(tostring(self.params.id))
     return { json = role, status = 204 }
   end
 }))
