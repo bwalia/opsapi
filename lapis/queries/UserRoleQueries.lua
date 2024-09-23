@@ -1,12 +1,11 @@
-local RoleModel = require "models.RoleModel"
 local Global = require "helper.global"
-local Json = require("cjson")
 local UserRoles = require "models.UserRoleModel"
+local RoleQueries = require "queries.RoleQueries"
 
 local UserRolesQueries = {}
 
 function UserRolesQueries.addRole(userId, roleName)
-    local role = RoleModel.roleByName(roleName)
+    local role = RoleQueries.roleByName(roleName)
     if role then
         local data = {
             user_id = userId,

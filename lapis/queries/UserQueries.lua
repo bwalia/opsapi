@@ -2,11 +2,16 @@ local Json = require("cjson")
 local Global = require "helper.global"
 local UserRolesQueries = require "queries.UserRoleQueries"
 local Users = require "models.UserModel"
+local RoleModel = require "models.RoleModel"
+local Validation = require "helper.validations"
 
 local UserQueries = {}
 
 function UserQueries.create(params)
     local userData = params
+    -- Validate the user data
+    Validation.createUser(userData)
+
     local role = params.role
     userData.role = nil
     if userData.uuid == nil then
@@ -31,7 +36,20 @@ function UserQueries.all(params)
         per_page = perPage,
         fields = "id, uuid, name, username, email, created_at, updated_at"
     })
-    return paginated:get_page(page)
+
+    local users, userWithRoles = paginated:get_page(page), {}
+    for userIndex, user in ipairs(users) do
+        user:get_roles()
+        for index, role in ipairs(user.roles) do
+            local roleData = RoleModel:find(role.role_id)
+            user.roles[index]["name"] = roleData.role_name
+        end
+        table.insert(userWithRoles, user)
+    end
+    return {
+        data = userWithRoles,
+        total = paginated:total_items()
+    }
 end
 
 function UserQueries.show(id)
@@ -39,13 +57,18 @@ function UserQueries.show(id)
         uuid = id
     })
     user:get_roles()
+    for index, role in ipairs(user.roles) do
+        local roleData = RoleModel:find(role.role_id)
+        user.roles[index]["name"] = roleData.role_name
+    end
+    user.password = nil
     return user
-    -- local posts = user:get_roles()
-    -- ngx.say(Json.encode(posts))
-    -- ngx.exit(ngx.HTTP_OK)
 end
 
 function UserQueries.update(id, params)
+    local validations = Validation.updateUser(params)
+    ngx.say(Json.encode(validations))
+    ngx.exit(ngx.HTTP_OK)
     local user = Users:find({
         uuid = id
     })
