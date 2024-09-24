@@ -18,4 +18,21 @@ function UserRolesQueries.addRole(userId, roleName)
     end
 end
 
+function UserRolesQueries.deleteByUid(uId)
+    local userRole = UserRoles:find({
+        user_id = uId
+    })
+    if userRole then
+        userRole:delete()
+    end
+end
+function UserRolesQueries.deleteByRid(uId)
+    local userRole = UserRoles:find({
+        role_id = uId
+    })
+    if userRole then
+        userRole:delete()
+    end
+end
+
 return UserRolesQueries

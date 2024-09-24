@@ -11,7 +11,6 @@ function UserQueries.create(params)
     local userData = params
     -- Validate the user data
     Validation.createUser(userData)
-
     local role = params.role
     userData.role = nil
     if userData.uuid == nil then
@@ -37,6 +36,7 @@ function UserQueries.all(params)
         fields = "id, uuid, name, username, email, created_at, updated_at"
     })
 
+    -- Append the role into user object
     local users, userWithRoles = paginated:get_page(page), {}
     for userIndex, user in ipairs(users) do
         user:get_roles()
@@ -56,23 +56,22 @@ function UserQueries.show(id)
     local user = Users:find({
         uuid = id
     })
-    user:get_roles()
-    for index, role in ipairs(user.roles) do
-        local roleData = RoleModel:find(role.role_id)
-        user.roles[index]["name"] = roleData.role_name
+    if user then
+        user:get_roles()
+        for index, role in ipairs(user.roles) do
+            local roleData = RoleModel:find(role.role_id)
+            user.roles[index]["name"] = roleData.role_name
+        end
+        user.password = nil
+        return user, ngx.HTTP_OK
     end
-    user.password = nil
-    return user
 end
 
 function UserQueries.update(id, params)
-    local validations = Validation.updateUser(params)
-    ngx.say(Json.encode(validations))
-    ngx.exit(ngx.HTTP_OK)
     local user = Users:find({
         uuid = id
     })
-    params.id = user.id
+    params.id = nil
     return user:update(params, {
         returning = "*"
     })
@@ -82,6 +81,9 @@ function UserQueries.destroy(id)
     local user = Users:find({
         uuid = id
     })
-    return user:delete()
+    if user then
+        UserRolesQueries.deleteByUid(user.id)
+        return user:delete()
+    end
 end
 return UserQueries

@@ -40,5 +40,19 @@ return {
       "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
       "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE"
     })
-  end
+  end,
+  ['create_modules'] = function()
+    schema.create_table("modules", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "machine_name", types.varchar({ unique = true }) },
+      { "name", types.varchar },
+      { "description", types.text({ null = true }) },
+      { "priority", types.varchar },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)"
+    })
+  end,
 }

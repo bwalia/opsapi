@@ -1,11 +1,12 @@
 local Global = require "helper.global"
-local Json = require("cjson")
 local Roles = require "models.RoleModel"
+local Validation = require "helper.validations"
 
 
 local RoleQueries = {}
 
 function RoleQueries.create(roleData)
+    Validation.createRole(roleData)
     if roleData.uuid == nil then
         roleData.uuid = Global.generateUUID()
     end
