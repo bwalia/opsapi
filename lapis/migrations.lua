@@ -2,7 +2,7 @@ local schema = require("lapis.db.schema")
 local types = schema.types
 
 return {
-  ['create_users'] = function()
+  ['01_create_users'] = function()
     schema.create_table("users", {
       { "id", types.serial },
       { "uuid", types.varchar({ unique = true }) },
@@ -36,7 +36,23 @@ return {
       {"created_at", types.time({ null = true})},
       {"updated_at", types.time({ null = true})},
 
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+      "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE"
+    })
+  end,
+  ['create_modules'] = function()
+    schema.create_table("modules", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "machine_name", types.varchar({ unique = true }) },
+      { "name", types.varchar },
+      { "description", types.text({ null = true }) },
+      { "priority", types.varchar },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
       "PRIMARY KEY (id)"
     })
-  end
+  end,
 }

@@ -1,13 +1,12 @@
-local Model = require("lapis.db.model").Model
 local Global = require "helper.global"
-local Json = require("cjson")
+local Roles = require "models.RoleModel"
+local Validation = require "helper.validations"
 
-local Roles = Model:extend("roles", {
-    timestamp = true
-})
-local RoleModel = {}
 
-function RoleModel.create(roleData)
+local RoleQueries = {}
+
+function RoleQueries.create(roleData)
+    Validation.createRole(roleData)
     if roleData.uuid == nil then
         roleData.uuid = Global.generateUUID()
     end
@@ -16,7 +15,7 @@ function RoleModel.create(roleData)
     })
 end
 
-function RoleModel.all(params)
+function RoleQueries.all(params)
     local page, perPage, orderField, orderDir =
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
 
@@ -26,13 +25,13 @@ function RoleModel.all(params)
     return paginated:get_page(page)
 end
 
-function RoleModel.show(id)
+function RoleQueries.show(id)
     return Roles:find({
         uuid = id
     })
 end
 
-function RoleModel.update(id, params)
+function RoleQueries.update(id, params)
     local role = Roles:find({
         uuid = id
     })
@@ -42,17 +41,17 @@ function RoleModel.update(id, params)
     })
 end
 
-function RoleModel.destroy(id)
+function RoleQueries.destroy(id)
     local role = Roles:find({
         uuid = id
     })
     return role:delete()
 end
 
-function RoleModel.roleByName(name)
+function RoleQueries.roleByName(name)
     return Roles:find({
         role_name = tostring(name)
     })
 end
 
-return RoleModel
+return RoleQueries

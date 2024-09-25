@@ -15,6 +15,7 @@ RUN luarocks install luaossl
 RUN luarocks install luasec
 RUN luarocks install lapis
 RUN luarocks install bcrypt
+RUN luarocks install tableshape
 
 WORKDIR /app
 
