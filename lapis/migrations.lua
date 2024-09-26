@@ -16,7 +16,7 @@ return {
       "PRIMARY KEY (id)"
     })
   end,
-  ['create_roles'] = function()
+  ['02_create_roles'] = function()
     schema.create_table("roles", {
       { "id", types.serial },
       { "uuid", types.varchar({ unique = true }) },
@@ -53,6 +53,33 @@ return {
       {"updated_at", types.time({ null = true})},
 
       "PRIMARY KEY (id)"
+    })
+  end,
+  ['create_permissions'] = function()
+    schema.create_table("permissions", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "module_id", types.foreign_key },
+      { "permissions", types.text({ null = true }) },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE",
+    })
+  end,
+  ['create_role__permissions'] = function()
+    schema.create_table("role__permissions", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "role_id", types.foreign_key },
+      { "permission_id", types.foreign_key },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE",
+      "FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE",
     })
   end,
 }

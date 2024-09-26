@@ -27,9 +27,21 @@ function SwaggerUi.generate()
         },
         paths = {}
     }
+
+    -- Add relation fields
     table.insert(res, 1, {
         column_name = "role",
         table_name = "users",
+        data_type = "character varying"
+    })
+    table.insert(res, 1, {
+        column_name = "role",
+        table_name = "permissions",
+        data_type = "character varying"
+    })
+    table.insert(res, 1, {
+        column_name = "module_machine_name",
+        table_name = "permissions",
         data_type = "character varying"
     })
     for _, row in ipairs(res) do
@@ -132,11 +144,13 @@ function SwaggerUi.generate()
                     if column_name ~= "id" then
                         if column_name ~= "created_at" then
                             if column_name ~= "updated_at" then
-                                swagger.paths["/api/v2/" .. table_name].post.requestBody.content["multipart/form-data"].schema.properties[column_name] = {
-                                    type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
-                                    description = "Description of " .. column_name,
-                                    example = "Example value"
-                                }
+                                if column_name ~= "module_id" then
+                                    swagger.paths["/api/v2/" .. table_name].post.requestBody.content["multipart/form-data"].schema.properties[column_name] = {
+                                        type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
+                                        description = "Description of " .. column_name,
+                                        example = "Example value"
+                                    }
+                                end
                             end
                         end
                     end
@@ -238,11 +252,13 @@ function SwaggerUi.generate()
                     if column_name ~= "id" then
                         if column_name ~= "created_at" then
                             if column_name ~= "updated_at" then
-                                swagger.paths["/api/v2/" .. table_name .. "/{uuid}"].put.requestBody.content["multipart/form-data"].schema.properties[column_name] = {
-                                    type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
-                                    description = "Description of " .. column_name,
-                                    example = "Example value"
-                                }
+                                if column_name ~= "module_id" then
+                                    swagger.paths["/api/v2/" .. table_name .. "/{uuid}"].put.requestBody.content["multipart/form-data"].schema.properties[column_name] = {
+                                        type = (data_type == "int" or data_type == "bigint") and "integer" or "string",
+                                        description = "Description of " .. column_name,
+                                        example = "Example value"
+                                    }
+                                end
                             end
                         end
                     end

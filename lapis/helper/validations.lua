@@ -32,4 +32,16 @@ function Validation.createModule(params)
     })
 end
 
+-- Permissions Validations
+function Validation.createPermissions(params)
+    return validate.assert_valid(params, {
+        { "module_id", exists = true },
+    })
+end
+function Validation.createPermissionsWithMName(params)
+    return validate.assert_valid(params, {
+        { "module_machine_name", exists = true },
+        { "role", exists = true },
+    })
+end
 return Validation

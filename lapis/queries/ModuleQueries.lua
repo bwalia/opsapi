@@ -1,6 +1,7 @@
 local Global = require "helper.global"
 local Modules = require "models.ModuleModel"
 local Validation = require "helper.validations"
+local PermissionQueries = require "queries.PermissionQueries"
 
 
 local ModuleQueries = {}
@@ -10,9 +11,16 @@ function ModuleQueries.create(data)
     if data.uuid == nil then
         data.uuid = Global.generateUUID()
     end
-    return Modules:create(data, {
+    local module = Modules:create(data, {
         returning = "*"
     })
+    if module then
+        local pData = {
+            module_id = module.id
+        }
+        PermissionQueries.create(pData)
+        return module
+    end
 end
 
 function ModuleQueries.all(params)
@@ -32,20 +40,27 @@ function ModuleQueries.show(id)
 end
 
 function ModuleQueries.update(id, params)
-    local role = Modules:find({
+    local module = Modules:find({
         uuid = id
     })
-    params.id = role.id
-    return role:update(params, {
+    params.id = module.id
+    return module:update(params, {
         returning = "*"
     })
 end
 
 function ModuleQueries.destroy(id)
-    local role = Modules:find({
+    local module = Modules:find({
         uuid = id
     })
-    return role:delete()
+    return module:delete()
+end
+
+function ModuleQueries.getByMachineName(mName)
+    local module = Modules:find({
+        machine_name = mName
+    })
+    return module
 end
 
 return ModuleQueries
