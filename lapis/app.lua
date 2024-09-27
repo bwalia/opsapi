@@ -171,7 +171,7 @@ app:match("permissions", "/api/v2/permissions", respond_to({
     return { json = roles }
   end,
   POST = function(self)
-    local roles = PermissionQueries.createWithModuleMName(self.params)
+    local roles = PermissionQueries.create(self.params)
     return { json = roles, status = 201 }
   end
 }))

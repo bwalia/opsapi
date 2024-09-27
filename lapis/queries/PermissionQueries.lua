@@ -2,43 +2,40 @@ local PermissionModel = require "models.PermissionModel"
 local Validation = require "helper.validations"
 local Global = require "helper.global"
 local ModuleModel = require "models.ModuleModel"
-local RolePermissionQueries = require "queries.RolePermissionQueries"
+local RoleQueries = require "queries.RoleQueries"
 local Json = require("cjson")
 
 local PermissionQueries = {}
 
 function PermissionQueries.create(params)
     Validation.createPermissions(params)
-    if params.uuid == nil then
-        params.uuid = Global.generateUUID()
-    end
-    return PermissionModel:create(params, {
+    local module = ModuleModel:find({
+        machine_name = params.module_machine_name
+    })
+    local role = RoleQueries.roleByName(params.role)
+    local pData = {
+        module_id = module.id,
+        permissions = params.permissions,
+        role_id = role.id,
+        uuid = Global.generateUUID()
+    }
+    return PermissionModel:create(pData, {
         returning = "*"
     })
 end
 
-function PermissionQueries.createWithModuleMName(params)
+function PermissionQueries.createWithModuleId(params)
     Validation.createPermissionsWithMName(params)
+    local role = RoleQueries.roleByName(params.role)
     local moduleData = {
-        permissions = params.permissions
+        permissions = params.permissions,
+        role_id = role.id,
+        module_id = params.module_id,
+        uuid = Global.generateUUID()
     }
-    local role = params.role
-    local module = ModuleModel:find({
-        machine_name = params.module_machine_name
-    })
-
-    local permission = PermissionModel:find({
-        module_id = module.id
-    })
-
-    permission:update(moduleData, {
+    return PermissionModel:create(moduleData, {
         returning = "*"
     })
-
-    if permission then
-        RolePermissionQueries.addRolePermission(role, permission.id)
-        return permission
-    end
 end
 
 function PermissionQueries.all(params)
@@ -52,11 +49,13 @@ function PermissionQueries.all(params)
     local permissions, permissionModules = paginated:get_page(page), {}
     for i, permission in ipairs(permissions) do
         permission:get_module()
+        permission:get_role()
         permission.module_id = nil
+        permission.role_id = nil
         table.insert(permissionModules, permission)
     end
     return {
-        data = permissionModules,
+        data = permissions,
         total = paginated:total_items()
     }
 end

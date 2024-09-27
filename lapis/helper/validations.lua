@@ -35,13 +35,16 @@ end
 -- Permissions Validations
 function Validation.createPermissions(params)
     return validate.assert_valid(params, {
-        { "module_id", exists = true },
+        { "module_machine_name", exists = true },
+        { "role", exists = true },
+        { "permissions", exists = true },
     })
 end
 function Validation.createPermissionsWithMName(params)
     return validate.assert_valid(params, {
-        { "module_machine_name", exists = true },
+        { "module_id", exists = true },
         { "role", exists = true },
+        { "permissions", exists = true },
     })
 end
 return Validation

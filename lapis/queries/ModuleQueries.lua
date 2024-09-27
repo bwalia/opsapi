@@ -16,9 +16,11 @@ function ModuleQueries.create(data)
     })
     if module then
         local pData = {
-            module_id = module.id
+            module_id = module.id,
+            permissions = "read,write,delete",
+            role = "administrative"
         }
-        PermissionQueries.create(pData)
+        PermissionQueries.createWithModuleId(pData)
         return module
     end
 end
