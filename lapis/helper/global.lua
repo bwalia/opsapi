@@ -11,6 +11,23 @@ function Global.generateUUID()
     return uuid
 end
 
+function Global.generateStaticUUID()
+    local random = math.random
+    local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+
+    -- Replace each 'x' and 'y' with random hex digits.
+    -- 'x' can be any hex digit (0-9, a-f)
+    -- 'y' is one of 8, 9, A, or B (for UUID v4 compliance)
+    return string.gsub(template, "[xy]", function(c)
+        local v = (c == "x") and random(0, 15) or random(8, 11)
+        return string.format("%x", v)
+    end)
+end
+
+function Global.getCurrentTimestamp()
+    return os.date("%Y-%m-%d %H:%M:%S")
+  end
+
 function Global.hashPassword(password)
     local hash = bcrypt.digest(password, saltRounds)
     return hash

@@ -1,5 +1,7 @@
 local schema = require("lapis.db.schema")
 local types = schema.types
+local db = require("lapis.db")
+local Global = require "helper.global"
 
 return {
   ['01_create_users'] = function()
@@ -15,8 +17,15 @@ return {
 
       "PRIMARY KEY (id)"
     })
+    local adminExists = db.select("id from users where username = ?", "administrative")
+    if not adminExists or #adminExists == 0 then
+      db.query([[
+        INSERT INTO users (uuid, name, username, password, email, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), "Super User", "administrative", Global.hashPassword("Admin@123"), "administrative@admin.com", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+    end
   end,
-  ['create_roles'] = function()
+  ['02_create_roles'] = function()
     schema.create_table("roles", {
       { "id", types.serial },
       { "uuid", types.varchar({ unique = true }) },
@@ -26,6 +35,13 @@ return {
 
       "PRIMARY KEY (id)"
     })
+    local roleExists = db.select("id from roles where role_name = ?", "administrative")
+    if not roleExists or #roleExists == 0 then
+      db.query([[
+        INSERT INTO roles (uuid, role_name, created_at, updated_at) 
+        VALUES (?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), "administrative", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+    end
   end,
   ['create_user__roles'] = function()
     schema.create_table("user__roles", {
@@ -40,6 +56,13 @@ return {
       "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
       "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE"
     })
+    local roleExists = db.select("id from user__roles where role_id = ? and user_id = ?", 1, 1)
+    if not roleExists or #roleExists == 0 then
+      db.query([[
+        INSERT INTO user__roles (uuid, role_id, user_id, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), 1, 1, Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+    end
   end,
   ['create_modules'] = function()
     schema.create_table("modules", {
@@ -53,6 +76,21 @@ return {
       {"updated_at", types.time({ null = true})},
 
       "PRIMARY KEY (id)"
+    })
+  end,
+  ['create_permissions'] = function()
+    schema.create_table("permissions", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "module_id", types.foreign_key },
+      { "permissions", types.text({ null = true }) },
+      { "role_id", types.foreign_key },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE",
+      "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE"
     })
   end,
 }
