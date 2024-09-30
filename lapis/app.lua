@@ -7,6 +7,7 @@ local UserQueries = require "queries.UserQueries"
 local RoleQueries = require "queries.RoleQueries"
 local ModuleQueries = require "queries.ModuleQueries"
 local PermissionQueries = require "queries.PermissionQueries"
+local GroupQueries = require "queries.GroupQueries"
 
 -- Common Openresty Libraries
 local Json = require("cjson")
@@ -200,6 +201,46 @@ app:match("edit_permission", "/api/v2/permissions/:id", respond_to({
   DELETE = function(self)
     local role = PermissionQueries.destroy(tostring(self.params.id))
     return { json = role, status = 204 }
+  end
+}))
+
+----------------- Group Routes --------------------
+app:match("groups", "/api/v2/groups", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local groups = GroupQueries.all(self.params)
+    return { json = groups }
+  end,
+  POST = function(self)
+    local groups = GroupQueries.create(self.params)
+    return { json = groups, status = 201 }
+  end
+}))
+
+app:match("edit_group", "/api/v2/groups/:id", respond_to({
+  before = function(self)
+    self.group = GroupQueries.show(tostring(self.params.id))
+    if not self.group then
+      self:write({ json = {
+        lapis = { version = require("lapis.version") },
+        error = "Group not found! Please check the UUID and try again."
+      }, status = 404 })
+    end
+  end,
+  GET = function(self)
+    local group = GroupQueries.show(tostring(self.params.id))
+    return {
+      json = group,
+      status = 200
+    }
+  end,
+  PUT = function(self)
+    local group = GroupQueries.update(tostring(self.params.id), self.params)
+    return { json = group, status = 204 }
+  end,
+  DELETE = function(self)
+    local group = GroupQueries.destroy(tostring(self.params.id))
+    return { json = group, status = 204 }
   end
 }))
 

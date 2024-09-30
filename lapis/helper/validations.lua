@@ -47,4 +47,12 @@ function Validation.createPermissionsWithMName(params)
         { "permissions", exists = true },
     })
 end
+
+-- Group Validations
+function Validation.createGroup(params)
+    return validate.assert_valid(params, {
+        { "machine_name", exists = true },
+        { "name", exists = true },
+    })
+end
 return Validation

@@ -1,5 +1,5 @@
 local bcrypt = require("bcrypt")
-local saltRounds = 10 
+local saltRounds = 10
 local Global = {}
 
 function Global.generateUUID()
@@ -26,7 +26,7 @@ end
 
 function Global.getCurrentTimestamp()
     return os.date("%Y-%m-%d %H:%M:%S")
-  end
+end
 
 function Global.hashPassword(password)
     local hash = bcrypt.digest(password, saltRounds)
@@ -41,6 +41,48 @@ function Global.removeBykey(table, key)
     local element = table[key]
     table[key] = nil
     return element
- end
+end
+
+-- Base SCIM schema for User
+function Global.scimUserSchema(user)
+    return {
+        schemas = { "urn:ietf:params:scim:schemas:core:2.0:User" },
+        id = user.id,
+        uuid = user.uuid,
+        userName = user.username,
+        name = {
+            givenName = user.first_name,
+            familyName = user.last_name
+        },
+        emails = { {
+            value = user.email,
+            primary = true
+        } },
+        active = user.active,
+        meta = {
+            resourceType = "User",
+            location = "/api/v2/Users/" .. user.uuid,
+            roles = user.roles,
+            created = user.created_at,
+            lastModified = user.updated_at
+        }
+    }
+end
+
+-- Base SCIM schema for Group
+function Global.scimGroupSchema(group)
+    return {
+        schemas = { "urn:ietf:params:scim:schemas:core:2.0:Group" },
+        id = group.id,
+        displayName = group.name,
+        members = group.members or {},
+        meta = {
+            resourceType = "Group",
+            created = group.created_at,
+            lastModified = group.updated_at,
+            location = "/scim/v2/Groups/" .. group.uuid
+        }
+    }
+end
 
 return Global
