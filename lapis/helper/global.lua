@@ -43,28 +43,55 @@ function Global.removeBykey(table, key)
     return element
 end
 
+function Global.convertIso8601(datetimeStr)
+    -- Parse the input date string to extract year, month, day, hour, minute, second
+    local pattern = "(%d+)%-(%d+)%-(%d+) (%d+):(%d+):(%d+)"
+    local year, month, day, hour, minute, second = datetimeStr:match(pattern)
+
+    -- Create a table representing the date and time
+    local dt_table = {
+      year = tonumber(year),
+      month = tonumber(month),
+      day = tonumber(day),
+      hour = tonumber(hour),
+      min = tonumber(minute),
+      sec = tonumber(second)
+    }
+
+    -- Convert to UNIX timestamp (UTC)
+    local utc_time = os.time(dt_table)
+
+    -- Format the date to ISO 8601 format (Z for UTC)
+    local iso8601_date = os.date("!%Y-%m-%dT%H:%M:%SZ", utc_time)
+
+    return iso8601_date
+  end
+
 -- Base SCIM schema for User
 function Global.scimUserSchema(user)
     return {
-        schemas = { "urn:ietf:params:scim:schemas:core:2.0:User" },
-        id = user.id,
-        uuid = user.uuid,
+        schemas = { 
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+        },
+        id = user.uuid,
+        externalId = user.uuid,
         userName = user.username,
         name = {
             givenName = user.first_name,
             familyName = user.last_name
         },
+        displayName = user.first_name .. " " .. user.last_name,
         emails = { {
             value = user.email,
             primary = true
         } },
         active = user.active,
+        roles = user.roles,
         meta = {
             resourceType = "User",
-            location = "/api/v2/Users/" .. user.uuid,
-            roles = user.roles,
-            created = user.created_at,
-            lastModified = user.updated_at
+            location = "http://172.19.0.12:8080/api/v2/Users/" .. user.uuid,
+            created = Global.convertIso8601(user.created_at),
+            lastModified = Global.convertIso8601(user.updated_at)
         }
     }
 end
@@ -73,14 +100,15 @@ end
 function Global.scimGroupSchema(group)
     return {
         schemas = { "urn:ietf:params:scim:schemas:core:2.0:Group" },
-        id = group.id,
+        id = group.uuid,
+        externalId = group.uuid,
         displayName = group.name,
         members = group.members or {},
         meta = {
             resourceType = "Group",
-            created = group.created_at,
-            lastModified = group.updated_at,
-            location = "/scim/v2/Groups/" .. group.uuid
+            created = Global.convertIso8601(group.created_at),
+            lastModified = Global.convertIso8601(group.updated_at),
+            location = "/scim/v2/Groups/" .. group.uuid,
         }
     }
 end

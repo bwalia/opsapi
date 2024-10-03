@@ -84,6 +84,19 @@ app:match("edit_user", "/api/v2/users/:id", respond_to({
   end
 }))
 
+----------------- SCIM User Routes --------------------
+app:match("scim_users", "/scim/v2/Users", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local users = UserQueries.SCIMall(self.params)
+    return { json = users, status = 200}
+  end,
+  POST = function(self)
+    local user = UserQueries.create(self.params)
+    return { json = user, status = 201 }
+  end
+}))
+
 ----------------- Role Routes --------------------
 app:match("roles", "/api/v2/roles", respond_to({
   GET = function(self)
@@ -241,6 +254,24 @@ app:match("edit_group", "/api/v2/groups/:id", respond_to({
   DELETE = function(self)
     local group = GroupQueries.destroy(tostring(self.params.id))
     return { json = group, status = 204 }
+  end
+}))
+
+app:post("/api/v2/groups/:id/members", function(self)
+  local group, status = GroupQueries.addMember(self.params.id, self.params)
+  return { json = group, status = status }
+end)
+
+----------------- SCIM Group Routes --------------------
+app:match("scim_groups", "/scim/v2/Groups", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local groups = GroupQueries.all(self.params)
+    return { json = groups }
+  end,
+  POST = function(self)
+    local groups = GroupQueries.create(self.params)
+    return { json = groups, status = 201 }
   end
 }))
 
