@@ -33,7 +33,7 @@ function UserQueries.all(params)
 
     local paginated = Users:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage,
-        fields = "id, uuid, name, username, email, created_at, updated_at"
+        fields = "id, uuid, first_name, last_name, username, email, active, created_at, updated_at"
     })
 
     -- Append the role into user object
@@ -44,11 +44,11 @@ function UserQueries.all(params)
             local roleData = RoleModel:find(role.role_id)
             user.roles[index]["name"] = roleData.role_name
         end
-        table.insert(userWithRoles, user)
+        table.insert(userWithRoles, Global.scimUserSchema(user))
     end
     return {
-        data = userWithRoles,
-        total = paginated:total_items()
+        Resources = userWithRoles,
+        totalResults = paginated:total_items()
     }
 end
 
@@ -63,7 +63,7 @@ function UserQueries.show(id)
             user.roles[index]["name"] = roleData.role_name
         end
         user.password = nil
-        return user, ngx.HTTP_OK
+        return Global.scimUserSchema(user), ngx.HTTP_OK
     end
 end
 
@@ -86,4 +86,31 @@ function UserQueries.destroy(id)
         return user:delete()
     end
 end
+
+-- SCIM user response
+function UserQueries.SCIMall(params)
+    local page, perPage, orderField, orderDir =
+        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+
+    local paginated = Users:paginated("order by " .. orderField .. " " .. orderDir, {
+        per_page = perPage,
+        fields = "id, uuid, first_name, last_name, username, email, active, created_at, updated_at"
+    })
+
+    -- Append the role into user object
+    local users, userWithRoles = paginated:get_page(page), {}
+    for userIndex, user in ipairs(users) do
+        user:get_roles()
+        for index, role in ipairs(user.roles) do
+            local roleData = RoleModel:find(role.role_id)
+            user.roles[index] = {value = roleData.role_name}
+        end
+        table.insert(userWithRoles, Global.scimUserSchema(user))
+    end
+    return {
+        Resources = userWithRoles,
+        totalResults = paginated:total_items()
+    }
+end
+
 return UserQueries

@@ -12,6 +12,7 @@ services:
       - LAPIS_ENVIRONMENT=development
     networks:
       opsapi-network:
+        ipv4_address: 172.19.0.12
 
   postgres:
     container_name: opsapi-postgres
@@ -49,6 +50,25 @@ services:
       ADMINER_DEFAULT_SERVER: mariadb
     ports:
       - 7777:8080
+    networks:
+      opsapi-network:
+
+# Add Keycloak service
+  keycloak:
+    container_name: keycloak
+    build:
+      context: .
+      dockerfile: Dockerfile.keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_SPI_THEME_WELCOME_THEME: scim
+    ports:
+      - "1010:8080"
+    depends_on:
+      - postgres
+    volumes:
+      - ./keycloak_data:/opt/keycloak/data
     networks:
       opsapi-network:
 

@@ -7,6 +7,7 @@ local UserQueries = require "queries.UserQueries"
 local RoleQueries = require "queries.RoleQueries"
 local ModuleQueries = require "queries.ModuleQueries"
 local PermissionQueries = require "queries.PermissionQueries"
+local GroupQueries = require "queries.GroupQueries"
 
 -- Common Openresty Libraries
 local Json = require("cjson")
@@ -80,6 +81,19 @@ app:match("edit_user", "/api/v2/users/:id", respond_to({
   DELETE = function(self)
     local user = UserQueries.destroy(tostring(self.params.id))
     return { json = user, status = 204 }
+  end
+}))
+
+----------------- SCIM User Routes --------------------
+app:match("scim_users", "/scim/v2/Users", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local users = UserQueries.SCIMall(self.params)
+    return { json = users, status = 200}
+  end,
+  POST = function(self)
+    local user = UserQueries.create(self.params)
+    return { json = user, status = 201 }
   end
 }))
 
@@ -200,6 +214,64 @@ app:match("edit_permission", "/api/v2/permissions/:id", respond_to({
   DELETE = function(self)
     local role = PermissionQueries.destroy(tostring(self.params.id))
     return { json = role, status = 204 }
+  end
+}))
+
+----------------- Group Routes --------------------
+app:match("groups", "/api/v2/groups", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local groups = GroupQueries.all(self.params)
+    return { json = groups }
+  end,
+  POST = function(self)
+    local groups = GroupQueries.create(self.params)
+    return { json = groups, status = 201 }
+  end
+}))
+
+app:match("edit_group", "/api/v2/groups/:id", respond_to({
+  before = function(self)
+    self.group = GroupQueries.show(tostring(self.params.id))
+    if not self.group then
+      self:write({ json = {
+        lapis = { version = require("lapis.version") },
+        error = "Group not found! Please check the UUID and try again."
+      }, status = 404 })
+    end
+  end,
+  GET = function(self)
+    local group = GroupQueries.show(tostring(self.params.id))
+    return {
+      json = group,
+      status = 200
+    }
+  end,
+  PUT = function(self)
+    local group = GroupQueries.update(tostring(self.params.id), self.params)
+    return { json = group, status = 204 }
+  end,
+  DELETE = function(self)
+    local group = GroupQueries.destroy(tostring(self.params.id))
+    return { json = group, status = 204 }
+  end
+}))
+
+app:post("/api/v2/groups/:id/members", function(self)
+  local group, status = GroupQueries.addMember(self.params.id, self.params)
+  return { json = group, status = status }
+end)
+
+----------------- SCIM Group Routes --------------------
+app:match("scim_groups", "/scim/v2/Groups", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local groups = GroupQueries.all(self.params)
+    return { json = groups }
+  end,
+  POST = function(self)
+    local groups = GroupQueries.create(self.params)
+    return { json = groups, status = 201 }
   end
 }))
 

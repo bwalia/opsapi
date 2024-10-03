@@ -8,10 +8,12 @@ return {
     schema.create_table("users", {
       { "id", types.serial },
       { "uuid", types.varchar({ unique = true }) },
-      { "name", types.varchar },
+      { "first_name", types.varchar },
+      { "last_name", types.varchar },
       { "email", types.varchar({ unique = true }) },
       { "username", types.varchar({ unique = true }) },
       { "password", types.text },
+      { "active", types.boolean, default = false },
       {"created_at", types.time({ null = true})},
       {"updated_at", types.time({ null = true})},
 
@@ -20,9 +22,9 @@ return {
     local adminExists = db.select("id from users where username = ?", "administrative")
     if not adminExists or #adminExists == 0 then
       db.query([[
-        INSERT INTO users (uuid, name, username, password, email, created_at, updated_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), "Super User", "administrative", Global.hashPassword("Admin@123"), "administrative@admin.com", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+        INSERT INTO users (uuid, first_name, last_name, username, password, email, active, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), "Super", "User", "administrative", Global.hashPassword("Admin@123"), "administrative@admin.com", true, Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
     end
   end,
   ['02_create_roles'] = function()
@@ -91,6 +93,33 @@ return {
       "PRIMARY KEY (id)",
       "FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE",
       "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE"
+    })
+  end,
+  ['create_groups'] = function()
+    schema.create_table("groups", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "machine_name", types.varchar({ unique = true }) },
+      { "name", types.varchar },
+      { "description", types.text({ null = true }) },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)"
+    })
+  end,
+  ['create_user__groups'] = function()
+    schema.create_table("user__groups", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "user_id", types.foreign_key },
+      { "group_id", types.foreign_key },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+      "FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE"
     })
   end,
 }
