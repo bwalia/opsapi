@@ -97,6 +97,45 @@ app:match("scim_users", "/scim/v2/Users", respond_to({
   end
 }))
 
+app:match("edit_scim_user", "/scim/v2/Users/:id", respond_to({
+  before = function(self)
+    self.user = UserQueries.show(tostring(self.params.id))
+    if not self.user then
+      self:write({ json = {
+        lapis = { version = require("lapis.version") },
+        error = "User not found! Please check the UUID and try again."
+      }, status = 404 })
+    end
+  end,
+  GET = function(self)
+    local user = UserQueries.show(tostring(self.params.id))
+    return {
+      json = user,
+      status = 200
+    }
+  end,
+  PUT = function(self)
+    -- if self.params.email or self.params.username or self.params.password then
+    --   return {json = {
+    --     lapis = { version = require("lapis.version") },
+    --     error = "assert_valid was not captured: You cannot update email, username or password directly"
+    --   }, status = 500}
+    -- end
+    -- if not self.params.id then
+    --   return {json = {
+    --     lapis = { version = require("lapis.version") },
+    --     error = "assert_valid was not captured: Please pass the uuid of user that you want to update"
+    --   }, status = 500}
+    -- end
+    local user = UserQueries.update(tostring(self.params.id), self.params)
+    return { json = user, status = 204 }
+  end,
+  DELETE = function(self)
+    local user = UserQueries.destroy(tostring(self.params.id))
+    return { json = user, status = 204 }
+  end
+}))
+
 ----------------- Role Routes --------------------
 app:match("roles", "/api/v2/roles", respond_to({
   GET = function(self)
@@ -266,7 +305,7 @@ end)
 app:match("scim_groups", "/scim/v2/Groups", respond_to({
   GET = function(self)
     self.params.timestamp = true
-    local groups = GroupQueries.all(self.params)
+    local groups = GroupQueries.SCIMall(self.params)
     return { json = groups }
   end,
   POST = function(self)
@@ -275,4 +314,30 @@ app:match("scim_groups", "/scim/v2/Groups", respond_to({
   end
 }))
 
+app:match("edit_scim_group", "/scim/v2/Groups/:id", respond_to({
+  before = function(self)
+    self.group = GroupQueries.show(tostring(self.params.id))
+    if not self.group then
+      self:write({ json = {
+        lapis = { version = require("lapis.version") },
+        error = "Group not found! Please check the UUID and try again."
+      }, status = 404 })
+    end
+  end,
+  GET = function(self)
+    local group = GroupQueries.show(tostring(self.params.id))
+    return {
+      json = group,
+      status = 200
+    }
+  end,
+  PUT = function(self)
+    local group = GroupQueries.SCIMupdate(tostring(self.params.id), self.params)
+    return { json = group, status = 204 }
+  end,
+  DELETE = function(self)
+    local group = GroupQueries.destroy(tostring(self.params.id))
+    return { json = group, status = 204 }
+  end
+}))
 return app

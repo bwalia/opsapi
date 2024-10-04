@@ -103,4 +103,55 @@ function GroupQueries.addMember(groupId, userId)
     end
 end
 
+-- SCIM functions
+
+function GroupQueries.SCIMall(params)
+    local page, perPage, orderField, orderDir =
+        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+
+    local paginated = Groups:paginated("order by " .. orderField .. " " .. orderDir, {
+        per_page = perPage
+    })
+    -- Append the members into group object
+    local groups, groupWmembers = paginated:get_page(page), {}
+    for gI, group in ipairs(groups) do
+        group:get_members()
+        for index, member in ipairs(group.members) do
+            local memberData = Users:find(member.id)
+            local scimMemberData = {
+                value = memberData.uuid,
+                display = memberData.first_name .. " " .. memberData.last_name,
+            }
+            scimMemberData["$ref"] = "/scim/v2/Users/" .. memberData.uuid
+            group.members[index] = scimMemberData
+        end
+        table.insert(groupWmembers, Global.scimGroupSchema(group))
+    end
+    return {
+        Resources = groupWmembers,
+        totalResults = paginated:total_items()
+    }
+end
+
+function GroupQueries.SCIMupdate(id, params)
+    local group = Groups:find({
+        uuid = id
+    })
+    params.id = nil
+    ngx.say(Json.encode(params))
+    ngx.exit(ngx.HTTP_OK)
+    local isUpdate = group:update(params, {
+        returning = "*"
+    })
+    if isUpdate then
+        local groupMember = UserGroupModel:find({
+            group_id = group.id
+        })
+        groupMember:delete()
+        for _, member in ipairs(params.members) do
+            GroupQueries.addMember(id, member.value)
+        end
+    end
+end
+
 return GroupQueries
