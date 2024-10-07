@@ -1,4 +1,5 @@
 local bcrypt = require("bcrypt")
+local Json = require("cjson")
 local saltRounds = 10
 local Global = {}
 
@@ -111,6 +112,23 @@ function Global.scimGroupSchema(group)
             location = "/scim/v2/Groups/" .. group.uuid,
         }
     }
+end
+
+-- Get POST/PUT Args
+function Global.getPayloads(body)
+    local keyset = {}
+    local n = 0
+    for k, v in pairs(body) do
+        n = n + 1
+        if type(v) == "string" then
+            if v ~= nil and v ~= "" then
+                table.insert(keyset, Json.decode(k .. v))
+            end
+        else
+            table.insert(keyset, Json.decode(k))
+        end
+    end
+    return keyset[1]
 end
 
 return Global

@@ -17,6 +17,7 @@ local SwaggerUi = require "api-docs.swaggerUi"
 
 -- Helper Files
 local File = require "helper.file"
+local Global = require "helper.global"
 
 -- Initilising Lapis
 local app = lapis.Application()
@@ -29,7 +30,7 @@ app:get("/", function()
 end)
 app:get("/swagger/swagger.json", function()
   local swaggerJson = File.readFile("api-docs/swagger.json")
-  return {json = Json.decode(swaggerJson)}
+  return { json = Json.decode(swaggerJson) }
 end)
 
 ----------------- User Routes --------------------
@@ -37,7 +38,7 @@ app:match("users", "/api/v2/users", respond_to({
   GET = function(self)
     self.params.timestamp = true
     local users = UserQueries.all(self.params)
-    return { json = users, status = 200}
+    return { json = users, status = 200 }
   end,
   POST = function(self)
     local user = UserQueries.create(self.params)
@@ -49,10 +50,13 @@ app:match("edit_user", "/api/v2/users/:id", respond_to({
   before = function(self)
     self.user = UserQueries.show(tostring(self.params.id))
     if not self.user then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "User not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "User not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -64,16 +68,22 @@ app:match("edit_user", "/api/v2/users/:id", respond_to({
   end,
   PUT = function(self)
     if self.params.email or self.params.username or self.params.password then
-      return {json = {
-        lapis = { version = require("lapis.version") },
-        error = "assert_valid was not captured: You cannot update email, username or password directly"
-      }, status = 500}
+      return {
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "assert_valid was not captured: You cannot update email, username or password directly"
+        },
+        status = 500
+      }
     end
     if not self.params.id then
-      return {json = {
-        lapis = { version = require("lapis.version") },
-        error = "assert_valid was not captured: Please pass the uuid of user that you want to update"
-      }, status = 500}
+      return {
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "assert_valid was not captured: Please pass the uuid of user that you want to update"
+        },
+        status = 500
+      }
     end
     local user = UserQueries.update(tostring(self.params.id), self.params)
     return { json = user, status = 204 }
@@ -89,7 +99,7 @@ app:match("scim_users", "/scim/v2/Users", respond_to({
   GET = function(self)
     self.params.timestamp = true
     local users = UserQueries.SCIMall(self.params)
-    return { json = users, status = 200}
+    return { json = users, status = 200 }
   end,
   POST = function(self)
     local user = UserQueries.create(self.params)
@@ -101,10 +111,13 @@ app:match("edit_scim_user", "/scim/v2/Users/:id", respond_to({
   before = function(self)
     self.user = UserQueries.show(tostring(self.params.id))
     if not self.user then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "User not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "User not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -115,20 +128,14 @@ app:match("edit_scim_user", "/scim/v2/Users/:id", respond_to({
     }
   end,
   PUT = function(self)
-    -- if self.params.email or self.params.username or self.params.password then
-    --   return {json = {
-    --     lapis = { version = require("lapis.version") },
-    --     error = "assert_valid was not captured: You cannot update email, username or password directly"
-    --   }, status = 500}
-    -- end
-    -- if not self.params.id then
-    --   return {json = {
-    --     lapis = { version = require("lapis.version") },
-    --     error = "assert_valid was not captured: Please pass the uuid of user that you want to update"
-    --   }, status = 500}
-    -- end
-    local user = UserQueries.update(tostring(self.params.id), self.params)
-    return { json = user, status = 204 }
+    local content_type = self.req.headers["content-type"]
+    local body = self.params
+    if content_type == "application/json" then
+      ngx.req.read_body()
+      body = Global.getPayloads(ngx.req.get_post_args())
+    end
+    local user, status = UserQueries.SCIMupdate(tostring(self.params.id), body)
+    return { json = user, status = status }
   end,
   DELETE = function(self)
     local user = UserQueries.destroy(tostring(self.params.id))
@@ -153,10 +160,13 @@ app:match("edit_role", "/api/v2/roles/:id", respond_to({
   before = function(self)
     self.role = RoleQueries.show(tostring(self.params.id))
     if not self.role then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "Role not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "Role not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -193,10 +203,13 @@ app:match("edit_module", "/api/v2/modules/:id", respond_to({
   before = function(self)
     self.role = ModuleQueries.show(tostring(self.params.id))
     if not self.role then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "Role not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "Role not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -233,10 +246,13 @@ app:match("edit_permission", "/api/v2/permissions/:id", respond_to({
   before = function(self)
     self.role = PermissionQueries.show(tostring(self.params.id))
     if not self.role then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "Role not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "Role not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -273,10 +289,13 @@ app:match("edit_group", "/api/v2/groups/:id", respond_to({
   before = function(self)
     self.group = GroupQueries.show(tostring(self.params.id))
     if not self.group then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "Group not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "Group not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -297,7 +316,7 @@ app:match("edit_group", "/api/v2/groups/:id", respond_to({
 }))
 
 app:post("/api/v2/groups/:id/members", function(self)
-  local group, status = GroupQueries.addMember(self.params.id, self.params)
+  local group, status = GroupQueries.addMember(self.params.id, self.params.user_id)
   return { json = group, status = status }
 end)
 
@@ -318,10 +337,13 @@ app:match("edit_scim_group", "/scim/v2/Groups/:id", respond_to({
   before = function(self)
     self.group = GroupQueries.show(tostring(self.params.id))
     if not self.group then
-      self:write({ json = {
-        lapis = { version = require("lapis.version") },
-        error = "Group not found! Please check the UUID and try again."
-      }, status = 404 })
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "Group not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
     end
   end,
   GET = function(self)
@@ -332,8 +354,14 @@ app:match("edit_scim_group", "/scim/v2/Groups/:id", respond_to({
     }
   end,
   PUT = function(self)
-    local group = GroupQueries.SCIMupdate(tostring(self.params.id), self.params)
-    return { json = group, status = 204 }
+    local content_type = self.req.headers["content-type"]
+    local body = self.params
+    if content_type == "application/json" then
+      ngx.req.read_body()
+      body = Global.getPayloads(ngx.req.get_post_args())
+    end
+    local group, status = GroupQueries.SCIMupdate(tostring(self.params.id), body)
+    return { json = group, status = status }
   end,
   DELETE = function(self)
     local group = GroupQueries.destroy(tostring(self.params.id))

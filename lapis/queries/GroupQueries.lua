@@ -65,16 +65,16 @@ function GroupQueries.destroy(id)
 end
 
 function GroupQueries.addMember(groupId, userId)
-    if not groupId or not userId.user_id then
-        return {error = "Group id and user id is must"}, 400
+    if not groupId or not userId then
+        return { error = "Group id and user id is must" }, 400
     end
     local group = Groups:find({
         uuid = groupId
     })
     if not group then
-        return {error = "Group not found please check UUID of group"}, 400
+        return { error = "Group not found please check UUID of group" }, 400
     end
-    local userIds = userId.user_id
+    local userIds = userId
     if type(userIds) == "string" then
         userIds = {userIds}
     else
@@ -86,6 +86,7 @@ function GroupQueries.addMember(groupId, userId)
     end
 
     local user = Users:find_all(userIds, "uuid")
+    user.password = nil
     if user then
         for index, userData in ipairs(user) do
             local ugData = {
@@ -97,9 +98,9 @@ function GroupQueries.addMember(groupId, userId)
                 returning = "*"
             })
         end
-        return {group, user}, 201
+        return { group, user }, 201
     else
-        return {error = "User not found"}, 400
+        return { error = "User not found" }, 400
     end
 end
 
@@ -117,7 +118,7 @@ function GroupQueries.SCIMall(params)
     for gI, group in ipairs(groups) do
         group:get_members()
         for index, member in ipairs(group.members) do
-            local memberData = Users:find(member.id)
+            local memberData = Users:find(member.user_id)
             local scimMemberData = {
                 value = memberData.uuid,
                 display = memberData.first_name .. " " .. memberData.last_name,
@@ -138,19 +139,24 @@ function GroupQueries.SCIMupdate(id, params)
         uuid = id
     })
     params.id = nil
-    ngx.say(Json.encode(params))
-    ngx.exit(ngx.HTTP_OK)
-    local isUpdate = group:update(params, {
+    if params.displayName == nil then
+        return "displayName missing", 400
+    end
+    local groupBody = {
+        name = params.displayName
+    }
+    local isUpdate = group:update(groupBody, {
         returning = "*"
     })
     if isUpdate then
-        local groupMember = UserGroupModel:find({
-            group_id = group.id
-        })
-        groupMember:delete()
+        local groupMembers = UserGroupModel:find_all({group.id}, "group_id")
+        for i, groupMember in ipairs(groupMembers) do
+            groupMember:delete()
+        end
         for _, member in ipairs(params.members) do
             GroupQueries.addMember(id, member.value)
         end
+        return group, 204
     end
 end
 

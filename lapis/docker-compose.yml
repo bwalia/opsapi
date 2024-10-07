@@ -63,6 +63,7 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_SPI_THEME_WELCOME_THEME: scim
+      KEYCLOAK_IMPORT: /opt/keycloak/import/realm-config.json
     ports:
       - "1010:8080"
     depends_on:

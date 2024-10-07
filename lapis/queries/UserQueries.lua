@@ -113,4 +113,18 @@ function UserQueries.SCIMall(params)
     }
 end
 
+function UserQueries.SCIMupdate(id, params)
+    local user = Users:find({
+        uuid = id
+    })
+    params.id = nil
+    if params.uuid == nil then
+        ngx.log(ngx.INFO, Json.encode(params))
+        return "uuid didnot use", 400
+    end
+    return user:update(params, {
+        returning = "*"
+    }), 204
+end
+
 return UserQueries
