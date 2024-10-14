@@ -145,6 +145,8 @@ function GroupQueries.SCIMupdate(id, params)
     local groupBody = {
         name = params.displayName
     }
+    ngx.say(Json.encode(params))
+    ngx.exit(ngx.HTTP_OK)
     local isUpdate = group:update(groupBody, {
         returning = "*"
     })

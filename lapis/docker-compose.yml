@@ -16,7 +16,7 @@ services:
 
   postgres:
     container_name: opsapi-postgres
-    image: postgres
+    image: postgres:16
     ports:
       - "5433:5432"
     volumes:
@@ -62,8 +62,7 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_SPI_THEME_WELCOME_THEME: scim
-      KEYCLOAK_IMPORT: /opt/keycloak/import/realm-config.json
+      # KEYCLOAK_IMPORT: /opt/keycloak/import/realm-config.json
     ports:
       - "1010:8080"
     depends_on:

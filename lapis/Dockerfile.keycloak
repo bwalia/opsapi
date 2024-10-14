@@ -9,13 +9,13 @@ ENV KEYCLOAK_ADMIN=admin
 ENV KEYCLOAK_ADMIN_PASSWORD=admin
 
 COPY ./keycloak/keycloak-scim-1.0-SNAPSHOT-all.jar /opt/keycloak/providers/
-RUN mkdir -p /opt/keycloak/import
-RUN chmod +x /opt/keycloak/import
-RUN chown keycloak /opt/keycloak/import
+# RUN mkdir -p /opt/keycloak/import
+# RUN chmod +x /opt/keycloak/import
+# RUN chown keycloak /opt/keycloak/import
 
-COPY ./keycloak/import /opt/keycloak/import
+# COPY ./keycloak/import /opt/keycloak/import
 
-ENV KEYCLOAK_IMPORT=/opt/keycloak/import/realm-config.json
+# ENV KEYCLOAK_IMPORT=/opt/keycloak/import/realm-config.json
 
 # RUN /opt/keycloak/bin/kc.sh import --file /opt/keycloak/import/realm-export.json
 

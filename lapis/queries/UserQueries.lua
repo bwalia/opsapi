@@ -118,10 +118,19 @@ function UserQueries.SCIMupdate(id, params)
         uuid = id
     })
     params.id = nil
-    if params.uuid == nil then
-        ngx.log(ngx.INFO, Json.encode(params))
-        return "uuid didnot use", 400
-    end
+
+    local firstName, lastName = params.displayName:match("^(%S+)%s+(%S+)$")
+    local userParams = {
+        first_name = firstName,
+        lastName = lastName,
+    }
+
+    ngx.say(Json.encode(params))
+    ngx.exit(ngx.HTTP_OK)
+    -- if params.uuid == nil then
+    --     ngx.log(ngx.INFO, Json.encode(params))
+    --     return "uuid didnot use", 400
+    -- end
     return user:update(params, {
         returning = "*"
     }), 204
