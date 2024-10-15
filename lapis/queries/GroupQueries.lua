@@ -94,9 +94,12 @@ function GroupQueries.addMember(groupId, userId)
                 user_id = userData.id,
                 group_id = group.id
             }
-            UserGroupModel:create(ugData, {
+            local userGroup = UserGroupModel:create(ugData, {
                 returning = "*"
             })
+            if not userGroup then
+                return { error = "Unable to make realtion" }, 400
+            end
         end
         return { group, user }, 201
     else
@@ -139,14 +142,11 @@ function GroupQueries.SCIMupdate(id, params)
         uuid = id
     })
     params.id = nil
-    if params.displayName == nil then
-        return "displayName missing", 400
-    end
+
     local groupBody = {
-        name = params.displayName
+        name = params.displayName or group.name
     }
-    ngx.say(Json.encode(params))
-    ngx.exit(ngx.HTTP_OK)
+
     local isUpdate = group:update(groupBody, {
         returning = "*"
     })
@@ -155,10 +155,12 @@ function GroupQueries.SCIMupdate(id, params)
         for i, groupMember in ipairs(groupMembers) do
             groupMember:delete()
         end
+        local response = {}
         for _, member in ipairs(params.members) do
-            GroupQueries.addMember(id, member.value)
+            local groupMember, status = GroupQueries.addMember(id, member.value)
+            table.insert(response, groupMember)
         end
-        return group, 204
+        return response, 200
     end
 end
 

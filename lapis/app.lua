@@ -102,7 +102,7 @@ app:match("scim_users", "/scim/v2/Users", respond_to({
     return { json = users, status = 200 }
   end,
   POST = function(self)
-    local user = UserQueries.create(self.params)
+    local user = UserQueries.SCIMcreate(self.params)
     return { json = user, status = 201 }
   end
 }))
