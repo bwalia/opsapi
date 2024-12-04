@@ -12,7 +12,7 @@ services:
       - LAPIS_ENVIRONMENT=development
     networks:
       opsapi-network:
-        ipv4_address: 172.19.0.12
+        ipv4_address: 172.71.0.12
 
   postgres:
     container_name: opsapi-postgres
@@ -27,13 +27,13 @@ services:
       POSTGRES_DB: opsapi
     networks:
       opsapi-network:
-        ipv4_address: 172.19.0.10
+        ipv4_address: 172.71.0.10
 
   mariadb:
     container_name: webimpetus-mariadb
     image: mariadb
     ports:
-      - "3309:3306"
+      - "3319:3306"
     environment:
       MYSQL_ROOT_PASSWORD: msroot
       MYSQL_DATABASE: opsapi
@@ -41,7 +41,7 @@ services:
       MYSQL_PASSWORD: mspassword
     networks:
       opsapi-network:
-        ipv4_address: 172.19.0.11
+        ipv4_address: 172.71.0.11
 
   adminer:
     image: adminer:latest
@@ -78,5 +78,5 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 172.19.0.0/16
-          gateway: 172.19.0.1
+        - subnet: 172.71.0.0/16
+          gateway: 172.71.0.1
