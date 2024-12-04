@@ -113,4 +113,42 @@ function UserQueries.SCIMall(params)
     }
 end
 
+function UserQueries.SCIMcreate(params)
+    local userData = params
+    -- Validate the user data
+    Validation.createUser(userData)
+    local role = params.role
+    userData.role = nil
+    if userData.uuid == nil then
+        userData.uuid = Global.generateUUID()
+    end
+
+    userData.password = Global.hashPassword(userData.password)
+    local user = Users:create(userData, {
+        returning = "*"
+    })
+    user.password = nil
+
+    UserRolesQueries.addRole(user.id, role)
+    return user
+end
+
+function UserQueries.SCIMupdate(id, params)
+    -- local user = Users:find({
+    --     uuid = id
+    -- })
+    -- params.id = nil
+
+    -- local firstName, lastName = params.displayName:match("^(%S+)%s+(%S+)$")
+    -- local userParams = {
+    --     first_name = firstName,
+    --     lastName = lastName,
+    --     phone_no = params.phoneNumbers,
+    -- }
+    return {}, 204
+    -- return user:update(userParams, {
+    --     returning = "*"
+    -- }), 204
+end
+
 return UserQueries

@@ -7,12 +7,17 @@ ENV KC_HOSTNAME=localhost
 ENV KC_HTTP_ENABLED=true
 ENV KEYCLOAK_ADMIN=admin
 ENV KEYCLOAK_ADMIN_PASSWORD=admin
-ENV KC_SPI_THEME_WELCOME_THEME=scim
 
-# COPY ./keycloak/scim-for-keycloak-kc.jar /opt/keycloak/providers/
 COPY ./keycloak/keycloak-scim-1.0-SNAPSHOT-all.jar /opt/keycloak/providers/
-# RUN echo spi-theme-welcome-theme=scim >> /opt/keycloak/conf/keycloak.conf
-# RUN echo spi-realm-restapi-extension-scim-license-key=eyJhbGciOiJFUzUxMiJ9.eyJpc3MiOiJwYXNjYWwga251ZXBwZWwiLCJzdWIiOiIxMDAyIiwiYXVkIjoiMTAwMiIsImV4cCI6MTcyOTIwOTYwMH0.AF_XJdMhPDPSFWCY1e1Mh3mdVsU7e0bjhspp-J3WmZDdy3EAu1EYVrlUH85OhBWiud9daglmWv4S3RL18VR6EH99AaqjsDXoRwqHL7I93Ek6bkagujxMxyi4KIE7bhvUJ783JjZVeVlmE1Rwx4VIp370kR9FyRud9SVJOLr77XF528fW >> /opt/keycloak/conf/keycloak.conf
+# RUN mkdir -p /opt/keycloak/import
+# RUN chmod +x /opt/keycloak/import
+# RUN chown keycloak /opt/keycloak/import
+
+# COPY ./keycloak/import /opt/keycloak/import
+
+# ENV KEYCLOAK_IMPORT=/opt/keycloak/import/realm-config.json
+
+# RUN /opt/keycloak/bin/kc.sh import --file /opt/keycloak/import/realm-export.json
 
 RUN /opt/keycloak/bin/kc.sh build
 

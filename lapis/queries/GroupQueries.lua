@@ -65,16 +65,16 @@ function GroupQueries.destroy(id)
 end
 
 function GroupQueries.addMember(groupId, userId)
-    if not groupId or not userId.user_id then
-        return {error = "Group id and user id is must"}, 400
+    if not groupId or not userId then
+        return { error = "Group id and user id is must" }, 400
     end
     local group = Groups:find({
         uuid = groupId
     })
     if not group then
-        return {error = "Group not found please check UUID of group"}, 400
+        return { error = "Group not found please check UUID of group" }, 400
     end
-    local userIds = userId.user_id
+    local userIds = userId
     if type(userIds) == "string" then
         userIds = {userIds}
     else
@@ -86,6 +86,7 @@ function GroupQueries.addMember(groupId, userId)
     end
 
     local user = Users:find_all(userIds, "uuid")
+    user.password = nil
     if user then
         for index, userData in ipairs(user) do
             local ugData = {
@@ -93,13 +94,73 @@ function GroupQueries.addMember(groupId, userId)
                 user_id = userData.id,
                 group_id = group.id
             }
-            UserGroupModel:create(ugData, {
+            local userGroup = UserGroupModel:create(ugData, {
                 returning = "*"
             })
+            if not userGroup then
+                return { error = "Unable to make realtion" }, 400
+            end
         end
-        return {group, user}, 201
+        return { group, user }, 201
     else
-        return {error = "User not found"}, 400
+        return { error = "User not found" }, 400
+    end
+end
+
+-- SCIM functions
+
+function GroupQueries.SCIMall(params)
+    local page, perPage, orderField, orderDir =
+        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+
+    local paginated = Groups:paginated("order by " .. orderField .. " " .. orderDir, {
+        per_page = perPage
+    })
+    -- Append the members into group object
+    local groups, groupWmembers = paginated:get_page(page), {}
+    for gI, group in ipairs(groups) do
+        group:get_members()
+        for index, member in ipairs(group.members) do
+            local memberData = Users:find(member.user_id)
+            local scimMemberData = {
+                value = memberData.uuid,
+                display = memberData.first_name .. " " .. memberData.last_name,
+            }
+            scimMemberData["$ref"] = "/scim/v2/Users/" .. memberData.uuid
+            group.members[index] = scimMemberData
+        end
+        table.insert(groupWmembers, Global.scimGroupSchema(group))
+    end
+    return {
+        Resources = groupWmembers,
+        totalResults = paginated:total_items()
+    }
+end
+
+function GroupQueries.SCIMupdate(id, params)
+    local group = Groups:find({
+        uuid = id
+    })
+    params.id = nil
+
+    local groupBody = {
+        name = params.displayName or group.name
+    }
+
+    local isUpdate = group:update(groupBody, {
+        returning = "*"
+    })
+    if isUpdate then
+        local groupMembers = UserGroupModel:find_all({group.id}, "group_id")
+        for i, groupMember in ipairs(groupMembers) do
+            groupMember:delete()
+        end
+        local response = {}
+        for _, member in ipairs(params.members) do
+            local groupMember, status = GroupQueries.addMember(id, member.value)
+            table.insert(response, groupMember)
+        end
+        return response, 200
     end
 end
 

@@ -13,6 +13,8 @@ return {
       { "email", types.varchar({ unique = true }) },
       { "username", types.varchar({ unique = true }) },
       { "password", types.text },
+      { "phone_no", types.text({ null = true }) },
+      { "address", types.text({ null = true }) },
       { "active", types.boolean, default = false },
       {"created_at", types.time({ null = true})},
       {"updated_at", types.time({ null = true})},
