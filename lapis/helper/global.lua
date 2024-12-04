@@ -71,7 +71,7 @@ function Global.convertIso8601(datetimeStr)
 -- Base SCIM schema for User
 function Global.scimUserSchema(user)
     return {
-        schemas = { 
+        schemas = {
             "urn:ietf:params:scim:schemas:core:2.0:User"
         },
         id = user.uuid,
