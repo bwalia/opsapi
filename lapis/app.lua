@@ -1,5 +1,7 @@
 -- Lapis Libraries
 local lapis = require("lapis")
+local json = require("cjson")
+local http = require("resty.http")
 local respond_to = require("lapis.application").respond_to
 
 -- Query files
@@ -31,6 +33,71 @@ end)
 app:get("/swagger/swagger.json", function()
   local swaggerJson = File.readFile("api-docs/swagger.json")
   return { json = Json.decode(swaggerJson) }
+end)
+
+----------------- Auth Routes --------------------
+
+app:get("/auth/login", function(self)
+  local keycloak_auth_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/auth"
+  local client_id = "opsapi"
+  local redirect_uri = "https://api-test.brahmstra.org/auth/callback"
+  local state = "development"
+
+  -- Redirect to Keycloak's login page
+  local login_url = string.format(
+    "%s?client_id=%s&redirect_uri=%s&response_type=code&state=%s",
+    keycloak_auth_url,
+    client_id,
+    redirect_uri,
+    state
+  )
+
+  return { redirect_to = login_url }
+end)
+
+app:get("/auth/callback", function(self)
+  local httpc = http.new()
+  local token_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/token"
+  local client_id = "opsapi"
+  local client_secret = "client_id"
+  local redirect_uri = "https://api-test.brahmstra.org/auth/callback"
+
+  -- Exchange the authorization code for a token
+  local res, err = httpc:request_uri(token_url, {
+    method = "POST",
+    body = ngx.encode_args({
+      grant_type = "authorization_code",
+      code = self.params.code,
+      redirect_uri = redirect_uri,
+      client_id = client_id,
+      client_secret = client_secret
+    }),
+    headers = {
+      ["Content-Type"] = "application/x-www-form-urlencoded"
+    }
+  })
+
+  if not res then
+    return { status = 500, json = { error = "Failed to fetch token: " .. (err or "unknown") } }
+  end
+
+  local token_response = json.decode(res.body)
+
+  -- Optionally, fetch user info
+  local userinfo_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/userinfo"
+  local res, err = httpc:request_uri(userinfo_url, {
+    method = "GET",
+    headers = {
+      Authorization = "Bearer " .. token_response.access_token
+    }
+  })
+
+  if not res then
+    return { status = 500, json = { error = "Failed to fetch user info: " .. (err or "unknown") } }
+  end
+
+  local userinfo = json.decode(res.body)
+  return { json = userinfo }
 end)
 
 ----------------- User Routes --------------------
