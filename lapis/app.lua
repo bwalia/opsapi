@@ -40,7 +40,7 @@ end)
 app:get("/auth/login", function(self)
   local keycloak_auth_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/auth"
   local client_id = "opsapi"
-  local redirect_uri = "http://localhost:4010/auth/callback"
+  local redirect_uri = "https://api-test.brahmstra.org/auth/callback"
   local state = "development"
 
   -- Redirect to Keycloak's login page
@@ -59,8 +59,8 @@ app:get("/auth/callback", function(self)
   local httpc = http.new()
   local token_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/token"
   local client_id = "opsapi"
-  local client_secret = "2HBnKRFhc6Ikt7ZIW3bzK9uGETDjcSCb"
-  local redirect_uri = "http://localhost:4010/auth/callback"
+  local client_secret = "client_id"
+  local redirect_uri = "https://api-test.brahmstra.org/auth/callback"
 
   -- Exchange the authorization code for a token
   local res, err = httpc:request_uri(token_url, {
