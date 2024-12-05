@@ -58,7 +58,7 @@ end)
 
 app:get("/auth/callback", function(self)
   local httpc = http.new()
-  local token_url = "ttps://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/token"
+  local token_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/token"
   local client_id = "opsapi"
   local client_secret = "client_id"
   local redirect_uri = "https://api-test.brahmstra.org/auth/callback"
