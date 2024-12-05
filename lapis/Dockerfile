@@ -17,6 +17,7 @@ RUN luarocks install lapis
 RUN luarocks install bcrypt
 RUN luarocks install tableshape
 RUN luarocks install lua-resty-http
+RUN luarocks install lua-resty-openidc
 
 WORKDIR /app
 
