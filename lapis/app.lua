@@ -60,7 +60,7 @@ app:get("/auth/callback", function(self)
   -- local httpc = http.new()
   -- local token_url = "http://10.24.5.6:6060/realms/lapis-opsapi/protocol/openid-connect/token"
   -- local client_id = "opsapi"
-  -- local client_secret = "2HBnKRFhc6Ikt7ZIW3bzK9uGETDjcSCb"
+  -- local client_secret = "client_id"
   -- local redirect_uri = "http://localhost:4010/auth/callback"
 
   -- -- Exchange the authorization code for a token
