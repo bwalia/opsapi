@@ -86,7 +86,7 @@ app:get("/auth/callback", function(self)
 
   local token_response = json.decode(res.body)
   -- Optionally, fetch user info
-  local userinfo_url = "ttps://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/userinfo?schema=openid"
+  local userinfo_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/userinfo?schema=openid"
   local usrRes, usrErr = httpc:request_uri(userinfo_url, {
     method = "GET",
     headers = {
