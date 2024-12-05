@@ -57,71 +57,71 @@ app:get("/auth/login", function(self)
 end)
 
 app:get("/auth/callback", function(self)
-  -- local httpc = http.new()
-  -- local token_url = "http://10.24.5.6:6060/realms/lapis-opsapi/protocol/openid-connect/token"
-  -- local client_id = "opsapi"
-  -- local client_secret = "client_id"
-  -- local redirect_uri = "http://localhost:4010/auth/callback"
+  local httpc = http.new()
+  local token_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/token"
+  local client_id = "opsapi"
+  local client_secret = "client_id"
+  local redirect_uri = "https://api-test.brahmstra.org/auth/callback"
 
-  -- -- Exchange the authorization code for a token
-  -- local res, err = httpc:request_uri(token_url, {
-  --   method = "POST",
-  --   body = ngx.encode_args({
-  --     grant_type = "authorization_code",
-  --     code = self.params.code,
-  --     redirect_uri = redirect_uri,
-  --     client_id = client_id,
-  --     client_secret = client_secret,
-  --     scope = "openid profile email"
-  --   }),
-  --   headers = {
-  --     ["Content-Type"] = "application/x-www-form-urlencoded"
-  --   },
-  --   ssl_verify = false
-  -- })
+  -- Exchange the authorization code for a token
+  local res, err = httpc:request_uri(token_url, {
+    method = "POST",
+    body = ngx.encode_args({
+      grant_type = "authorization_code",
+      code = self.params.code,
+      redirect_uri = redirect_uri,
+      client_id = client_id,
+      client_secret = client_secret,
+      scope = "openid profile email"
+    }),
+    headers = {
+      ["Content-Type"] = "application/x-www-form-urlencoded"
+    },
+    ssl_verify = false
+  })
 
-  -- if not res then
-  --   return { status = 500, json = { error = "Failed to fetch token: " .. (err or "unknown") } }
-  -- end
-
-  -- local token_response = json.decode(res.body)
-  -- -- Optionally, fetch user info
-  -- local userinfo_url = "http://10.24.5.6:6060/realms/lapis-opsapi/protocol/openid-connect/userinfo?schema=openid"
-  -- local usrRes, usrErr = httpc:request_uri(userinfo_url, {
-  --   method = "GET",
-  --   headers = {
-  --     Authorization = "Bearer " .. token_response.access_token,
-  --     ['Accept'] = 'application/json'
-  --   }
-  -- })
-  
-  -- if not usrRes then
-  --   return { status = 500, json = { error = "Failed to fetch user info: " .. (usrErr or "unknown") } }
-  -- end
-  -- ngx.say(json.encode(usrRes.body))
-  -- ngx.exit(ngx.HTTP_OK)
-
-  -- local userinfo = json.decode(usrRes.body)
-  -- return { json = userinfo }
-
-  local oidc_opts = {
-    discovery = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/.well-known/openid-configuration",
-    client_id = "opsapi",
-    client_secret = "client_id",
-    redirect_uri = "https://api-test.brahmstra.org/callback",
-    scope = "openid email profile"
-  }
-
-  local res, err = oidc.authenticate(oidc_opts)
-
-  if err then
-    self.status = 500
-    return { json = { error = "Authentication failed: " .. err } }
+  if not res then
+    return { status = 500, json = { error = "Failed to fetch token: " .. (err or "unknown") } }
   end
 
-  -- Save user information to session or database as needed
-  self.session.user = res
-  return { json = res }
+  local token_response = json.decode(res.body)
+  -- Optionally, fetch user info
+  local userinfo_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/userinfo?schema=openid"
+  local usrRes, usrErr = httpc:request_uri(userinfo_url, {
+    method = "GET",
+    headers = {
+      Authorization = "Bearer " .. token_response.access_token,
+      ['Accept'] = 'application/json'
+    }
+  })
+  
+  if not usrRes then
+    return { status = 500, json = { error = "Failed to fetch user info: " .. (usrErr or "unknown") } }
+  end
+  ngx.say(json.encode(usrRes.body))
+  ngx.exit(ngx.HTTP_OK)
+
+  local userinfo = json.decode(usrRes.body)
+  return { json = userinfo }
+
+  -- local oidc_opts = {
+  --   discovery = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/.well-known/openid-configuration",
+  --   client_id = "opsapi",
+  --   client_secret = "client_id",
+  --   redirect_uri = "https://api-test.brahmstra.org/callback",
+  --   scope = "openid email profile"
+  -- }
+
+  -- local res, err = oidc.authenticate(oidc_opts)
+
+  -- if err then
+  --   self.status = 500
+  --   return { json = { error = "Authentication failed: " .. err } }
+  -- end
+
+  -- -- Save user information to session or database as needed
+  -- self.session.user = res
+  -- return { json = res }
 end)
 
 app:get("/protected", function(self)
