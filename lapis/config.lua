@@ -9,5 +9,10 @@ config("development", {
     user = "pguser",
     password = "pgpassword",
     database = "opsapi"
+  },
+  sessions = {
+    cookie_name = "lapis_session",
+    cookie_renew = false,  -- set to true to renew session cookie on each request
+    lifetime = 3600, -- session lifetime in seconds
   }
 })
