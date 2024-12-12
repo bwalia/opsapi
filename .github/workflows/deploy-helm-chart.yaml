@@ -1,0 +1,37 @@
+name: Deploy Helm Chart
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up kubeconfig
+      run: echo "${{ secrets.KUBE_CONFIG_DATA_K3S2 }}" > kubeconfig && export KUBECONFIG=$PWD/kubeconfig
+
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Deploy Sealed Secret
+      run: kubectl apply -f kubernetes/sealed-secret.yaml
+
+    - name: Deploy Helm Chart
+      run: |
+        helm upgrade --install opsapi ./chart \
+          --set image.repository=bwalia/opsapi \
+          --set image.tag=latest \
+          --namespace default --create-namespace

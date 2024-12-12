@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opsapi
+  labels:
+    app: opsapi
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: opsapi
+  template:
+    metadata:
+      labels:
+        app: opsapi
+    spec:
+      containers:
+        - name: opsapi
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          env:
+            - name: KEYCLOAK_AUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: KEYCLOAK_AUTH_URL
+            - name: KEYCLOAK_TOKEN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: KEYCLOAK_TOKEN_URL
+            - name: KEYCLOAK_USERINFO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: KEYCLOAK_USERINFO_URL
+            - name: KEYCLOAK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: KEYCLOAK_CLIENT_ID
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: KEYCLOAK_CLIENT_SECRET
+            - name: KEYCLOAK_REDIRECT_URI
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: KEYCLOAK_REDIRECT_URI
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: DB_HOST
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: DB_PASSWORD
+            - name: DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: DATABASE
