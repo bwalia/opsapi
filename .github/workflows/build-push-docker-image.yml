@@ -42,7 +42,7 @@ jobs:
         echo "OPSAPI Docker image builder!"
         echo "Build, tag, and push image to the given Docker Registry."
         docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWD }}
-        docker build -f Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
+        docker build -f lapis/Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
         docker tag test-${{ env.TARGET_STACK }} ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
         docker push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
       shell: bash        
