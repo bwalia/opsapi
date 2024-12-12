@@ -5,10 +5,10 @@ config("development", {
   code_cache = "off",
   num_workers = "1",
   postgres = {
-    host = "172.71.0.10",
-    user = "pguser",
-    password = "pgpassword",
-    database = "opsapi"
+    host = os.getenv("DB_HOST"),
+    user = os.getenv("DB_USER"),
+    password = os.getenv("DB_PASSWORD"),
+    database = os.getenv("DATABASE")
   },
   sessions = {
     cookie_name = "lapis_session",

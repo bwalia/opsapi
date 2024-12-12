@@ -42,113 +42,70 @@ app:get("/swagger/swagger.json", function()
 end)
 
 ----------------- Auth Routes --------------------
-local oidc_opts = {
-  discovery = "https://sso-dev.workstation.co.uk/realms/opsapi/.well-known/openid-configuration",
-  client_id = "opsapi",
-  client_secret = "client_id",
-  redirect_uri = "https://api-test.brahmstra.org/auth/callback",
-  ssl_verify = "no",
-  scope = "openid"
-}
 
 app:get("/auth/login", function(self)
-  -- local keycloak_auth_url = "https://sso-dev.workstation.co.uk/realms/lapis-opsapi/protocol/openid-connect/auth"
-  -- local client_id = "opsapi"
-  -- local redirect_uri = "http://localhost:4010/auth/callback"
-  -- local state = "development"
+  local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
+  local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
+  local redirect_uri = os.getenv("KEYCLOAK_REDIRECT_URI")
 
-  -- -- Redirect to Keycloak's login page
-  -- local login_url = string.format(
-  --   "%s?client_id=%s&redirect_uri=%s&response_type=code&state=%s",
-  --   keycloak_auth_url,
-  --   client_id,
-  --   redirect_uri,
-  --   state
-  -- )
-
-  -- local subData, sessionData = session:get_subject(), session:get("quote")
-
-  -- do return {json = {is_started = ok, error = err, subData = subData, sessionData = sessionData}} end
-
-  -- return { redirect_to = login_url }
-
-  local args = {
-    redirect_uri = oidc_opts.redirect_uri
-  }
-  
   -- Redirect to Keycloak's login page
-  local res, err = oidc.authenticate(oidc_opts, nil, nil, session)
-
-  if err then
-    self.status = 500
-    return { json = { error = "Failed to start authentication: " .. err } }
-  end
-
-  -- If authentication is successful, the response is handled at the callback
-  return { redirect_to = oidc_opts.redirect_uri }
+  local login_url = string.format(
+    "%s?client_id=%s&redirect_uri=%s&response_type=code&scope=openid+profile+email",
+    keycloak_auth_url,
+    client_id,
+    redirect_uri
+  )
+  return { redirect_to = login_url }
 end)
 
 app:get("/auth/callback", function(self)
-  -- local httpc = http.new()
-  -- local token_url = "http://10.24.5.6:6060/realms/lapis-opsapi/protocol/openid-connect/token"
-  -- local client_id = "opsapi"
-  -- local client_secret = "client_id"
-  -- local redirect_uri = "http://localhost:4010/auth/callback"
 
-  -- -- Exchange the authorization code for a token
-  -- local res, err = httpc:request_uri(token_url, {
-  --   method = "POST",
-  --   body = ngx.encode_args({
-  --     grant_type = "authorization_code",
-  --     code = self.params.code,
-  --     redirect_uri = redirect_uri,
-  --     client_id = client_id,
-  --     client_secret = client_secret,
-  --     scope = "openid"
-  --   }),
-  --   headers = {
-  --     ["Content-Type"] = "application/x-www-form-urlencoded"
-  --   },
-  --   ssl_verify = false
-  -- })
+  local httpc = http.new()
+  local token_url = os.getenv("KEYCLOAK_TOKEN_URL")
+  local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
+  local client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET")
+  local redirect_uri = os.getenv("KEYCLOAK_REDIRECT_URI")
 
-  -- if not res then
-  --   return { status = 500, json = { error = "Failed to fetch token: " .. (err or "unknown") } }
-  -- end
+  -- Exchange the authorization code for a token
+  local res, err = httpc:request_uri(token_url, {
+    method = "POST",
+    body = ngx.encode_args({
+      grant_type = "authorization_code",
+      code = self.params.code,
+      redirect_uri = redirect_uri,
+      client_id = client_id,
+      client_secret = client_secret,
+      scope = "openid profile email"
+    }),
+    headers = {
+      ["Content-Type"] = "application/x-www-form-urlencoded"
+    },
+    ssl_verify = false
+  })
 
-  -- local token_response = json.decode(res.body)
-  -- -- Optionally, fetch user info
-  -- local userinfo_url = "http://10.24.5.6:6060/realms/lapis-opsapi/protocol/openid-connect/userinfo?schema=openid"
-  -- local usrRes, usrErr = httpc:request_uri(userinfo_url, {
-  --   method = "GET",
-  --   headers = {
-  --     Authorization = "Bearer " .. token_response.access_token,
-  --     ['Accept'] = 'application/json'
-  --   },
-  --   scope = "openid",
-  --   ssl_verify = false
-  -- })
-  
-  -- if not usrRes then
-  --   return { status = 500, json = { error = "Failed to fetch user info: " .. (usrErr or "unknown") } }
-  -- end
-  -- ngx.say(json.encode(usrErr))
-  -- ngx.exit(ngx.HTTP_OK)
-
-  -- local userinfo = json.decode(usrRes.body)
-  -- return { json = userinfo } http://10.24.5.6:6060/
- 
-
-  local res, err = oidc.authenticate(oidc_opts)
-
-  if err then
-    self.status = 500
-    return { json = { error = "Authentication failed: " .. err } }
+  if not res then
+    return { status = 500, json = { error = "Failed to fetch token: " .. (err or "unknown") } }
   end
 
-  -- Save user information to session or database as needed
-  self.session.user = res
-  return { json = res }
+  local token_response = json.decode(res.body)
+
+  local userinfo_url = os.getenv("KEYCLOAK_USERINFO_URL")
+  local usrRes, usrErr = httpc:request_uri(userinfo_url, {
+    method = "GET",
+    headers = {
+      ["Authorization"] = "Bearer " .. token_response.access_token
+    },
+    scope = "openid profile email",
+    ssl_verify = false
+  })
+  
+  if not usrRes then
+    return { status = 500, json = { error = "Failed to fetch user info: " .. (usrErr or "unknown") } }
+  end
+
+  local userinfo = json.decode(usrRes.body)
+  return { json = userinfo }
+
 end)
 
 app:get("/protected", function(self)

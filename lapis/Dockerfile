@@ -24,6 +24,10 @@ WORKDIR /app
 COPY . /app
 COPY logs/ /usr/local/openresty/nginx/logs/
 
+COPY .env /app/.env
+RUN echo "export $(cat /app/.env | xargs)" >> /etc/profile.d/lapis_env.sh
+RUN chmod +x /etc/profile.d/lapis_env.sh
+
 EXPOSE 8080
 
-CMD ["lapis", "server"]
+CMD ["sh", "-c", "source /etc/profile.d/lapis_env.sh && lapis server"]

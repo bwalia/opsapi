@@ -8,8 +8,7 @@ services:
       - "4010:8080"
     volumes:
       - .:/app
-    environment:
-      - LAPIS_ENVIRONMENT=development
+    env_file: ".env"
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.12
