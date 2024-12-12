@@ -22,7 +22,6 @@ RUN luarocks install lua-resty-openidc
 WORKDIR /app
 
 COPY . /app
-COPY logs/ /usr/local/openresty/nginx/logs/
 
 EXPOSE 8080
 
