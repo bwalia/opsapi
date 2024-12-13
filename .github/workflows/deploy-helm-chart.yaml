@@ -7,14 +7,19 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: whisky03
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up kubeconfig
-      run: echo "${{ secrets.KUBE_CONFIG_DATA_K3S2 }}" > kubeconfig && export KUBECONFIG=$PWD/kubeconfig
+    - name: Decode and Export Kubeconfig
+      env:
+        KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S3 }}
+      run: |
+        echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+        export KUBECONFIG=$(pwd)/kubeconfig
+        echo "Kubeconfig decoded and exported successfully."
 
     - name: Install kubectl
       uses: azure/setup-kubectl@v3
