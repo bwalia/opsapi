@@ -27,7 +27,7 @@ jobs:
         version: 'latest'
 
     - name: Deploy Sealed Secret
-      run: kubectl apply -f kubernetes/sealed-secret.yaml
+      run: kubectl apply -f devops/kubernetes/sealed-secret.yaml
 
     - name: Deploy Helm Chart
       run: |
