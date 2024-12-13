@@ -48,7 +48,7 @@ jobs:
 
     - name: Deploy Helm Chart
       run: |
-        helm upgrade --install opsapi ./chart \
+        helm upgrade --install opsapi ./devops/helm-chart \
           --set image.repository=bwalia/opsapi \
           --set image.tag=latest \
           --namespace default --create-namespace
