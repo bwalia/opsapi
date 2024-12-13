@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opsapi
+spec:
+  selector:
+    app: opsapi
+  ports:
+    - protocol: TCP
+      port: {{ .Values.service.port }}
+      targetPort: 80
+  type: {{ .Values.service.type }}
