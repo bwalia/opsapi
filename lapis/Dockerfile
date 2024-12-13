@@ -21,7 +21,7 @@ RUN luarocks install lua-resty-openidc
 
 WORKDIR /app
 
-COPY . /app
+COPY . .
 
 EXPOSE 8080
 
