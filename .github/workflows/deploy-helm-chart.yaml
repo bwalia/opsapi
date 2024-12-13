@@ -21,15 +21,27 @@ jobs:
         export KUBECONFIG=$(pwd)/kubeconfig
         echo "Kubeconfig decoded and exported successfully."
 
-    - name: Install kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'latest'
-
-    - name: Install Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: 'latest'
+    - name: Check and Install kubectl
+      run: |
+        if ! command -v kubectl &> /dev/null; then
+          echo "kubectl not found. Installing kubectl..."
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+        else
+          echo "kubectl is already installed."
+        fi
+      shell: bash
+  
+    - name: Check and Install Helm
+      run: |
+        if ! command -v helm &> /dev/null; then
+          echo "Helm not found. Installing Helm..."
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        else
+          echo "Helm is already installed."
+        fi
+      shell: bash
 
     - name: Deploy Sealed Secret
       run: kubectl apply -f devops/kubernetes/sealed-secret.yaml
