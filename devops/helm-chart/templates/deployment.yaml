@@ -66,6 +66,11 @@ spec:
                 secretKeyRef:
                   name: opsapi-secrets
                   key: DB_PASSWORD
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: opsapi-secrets
+                  key: DB_PORT
             - name: DATABASE
               valueFrom:
                 secretKeyRef:
