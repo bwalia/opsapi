@@ -21,7 +21,8 @@ RUN luarocks install lua-resty-openidc
 
 WORKDIR /app
 
-COPY . .
+COPY . /app
+COPY ./nginx.conf /app/nginx.conf
 
 EXPOSE 8080
 
