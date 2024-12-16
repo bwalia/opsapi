@@ -21,6 +21,8 @@ service:
   type: ClusterIP
   port: 8080
 
+svcAccessPort: 33177
+
 ingress:
   enabled: true
   className: "nginx"
