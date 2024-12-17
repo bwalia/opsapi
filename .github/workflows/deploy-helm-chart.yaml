@@ -1,9 +1,11 @@
 name: Deploy Helm Chart
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - Docker OPSAPI Image build and Push
+    types:
+      - completed
 
 jobs:
   deploy:
