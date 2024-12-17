@@ -1,10 +1,7 @@
-name: Docker OPSAPI Image build
+name: Docker OPSAPI Image build and Push
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
     branches:
       - main
 
