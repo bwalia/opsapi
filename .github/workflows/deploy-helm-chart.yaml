@@ -17,7 +17,7 @@ jobs:
 
     - name: Decode and Export Kubeconfig
       env:
-        KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S3 }}
+        KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
       run: |
         echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
         export KUBECONFIG=$(pwd)/kubeconfig
