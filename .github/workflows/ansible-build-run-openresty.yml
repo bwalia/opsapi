@@ -1,8 +1,9 @@
 name: Ansible compile from source and install Openresty
 
 on:
-  schedule:
-    - cron: '0 9 * * *'
+  push:
+    branches:
+      - dummy
 
   workflow_dispatch:
     inputs:
