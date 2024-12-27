@@ -55,4 +55,12 @@ function Validation.createGroup(params)
         { "name", exists = true },
     })
 end
+
+-- Roles Validations
+function Validation.createSecret(params)
+    return validate.assert_valid(params, {
+        { "secret", exists = true },
+        { "name", exists = true }
+    })
+end
 return Validation

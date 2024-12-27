@@ -1,5 +1,14 @@
 local bcrypt = require("bcrypt")
 local Json = require("cjson")
+local AES = require("resty.aes")
+local base64 = require'base64'
+
+local secretKey = os.getenv("OPENSSL_SECRET_KEY")
+local secretIV = os.getenv("OPENSSL_SECRET_IV")
+
+local aesInstance = assert(AES:new(secretKey,
+    nil, AES.cipher(128, "cbc"), { iv = secretIV }))
+
 local saltRounds = 10
 local Global = {}
 
@@ -44,6 +53,24 @@ function Global.removeBykey(table, key)
     return element
 end
 
+function Global.encryptSecret(secret)
+    local encrypted = aesInstance:encrypt(secret)
+    if not encrypted then
+        error("Encryption failed")
+    end
+    return base64.encode(encrypted)
+end
+
+-- Function to decrypt data
+function Global.decryptSecret(encodedSecret)
+    local encrypted = base64.decode(encodedSecret)
+    local decrypted = aesInstance:decrypt(encrypted)
+    if not decrypted then
+        error("Decryption failed")
+    end
+    return decrypted
+end
+
 function Global.convertIso8601(datetimeStr)
     -- Parse the input date string to extract year, month, day, hour, minute, second
     local pattern = "(%d+)%-(%d+)%-(%d+) (%d+):(%d+):(%d+)"
@@ -51,12 +78,12 @@ function Global.convertIso8601(datetimeStr)
 
     -- Create a table representing the date and time
     local dt_table = {
-      year = tonumber(year),
-      month = tonumber(month),
-      day = tonumber(day),
-      hour = tonumber(hour),
-      min = tonumber(minute),
-      sec = tonumber(second)
+        year = tonumber(year),
+        month = tonumber(month),
+        day = tonumber(day),
+        hour = tonumber(hour),
+        min = tonumber(minute),
+        sec = tonumber(second)
     }
 
     -- Convert to UNIX timestamp (UTC)
@@ -66,7 +93,7 @@ function Global.convertIso8601(datetimeStr)
     local iso8601_date = os.date("!%Y-%m-%dT%H:%M:%SZ", utc_time)
 
     return iso8601_date
-  end
+end
 
 -- Base SCIM schema for User
 function Global.scimUserSchema(user)

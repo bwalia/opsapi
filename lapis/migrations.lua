@@ -124,4 +124,18 @@ return {
       "FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE"
     })
   end,
+
+  ['create_secrets'] = function()
+    schema.create_table("secrets", {
+      { "id", types.serial },
+      { "uuid", types.varchar({ unique = true }) },
+      { "secret", types.varchar },
+      { "name", types.varchar },
+      { "description", types.text({ null = true }) },
+      {"created_at", types.time({ null = true})},
+      {"updated_at", types.time({ null = true})},
+
+      "PRIMARY KEY (id)"
+    })
+  end,
 }
