@@ -20,6 +20,7 @@ RUN luarocks install lua-resty-http
 RUN luarocks install lua-resty-openidc
 RUN luarocks install lua-resty-string
 RUN luarocks install base64
+RUN luarocks install lua-resty-jwt
 
 WORKDIR /app
 
