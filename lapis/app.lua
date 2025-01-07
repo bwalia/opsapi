@@ -22,18 +22,11 @@ local jwt = require("resty.jwt")
 local File = require "helper.file"
 local Global = require "helper.global"
 
--- Start Session
-local session, sessionErr = require "resty.session".new()
-if sessionErr then
-  ngx.log(ngx.ERR, cJson.encode({
-    message = "Failed to start session",
-    details = sessionErr
-  }))
-end
-
 -- Initilising Lapis
 local app = lapis.Application()
 app:enable("etlua")
+
+
 
 ----------------- Home Page Route --------------------
 app:get("/", function()
@@ -51,6 +44,10 @@ app:get("/auth/login", function(self)
   local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
   local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
   local redirect_uri = os.getenv("KEYCLOAK_REDIRECT_URI")
+
+  self.cookies.redirect_from = self.params.from
+
+  local session, sessionErr = require "resty.session".new()
   session:set("redirect_from", self.params.from)
   session:save()
 
@@ -110,36 +107,36 @@ app:get("/auth/callback", function(self)
 
   local userinfo = cJson.decode(usrRes.body)
   if userinfo.email ~= nil and userinfo.sub ~= nil then
-    local sessionData = session:get_data()
 
-    ngx.say(cJson.encode(sessionData))
-    ngx.exit(ngx.HTTP_OK)
+    local session, sessionErr = require "resty.session".start()
     session:set(userinfo.sub, cJson.encode(token_response))
     session:save()
 
     local JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     local token = jwt:sign(JWT_SECRET_KEY, {
       header = { typ = "JWT", alg = "HS256" },
-      payload = userinfo,
+      payload = {
+        userinfo = userinfo,
+        token_response = token_response
+      },
     })
-    local redirectURL = sessionData.redirect_from or ngx.redirect_uri
+    local redirectURL = self.cookies.redirect_from or ngx.redirect_uri
     local externalUrl = redirectURL .. "?token=" .. ngx.escape_uri(token)
     ngx.redirect(externalUrl, ngx.HTTP_MOVED_TEMPORARILY)
   end
   return { json = userinfo }
 end)
 
-app:get("/auth/logout", function(self)
-  local sub = self.params.sub
-  if not sub then
-    return { status = 400, json = { error = "Sub ID is required for logout" } }
+app:post("/auth/logout", function(self)
+  local payloads = self.params
+  if not payloads then
+    return { status = 400, json = { error = "Refresh and Access Tokens are required." } }
   end
-  local sessionData = session:get_data()
-  local loggedSession, refreshToken, accessToken = sessionData[sub], nil, nil
-  if loggedSession then
-    loggedSession = cJson.decode(loggedSession)
-    refreshToken = loggedSession.refresh_token
-    accessToken = loggedSession.access_token
+
+  local refreshToken, accessToken = nil, nil
+  if payloads then
+    refreshToken = payloads.refreshToken
+    accessToken = payloads.accessToken
 
     local keycloakAuthUrl = os.getenv("KEYCLOAK_AUTH_URL") or ""
     local client_id = os.getenv("KEYCLOAK_CLIENT_ID")

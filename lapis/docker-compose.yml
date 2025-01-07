@@ -52,6 +52,19 @@ services:
     networks:
       opsapi-network:
 
+
+  redis:
+    image: redis:alpine
+    container_name: opsapi-redis
+    ports:
+      - "6377:6379"
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.13
+    volumes:
+      - ./session-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
 # Add Keycloak service
   keycloak:
     container_name: ops_keycloak
