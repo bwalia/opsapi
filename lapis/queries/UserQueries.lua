@@ -44,11 +44,11 @@ function UserQueries.all(params)
             local roleData = RoleModel:find(role.role_id)
             user.roles[index]["name"] = roleData.role_name
         end
-        table.insert(userWithRoles, Global.scimUserSchema(user))
+        table.insert(userWithRoles, user)
     end
     return {
-        Resources = userWithRoles,
-        totalResults = paginated:total_items()
+        data = userWithRoles,
+        total = paginated:total_items()
     }
 end
 

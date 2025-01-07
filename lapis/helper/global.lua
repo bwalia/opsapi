@@ -1,13 +1,9 @@
 local bcrypt = require("bcrypt")
 local Json = require("cjson")
-local AES = require("resty.aes")
 local base64 = require'base64'
 
 local secretKey = os.getenv("OPENSSL_SECRET_KEY")
 local secretIV = os.getenv("OPENSSL_SECRET_IV")
-
-local aesInstance = assert(AES:new(secretKey,
-    nil, AES.cipher(128, "cbc"), { iv = secretIV }))
 
 local saltRounds = 10
 local Global = {}
@@ -54,6 +50,9 @@ function Global.removeBykey(table, key)
 end
 
 function Global.encryptSecret(secret)
+    local AES = require("resty.aes")
+    local aesInstance = assert(AES:new(secretKey,
+    nil, AES.cipher(128, "cbc"), { iv = secretIV }))
     local encrypted = aesInstance:encrypt(secret)
     if not encrypted then
         error("Encryption failed")
@@ -63,6 +62,9 @@ end
 
 -- Function to decrypt data
 function Global.decryptSecret(encodedSecret)
+    local AES = require("resty.aes")
+    local aesInstance = assert(AES:new(secretKey,
+    nil, AES.cipher(128, "cbc"), { iv = secretIV }))
     local encrypted = base64.decode(encodedSecret)
     local decrypted = aesInstance:decrypt(encrypted)
     if not decrypted then

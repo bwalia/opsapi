@@ -1,3 +1,4 @@
 lapis/pgdata
+lapis/session-data
 lapis/logs
 lapis/.env

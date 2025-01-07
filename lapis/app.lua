@@ -1,8 +1,6 @@
 -- Lapis Libraries
 local lapis = require("lapis")
-local json = require("cjson")
 local http = require("resty.http")
-local oidc = require("resty.openidc")
 local respond_to = require("lapis.application").respond_to
 
 -- Query files
@@ -14,10 +12,11 @@ local GroupQueries = require "queries.GroupQueries"
 local SecretQueries = require "queries.SecretQueries"
 
 -- Common Openresty Libraries
-local Json = require("cjson")
+local cJson = require("cjson")
 
 -- Other installed Libraries
 local SwaggerUi = require "api-docs.swaggerUi"
+local jwt = require("resty.jwt")
 
 -- Helper Files
 local File = require "helper.file"
@@ -27,6 +26,8 @@ local Global = require "helper.global"
 local app = lapis.Application()
 app:enable("etlua")
 
+
+
 ----------------- Home Page Route --------------------
 app:get("/", function()
   SwaggerUi.generate()
@@ -34,7 +35,7 @@ app:get("/", function()
 end)
 app:get("/swagger/swagger.json", function()
   local swaggerJson = File.readFile("api-docs/swagger.json")
-  return { json = Json.decode(swaggerJson) }
+  return { json = cJson.decode(swaggerJson) }
 end)
 
 ----------------- Auth Routes --------------------
@@ -43,6 +44,12 @@ app:get("/auth/login", function(self)
   local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
   local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
   local redirect_uri = os.getenv("KEYCLOAK_REDIRECT_URI")
+
+  self.cookies.redirect_from = self.params.from
+
+  local session, sessionErr = require "resty.session".new()
+  session:set("redirect_from", self.params.from)
+  session:save()
 
   -- Redirect to Keycloak's login page
   local login_url = string.format(
@@ -82,7 +89,7 @@ app:get("/auth/callback", function(self)
     return { status = 500, json = { error = "Failed to fetch token: " .. (err or "unknown") } }
   end
 
-  local token_response = json.decode(res.body)
+  local token_response = cJson.decode(res.body)
 
   local userinfo_url = os.getenv("KEYCLOAK_USERINFO_URL")
   local usrRes, usrErr = httpc:request_uri(userinfo_url, {
@@ -98,8 +105,81 @@ app:get("/auth/callback", function(self)
     return { status = 500, json = { error = "Failed to fetch user info: " .. (usrErr or "unknown") } }
   end
 
-  local userinfo = json.decode(usrRes.body)
+  local userinfo = cJson.decode(usrRes.body)
+  if userinfo.email ~= nil and userinfo.sub ~= nil then
+
+    local session, sessionErr = require "resty.session".start()
+    session:set(userinfo.sub, cJson.encode(token_response))
+    session:save()
+
+    local JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+    local token = jwt:sign(JWT_SECRET_KEY, {
+      header = { typ = "JWT", alg = "HS256" },
+      payload = {
+        userinfo = userinfo,
+        token_response = token_response
+      },
+    })
+    local redirectURL = self.cookies.redirect_from or ngx.redirect_uri
+    local externalUrl = redirectURL .. "?token=" .. ngx.escape_uri(token)
+    ngx.redirect(externalUrl, ngx.HTTP_MOVED_TEMPORARILY)
+  end
   return { json = userinfo }
+end)
+
+app:post("/auth/logout", function(self)
+  local payloads = self.params
+  if not payloads then
+    return { status = 400, json = { error = "Refresh and Access Tokens are required." } }
+  end
+
+  local refreshToken, accessToken = nil, nil
+  if payloads then
+    refreshToken = payloads.refreshToken
+    accessToken = payloads.accessToken
+
+    local keycloakAuthUrl = os.getenv("KEYCLOAK_AUTH_URL") or ""
+    local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
+    local client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET")
+    local logoutUrl = keycloakAuthUrl:gsub("/auth$", "/logout")
+
+    if refreshToken ~= nil and accessToken ~= nil then
+      local postData = {
+        client_id = client_id,
+        client_secret = client_secret,
+        refresh_token = refreshToken
+      }
+
+      local httpc = http.new()
+      local res, err = httpc:request_uri(logoutUrl, {
+        method = "POST",
+        body = ngx.encode_args(postData),
+        headers = {
+          ["Authorization"] = "Bearer " .. accessToken,
+          ["Content-Type"] = "application/x-www-form-urlencoded"
+        },
+        ssl_verify = false
+      })
+
+      if not res then
+        return { status = 500, json = { error = "Failed to connect to Keycloak", details = err } }
+      end
+      if res.status == 200 then
+        return { status = 200, json = { message = "Logout successful!", body = res.body } }
+      else
+        return { status = res.status, json = { error = "Logout failed", details = res.body } }
+      end
+    else
+      return {
+        status = 500,
+        json = {
+          error = "Session Data for token not found.",
+        }
+      }
+    end
+  else
+    return { status = 500, json = { error = "Session Data not found." } }
+  end
 end)
 
 ----------------- User Routes --------------------
