@@ -44,6 +44,8 @@ function UserQueries.all(params)
             local roleData = RoleModel:find(role.role_id)
             user.roles[index]["name"] = roleData.role_name
         end
+        user.internal_id = user.id
+        user.id = user.uuid
         table.insert(userWithRoles, user)
     end
     return {
@@ -63,7 +65,9 @@ function UserQueries.show(id)
             user.roles[index]["name"] = roleData.role_name
         end
         user.password = nil
-        return Global.scimUserSchema(user), ngx.HTTP_OK
+        user.internal_id = user.id
+        user.id = user.uuid
+        return user, ngx.HTTP_OK
     end
 end
 

@@ -20,15 +20,24 @@ function RoleQueries.all(params)
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
 
     local paginated = Roles:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage
+        per_page = perPage,
+        fields = 'id as internal_id, uuid as id, role_name, created_at, updated_at'
     })
-    return paginated:get_page(page)
+    return {
+        data = paginated:get_page(page),
+        total = paginated:total_items()
+    }
 end
 
 function RoleQueries.show(id)
-    return Roles:find({
+    local role = Roles:find({
         uuid = id
     })
+    if role then
+        role.internal_id = role.id
+        role.id = role.uuid
+    end
+    return role
 end
 
 function RoleQueries.update(id, params)
