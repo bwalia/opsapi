@@ -24,7 +24,7 @@ RUN luarocks install lua-resty-jwt
 
 WORKDIR /app
 
-COPY . /app
+COPY lapis/. /app
 
 EXPOSE 8080
 
