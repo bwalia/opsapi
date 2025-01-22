@@ -125,6 +125,7 @@ jobs:
       run: |
         export KUBECONFIG=$(pwd)/kubeconfig
         helm upgrade --install ${{ env.IMAGE_NAME }} ./devops/helm-chart \
+          -f ./devops/helm-chart/values-${{ env.TARGET_ENV }}.yaml \
           --set image.repository=bwalia/opsapi \
           --set image.tag=latest \
           --namespace ${{ env.TARGET_ENV }} --create-namespace
