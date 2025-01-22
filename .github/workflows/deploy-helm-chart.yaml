@@ -3,7 +3,7 @@ name: Deploy Helm Chart
 on:
   workflow_run:
     workflows:
-      - Docker OPSAPI Image build and Push
+      - Dummy
     types:
       - completed
 

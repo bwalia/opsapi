@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: opsapi
+  name: {{ .Release.Name }}
   annotations:
     {{- range $key, $value := .Values.ingress.annotations }}
     {{ $key }}: {{ $value | quote }}
@@ -19,7 +19,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: opsapi-svc
+                name: {{ .Release.Name }}-svc
                 port:
                   number: {{ $.Values.service.port }}
           {{- end }}
