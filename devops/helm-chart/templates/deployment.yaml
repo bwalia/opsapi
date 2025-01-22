@@ -18,6 +18,15 @@ spec:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "echo 'Hello, World!' >> logs/access.log"]
+          volumeMounts:
+            - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
+              mountPath: /tmp/configmap
+            - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
+              mountPath: /tmp/secrets
           ports:
             - containerPort: 80
           env:
@@ -91,3 +100,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: OPENSSL_SECRET_KEY
+
+      volumes:
+        - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
+          configMap:
+            name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
+        - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
+          secret:
+            secretName: "{{ .Release.Name }}-secrets"
+            items:
+            - key: LAPIS_CONFIG
+              path: config.lua

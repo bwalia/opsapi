@@ -2,3 +2,7 @@ lapis/pgdata
 lapis/session-data
 lapis/logs
 lapis/.env
+lapis/.env*
+
+sealed-secret.yaml
+secret.yaml
