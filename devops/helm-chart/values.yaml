@@ -25,7 +25,7 @@ service:
   type: ClusterIP
   port: 8080
 
-svcAccessPort: 32167
+svcAccessPort: 32137
 
 ingress:
   enabled: true
