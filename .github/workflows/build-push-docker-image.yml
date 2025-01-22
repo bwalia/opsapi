@@ -82,7 +82,7 @@ jobs:
 
   deploy:
     runs-on: whisky03
-
+    needs: [ build ]
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
