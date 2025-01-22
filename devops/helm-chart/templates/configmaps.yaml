@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
+#   namespace: {{ .Values.targetNS }}
+data:
+    bootstrap-nginx.sh: |
+        #!/bin/bash
+        set -x
+
+        FILE=/app/config.lua
+        cp /tmp/secrets/config.lua $FILE
+        echo "==========================="
