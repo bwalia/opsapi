@@ -19,7 +19,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ .Release.Name }}-svc
+                name: opsapi-svc
                 port:
                   number: {{ $.Values.service.port }}
           {{- end }}
