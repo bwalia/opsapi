@@ -21,7 +21,7 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh", "-c", "echo 'Hello, World!' >> logs/access.log"]
+                command: ["/bin/sh", "-c", "stat -c %a /tmp && ls -la /tmp && cp /tmp/configmap/bootstrap-nginx.sh /usr/local/bin/bootstrap-nginx.sh && chmod +x /usr/local/bin/bootstrap-nginx.sh && /bin/sh /usr/local/bin/bootstrap-nginx.sh"]
           volumeMounts:
             - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
               mountPath: /tmp/configmap
