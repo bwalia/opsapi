@@ -1,0 +1,138 @@
+---
+# Source: opsapi/templates/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opsapi-{{ .Release.Namespace }}-db-backup-hourly
+spec:
+  schedule: "0 * * * *"
+  #testing 1 min "0 */1 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: "opsapi-db-backup-{{ .Release.Namespace }}-hourly"
+            image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            command:
+              - /bin/sh
+              - -c
+              - --
+            args:
+              - cp /tmp/configmap/backup-database.sh /usr/local/bin/backup-database.sh && chmod +x /usr/local/bin/backup-database.sh && bash /usr/local/bin/backup-database.sh
+              # cp /tmp/configmap/backup-database.sh /usr/local/bin/backup-database.sh && chmod +x /usr/local/bin/backup-database.sh && bash /usr/local/bin/backup-database.sh
+              # sleep infinity
+            env:
+              - name: DB_BACKUP_JOB_NAME
+                value: opsapi-{{ .Release.Namespace }}-db-backup-hourly
+              - name: BACKUP_FREQUENCY
+                value: hourly
+              - name: DB_HOST
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_HOST
+              - name: DB_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_USER
+              - name: DB_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_PASSWORD
+              - name: DB_PORT
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_PORT
+              - name: DATABASE
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DATABASE
+            envFrom:
+            resources:
+              null
+            volumeMounts:
+              - name: {{ .Release.Name }}-bootstrap-cm-bk-volume
+                mountPath: "/tmp/configmap"
+                readOnly: false
+          volumes:
+            - name: {{ .Release.Name }}-bootstrap-cm-bk-volume
+              configMap:
+                name: {{ .Release.Name }}-cm-bk-{{ .Release.Namespace }}
+      backoffLimit: 0
+---
+# Source: opsapi/templates/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opsapi-{{ .Release.Namespace }}-db-backup-daily
+spec:
+  schedule: "0 4 * * *"
+  #testing 1 min "0 */1 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: opsapi-db-backup-{{ .Release.Namespace }}-daily
+            image: {{ .Values.targetImage }}:{{ .Values.targetImageTag }}
+            imagePullPolicy: Always
+            command:
+              - /bin/sh
+              - -c
+              - --
+            args:
+              - cp /tmp/configmap/backup-database.sh /usr/local/bin/backup-database.sh && chmod +x /usr/local/bin/backup-database.sh && bash /usr/local/bin/backup-database.sh
+              # cp /tmp/configmap/backup-database.sh /usr/local/bin/backup-database.sh && chmod +x /usr/local/bin/backup-database.sh && bash /usr/local/bin/backup-database.sh
+              # sleep infinity
+            env:
+              - name: DB_BACKUP_JOB_NAME
+                value: opsapi-{{ .Release.Namespace }}-db-backup-daily
+              - name: BACKUP_FREQUENCY
+                value: daily
+              - name: DB_HOST
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_HOST
+              - name: DB_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_USER
+              - name: DB_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_PASSWORD
+              - name: DB_PORT
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DB_PORT
+              - name: DATABASE
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-secrets
+                    key: DATABASE
+            envFrom:
+            resources:
+              null
+            volumeMounts:
+              - name: {{ .Release.Name }}-bootstrap-cm-bk-volume
+                mountPath: "/tmp/configmap"
+                readOnly: false
+          volumes:
+            - name: {{ .Release.Name }}-bootstrap-cm-bk-volume
+              configMap:
+                name: {{ .Release.Name }}-cm-bk-{{ .Release.Namespace }}
+      backoffLimit: 0
