@@ -26,12 +26,16 @@ jobs:
         shell: bash
 
       - name: Configure kubectl
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
         run: |
-          echo "${{ secrets.KUBE_CONFIG_DATA_K3S }}" | base64 --decode > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "Kubeconfig decoded and exported successfully."
 
       - name: Retrieve PostgreSQL Credentials from Kubernetes
         run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
           export PGHOST=$(kubectl get secret postgres-secret -o jsonpath="{.data.DB_HOST}" | base64 --decode)
           export PGPORT=$(kubectl get secret postgres-secret -o jsonpath="{.data.DB_PORT}" | base64 --decode)
           export PGUSER=$(kubectl get secret postgres-secret -o jsonpath="{.data.DB_USER}" | base64 --decode)
