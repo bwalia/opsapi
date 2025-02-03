@@ -50,11 +50,11 @@ jobs:
       - name: Retrieve PostgreSQL Credentials from Kubernetes
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
-          export PGHOST=$(kubectl get secret opsapi-secret -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_HOST}" | base64 --decode)
-          export PGPORT=$(kubectl get secret opsapi-secret -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PORT}" | base64 --decode)
-          export PGUSER=$(kubectl get secret opsapi-secret -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_USER}" | base64 --decode)
-          export PGPASSWORD=$(kubectl get secret opsapi-secret -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PASSWORD}" | base64 --decode)
-          export PGDATABASE=$(kubectl get secret opsapi-secret -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DATABASE}" | base64 --decode)
+          export PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_HOST}" | base64 --decode)
+          export PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PORT}" | base64 --decode)
+          export PGUSER=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_USER}" | base64 --decode)
+          export PGPASSWORD=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PASSWORD}" | base64 --decode)
+          export PGDATABASE=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DATABASE}" | base64 --decode)
 
           echo "PGHOST=$PGHOST" >> $GITHUB_ENV
           echo "PGPORT=$PGPORT" >> $GITHUB_ENV
