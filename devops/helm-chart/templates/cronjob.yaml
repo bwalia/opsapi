@@ -5,7 +5,7 @@ kind: CronJob
 metadata:
   name: opsapi-{{ .Release.Namespace }}-db-backup-hourly
 spec:
-  schedule: "*/1 * * * *"
+  schedule: "0 * * * *"
   #testing 1 min "0 */1 * * *"
   concurrencyPolicy: Forbid
   jobTemplate:
@@ -20,23 +20,104 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-                  BACKUP_FILE="backup_$TIMESTAMP.sql.gz"
+                  echo "Connecting to PostgreSQL at: $DB_HOST"
 
-                  pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DATABASE" -F c | gzip > "/tmp/$BACKUP_FILE"
+                  # Load environment variables
+                  export PGPASSWORD="$DB_PASSWORD"
 
-                  # Configure MinIO and upload backup
+                  # Check if we can reach the PostgreSQL server
+                  pg_isready -h "$DB_HOST" -p $DB_PORT -U "$DB_USER"
+
+                  # Set backup file name with timestamp
+                  BACKUP_FILE="/tmp/backup_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
+
+                  echo "Starting PostgreSQL backup..."
+
+                  # ✅ Force TCP connection by explicitly setting -h and -p
+                  pg_dump -h "$DB_HOST" -p $DB_PORT -U "$DB_USER" -d "$DATABASE" | gzip > "$BACKUP_FILE"
+
+                  echo "Backup completed: $BACKUP_FILE"
+                  if [ ! -f "$BACKUP_FILE" ]; then
+                    echo "Error: Backup file was not created!"
+                    exit 1
+                  fi
+                  # Install MinIO Client
+                  curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+                  chmod +x mc && mv mc /usr/local/bin/
+
+                  # Debugging: Ensure MinIO variables are set
+                  echo "MinIO Endpoint: $MINIO_ENDPOINT"
+                  echo "MinIO Bucket: $MINIO_BUCKET"
+
+                  if [[ -z "$MINIO_ENDPOINT" || -z "$MINIO_BUCKET" ]]; then
+                      echo "Error: MINIO_ENDPOINT or MINIO_BUCKET is not set"
+                      exit 1
+                  fi
+
+                  # ✅ Set MinIO alias
                   mc alias set myminio "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-                  mc cp "/tmp/$BACKUP_FILE" myminio/"$MINIO_BUCKET"/"$BACKUP_FILE"
 
-                  # Cleanup
-                  rm -f "/tmp/$BACKUP_FILE"
+                  # ✅ Debug: Check if file exists before copying
+                  ls -lh "$BACKUP_FILE"
+
+                  # ✅ Upload to MinIO
+                  echo "Uploading backup to MinIO..."
+                  mc cp "$BACKUP_FILE" myminio/"opsapi-test-pg"/ || { echo "MinIO upload failed!"; exit 1; }
+
+                  echo "Backup successfully uploaded to MinIO."
               volumeMounts:
                 - name: {{ .Release.Name }}-backup-script
                   mountPath: /scripts
                   readOnly: true
                 - name: {{ .Release.Name }}-backup-storage
                   mountPath: /backup
+
+              env:
+                - name: MINIO_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_ENDPOINT
+                - name: MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_ACCESS_KEY
+                - name: MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_SECRET_KEY
+                - name: MINIO_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_BUCKET
+                - name: DB_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_HOST
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_USER
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_PASSWORD
+                - name: DB_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_PORT
+                - name: DATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DATABASE
           volumes:
             - name: {{ .Release.Name }}-backup-script
               configMap:
@@ -67,23 +148,103 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-                  BACKUP_FILE="backup_$TIMESTAMP.sql.gz"
+                  echo "Connecting to PostgreSQL at: $DB_HOST"
 
-                  pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DATABASE" -F c | gzip > "/tmp/$BACKUP_FILE"
+                  # Load environment variables
+                  export PGPASSWORD="$DB_PASSWORD"
 
-                  # Configure MinIO and upload backup
+                  # Check if we can reach the PostgreSQL server
+                  pg_isready -h "$DB_HOST" -p $DB_PORT -U "$DB_USER"
+
+                  # Set backup file name with timestamp
+                  BACKUP_FILE="/tmp/backup_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
+
+                  echo "Starting PostgreSQL backup..."
+
+                  # ✅ Force TCP connection by explicitly setting -h and -p
+                  pg_dump -h "$DB_HOST" -p $DB_PORT -U "$DB_USER" -d "$DATABASE" | gzip > "$BACKUP_FILE"
+
+                  echo "Backup completed: $BACKUP_FILE"
+                  if [ ! -f "$BACKUP_FILE" ]; then
+                    echo "Error: Backup file was not created!"
+                    exit 1
+                  fi
+                  # Install MinIO Client
+                  curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+                  chmod +x mc && mv mc /usr/local/bin/
+
+                  # Debugging: Ensure MinIO variables are set
+                  echo "MinIO Endpoint: $MINIO_ENDPOINT"
+                  echo "MinIO Bucket: $MINIO_BUCKET"
+
+                  if [[ -z "$MINIO_ENDPOINT" || -z "$MINIO_BUCKET" ]]; then
+                      echo "Error: MINIO_ENDPOINT or MINIO_BUCKET is not set"
+                      exit 1
+                  fi
+
+                  # ✅ Set MinIO alias
                   mc alias set myminio "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-                  mc cp "/tmp/$BACKUP_FILE" myminio/"$MINIO_BUCKET"/"$BACKUP_FILE"
 
-                  # Cleanup
-                  rm -f "/tmp/$BACKUP_FILE"
+                  # ✅ Debug: Check if file exists before copying
+                  ls -lh "$BACKUP_FILE"
+
+                  # ✅ Upload to MinIO
+                  echo "Uploading backup to MinIO..."
+                  mc cp "$BACKUP_FILE" myminio/"opsapi-test-pg"/ || { echo "MinIO upload failed!"; exit 1; }
+
+                  echo "Backup successfully uploaded to MinIO."
               volumeMounts:
                 - name: {{ .Release.Name }}-backup-script
                   mountPath: /scripts
                   readOnly: true
                 - name: {{ .Release.Name }}-backup-storage
                   mountPath: /backup
+              env:
+                - name: MINIO_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_ENDPOINT
+                - name: MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_ACCESS_KEY
+                - name: MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_SECRET_KEY
+                - name: MINIO_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: MINIO_BUCKET
+                - name: DB_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_HOST
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_USER
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_PASSWORD
+                - name: DB_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DB_PORT
+                - name: DATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secrets
+                      key: DATABASE
           volumes:
             - name: {{ .Release.Name }}-backup-script
               configMap:
