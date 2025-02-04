@@ -22,9 +22,16 @@ RUN luarocks install lua-resty-string
 RUN luarocks install base64
 RUN luarocks install lua-resty-jwt
 
+RUN apk add mysql-client
+RUN apk add postgresql-client
+RUN apk add curl
+RUN wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc \
+    --tries=3 --timeout=30 && \
+    chmod +x /usr/local/bin/mc
+
 WORKDIR /app
 
-COPY lapis/. /app
+COPY . /app
 
 EXPOSE 8080
 

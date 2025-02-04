@@ -16,16 +16,12 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-cm-bk-{{ .Release.Namespace }}
-#   namespace: {{ .Values.targetNS }}
+  name: {{ .Release.Name }}-pg-backup-{{ .Release.Namespace }}
+#   namespace: {{ .Values.targetNS }} kubectl get configmap opsapi-pg-backup-test -n test -o yaml
 data:
     backup-database.sh: |
       #!/bin/bash
       set -x
-      if [ -z "$BACKUP_FREQUENCY" ]; then
-        echo "BACKUP_FREQUENCY set to hourly."
-        BACKUP_FREQUENCY="hourly"
-      fi
       TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
       BACKUP_FILE="backup_$TIMESTAMP.sql.gz"
 
