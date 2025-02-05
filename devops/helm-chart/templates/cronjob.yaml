@@ -143,8 +143,8 @@ spec:
           restartPolicy: Never
           containers:
             - name: opsapi-db-backup-{{ .Release.Namespace }}-daily
-              image: "{{ .Values.targetImage }}:{{ .Values.targetImageTag }}"
-              imagePullPolicy: Always
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: ["/bin/sh", "-c"]
               args:
                 - |
