@@ -32,7 +32,10 @@ function ModuleQueries.all(params)
     local paginated = Modules:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
-    return paginated:get_page(page)
+    return {
+        data = paginated:get_page(page),
+        total = paginated:total_items()
+    }
 end
 
 function ModuleQueries.show(id)

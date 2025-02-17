@@ -154,4 +154,35 @@ return {
       "PRIMARY KEY (id)"
     })
   end,
+
+  ['01_create_projects'] = function()
+    schema.create_table("projects", {
+      { "id",            types.serial },
+      { "uuid",          types.varchar({ unique = true }) },
+      { "name",          types.varchar },
+      { "start_date",    types.date({ null = true }) },
+      { "budget",        types.double({ null = true }) },
+      { "deadline_date", types.date({ null = true }) },
+      { "active",        types.boolean },
+      { "created_at",    types.time({ null = true }) },
+      { "updated_at",    types.time({ null = true }) },
+
+      "PRIMARY KEY (id)"
+    })
+  end,
+
+  ['create_project__templates'] = function()
+    schema.create_table("project__templates", {
+      { "id",          types.serial },
+      { "uuid",        types.varchar({ unique = true }) },
+      { "project_id",  types.foreign_key },
+      { "template_id", types.foreign_key },
+      { "created_at",  types.time({ null = true }) },
+      { "updated_at",  types.time({ null = true }) },
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+      "FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE"
+    })
+  end,
 }

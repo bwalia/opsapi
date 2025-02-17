@@ -33,18 +33,30 @@ function GroupQueries.all(params)
             local memberData = Users:find(member.id)
             group.members[index] = memberData
         end
-        table.insert(groupWmembers, Global.scimGroupSchema(group))
+        group.internal_id = group.id
+        group.id = group.uuid
+        table.insert(groupWmembers, group)
     end
     return {
-        Resources = groupWmembers,
-        totalResults = paginated:total_items()
+        data = groupWmembers,
+        total = paginated:total_items()
     }
 end
 
 function GroupQueries.show(id)
-    return Groups:find({
+    local group = Groups:find({
         uuid = id
     })
+    if group then
+        group:get_members()
+        for index, member in ipairs(group.members) do
+            local memberData = Users:find(member.id)
+            group.members[index] = memberData
+        end
+        group.internal_id = group.id
+        group.id = group.uuid
+        return group, ngx.HTTP_OK
+    end
 end
 
 function GroupQueries.update(id, params)

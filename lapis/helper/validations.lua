@@ -63,4 +63,13 @@ function Validation.createSecret(params)
         { "name", exists = true }
     })
 end
+
+-- Roles Validations
+function Validation.createProject(params)
+    return validate.assert_valid(params, {
+        { "name", exists = true },
+        { "active", exists = true }
+    })
+end
+
 return Validation
