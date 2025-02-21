@@ -8,8 +8,21 @@ function ProjectTemplateQueries.addTemplate(userId, templateName)
     local template = RoleQueries.roleByName(templateName)
     if template then
         local data = {
-            user_id = userId,
+            project_id = userId,
             template_id = template.id,
+            uuid = Global.generateUUID()
+        }
+        return ProjectTemplate:create(data)
+    else
+        return nil
+    end
+end
+
+function ProjectTemplateQueries.addProjectTemplate(pId, tId)
+    if pId and tId then
+        local data = {
+            project_id = pId,
+            template_id = tId.id,
             uuid = Global.generateUUID()
         }
         return ProjectTemplate:create(data)

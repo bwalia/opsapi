@@ -140,13 +140,13 @@ return {
     })
   end,
 
-  ['create_templates'] = function()
+  ['00_create_templates'] = function()
     schema.create_table("templates", {
       { "id",               types.serial },
       { "uuid",             types.varchar({ unique = true }) },
       { "code",             types.varchar },
       { "template_content", types.text },
-      { "module_name",      types.varchar },
+      { "template_type",    types.varchar({ null = true }) },
       { "description",      types.text({ null = true }) },
       { "created_at",       types.time({ null = true }) },
       { "updated_at",       types.time({ null = true }) },
@@ -171,7 +171,7 @@ return {
     })
   end,
 
-  ['create_project__templates'] = function()
+  ['02_create_project__templates'] = function()
     schema.create_table("project__templates", {
       { "id",          types.serial },
       { "uuid",        types.varchar({ unique = true }) },

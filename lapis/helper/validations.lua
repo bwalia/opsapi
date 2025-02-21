@@ -72,4 +72,12 @@ function Validation.createProject(params)
     })
 end
 
+-- Roles Validations
+function Validation.createTemplate(params)
+    return validate.assert_valid(params, {
+        { "code", exists = true },
+        { "template_content", exists = true }
+    })
+end
+
 return Validation
