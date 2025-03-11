@@ -1,6 +1,7 @@
 local Global = require "helper.global"
 local ProjectTemplate = require "models.ProjectTemplateModel"
 local RoleQueries = require "queries.RoleQueries"
+local cJson = require "cjson"
 
 local ProjectTemplateQueries = {}
 
@@ -22,7 +23,7 @@ function ProjectTemplateQueries.addProjectTemplate(pId, tId)
     if pId and tId then
         local data = {
             project_id = pId,
-            template_id = tId.id,
+            template_id = tId,
             uuid = Global.generateUUID()
         }
         return ProjectTemplate:create(data)
@@ -31,17 +32,17 @@ function ProjectTemplateQueries.addProjectTemplate(pId, tId)
     end
 end
 
-function ProjectTemplateQueries.deleteByPid(uId)
+function ProjectTemplateQueries.deleteByPid(pId)
     local projectTemplate = ProjectTemplate:find({
-        project_id = uId
+        project_id = pId
     })
     if projectTemplate then
-        projectTemplate:delete()
+        return projectTemplate:delete()
     end
 end
-function ProjectTemplateQueries.deleteByTid(uId)
+function ProjectTemplateQueries.deleteByTid(tId)
     local projectTemplate = ProjectTemplate:find({
-        template_id = uId
+        template_id = tId
     })
     if projectTemplate then
         projectTemplate:delete()

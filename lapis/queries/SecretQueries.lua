@@ -1,7 +1,7 @@
 local Global = require "helper.global"
 local Secrets = require "models.SecretModel"
 local Validation = require "helper.validations"
-local cjson = require "cjson"
+local cJson = require "cjson"
 
 
 local SecretQueries = {}
@@ -15,9 +15,12 @@ function SecretQueries.create(secretData)
     if secretData.uuid == nil then
         secretData.uuid = Global.generateUUID()
     end
-    return Secrets:create(secretData, {
+    local secret = Secrets:create(secretData, {
         returning = "*"
     })
+    secret.internal_id = secret.id
+    secret.id = secret.uuid
+    return { data = secret }
 end
 
 function SecretQueries.all(params)
@@ -25,15 +28,26 @@ function SecretQueries.all(params)
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
 
     local paginated = Secrets:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage
+        per_page = perPage,
+        fields = 'id as internal_id, uuid as id, name, description, created_at, updated_at'
     })
-    return paginated:get_page(page)
+    return {
+        data = paginated:get_page(page),
+        total = paginated:total_items()
+    }
 end
 
 function SecretQueries.show(id)
-    return Secrets:find({
+    local secret = Secrets:find({
         uuid = id
     })
+    if secret then
+        secret.secret = "********"
+        secret.internal_id = secret.id
+        secret.id = secret.uuid
+        return secret
+    end
+    return {}
 end
 
 function SecretQueries.update(id, params)
@@ -41,6 +55,9 @@ function SecretQueries.update(id, params)
         uuid = id
     })
     params.id = secret.id
+    if params.secret == "********" then
+        params.secret = nil
+    end
     if params.secret and params.secret ~= nil and params.secret ~= ngx.null and params.secret ~= "" then
         local encodedSecret = Global.encryptSecret(params.secret)
         params.secret = encodedSecret

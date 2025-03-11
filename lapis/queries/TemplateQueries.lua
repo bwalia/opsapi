@@ -1,7 +1,9 @@
 local Global = require "helper.global"
 local Templates = require "models.TemplateModel"
 local Validation = require "helper.validations"
-local ProjectTemplateQueries = require "queries.ProjectTemplateQueries"
+local ProjectTemplate = require "queries.ProjectTemplateQueries"
+local Project = require "queries.ProjectQueries"
+local cJson = require "cjson"
 
 
 local TemplateQueries = {}
@@ -16,9 +18,11 @@ function TemplateQueries.create(templateData)
     local record = Templates:create(templateData, {
         returning = "*"
     })
-
     if record then
-        ProjectTemplateQueries.addProjectTemplate(projectId, record.id)
+        local project = Project.show(projectId)
+        if project then
+            ProjectTemplate.addProjectTemplate(project.internal_id, record.id)
+        end
     end
 
     return { data = record }
@@ -44,6 +48,14 @@ function TemplateQueries.show(id)
         uuid = id
     })
     if template then
+        template:get_projects()
+        template.project_ids = {}
+        for index, tempProject in ipairs(template.projects) do
+            local project = Project.showByInternalId(tempProject.project_id)
+            if project then
+                template.projects[index] = project
+            end
+        end
         template.internal_id = template.id
         template.id = template.uuid
     end
@@ -55,9 +67,26 @@ function TemplateQueries.update(id, params)
         uuid = id
     })
     params.id = template.id
-    return template:update(params, {
-        returning = "*"
-    })
+    if params.data and params.data ~= nil and type(params.data) == "string" then
+        local reqData = cJson.decode(params.data)
+        if reqData.projects and type(reqData.projects) == "table" then
+            ProjectTemplate.deleteByTid(template.id)
+            for index, pUuid in ipairs(reqData.projects) do
+                local project = Project.show(pUuid)
+                ProjectTemplate.addProjectTemplate(project.internal_id, template.id)
+            end
+        end
+        local tempData = {
+            code = reqData.code,
+            template_content = reqData.template_content,
+            template_type = reqData.template_type,
+            description = reqData.description
+        }
+        local updateData = template:update(tempData, {
+            returning = "*"
+        })
+        return { data = updateData }
+    end
 end
 
 function TemplateQueries.destroy(id)

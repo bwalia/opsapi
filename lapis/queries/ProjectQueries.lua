@@ -68,6 +68,14 @@ function ProjectQueries.show(id)
         return project, ngx.HTTP_OK
     end
 end
+function ProjectQueries.showByInternalId(id)
+    local project = Projects:find(id)
+    if project then
+        project.internal_id = project.id
+        project.id = project.uuid
+        return project, ngx.HTTP_OK
+    end
+end
 
 function ProjectQueries.update(id, params)
     local user = Projects:find({
