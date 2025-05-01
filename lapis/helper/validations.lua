@@ -80,4 +80,14 @@ function Validation.createTemplate(params)
     })
 end
 
+-- Document Validations
+function Validation.createDocument(params)
+    return validate.assert_valid(params, {
+        { "title", exists = true },
+        { "status", exists = true },
+        { "user_id", exists = true },
+        { "content", exists = true }
+    })
+end
+
 return Validation

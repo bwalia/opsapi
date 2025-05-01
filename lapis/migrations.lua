@@ -185,4 +185,26 @@ return {
       "FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE"
     })
   end,
+
+  ['create_documents'] = function()
+    schema.create_table("documents", {
+      { "id",               types.serial },
+      { "uuid",             types.varchar({ unique = true }) },
+      { "tags",             types.text({ null = true }) },
+      { "title",            types.varchar },
+      { "sub_title",        types.varchar({ null = true }) },
+      { "status",           types.boolean },
+      { "meta_title",       types.varchar({ null = true }) },
+      { "meta_description", types.varchar({ null = true }) },
+      { "meta_keywords",    types.text({ null = true }) },
+      { "user_id",          types.foreign_key },
+      { "published_date",   types.date({ null = true }) },
+      { "content",          types.text({ null = true }) },
+      { "created_at",       types.time({ null = true }) },
+      { "updated_at",       types.time({ null = true }) },
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    })
+  end,
 }
