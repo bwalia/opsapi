@@ -186,13 +186,14 @@ return {
     })
   end,
 
-  ['create_documents'] = function()
+  ['01_create_documents'] = function()
     schema.create_table("documents", {
       { "id",               types.serial },
       { "uuid",             types.varchar({ unique = true }) },
-      { "tags",             types.text({ null = true }) },
+      { "excerpt",          types.text({ null = true }) },
       { "title",            types.varchar },
       { "sub_title",        types.varchar({ null = true }) },
+      { "slug",             types.text({ unique = true, null = true }) },
       { "status",           types.boolean },
       { "meta_title",       types.varchar({ null = true }) },
       { "meta_description", types.varchar({ null = true }) },
@@ -205,6 +206,47 @@ return {
 
       "PRIMARY KEY (id)",
       "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    })
+  end,
+  ['02_create_tags'] = function()
+    schema.create_table("tags", {
+      { "id",         types.serial },
+      { "uuid",       types.varchar({ unique = true }) },
+      { "name",       types.varchar({ unique = true }) },
+      { "created_at", types.time({ null = true }) },
+      { "updated_at", types.time({ null = true }) },
+
+      "PRIMARY KEY (id)"
+    })
+  end,
+
+  ['03_create_blog__tags'] = function()
+    schema.create_table("document__tags", {
+      { "id",          types.serial },
+      { "uuid",        types.varchar({ unique = true }) },
+      { "document_id", types.foreign_key },
+      { "tag_id",      types.foreign_key },
+      { "created_at",  types.time({ null = true }) },
+      { "updated_at",  types.time({ null = true }) },
+
+      "PRIMARY KEY (document_id, tag_id)",
+      "FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE",
+      "FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE"
+    })
+  end,
+
+  ['04_create_images'] = function()
+    schema.create_table("images", {
+      { "id",          types.serial },
+      { "uuid",        types.varchar({ unique = true }) },
+      { "document_id", types.foreign_key },
+      { "url",         types.text },
+      { "alt_text",    types.text({ null = true }) },
+      { "is_cover",    types.boolean({ default = false }) },
+      { "created_at",  types.time({ null = true }) },
+      { "updated_at",  types.time({ null = true }) },
+
+      "PRIMARY KEY (id)"
     })
   end,
 }

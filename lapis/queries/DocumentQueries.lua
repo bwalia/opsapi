@@ -1,12 +1,16 @@
 local Global = require "helper.global"
 local DocumentModel = require "models.DocumentModel"
 local Validation = require "helper.validations"
-
+local UserQueries = require "queries.UserQueries"
+local cJson = require "cjson"
 
 local DocumentQueries = {}
 
 function DocumentQueries.create(data)
     Validation.createDocument(data)
+    local userUuid = data.user_id
+    local user = UserQueries.show(userUuid)
+    data.user_id = user.internal_id
     if data.uuid == nil then
         data.uuid = Global.generateUUID()
     end
@@ -22,7 +26,7 @@ function DocumentQueries.all(params)
     local paginated = DocumentModel:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage,
         fields =
-        'id as internal_id, uuid as id, tags, title, sub_title, status, meta_title, meta_description,meta_keywords, user_id,published_date,content,created_at,updated_at'
+        'id as internal_id, uuid as id, title, sub_title, status, meta_title, meta_description,meta_keywords, user_id,published_date,content,created_at,updated_at'
     })
     return {
         data = paginated:get_page(page),
