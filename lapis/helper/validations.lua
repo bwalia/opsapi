@@ -90,4 +90,11 @@ function Validation.createDocument(params)
     })
 end
 
+-- Tag Validations
+function Validation.createTag(params)
+    return validate.assert_valid(params, {
+        { "name", exists = true }
+    })
+end
+
 return Validation

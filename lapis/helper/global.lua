@@ -160,4 +160,13 @@ function Global.getPayloads(body)
     return keyset[1]
 end
 
+-- Split String
+function Global.splitStr(str, sep)
+    local t = {}
+    for tag in string.gmatch(str, "([^" .. sep .. "]+)") do
+      table.insert(t, tag:match("^%s*(.-)%s*$"))
+    end
+    return t
+  end
+
 return Global

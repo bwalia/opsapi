@@ -13,6 +13,7 @@ local SecretQueries = require "queries.SecretQueries"
 local ProjectQueries = require "queries.ProjectQueries"
 local TemplateQueries = require "queries.TemplateQueries"
 local DocumentQueries = require "queries.DocumentQueries"
+local TagsQueries = require "queries.TagsQueries"
 
 -- Common Openresty Libraries
 local cJson = require("cjson")
@@ -42,6 +43,44 @@ app:get("/swagger/swagger.json", function()
 end)
 
 ----------------- Auth Routes --------------------
+
+
+app:post("/auth/login", function(self)
+  local email = self.params.username
+  local password = self.params.password
+
+  if not email or not password then
+    return { status = 400, json = { error = "Email and password are required" } }
+  end
+
+  local user = UserQueries.verify(email, password)
+
+  if not user then
+    return { status = 401, json = { error = "Invalid email or password" } }
+  end
+
+  local JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+  local token = jwt:sign(JWT_SECRET_KEY, {
+    header = { typ = "JWT", alg = "HS256" },
+    payload = {
+      userinfo = user,
+      token_response = {}
+    },
+  })
+
+  -- You can also return a JWT token here
+  return {
+    status = 200,
+    json = {
+      user = {
+        id = user.uuid,
+        email = user.email,
+        name = user.name,
+      },
+      token = token
+    }
+  }
+end)
 
 app:get("/auth/login", function(self)
   local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
@@ -110,7 +149,6 @@ app:get("/auth/callback", function(self)
 
   local userinfo = cJson.decode(usrRes.body)
   if userinfo.email ~= nil and userinfo.sub ~= nil then
-
     local session, sessionErr = require "resty.session".start()
     session:set(userinfo.sub, cJson.encode(token_response))
     session:save()
@@ -743,6 +781,59 @@ app:match("edit_documents", "/api/v2/documents/:id", respond_to({
   end,
   DELETE = function(self)
     local record = DocumentQueries.destroy(tostring(self.params.id))
+    return { json = record, status = 204 }
+  end
+}))
+
+----------------- Tags Routes --------------------
+
+app:match("tags", "/api/v2/tags", respond_to({
+  GET = function(self)
+    self.params.timestamp = true
+    local records = TagsQueries.all(self.params)
+    return { json = records, status = 200 }
+  end,
+  POST = function(self)
+    local record = TagsQueries.create(self.params)
+    return { json = record, status = 201 }
+  end
+}))
+
+app:match("edit_tags", "/api/v2/tags/:id", respond_to({
+  before = function(self)
+    self.record = TagsQueries.show(tostring(self.params.id))
+    if not self.record then
+      self:write({
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "Project not found! Please check the UUID and try again."
+        },
+        status = 404
+      })
+    end
+  end,
+  GET = function(self)
+    local record = TagsQueries.show(tostring(self.params.id))
+    return {
+      json = record,
+      status = 200
+    }
+  end,
+  PUT = function(self)
+    if not self.params.id then
+      return {
+        json = {
+          lapis = { version = require("lapis.version") },
+          error = "assert_valid was not captured: Please pass the uuid of document that you want to update"
+        },
+        status = 500
+      }
+    end
+    local record = TagsQueries.update(tostring(self.params.id), self.params)
+    return { json = record, status = 204 }
+  end,
+  DELETE = function(self)
+    local record = TagsQueries.destroy(tostring(self.params.id))
     return { json = record, status = 204 }
   end
 }))
