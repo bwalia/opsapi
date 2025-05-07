@@ -40,7 +40,7 @@ function DocumentQueries.create(data)
         end
         savedDocument.tags = selectedTags
     end
-    return savedDocument
+    return {data = savedDocument}
 end
 
 function DocumentQueries.all(params)

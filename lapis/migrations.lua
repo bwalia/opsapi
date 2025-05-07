@@ -140,7 +140,7 @@ return {
     })
   end,
 
-  ['00_create_templates'] = function()
+  ['03_create_templates'] = function()
     schema.create_table("templates", {
       { "id",               types.serial },
       { "uuid",             types.varchar({ unique = true }) },
@@ -155,7 +155,7 @@ return {
     })
   end,
 
-  ['01_create_projects'] = function()
+  ['04_create_projects'] = function()
     schema.create_table("projects", {
       { "id",            types.serial },
       { "uuid",          types.varchar({ unique = true }) },
@@ -171,7 +171,7 @@ return {
     })
   end,
 
-  ['02_create_project__templates'] = function()
+  ['05_create_project__templates'] = function()
     schema.create_table("project__templates", {
       { "id",          types.serial },
       { "uuid",        types.varchar({ unique = true }) },
@@ -186,7 +186,7 @@ return {
     })
   end,
 
-  ['01_create_documents'] = function()
+  ['06_create_documents'] = function()
     schema.create_table("documents", {
       { "id",               types.serial },
       { "uuid",             types.varchar({ unique = true }) },
@@ -208,7 +208,7 @@ return {
       "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
     })
   end,
-  ['02_create_tags'] = function()
+  ['07_create_tags'] = function()
     schema.create_table("tags", {
       { "id",         types.serial },
       { "uuid",       types.varchar({ unique = true }) },
@@ -220,7 +220,7 @@ return {
     })
   end,
 
-  ['03_create_blog__tags'] = function()
+  ['08_create_blog__tags'] = function()
     schema.create_table("document__tags", {
       { "id",          types.serial },
       { "uuid",        types.varchar({ unique = true }) },
@@ -235,7 +235,7 @@ return {
     })
   end,
 
-  ['04_create_images'] = function()
+  ['09_create_images'] = function()
     schema.create_table("images", {
       { "id",          types.serial },
       { "uuid",        types.varchar({ unique = true }) },

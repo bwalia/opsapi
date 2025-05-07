@@ -10,9 +10,10 @@ function TagsQueries.create(data)
     if data.uuid == nil then
         data.uuid = Global.generateUUID()
     end
-    return TagsModel:create(data, {
+    local tag = TagsModel:create(data, {
         returning = "*"
     })
+    return {data = tag}
 end
 
 function TagsQueries.all(params)
