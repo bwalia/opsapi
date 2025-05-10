@@ -140,7 +140,7 @@ return {
     })
   end,
 
-  ['00_create_templates'] = function()
+  ['03_create_templates'] = function()
     schema.create_table("templates", {
       { "id",               types.serial },
       { "uuid",             types.varchar({ unique = true }) },
@@ -155,7 +155,7 @@ return {
     })
   end,
 
-  ['01_create_projects'] = function()
+  ['04_create_projects'] = function()
     schema.create_table("projects", {
       { "id",            types.serial },
       { "uuid",          types.varchar({ unique = true }) },
@@ -171,7 +171,7 @@ return {
     })
   end,
 
-  ['02_create_project__templates'] = function()
+  ['05_create_project__templates'] = function()
     schema.create_table("project__templates", {
       { "id",          types.serial },
       { "uuid",        types.varchar({ unique = true }) },
@@ -183,6 +183,71 @@ return {
       "PRIMARY KEY (id)",
       "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
       "FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE"
+    })
+  end,
+
+  ['06_create_documents'] = function()
+    schema.create_table("documents", {
+      { "id",               types.serial },
+      { "uuid",             types.varchar({ unique = true }) },
+      { "excerpt",          types.text({ null = true }) },
+      { "title",            types.varchar },
+      { "sub_title",        types.varchar({ null = true }) },
+      { "slug",             types.text({ unique = true, null = true }) },
+      { "status",           types.boolean },
+      { "meta_title",       types.varchar({ null = true }) },
+      { "meta_description", types.varchar({ null = true }) },
+      { "meta_keywords",    types.text({ null = true }) },
+      { "user_id",          types.foreign_key },
+      { "published_date",   types.date({ null = true }) },
+      { "content",          types.text({ null = true }) },
+      { "created_at",       types.time({ null = true }) },
+      { "updated_at",       types.time({ null = true }) },
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    })
+  end,
+  ['07_create_tags'] = function()
+    schema.create_table("tags", {
+      { "id",         types.serial },
+      { "uuid",       types.varchar({ unique = true }) },
+      { "name",       types.varchar({ unique = true }) },
+      { "created_at", types.time({ null = true }) },
+      { "updated_at", types.time({ null = true }) },
+
+      "PRIMARY KEY (id)"
+    })
+  end,
+
+  ['08_create_blog__tags'] = function()
+    schema.create_table("document__tags", {
+      { "id",          types.serial },
+      { "uuid",        types.varchar({ unique = true }) },
+      { "document_id", types.foreign_key },
+      { "tag_id",      types.foreign_key },
+      { "created_at",  types.time({ null = true }) },
+      { "updated_at",  types.time({ null = true }) },
+
+      "PRIMARY KEY (document_id, tag_id)",
+      "FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE",
+      "FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE"
+    })
+  end,
+
+  ['09_create_images'] = function()
+    schema.create_table("images", {
+      { "id",          types.serial },
+      { "uuid",        types.varchar({ unique = true }) },
+      { "document_id", types.foreign_key },
+      { "url",         types.text },
+      { "alt_text",    types.text({ null = true }) },
+      { "is_cover",    types.boolean({ default = false }) },
+      { "created_at",  types.time({ null = true }) },
+      { "updated_at",  types.time({ null = true }) },
+
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE",
     })
   end,
 }

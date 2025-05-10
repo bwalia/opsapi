@@ -4,6 +4,7 @@ local UserRolesQueries = require "queries.UserRoleQueries"
 local Users = require "models.UserModel"
 local RoleModel = require "models.RoleModel"
 local Validation = require "helper.validations"
+local bcrypt = require("bcrypt")
 
 local UserQueries = {}
 
@@ -91,6 +92,14 @@ function UserQueries.destroy(id)
     end
 end
 
+function UserQueries.verify(email, plain_password)
+    local user = Users:find({ username = email })
+    if user and bcrypt.verify(plain_password, user.password) then
+        return user
+    end
+    return nil
+end
+
 -- SCIM user response
 function UserQueries.SCIMall(params)
     local page, perPage, orderField, orderDir =
@@ -107,7 +116,7 @@ function UserQueries.SCIMall(params)
         user:get_roles()
         for index, role in ipairs(user.roles) do
             local roleData = RoleModel:find(role.role_id)
-            user.roles[index] = {value = roleData.role_name}
+            user.roles[index] = { value = roleData.role_name }
         end
         table.insert(userWithRoles, Global.scimUserSchema(user))
     end
