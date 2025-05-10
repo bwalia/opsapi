@@ -246,7 +246,8 @@ return {
       { "created_at",  types.time({ null = true }) },
       { "updated_at",  types.time({ null = true }) },
 
-      "PRIMARY KEY (id)"
+      "PRIMARY KEY (id)",
+      "FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE",
     })
   end,
 }
