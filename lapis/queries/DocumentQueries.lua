@@ -4,6 +4,7 @@ local Validation = require "helper.validations"
 local UserQueries = require "queries.UserQueries"
 local DocumentTagsModel = require "models.DocumentTagsModel"
 local TagsModel = require "models.TagsModel"
+local ImageModel = require "models.ImageModel"
 local cJson = require "cjson"
 local db = require("lapis.db")
 
@@ -21,36 +22,75 @@ function DocumentQueries.create(data)
     else
         data.user_id = 1
     end
+    local file = data.cover_image
+    if not file then
+        return {
+            status = 400,
+            json = {
+                error = "Missing file"
+            }
+        }
+    end
+
+    local filename = file.filename or ("upload_" .. tostring(os.time()) .. ".bin")
+    local url, err = Global.uploadToMinio(file, filename)
+
+    if not url then
+        return {
+            data = {
+                error = err
+            }
+        }
+    end
+
     local selectedTags = data.tags
+    local coverImg = data.cover_image
     data.tags = nil
+    data.cover_image = nil
     if data.status == "true" then
         data.published_date = os.date("%Y-%m-%d %H:%M:%S")
     end
     local savedDocument = DocumentModel:create(data, {
         returning = "*"
     })
+    if savedDocument and coverImg then
+        local imgUuid = Global.generateUUID()
+        ImageModel:create({
+            uuid = imgUuid,
+            document_id = savedDocument.id,
+            url = url,
+            is_cover = true
+        })
+    end
     if selectedTags ~= nil then
         local tags = Global.splitStr(selectedTags, ",")
         for _, name in ipairs(tags) do
-            local tag = TagsModel:find({ uuid = name })
+            local tag = TagsModel:find({
+                uuid = name
+            })
             if tag then
                 local relUuid = Global.generateUUID()
-                tag = DocumentTagsModel:create({ document_id = savedDocument.id, tag_id = tag.id, uuid = relUuid })
+                tag = DocumentTagsModel:create({
+                    document_id = savedDocument.id,
+                    tag_id = tag.id,
+                    uuid = relUuid
+                })
             end
         end
         savedDocument.tags = selectedTags
     end
-    return {data = savedDocument}
+    return {
+        data = savedDocument
+    }
 end
 
 function DocumentQueries.all(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    local page, perPage, orderField, orderDir = params.page or 1, params.perPage or 10, params.orderBy or 'id',
+        params.orderDir or 'desc'
 
     local paginated = DocumentModel:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage,
-        fields =
-        'id as internal_id, uuid as id, title, sub_title, slug, status, meta_title, meta_description,meta_keywords, user_id,published_date,content,created_at,updated_at'
+        fields = 'id as internal_id, uuid as id, title, sub_title, slug, status, meta_title, meta_description,meta_keywords, user_id,published_date,content,created_at,updated_at'
     })
     return {
         data = paginated:get_page(page),
