@@ -44,8 +44,10 @@ function DocumentQueries.create(data)
     end
 
     local selectedTags = data.tags
+    local tagNames = data.tag_names
     local coverImg = data.cover_image
     data.tags = nil
+    data.tag_names = nil
     data.cover_image = nil
     if data.status == "true" then
         data.published_date = os.date("%Y-%m-%d %H:%M:%S")
@@ -63,14 +65,14 @@ function DocumentQueries.create(data)
         })
     end
     if selectedTags ~= nil then
-        local tags = Global.splitStr(selectedTags, ",")
-        for _, name in ipairs(tags) do
+        local tagUuids = Global.splitStr(selectedTags, ",")
+        for _, tagUuid in ipairs(tagUuids) do
             local tag = TagsModel:find({
-                uuid = name
+                uuid = tagUuid
             })
             if tag then
                 local relUuid = Global.generateUUID()
-                tag = DocumentTagsModel:create({
+                DocumentTagsModel:create({
                     document_id = savedDocument.id,
                     tag_id = tag.id,
                     uuid = relUuid
@@ -79,6 +81,38 @@ function DocumentQueries.create(data)
         end
         savedDocument.tags = selectedTags
     end
+
+    if tagNames ~= nil and selectedTags == nil then
+        local enteredTags = Global.splitStr(tagNames, ",")
+        local tagUuids = {}
+
+        for _, name in ipairs(enteredTags) do
+            local trimmed = name:match("^%s*(.-)%s*$") -- trim spaces
+            local tag = TagsModel:find({
+                name = trimmed
+            })
+
+            if not tag then
+                local newTagUuid = Global.generateUUID()
+                tag = TagsModel:create({
+                    uuid = newTagUuid,
+                    name = trimmed
+                })
+            end
+
+            if tag then
+                local relUuid = Global.generateUUID()
+                DocumentTagsModel:create({
+                    document_id = savedDocument.id,
+                    tag_id = tag.id,
+                    uuid = relUuid
+                })
+                table.insert(tagUuids, tag.uuid)
+            end
+        end
+        savedDocument.tags = table.concat(tagUuids, ",")
+    end
+
     return {
         data = savedDocument
     }

@@ -309,5 +309,3 @@ function Global.uploadToMinio(file, file_name)
 end
 
 return Global
-
--- "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>AWS authentication requires a valid Date or x-amz-date header</Message><Resource>/test-images/88388719-e596-47d0-9c95-bca687abd82b.jpg</Resource><RequestId>183F1F8523AB053B</RequestId><HostId>dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af9251148b658df7ac2e3e8</HostId></Error>"
