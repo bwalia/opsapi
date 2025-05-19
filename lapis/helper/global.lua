@@ -270,7 +270,7 @@ end
 function Global.uploadToMinio(file, file_name)
     local http = require "resty.http"
 
-    local object_path = MINIO_BUCKET .. "/" .. file_name
+    local object_path = MINIO_BUCKET .. "/" .. uri_encode(file_name)
     local host = MINIO_ENDPOINT
     local url = "https://" .. host .. "/" .. object_path
 
