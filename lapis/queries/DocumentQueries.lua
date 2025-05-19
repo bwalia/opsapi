@@ -123,11 +123,27 @@ function DocumentQueries.all(params)
         params.orderDir or 'desc'
 
     local paginated = DocumentModel:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage,
-        fields = 'id as internal_id, uuid as id, title, sub_title, slug, status, meta_title, meta_description,meta_keywords, user_id,published_date,content,created_at,updated_at'
+        per_page = perPage
     })
+
+    local documents, updatedRecords = paginated:get_page(page), {}
+    for _, document in ipairs(documents) do
+        document:get_images()
+        document:get_tags()
+        -- local tagRows = db.select([[
+        --     t.id as internal_id, t.uuid as id, t.name
+        --     FROM tags t
+        --     INNER JOIN document__tags dt ON dt.tag_id = t.id
+        --     WHERE dt.document_id = ?
+        --   ]], documents.id)
+        document.internal_id = document.id
+        document.id = document.uuid
+        -- document['tags_data'] = tagRows
+        table.insert(updatedRecords, document)
+    end
+
     return {
-        data = paginated:get_page(page),
+        data = updatedRecords,
         total = paginated:total_items()
     }
 end
@@ -137,6 +153,7 @@ function DocumentQueries.show(id)
         uuid = id
     })
     if singleRecord then
+        singleRecord:get_images()
         local tagRows = db.select([[
             t.id as internal_id, t.uuid as id, t.name
             FROM tags t
