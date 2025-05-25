@@ -4,8 +4,9 @@ local db = require("lapis.db")
 local Document = Model:extend("documents", {
   timestamp = true,
   relations = {
-    { "tags", has_many = "DocumentTagsModel", key = "document_id" },
-    { "images", has_many = "ImageModel", key = "document_id" }
+    { "tags",   has_many = "DocumentTagsModel", key = "document_id" },
+    { "images", has_many = "ImageModel",        key = "document_id" },
+    { "user",   belongs_to = "UserModel" }
   }
 })
 
