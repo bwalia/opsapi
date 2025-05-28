@@ -38,7 +38,7 @@ ingress:
   className: "nginx"
   annotations: {}
   hosts:
-    - host: test.opsapi.io
+    - host: opsapi.workstation.co.uk
       paths:
         - path: /
           pathType: Prefix
