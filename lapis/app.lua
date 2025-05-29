@@ -103,7 +103,7 @@ app:get("/auth/login", function(self)
 
     self.cookies.redirect_from = self.params.from
 
-    local session, sessionErr = require"resty.session".new()
+    local session, sessionErr = require "resty.session".new()
     session:set("redirect_from", self.params.from)
     session:save()
 
@@ -171,7 +171,7 @@ app:get("/auth/callback", function(self)
 
     local userinfo = cJson.decode(usrRes.body)
     if userinfo.email ~= nil and userinfo.sub ~= nil then
-        local session, sessionErr = require"resty.session".start()
+        local session, sessionErr = require "resty.session".start()
         session:set(userinfo.sub, cJson.encode(token_response))
         session:save()
 
@@ -941,6 +941,16 @@ app:match("edit_templates", "/api/v2/templates/:id", respond_to({
 }))
 
 ----------------- Document Routes --------------------
+
+app:get("/api/v2/all-documents", function(self)
+    local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
+    self.params.timestamp = true
+    local records = DocumentQueries.allData()
+    return {
+        json = records,
+        status = 200
+    }
+end)
 
 app:match("documents", "/api/v2/documents", respond_to({
     GET = function(self)
