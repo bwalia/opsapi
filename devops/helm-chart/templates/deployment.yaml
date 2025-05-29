@@ -120,7 +120,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: MINIO_BUCKET
-
+            - name: MINIO_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: MINIO_REGION
       volumes:
         - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
           configMap:
@@ -129,5 +133,5 @@ spec:
           secret:
             secretName: "{{ .Release.Name }}-secrets"
             items:
-            - key: LAPIS_CONFIG
+            - key: LAPIS_CONFIG_LUA_FILE
               path: config.lua

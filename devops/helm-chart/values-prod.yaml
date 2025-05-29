@@ -1,4 +1,4 @@
-env: int
+env: prod
 
 image:
   repository: bwalia/opsapi
@@ -33,14 +33,14 @@ service:
   type: ClusterIP
   port: 8080
 
-svcAccessPort: 32135
+svcAccessPort: 32137
 
 ingress:
   enabled: true
   className: "nginx"
   annotations: {}
   hosts:
-    - host: int-opsapi.workstation.co.uk
+    - host: opsapi.workstation.co.uk
       paths:
         - path: /
           pathType: Prefix
