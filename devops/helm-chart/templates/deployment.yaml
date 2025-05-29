@@ -133,5 +133,5 @@ spec:
           secret:
             secretName: "{{ .Release.Name }}-secrets"
             items:
-            - key: LAPIS_CONFIG
+            - key: LAPIS_CONFIG_LUA_FILE
               path: config.lua

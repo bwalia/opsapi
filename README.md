@@ -29,7 +29,7 @@ data:
     KEYCLOAK_USERINFO_URL: {{ .Values.app_secrets.keycloak_userinfo_url }}
     OPENSSL_SECRET_IV: {{ .Values.app_secrets.openssl_secret_iv }}
     OPENSSL_SECRET_KEY: {{ .Values.app_secrets.openssl_secret_key }}
-    LAPIS_CONFIG: {{ .Values.app_secrets.lapis_config }}
+    lapis_config_lua_file: {{ .Values.app_secrets.lapis_config }}
     MINIO_ENDPOINT: {{ .Values.app_secrets.minio_endpoint }}
     MINIO_ACCESS_KEY: {{ .Values.app_secrets.minio_access_key }}
     MINIO_SECRET_KEY: {{ .Values.app_secrets.minio_secret_key }}
