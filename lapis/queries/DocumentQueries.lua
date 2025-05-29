@@ -130,6 +130,7 @@ function DocumentQueries.all(params)
     for _, document in ipairs(documents) do
         document:get_images()
         document:get_tags()
+        document:get_user()
         for index, tag in ipairs(document.tags) do
             local tagUUID = tag.tag_id
             local tagData = TagsModel:find(tagUUID)
@@ -144,6 +145,30 @@ function DocumentQueries.all(params)
     return {
         data = updatedRecords,
         total = paginated:total_items()
+    }
+end
+
+function DocumentQueries.allData()
+    local data = DocumentModel:select()
+
+    local documents, updatedRecords = data, {}
+    for _, document in ipairs(documents) do
+        document:get_images()
+        document:get_tags()
+        document:get_user()
+        for index, tag in ipairs(document.tags) do
+            local tagUUID = tag.tag_id
+            local tagData = TagsModel:find(tagUUID)
+            document.tags[index]["name"] = tagData.name
+        end
+        document.internal_id = document.id
+        document.id = document.uuid
+        -- document['tags_data'] = tagRows
+        table.insert(updatedRecords, document)
+    end
+
+    return {
+        data = updatedRecords,
     }
 end
 

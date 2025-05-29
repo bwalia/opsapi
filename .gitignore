@@ -8,3 +8,4 @@ sealed-secret.yaml
 secret.yaml
 devops/.DS_Store
 .DS_Store
+.qodo
