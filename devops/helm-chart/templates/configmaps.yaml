@@ -10,6 +10,7 @@ data:
 
         FILE=/app/config.lua
         cp /tmp/secrets/config.lua $FILE
+        lapis migrate
         echo "==========================="
 
 ---
