@@ -124,6 +124,11 @@ jobs:
       if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
       run: |
         export KUBECONFIG=$(pwd)/kubeconfig
+        echo "Deploying Helm chart for ${{ env.TARGET_ENV }} environment..."
+        kubectl config use-context ${{ env.TARGET_ENV }}-k3s
+        echo "Helm deleting existing release if it exists..."
+        helm delete ${{ env.IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
+        echo "Helm upgrading or installing the release..."
         helm upgrade --install ${{ env.IMAGE_NAME }} ./devops/helm-chart \
           -f ./devops/helm-chart/values-${{ env.TARGET_ENV }}.yaml \
           --set image.repository=bwalia/opsapi \
