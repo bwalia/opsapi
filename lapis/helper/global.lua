@@ -10,7 +10,6 @@ local MINIO_BUCKET = os.getenv("MINIO_BUCKET")
 local MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 local MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 local MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
-local MINIO_ENDPOINT_SCHEME = os.getenv("MINIO_ENDPOINT_SCHEME") or "http" -- Default to http if not set
 local MINIO_REGION = os.getenv("MINIO_REGION")
 
 local saltRounds = 10
@@ -273,11 +272,7 @@ function Global.uploadToMinio(file, file_name)
 
     local object_path = MINIO_BUCKET .. "/" .. uri_encode(file_name)
     local host = MINIO_ENDPOINT
-    local urlScheme = MINIO_ENDPOINT_SCHEME
-    if not urlScheme:find("://") then
-        urlScheme = urlScheme .. "://"
-    end
-    local url = urlScheme .. host .. "/" .. object_path
+    local url = host .. "/" .. object_path
 
     local amz_date = get_amz_date()
     local authorization = generate_aws_sigv4("PUT", host, "/" .. object_path, -- Path must start with /
