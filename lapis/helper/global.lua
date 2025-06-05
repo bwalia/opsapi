@@ -272,7 +272,7 @@ function Global.uploadToMinio(file, file_name)
 
     local object_path = MINIO_BUCKET .. "/" .. uri_encode(file_name)
     local host = MINIO_ENDPOINT
-    local url = "https://" .. host .. "/" .. object_path
+    local url = host .. "/" .. object_path
 
     local amz_date = get_amz_date()
     local authorization = generate_aws_sigv4("PUT", host, "/" .. object_path, -- Path must start with /
