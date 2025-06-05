@@ -272,6 +272,9 @@ function Global.uploadToMinio(file, file_name)
 
     local object_path = MINIO_BUCKET .. "/" .. uri_encode(file_name)
     local host = MINIO_ENDPOINT
+    if not host:find("http://") AND not host:find("https://") then
+        host = "https://" .. host
+    end
     local url = host .. "/" .. object_path
 
     local amz_date = get_amz_date()
