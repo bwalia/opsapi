@@ -109,7 +109,7 @@ end
 -- Base SCIM schema for User
 function Global.scimUserSchema(user)
     return {
-        schemas = {"urn:ietf:params:scim:schemas:core:2.0:User"},
+        schemas = { "urn:ietf:params:scim:schemas:core:2.0:User" },
         id = user.uuid,
         externalId = user.uuid,
         userName = user.username,
@@ -118,10 +118,10 @@ function Global.scimUserSchema(user)
             familyName = user.last_name
         },
         displayName = user.first_name .. " " .. user.last_name,
-        emails = {{
+        emails = { {
             value = user.email,
             primary = true
-        }},
+        } },
         active = user.active,
         roles = user.roles,
         meta = {
@@ -136,7 +136,7 @@ end
 -- Base SCIM schema for Group
 function Global.scimGroupSchema(group)
     return {
-        schemas = {"urn:ietf:params:scim:schemas:core:2.0:Group"},
+        schemas = { "urn:ietf:params:scim:schemas:core:2.0:Group" },
         id = group.uuid,
         externalId = group.uuid,
         displayName = group.name,
@@ -233,7 +233,7 @@ local function generate_aws_sigv4(method, host, path, query, headers, payload, s
     if query and query ~= "" then
         local params = {}
         for k, v in string.gmatch(query, "([^&=]+)=([^&=]*)") do
-            table.insert(params, {k, v})
+            table.insert(params, { k, v })
         end
         table.sort(params, function(a, b)
             return a[1] < b[1]
@@ -271,19 +271,19 @@ function Global.uploadToMinio(file, file_name)
     local http = require "resty.http"
 
     local object_path = MINIO_BUCKET .. "/" .. uri_encode(file_name)
-    local host = MINIO_ENDPOINT
-    if not host:find("http://") AND not host:find("https://") then
+    local host = MINIO_ENDPOINT or ""
+    if not host:find("http://") and not host:find("https://") then
         host = "https://" .. host
     end
     local url = host .. "/" .. object_path
 
     local amz_date = get_amz_date()
     local authorization = generate_aws_sigv4("PUT", host, "/" .. object_path, -- Path must start with /
-    "", -- No query parameters
-    {
-        ["Content-Type"] = file["content-type"],
-        ["x-amz-date"] = amz_date
-    }, file.content, "s3", MINIO_REGION)
+        "",                                                                   -- No query parameters
+        {
+            ["Content-Type"] = file["content-type"],
+            ["x-amz-date"] = amz_date
+        }, file.content, "s3", MINIO_REGION)
 
     local httpc = http.new()
     local res, err = httpc:request_uri(url, {
