@@ -80,7 +80,7 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubworker00
     needs: [build]
     steps:
       - name: Checkout code
