@@ -21,7 +21,7 @@ env:
 
 jobs:
   backup:
-    runs-on: whisky03
+    runs-on: ubworker00
 
     steps:
       - name: Checkout repository
