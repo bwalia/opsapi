@@ -3,6 +3,8 @@ lapis/session-data
 lapis/logs
 lapis/.env
 lapis/.env*
+lapis/opsapi-node/node_modules
+lapis/opsapi-node/uploads
 
 sealed-secret.yaml
 secret.yaml
