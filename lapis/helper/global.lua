@@ -224,7 +224,7 @@ function Global.uploadToMinio(file, file_name)
     local body_data = table.concat(body, crlf)
 
     local httpc = http.new()
-    local res, err = httpc:request_uri("https://0e6c-2401-4900-8512-56e5-6404-fe46-1c71-9090.ngrok-free.app/api/upload",
+    local res, err = httpc:request_uri("http://172.71.0.14:3000/api/upload",
         {
             method = "POST",
             body = body_data,

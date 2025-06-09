@@ -3,10 +3,12 @@ lapis/session-data
 lapis/logs
 lapis/.env
 lapis/.env*
-lapis/opsapi-node/node_modules
-lapis/opsapi-node/uploads
 
-sealed-secret.yaml
+
+node/opsapi-node/node_modules
+node/opsapi-node/uploads
+
+/sealed-secret.yaml
 secret.yaml
 devops/.DS_Store
 .DS_Store

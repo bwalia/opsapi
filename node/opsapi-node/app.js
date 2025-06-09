@@ -6,6 +6,11 @@ const errorHandler = require("./middleware/errorHandler");
 const app = express();
 app.use(express.json());
 
+app.get("/", (req, res) => {
+  res.send(
+    "Welcome to opsapi-node! This is the Node.js microservice used by the Lua Lapis app."
+  );
+});
 app.use("/api", uploadRoute);
 
 // Error middleware
