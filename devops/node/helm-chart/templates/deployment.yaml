@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.app.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.app.name }}
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.app.name }}
+    spec:
+      volumes:
+        - name: env-file
+          secret:
+            secretName: {{ .Values.app.name }}-env
+        - name: env-runtime
+          emptyDir: {}
+        - name: bootstrap
+          configMap:
+            name: {{ .Values.app.name }}-bootstrap
+
+      initContainers:
+        - name: copy-env
+          image: busybox
+          command: ["/bin/sh", "-c"]
+          args:
+            - "cp /secrets/.env /tmp/.env"
+          volumeMounts:
+            - name: env-file
+              mountPath: /secrets
+              readOnly: true
+            - name: env-runtime
+              mountPath: /tmp
+
+      containers:
+        - name: {{ .Values.app.name }}
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - chmod +x /bootstrap/entrypoint.sh && /bootstrap/entrypoint.sh
+          volumeMounts:
+            - name: env-runtime
+              mountPath: /tmp
+            - name: bootstrap
+              mountPath: /bootstrap

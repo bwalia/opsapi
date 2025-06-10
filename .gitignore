@@ -4,7 +4,11 @@ lapis/logs
 lapis/.env
 lapis/.env*
 
-sealed-secret.yaml
+
+node/opsapi-node/node_modules
+node/opsapi-node/uploads
+
+/sealed-secret.yaml
 secret.yaml
 devops/.DS_Store
 .DS_Store

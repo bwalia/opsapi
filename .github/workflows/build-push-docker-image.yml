@@ -35,6 +35,7 @@ env:
   TARGET_IMAGE_TAG: latest
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
   DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+  NODE_IMAGE_NAME: opsapi-node
 
 jobs:
   build:
@@ -55,6 +56,14 @@ jobs:
           docker tag test-${{ env.TARGET_STACK }} ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
           docker push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
         shell: bash
+
+      - name: Build OPSAPI-NODE Docker image and push to Docker Hub
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          echo "Building Node.js app Docker image..."
+          docker build -f node/opsapi-node/Dockerfile -t ${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }} ./node/opsapi-node
+          docker push ${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
+
 
       # - name: Run Docker container
       #   if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
@@ -132,3 +141,16 @@ jobs:
             --set image.repository=bwalia/opsapi \
             --set image.tag=latest \
             --namespace ${{ env.TARGET_ENV }} --create-namespace
+
+      - name: Deploy Helm Chart for OPSAPI-NODE
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "Deploying Helm chart for Node.js app to ${{ env.TARGET_ENV }}..."
+          helm delete ${{ env.NODE_IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
+          helm upgrade --install ${{ env.NODE_IMAGE_NAME }} ./devops/node/helm-chart \
+            -f ./devops/node/helm-chart/values-${{ env.TARGET_ENV }}.yaml \
+            --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }} \
+            --set image.tag=${{ env.TARGET_IMAGE_TAG }} \
+            --namespace ${{ env.TARGET_ENV }} --create-namespace
+

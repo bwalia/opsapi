@@ -5,12 +5,11 @@ local base64 = require 'base64'
 local secretKey = os.getenv("OPENSSL_SECRET_KEY")
 local secretIV = os.getenv("OPENSSL_SECRET_IV")
 
--- local MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
-local MINIO_BUCKET = os.getenv("MINIO_BUCKET")
-local MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
-local MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
-local MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
-local MINIO_REGION = os.getenv("MINIO_REGION")
+
+local http = require("resty.http")
+local cjson = require("cjson.safe")
+
+local jwt = require "resty.jwt"
 
 local saltRounds = 10
 local Global = {}
@@ -176,139 +175,76 @@ function Global.splitStr(str, sep)
     return t
 end
 
--- Helper functions for AWS SigV4
-local function to_hex(str)
-    return string.gsub(str, ".", function(c)
-        return string.format("%02x", string.byte(c))
-    end)
-end
+function Global.generateJwt(user_id)
+    local secret = os.getenv("JWT_SECRET_KEY")
+    local current_time = ngx.time()
+    local token = jwt:sign(
+        secret,
+        {
+            header = { typ = "JWT", alg = "HS256" },
+            payload = {
+                user_id = user_id,
+                exp = current_time + 3600
+            }
+        }
+    )
 
-local function hmac_sha256(key, msg)
-    local hmac = require "resty.openssl.hmac"
-    return hmac.new(key, "sha256"):final(msg)
-end
-
-local function get_amz_date()
-    return os.date("!%Y%m%dT%H%M%SZ")
-end
-
-local function get_date_stamp()
-    return os.date("!%Y%m%d")
-end
-
-local function uri_encode(str)
-    if not str then
-        return ""
-    end
-    return string.gsub(str, "([^A-Za-z0-9%-%.%_%~])", function(c)
-        return string.format("%%%02X", string.byte(c))
-    end)
-end
-
-local function sha256_hex(str)
-    local crypto = require "resty.openssl.digest"
-    return to_hex(crypto.new("sha256"):final(str or ""))
-end
-
--- Generate AWS Signature Version 4
-local function generate_aws_sigv4(method, host, path, query, headers, payload, service, region)
-    local algorithm = "AWS4-HMAC-SHA256"
-    local date_stamp = get_date_stamp()
-    local amz_date = get_amz_date()
-    local content_type = headers["Content-Type"] or ""
-    local content_sha256 = sha256_hex(payload)
-
-    -- Normalize path (handle multiple slashes and encoding)
-    local normalized_path = path
-    if not string.find(normalized_path, "^/") then
-        normalized_path = "/" .. normalized_path
-    end
-
-    -- Canonical headers must be in lowercase and sorted
-    local canonical_headers = "host:" .. host:lower() .. "\nx-amz-date:" .. amz_date .. "\n"
-    local signed_headers = "host;x-amz-date"
-
-    -- Canonical query string (sorted)
-    local canonical_query = ""
-    if query and query ~= "" then
-        local params = {}
-        for k, v in string.gmatch(query, "([^&=]+)=([^&=]*)") do
-            table.insert(params, { k, v })
-        end
-        table.sort(params, function(a, b)
-            return a[1] < b[1]
-        end)
-        local parts = {}
-        for _, param in ipairs(params) do
-            table.insert(parts, uri_encode(param[1]) .. "=" .. uri_encode(param[2]))
-        end
-        canonical_query = table.concat(parts, "&")
-    end
-
-    -- Canonical request
-    local canonical_request = string.format("%s\n%s\n%s\n%s\n%s\n%s", method:upper(), normalized_path, canonical_query,
-        canonical_headers, signed_headers, content_sha256)
-
-    -- String to sign
-    local credential_scope = string.format("%s/%s/%s/aws4_request", date_stamp, region, service)
-
-    local string_to_sign = string.format("%s\n%s\n%s\n%s", algorithm, amz_date, credential_scope,
-        sha256_hex(canonical_request))
-
-    -- Calculate signature
-    local k_date = hmac_sha256("AWS4" .. MINIO_SECRET_KEY, date_stamp)
-    local k_region = hmac_sha256(k_date, region)
-    local k_service = hmac_sha256(k_region, service)
-    local k_signing = hmac_sha256(k_service, "aws4_request")
-    local signature = to_hex(hmac_sha256(k_signing, string_to_sign))
-
-    -- Return authorization header
-    return string.format("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s", algorithm, MINIO_ACCESS_KEY,
-        credential_scope, signed_headers, signature)
+    return token
 end
 
 function Global.uploadToMinio(file, file_name)
-    local http = require "resty.http"
-
-    local object_path = MINIO_BUCKET .. "/" .. uri_encode(file_name)
-    local host = MINIO_ENDPOINT or ""
-    if not host:find("http://") and not host:find("https://") then
-        host = "https://" .. host
+    local token = Global.generateJwt(1)
+    if not file or not file.filename or not file.content then
+        return nil, "Missing file or file content"
     end
-    local url = host .. "/" .. object_path
 
-    local amz_date = get_amz_date()
-    local authorization = generate_aws_sigv4("PUT", host, "/" .. object_path, -- Path must start with /
-        "",                                                                   -- No query parameters
-        {
-            ["Content-Type"] = file["content-type"],
-            ["x-amz-date"] = amz_date
-        }, file.content, "s3", MINIO_REGION)
+    local boundary = "----LuaFormBoundary" .. tostring(math.random(1e8, 1e9))
+    local crlf = "\r\n"
+
+    local function getContentType(filename)
+        local ext = filename:match("%.(%w+)$")
+        local mime_types = {
+            jpg = "image/jpeg",
+            jpeg = "image/jpeg",
+            png = "image/png",
+            webp = "image/webp"
+        }
+        return mime_types[ext:lower()] or "application/octet-stream"
+    end
+    local content_type = file.content_type or getContentType(file_name)
+
+    local body = {
+        "--" .. boundary,
+        string.format('Content-Disposition: form-data; name="image"; filename="%s"', file_name),
+        string.format("Content-Type: %s", content_type),
+        "",
+        file.content,
+        "--" .. boundary .. "--"
+    }
+    local body_data = table.concat(body, crlf)
 
     local httpc = http.new()
-    local res, err = httpc:request_uri(url, {
-        method = "PUT",
-        body = file.content,
-        headers = {
-            ["Host"] = host,
-            ["Content-Type"] = file["content-type"],
-            ["Content-Length"] = #file.content,
-            ["x-amz-date"] = amz_date,
-            ["Authorization"] = authorization,
-            ["x-amz-content-sha256"] = sha256_hex(file.content)
-        },
-        ssl_verify = false
-    })
+    local res, err = httpc:request_uri("http://172.71.0.14:3000/api/upload",
+        {
+            method = "POST",
+            body = body_data,
+            headers = {
+                ["Authorization"] = "Bearer " .. token,
+                ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
+                ["Content-Length"] = tostring(#body_data)
+            },
+            ssl_verify = false
+        })
 
-    if not res or err then
-        return nil, "MinIO upload error: " .. (err or "unknown")
+    if not res then
+        return nil, "Request error: " .. tostring(err)
     end
 
-    if res.status >= 400 then
-        return nil, "MinIO error (" .. res.status .. "): " .. (res.body or "unknown")
+    if res.status ~= 200 then
+        return nil, "Upload failed [" .. res.status .. "]: " .. tostring(res.body)
     end
 
-    return url, nil
+    return cjson.decode(res.body).url, nil
 end
 
 return Global

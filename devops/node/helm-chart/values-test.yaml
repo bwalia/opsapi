@@ -1,0 +1,32 @@
+app:
+  name: opsapi-node
+  image:
+    repository: bwalia/opsapi-node
+    tag: latest
+    pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+secrets:
+  env_file: AgCad7MvMlzO2nI1gngXMaIryz9dWuEMFwGPbwaawxFm3Cc5D1YDCo5iHFTnXw9/buHn1ts+UwGFNETLuUfD2FwLFc2uquwvna+uScmhBQt71/olgLvGxaVRhgL9GQwSp4+iU1/GSn/Z/lVaNmRdld+nuL6v+twQ0pUOpyXcmBqPh8/kY3yvsvQmhQi4bb/f/K+g7ZDXJH+xlBFadw3F/2uHcsMZjWkS5xnE8vgADnO5cn5IBDPCVtFS8rCkEmZBAeWJeQ9TcKLmf0orG9iu8rEYMdwKhWCcA5OWo9hd2MKv3YMUDJ5LpyvkbPVOf7IWxSCcZVyYiZ7YrGqP6WYDDGEA9aqRCZxBFNQXnDEDWVfw3bLhCtHIli7s4NxZIU9JZXvGTIyRYgooxWaZZYRQDS39HCC6jpCgKDEcbojhfOfLVyEhLsMl25cBIStMJAdBfY8onWGuzWBVpJF3yI6SJtOCDAGWOEDjBoSMDDNKQ5sDgHAcdo46lWJ3KJktwWr0P6W7o5dAhioDBMLy6L68gucEwHHQNInjXUHJEsodDAHUcZYqt//VEnJMsAX/xumkPgtIQPcmM/sDNd5biNcNiiSc9MV3fTKYyy/rk4s08SrbLoJzG2OHJ+k5qMuh2VpD1JBWYsxIsWba0vMQn3rp5cZVjDSYwFm7GM79CdDp99SrS35HQfLnH1QhV0rWh541Rpbyd0qRZl5NUFxOOa3MQ6T6ExeeWLDzLYXhHJtORln3mgcI7I3u1QuPvxYkuSo/HGv1uSGjJbmm+TJruUPsWQ36BxeT7jCp0dAb7KLMe+oY4k/zLwyXmxhHfzQTHsnWP/7mGY8/BzMQe6NoW0DrgJShJfQGuDAsUiqzNGMmBmpXXE26uc3NmxoMpP+IXOoqZEeME3C2HB/kJ7Wt0VgnUuJ6oay2JkSlEllKvS74MCoKkUkkMwCtRd4x49lYecjbYBmz9rAH8uFFuehYsZ+mfOb3/fMfKFigL4p5r5ISItJARcc6zmyiIAA+XS7E82pTknK29AQY/hILS5cU4D5MC4FZxRZURLb3egjRVskipU4R8Z0NyMJwzpEJ2WC2HHCNZ+bD19EKqCZib5nm/u+awTKDVTdfGtbr
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: opsapi-node.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+env:
+  - name: NODE_ENV
+    value: "production"
+
+resources: {}

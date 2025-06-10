@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app.name }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    echo "Copying .env file from /tmp to /app/.env"
+    cp /tmp/.env /app/.env
+    echo "Starting Node.js app"
+    cd /app
+    exec node index.js
