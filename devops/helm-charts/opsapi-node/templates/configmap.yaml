@@ -10,10 +10,9 @@ data:
       FILE=/app/.env
       cp /tmp/secrets/.env $FILE
       if [ -f "$FILE" ]; then
-          echo "File $FILE exists."
+          echo "Env vars file $FILE exists."
           echo "Running Node.js app..."
-          node /app/index.js
       else
-          echo "File $FILE does not exist. Exiting."
+          echo "Env vars file $FILE does not exist. Exiting."
           exit 1
       fi
