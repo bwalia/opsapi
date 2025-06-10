@@ -25,18 +25,18 @@ spec:
           configMap:
             name: {{ .Values.app.name }}-bootstrap
 
-      initContainers:
-        - name: copy-env
-          image: busybox
-          command: ["/bin/sh", "-c"]
-          args:
-            - "cp /secrets/.env /tmp/.env"
-          volumeMounts:
-            - name: env-file
-              mountPath: /secrets
-              readOnly: true
-            - name: env-runtime
-              mountPath: /tmp
+      # initContainers:
+      #   - name: copy-env
+      #     image: busybox
+      #     command: ["/bin/sh", "-c"]
+      #     args:
+      #       - "cp /secrets/.env /tmp/.env"
+      #     volumeMounts:
+      #       - name: env-file
+      #         mountPath: /secrets
+      #         readOnly: true
+      #       - name: env-runtime
+      #         mountPath: /tmp
 
       containers:
         - name: {{ .Values.app.name }}
@@ -46,9 +46,11 @@ spec:
             - containerPort: {{ .Values.service.port }}
           command: ["/bin/sh", "-c"]
           args:
-            - chmod +x /bootstrap/entrypoint.sh && /bootstrap/entrypoint.sh
+            - cp /tmp/configmap/runs_pod_on_start.sh /usr/local/bin/runs_pod_on_start.sh && \
+              chmod +x /usr/local/bin/runs_pod_on_start.sh && \
+              sh /usr/local/bin/runs_pod_on_start.sh
           volumeMounts:
             - name: env-runtime
-              mountPath: /tmp
+              mountPath: /tmp/secrets                
             - name: bootstrap
-              mountPath: /bootstrap
+              mountPath: /tmp/configmap
