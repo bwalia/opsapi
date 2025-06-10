@@ -4,10 +4,16 @@ metadata:
   name: {{ .Values.app.name }}-bootstrap
   namespace: {{ .Release.Namespace }}
 data:
-  runs_pod_on_start.sh: |
-    #!/bin/sh
-    # echo "Copying .env file from /tmp to /app/.env"
-    # cp /tmp/.env /app/.env
-    # echo "Starting Node.js app"
-    # ls -al /app
-    # exec node index.js
+  bootstrap_node.sh: |
+      #!/bin/bash
+      set -x
+      FILE=/app/.env
+      cp /tmp/secrets/.env $FILE
+      if [ -f "$FILE" ]; then
+          echo "File $FILE exists."
+          echo "Running Node.js app..."
+          node /app/index.js
+      else
+          echo "File $FILE does not exist. Exiting."
+          exit 1
+      fi
