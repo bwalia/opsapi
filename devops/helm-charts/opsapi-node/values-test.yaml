@@ -3,7 +3,10 @@ app:
   image:
     repository: bwalia/opsapi-node
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
+# imagePullSecrets: []
+# nameOverride: ""
+# fullnameOverride: ""
 
 replicaCount: 1
 
