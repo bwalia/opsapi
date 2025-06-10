@@ -2,18 +2,15 @@
 
 FROM node:22
 
-# Set working directory
-WORKDIR /usr/src/app
-
-# Copy package.json and install dependencies
-COPY package*.json ./
+# Set the working directory in the container
+WORKDIR /app
+# Copy package.json and package-lock.json to the working directory
+COPY node/opsapi-node/package*.json /app
+# Install Node.js dependencies
 RUN npm install
-
-# Copy the rest of the app code
-COPY . .
-
-# Expose the port your Node app runs on (change if needed)
+# Copy the rest of the application code to the working directory
+COPY node/opsapi-node/. /app
+# Expose the application port
 EXPOSE 3000
-
-# Run the app
+# Start the Node.js application
 CMD ["npm", "start"]

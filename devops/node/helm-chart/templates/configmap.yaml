@@ -9,5 +9,5 @@ data:
     echo "Copying .env file from /tmp to /app/.env"
     cp /tmp/.env /app/.env
     echo "Starting Node.js app"
-    cd /app
-    exec node index.js
+    ls -al /app
+    # exec node index.js
