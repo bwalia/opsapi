@@ -24,7 +24,6 @@ spec:
         - name: bootstrap
           configMap:
             name: {{ .Values.app.name }}-bootstrap
-
       # initContainers:
       #   - name: copy-env
       #     image: busybox
@@ -36,17 +35,26 @@ spec:
       #         mountPath: /secrets
       #         readOnly: true
       #       - name: env-runtime
-      #         mountPath: /tmp
-
       containers:
         - name: {{ .Values.app.name }}
           image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
           imagePullPolicy: {{ .Values.app.image.pullPolicy | default "IfNotPresent" }}
           ports:
-            - containerPort: {{ .Values.service.port }}
-          command: ["/bin/sh", "-c"]
-          args:
-            - cp /tmp/configmap/bootstrap_node.sh /usr/local/bin/bootstrap_node.sh
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "cp /tmp/configmap/bootstrap_node.sh /usr/local/bin/bootstrap_node.sh"]          
           volumeMounts:
             - name: env-runtime
               mountPath: /tmp/secrets                
