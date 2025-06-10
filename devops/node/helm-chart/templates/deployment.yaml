@@ -46,9 +46,7 @@ spec:
             - containerPort: {{ .Values.service.port }}
           command: ["/bin/sh", "-c"]
           args:
-            - cp /tmp/configmap/runs_pod_on_start.sh /usr/local/bin/runs_pod_on_start.sh && \
-              chmod +x /usr/local/bin/runs_pod_on_start.sh && \
-              sh /usr/local/bin/runs_pod_on_start.sh
+            - cp /tmp/configmap/runs_pod_on_start.sh /usr/local/bin/runs_pod_on_start.sh
           volumeMounts:
             - name: env-runtime
               mountPath: /tmp/secrets                
