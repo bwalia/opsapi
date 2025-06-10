@@ -19,22 +19,9 @@ spec:
         - name: env-file
           secret:
             secretName: {{ .Values.app.name }}-env
-        - name: env-runtime
-          emptyDir: {}
         - name: bootstrap
           configMap:
             name: {{ .Values.app.name }}-bootstrap
-      # initContainers:
-      #   - name: copy-env
-      #     image: busybox
-      #     command: ["/bin/sh", "-c"]
-      #     args:
-      #       - "cp /secrets/.env /tmp/.env"
-      #     volumeMounts:
-      #       - name: env-file
-      #         mountPath: /secrets
-      #         readOnly: true
-      #       - name: env-runtime
       containers:
         - name: {{ .Values.app.name }}
           image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
@@ -56,7 +43,7 @@ spec:
               exec:
                 command: ["/bin/sh", "-c", "cp /tmp/configmap/bootstrap_node.sh /usr/local/bin/bootstrap_node.sh"]          
           volumeMounts:
-            - name: env-runtime
+            - name: env-file
               mountPath: /tmp/secrets                
             - name: bootstrap
               mountPath: /tmp/configmap
