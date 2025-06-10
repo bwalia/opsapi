@@ -3,8 +3,7 @@ const express = require("express");
 const uploadRoute = require("./routes/upload");
 const errorHandler = require("./middleware/errorHandler");
 
-const port = 3000; // Default port
-process.env.PORT = process.env.PORT || port; // Use environment variable or default
+const port = process.env.PORT || 3000; // Use environment variable or default
 
 const app = express();
 app.use(express.json());
