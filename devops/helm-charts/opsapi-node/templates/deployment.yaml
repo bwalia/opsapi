@@ -41,7 +41,7 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh", "-c", "cp /tmp/configmap/bootstrap_node.sh /usr/local/bin/bootstrap_node.sh"]          
+                command: ["/bin/sh", "-c", "cp /tmp/configmap/bootstrap_node.sh /usr/local/bin/bootstrap_node.sh && chmod +x /usr/local/bin/bootstrap_node.sh && sh /usr/local/bin/bootstrap_node.sh"]          
           volumeMounts:
             - name: env-file
               mountPath: /tmp/secrets                
