@@ -136,8 +136,8 @@ jobs:
           echo "Helm deleting existing release if it exists..."
           helm delete ${{ env.IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
           echo "Helm upgrading or installing the release..."
-          helm upgrade --install ${{ env.IMAGE_NAME }} ./devops/helm-charts \
-            -f ./devops/helm-charts/values-${{ env.TARGET_ENV }}.yaml \
+          helm upgrade --install ${{ env.IMAGE_NAME }} ./devops/helm-charts/opsapi \
+            -f ./devops/helm-charts/opsapi/values-${{ env.TARGET_ENV }}.yaml \
             --set image.repository=bwalia/opsapi \
             --set image.tag=latest \
             --namespace ${{ env.TARGET_ENV }} --create-namespace
@@ -148,8 +148,8 @@ jobs:
           export KUBECONFIG=$(pwd)/kubeconfig
           echo "Deploying Helm chart for Node.js app to ${{ env.TARGET_ENV }}..."
           helm delete ${{ env.NODE_IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
-          helm upgrade --install ${{ env.NODE_IMAGE_NAME }} ./devops/node/helm-charts \
-            -f ./devops/node/helm-charts/values-${{ env.TARGET_ENV }}.yaml \
+          helm upgrade --install ${{ env.NODE_IMAGE_NAME }} ./devops/helm-charts/opsapi-node \
+            -f ./devops/helm-charts/opsapi-node/values-${{ env.TARGET_ENV }}.yaml \
             --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }} \
             --set image.tag=${{ env.TARGET_IMAGE_TAG }} \
             --namespace ${{ env.TARGET_ENV }} --create-namespace
