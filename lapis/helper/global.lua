@@ -224,7 +224,9 @@ function Global.uploadToMinio(file, file_name)
     local body_data = table.concat(body, crlf)
 
     local httpc = http.new()
-    local res, err = httpc:request_uri("http://172.71.0.14:3000/api/upload",
+    local nodeApiUrl = os.getenv("NODE_API_URL") or "https://test-opsapi-node.workstation.co.uk/api"
+    local url = nodeApiUrl .. "/upload"
+    local res, err = httpc:request_uri(url,
         {
             method = "POST",
             body = body_data,

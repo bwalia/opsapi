@@ -57,7 +57,7 @@ services:
     image: redis:alpine
     container_name: opsapi-redis
     ports:
-      - "6377:6379"
+      - "6373:6379"
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.13
@@ -83,6 +83,19 @@ services:
       - ./keycloak_data:/opt/keycloak/data
     networks:
       opsapi-network:
+
+  nodeapp:
+    container_name: opsapi-node
+    build:
+      context: ../node/opsapi-node
+    ports:
+      - "4011:3000"  # Host port : container port (adjust as needed)
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.14
+    volumes:
+      - ../node/opsapi-node:/usr/src/app
+    env_file: "../node/opsapi-node/.env"
 
 networks:
   opsapi-network:
