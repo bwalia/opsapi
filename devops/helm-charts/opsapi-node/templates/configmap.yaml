@@ -7,6 +7,7 @@ data:
   bootstrap_node.sh: |
       #!/bin/bash
       set -x
+      mkdir -p uploads
       FILE=/app/.env
       cp /tmp/secrets/.env $FILE
       if [ -f "$FILE" ]; then
