@@ -967,6 +967,13 @@ app:match("documents", "/api/v2/documents", respond_to({
             json = record,
             status = 201
         }
+    end,
+    DELETE = function(self)
+        local record = DocumentQueries.deleteMultiple(self.params)
+        return {
+            json = record,
+            status = 200
+        }
     end
 }))
 
