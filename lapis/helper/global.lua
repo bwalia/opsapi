@@ -5,12 +5,6 @@ local base64 = require 'base64'
 local secretKey = os.getenv("OPENSSL_SECRET_KEY")
 local secretIV = os.getenv("OPENSSL_SECRET_IV")
 
-
-local http = require("resty.http")
-local cjson = require("cjson.safe")
-
-local jwt = require "resty.jwt"
-
 local saltRounds = 10
 local Global = {}
 
@@ -176,6 +170,7 @@ function Global.splitStr(str, sep)
 end
 
 function Global.generateJwt(user_id)
+    local jwt = require "resty.jwt"
     local secret = os.getenv("JWT_SECRET_KEY")
     local current_time = ngx.time()
     local token = jwt:sign(
@@ -193,6 +188,8 @@ function Global.generateJwt(user_id)
 end
 
 function Global.uploadToMinio(file, file_name)
+    local http = require("resty.http")
+    local cjson = require("cjson.safe")
     local token = Global.generateJwt(1)
     if not file or not file.filename or not file.content then
         return nil, "Missing file or file content"

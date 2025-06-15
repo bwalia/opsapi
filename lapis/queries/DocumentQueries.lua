@@ -213,6 +213,19 @@ function DocumentQueries.destroy(id)
     return record:delete()
 end
 
+function DocumentQueries.deleteMultiple(params)
+    local ids = cJson.decode(params.ids)
+    local deleteAble = DocumentModel:find_all(ids.id, "uuid")
+    if deleteAble then
+        for _, record in ipairs(deleteAble) do
+            record:delete()
+        end
+    end
+    return {
+        data = deleteAble
+    }
+end
+
 function DocumentQueries.roleByName(name)
     return DocumentModel:find({
         role_name = tostring(name)
