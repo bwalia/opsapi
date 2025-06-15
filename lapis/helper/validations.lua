@@ -27,8 +27,8 @@ end
 function Validation.createModule(params)
     return validate.assert_valid(params, {
         { "machine_name", exists = true, min_length = 2, max_length = 25 },
-        { "name", exists = true, min_length = 2, max_length = 25 },
-        { "priority", exists = true, min_length = 1 },
+        { "name",         exists = true, min_length = 2, max_length = 25 },
+        { "priority",     exists = true, min_length = 1 },
     })
 end
 
@@ -36,14 +36,15 @@ end
 function Validation.createPermissions(params)
     return validate.assert_valid(params, {
         { "module_machine_name", exists = true },
-        { "role", exists = true },
-        { "permissions", exists = true },
+        { "role",                exists = true },
+        { "permissions",         exists = true },
     })
 end
+
 function Validation.createPermissionsWithMName(params)
     return validate.assert_valid(params, {
-        { "module_id", exists = true },
-        { "role", exists = true },
+        { "module_id",   exists = true },
+        { "role",        exists = true },
         { "permissions", exists = true },
     })
 end
@@ -52,7 +53,7 @@ end
 function Validation.createGroup(params)
     return validate.assert_valid(params, {
         { "machine_name", exists = true },
-        { "name", exists = true },
+        { "name",         exists = true },
     })
 end
 
@@ -60,14 +61,14 @@ end
 function Validation.createSecret(params)
     return validate.assert_valid(params, {
         { "secret", exists = true },
-        { "name", exists = true }
+        { "name",   exists = true }
     })
 end
 
 -- Roles Validations
 function Validation.createProject(params)
     return validate.assert_valid(params, {
-        { "name", exists = true },
+        { "name",   exists = true },
         { "active", exists = true }
     })
 end
@@ -75,7 +76,7 @@ end
 -- Roles Validations
 function Validation.createTemplate(params)
     return validate.assert_valid(params, {
-        { "code", exists = true },
+        { "code",             exists = true },
         { "template_content", exists = true }
     })
 end
@@ -83,8 +84,8 @@ end
 -- Document Validations
 function Validation.createDocument(params)
     return validate.assert_valid(params, {
-        { "title", exists = true },
-        { "status", exists = true },
+        { "title",   exists = true },
+        { "status",  exists = true },
         { "user_id", exists = true },
         { "content", exists = true }
     })
@@ -94,6 +95,15 @@ end
 function Validation.createTag(params)
     return validate.assert_valid(params, {
         { "name", exists = true }
+    })
+end
+
+-- Enquiries Validations
+function Validation.createEnquiry(params)
+    return validate.assert_valid(params, {
+        { "name",     exists = true },
+        { "email",    exists = true },
+        { "phone_no", exists = true },
     })
 end
 
