@@ -179,31 +179,102 @@ function DocumentQueries.show(id)
     if singleRecord then
         singleRecord:get_images()
         singleRecord:get_user()
-        local tagRows = db.select([[
-            t.id as internal_id, t.uuid as id, t.name
-            FROM tags t
-            INNER JOIN document__tags dt ON dt.tag_id = t.id
-            WHERE dt.document_id = ?
-          ]], singleRecord.id)
-        local tagIds = {}
-        for _, tag in ipairs(tagRows) do
-            table.insert(tagIds, tag.id)
-            singleRecord.tags = tagIds
-        end
+        singleRecord:get_tags()
         singleRecord.internal_id = singleRecord.id
         singleRecord.id = singleRecord.uuid
+
+        singleRecord.cover_image = singleRecord.images[1].url
+        local tagIds = {}
+        ---@diagnostic disable-next-line: param-type-mismatch
+        for index, tag in ipairs(singleRecord.tags) do
+            local tagData = TagsModel:find(tag.tag_id)
+            table.insert(tagIds, tagData.uuid)
+        end
+        singleRecord.tags = tagIds
     end
     return singleRecord
 end
 
 function DocumentQueries.update(id, params)
+    params.images = nil
+    params.user = nil
+    params.user_id = nil
+    params.id = nil
+    if params.cover_image ~= nil then
+        if type(params.cover_image) == "table" then
+            local file = params.cover_image
+            if not file then
+                return {
+                    status = 400,
+                    json = {
+                        error = "Missing file"
+                    }
+                }
+            end
+
+            local filename = file.filename or ("upload_" .. tostring(os.time()) .. ".bin")
+            local url, err = Global.uploadToMinio(file, filename)
+
+            if not url then
+                return {
+                    data = {
+                        error = err
+                    }
+                }
+            end
+            local existingImg = ImageModel:find({
+                document_id = params.internal_id
+            })
+            if existingImg then
+                existingImg:delete()
+            end
+            local imgUuid = Global.generateUUID()
+            ImageModel:create({
+                uuid = imgUuid,
+                document_id = params.internal_id,
+                url = url,
+                is_cover = true
+            })
+        end
+        params.cover_image = nil
+    end
+    local selectedTags = params.tags
+    if selectedTags ~= nil then
+        local tagUuids = Global.splitStr(selectedTags, ",")
+        local existingTags = DocumentTagsModel:find_all({ params.internal_id }, "document_id")
+        if existingTags then
+            for _, existingTag in ipairs(existingTags) do
+                existingTag:delete()
+            end
+        end
+        for _, tagUuid in ipairs(tagUuids) do
+            local tag = TagsModel:find({
+                uuid = tagUuid
+            })
+            if tag then
+                local relUuid = Global.generateUUID()
+                DocumentTagsModel:create({
+                    document_id = params.internal_id,
+                    tag_id = tag.id,
+                    uuid = relUuid
+                })
+            end
+        end
+        params.tags = nil
+    end
+    params.internal_id = nil
+
     local record = DocumentModel:find({
         uuid = id
     })
     params.id = record.id
-    return record:update(params, {
+    local updateDoc = record:update(params, {
         returning = "*"
     })
+    if updateDoc then
+        return { data = params }
+    end
+    return { data = nil }
 end
 
 function DocumentQueries.destroy(id)
