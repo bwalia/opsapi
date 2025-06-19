@@ -74,7 +74,7 @@ return function(app)
             local record = DocumentQueries.update(tostring(self.params.id), self.params)
             return {
                 json = record,
-                status = 204
+                status = 200
             }
         end,
         DELETE = function(self)
