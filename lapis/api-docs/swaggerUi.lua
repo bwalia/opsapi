@@ -49,9 +49,10 @@ function SwaggerUi.generate()
         local column_name = row.column_name
         local data_type = row.data_type
         local isRelationTable = string.find(table_name, "__")
+        local isPgDefaultTable = string.find(table_name, "pg_stat_")
         -- Check if the table has been added to Swagger
         if table_name ~= "lapis_migrations" then
-            if not isRelationTable then
+            if not isRelationTable and not isPgDefaultTable then
                 if not swagger.paths["/api/v2/" .. table_name] then
                     swagger.paths["/api/v2/" .. table_name] = {
                         get = {
@@ -269,7 +270,7 @@ function SwaggerUi.generate()
 
     local swagger_json = cjson.encode(swagger)
 
-    local file = io.open("/app/api-docs/swagger.json", "w")
+    local file = io.open("/tmp/swagger.json", "w")
     if file then
         file:write(swagger_json)
         file:close()
