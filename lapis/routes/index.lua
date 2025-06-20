@@ -10,7 +10,7 @@ return function(app)
     end)
 
     app:match("/swagger/swagger.json", function()
-        local swaggerJson = File.readFile("api-docs/swagger.json")
+        local swaggerJson = File.readFile("/tmp/swagger.json")
         return { json = cJson.decode(swaggerJson) }
     end)
 end
