@@ -112,7 +112,8 @@ function DocumentQueries.create(data)
         end
         savedDocument.tags = table.concat(tagUuids, ",")
     end
-
+    savedDocument.internal_id = savedDocument.id
+    savedDocument.id = savedDocument.uuid
     return {
         data = savedDocument
     }
