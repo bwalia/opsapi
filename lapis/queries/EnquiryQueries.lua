@@ -26,16 +26,27 @@ function EnquiryQueries.all(params)
     local paginated = Enquiries:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
+    local enquries = {}
+    for _, enquiry in ipairs(paginated:get_page(page)) do
+        enquiry.internal_id = enquiry.id
+        enquiry.id = enquiry.uuid
+        table.insert(enquries, enquiry)
+    end
     return {
-        data = paginated:get_page(page),
+        data = enquries,
         total = paginated:total_items()
     }
 end
 
 function EnquiryQueries.show(id)
-    return Enquiries:find({
+    local enquiry = Enquiries:find({
         uuid = id
     })
+    enquiry.internal_id = enquiry.id
+    enquiry.id = enquiry.uuid
+    return {
+        data = enquiry
+    }
 end
 
 function EnquiryQueries.update(id, params)
