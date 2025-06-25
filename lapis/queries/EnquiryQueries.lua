@@ -44,9 +44,7 @@ function EnquiryQueries.show(id)
     })
     enquiry.internal_id = enquiry.id
     enquiry.id = enquiry.uuid
-    return {
-        data = enquiry
-    }
+    return enquiry
 end
 
 function EnquiryQueries.update(id, params)
