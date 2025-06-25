@@ -193,7 +193,7 @@ function Global.trim(s)
 end
 
 function Global.getEnvVar(name)
-    local value = Global.getEnvVar(name)
+    local value = os.getenv(name)
     if value == nil then
         ngx.log(ngx.ERR, "Environment variable " .. name .. " is not set")
         return nil
