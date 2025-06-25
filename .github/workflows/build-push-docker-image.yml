@@ -21,7 +21,7 @@ on:
       DEPLOYMENT_TYPE:
         type: choice
         description: "Please select the build only, deploy only or build and deploy"
-        default: "build-and-deploy"
+        default: "deploy"
         required: true
         options:
           - build
