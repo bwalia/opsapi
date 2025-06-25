@@ -232,6 +232,7 @@ function Global.uploadToMinio(file, file_name)
                 ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
                 ["Content-Length"] = tostring(#body_data)
             },
+            ssl_verify = false
         })
 
     if not res then
