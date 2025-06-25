@@ -34,7 +34,7 @@ env:
   IMAGE_NAME: opsapi
   TARGET_IMAGE_TAG: latest
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
-  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'deploy' }}
   NODE_IMAGE_NAME: opsapi-node
 
 jobs:
