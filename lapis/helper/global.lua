@@ -2,9 +2,6 @@ local bcrypt = require("bcrypt")
 local Json = require("cjson")
 local base64 = require 'base64'
 
-local secretKey = os.getenv("OPENSSL_SECRET_KEY")
-local secretIV = os.getenv("OPENSSL_SECRET_IV")
-
 local saltRounds = 10
 local Global = {}
 
@@ -50,6 +47,8 @@ function Global.removeBykey(table, key)
 end
 
 function Global.encryptSecret(secret)
+    local secretKey = Global.getEnvVar("OPENSSL_SECRET_KEY")
+    local secretIV = Global.getEnvVar("OPENSSL_SECRET_IV")
     local AES = require("resty.aes")
     local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
         iv = secretIV
@@ -63,6 +62,8 @@ end
 
 -- Function to decrypt data
 function Global.decryptSecret(encodedSecret)
+    local secretKey = Global.getEnvVar("OPENSSL_SECRET_KEY")
+    local secretIV = Global.getEnvVar("OPENSSL_SECRET_IV")
     local AES = require("resty.aes")
     local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
         iv = secretIV
@@ -171,7 +172,7 @@ end
 
 function Global.generateJwt(user_id)
     local jwt = require "resty.jwt"
-    local secret = os.getenv("JWT_SECRET_KEY")
+    local secret = Global.getEnvVar("JWT_SECRET_KEY")
     local current_time = ngx.time()
     local token = jwt:sign(
         secret,
@@ -185,6 +186,19 @@ function Global.generateJwt(user_id)
     )
 
     return token
+end
+
+function Global.trim(s)
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+function Global.getEnvVar(name)
+    local value = Global.getEnvVar(name)
+    if value == nil then
+        ngx.log(ngx.ERR, "Environment variable " .. name .. " is not set")
+        return nil
+    end
+    return Global.trim(value)
 end
 
 function Global.uploadToMinio(file, file_name)
@@ -221,7 +235,8 @@ function Global.uploadToMinio(file, file_name)
     local body_data = table.concat(body, crlf)
 
     local httpc = http.new()
-    local nodeApiUrl = os.getenv("NODE_API_URL") or "https://test-opsapi-node.workstation.co.uk/api"
+    local nodeApiUrl = Global.getEnvVar("NODE_API_URL") or "http://test-opsapi-node.workstation.co.uk/api"
+
     local url = nodeApiUrl .. "/upload"
     local res, err = httpc:request_uri(url,
         {

@@ -3,6 +3,7 @@ local jwt = require("resty.jwt")
 local cJson = require("cjson")
 local lapis = require("lapis")
 local UserQueries = require "queries.UserQueries"
+local Global = require "helper.global"
 
 return function(app)
     ----------------- Auth Routes --------------------
@@ -31,7 +32,7 @@ return function(app)
             }
         end
 
-        local JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
         local token = jwt:sign(JWT_SECRET_KEY, {
             header = {
                 typ = "JWT",
@@ -58,9 +59,9 @@ return function(app)
     end)
 
     app:get("/auth/login", function(self)
-        local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
-        local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
-        local redirect_uri = os.getenv("KEYCLOAK_REDIRECT_URI")
+        local keycloak_auth_url = Global.getEnvVar("KEYCLOAK_AUTH_URL")
+        local client_id = Global.getEnvVar("KEYCLOAK_CLIENT_ID")
+        local redirect_uri = Global.getEnvVar("KEYCLOAK_REDIRECT_URI")
 
         self.cookies.redirect_from = self.params.from
 
@@ -78,10 +79,10 @@ return function(app)
 
     app:get("/auth/callback", function(self)
         local httpc = http.new()
-        local token_url = os.getenv("KEYCLOAK_TOKEN_URL")
-        local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
-        local client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET")
-        local redirect_uri = os.getenv("KEYCLOAK_REDIRECT_URI")
+        local token_url = Global.getEnvVar("KEYCLOAK_TOKEN_URL")
+        local client_id = Global.getEnvVar("KEYCLOAK_CLIENT_ID")
+        local client_secret = Global.getEnvVar("KEYCLOAK_CLIENT_SECRET")
+        local redirect_uri = Global.getEnvVar("KEYCLOAK_REDIRECT_URI")
 
         -- Exchange the authorization code for a token
         local res, err = httpc:request_uri(token_url, {
@@ -111,7 +112,7 @@ return function(app)
 
         local token_response = cJson.decode(res.body)
 
-        local userinfo_url = os.getenv("KEYCLOAK_USERINFO_URL")
+        local userinfo_url = Global.getEnvVar("KEYCLOAK_USERINFO_URL")
         local usrRes, usrErr = httpc:request_uri(userinfo_url, {
             method = "GET",
             headers = {
@@ -136,7 +137,7 @@ return function(app)
             session:set(userinfo.sub, cJson.encode(token_response))
             session:save()
 
-            local JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+            local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
             local token = jwt:sign(JWT_SECRET_KEY, {
                 header = {
                     typ = "JWT",
@@ -172,9 +173,9 @@ return function(app)
             refreshToken = payloads.refreshToken
             accessToken = payloads.accessToken
 
-            local keycloakAuthUrl = os.getenv("KEYCLOAK_AUTH_URL") or ""
-            local client_id = os.getenv("KEYCLOAK_CLIENT_ID")
-            local client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET")
+            local keycloakAuthUrl = Global.getEnvVar("KEYCLOAK_AUTH_URL") or ""
+            local client_id = Global.getEnvVar("KEYCLOAK_CLIENT_ID")
+            local client_secret = Global.getEnvVar("KEYCLOAK_CLIENT_SECRET")
             local logoutUrl = keycloakAuthUrl:gsub("/auth$", "/logout")
 
             if refreshToken ~= nil and accessToken ~= nil then

@@ -1,9 +1,10 @@
 local respond_to = require("lapis.application").respond_to
 local DocumentQueries = require "queries.DocumentQueries"
 local Route = require("lapis.application").Route
+local Global = require "helper.global"
 return function(app)
     app:get("/api/v2/all-documents", function(self)
-        local keycloak_auth_url = os.getenv("KEYCLOAK_AUTH_URL")
+        local keycloak_auth_url = Global.getEnvVar("KEYCLOAK_AUTH_URL")
         self.params.timestamp = true
         local records = DocumentQueries.allData()
         return {
