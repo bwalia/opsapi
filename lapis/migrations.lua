@@ -245,5 +245,20 @@ return {
             { "created_at", types.time({ null = true }) },
             { "updated_at", types.time({ null = true }) }
         })
+    end,
+    ['11_create_products'] = function()
+        schema.create_table("products", {
+            { "id",                types.serial },
+            { "uuid",              types.varchar({ unique = true }) },
+            { "name",              types.varchar },
+            { "description",       types.text({ null = true }) },
+            { "SKU",               types.varchar },
+            { "price",             types.varchar },
+            { "quantity_in_stock", types.varchar },
+            { "manufacturer",      types.varchar },
+            { "status",            types.varchar },
+            { "created_at",        types.time({ null = true }) },
+            { "updated_at",        types.time({ null = true }) }
+        })
     end
 }

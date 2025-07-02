@@ -15,5 +15,5 @@ require("routes.tags")(app)
 require("routes.templates")(app)
 require("routes.projects")(app)
 require("routes.enquiries")(app)
-
+require("routes.products")(app)
 return app
