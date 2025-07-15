@@ -32,7 +32,15 @@ export default function Navbar() {
             </Link>
 
             {user ? (
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-4">
+                {user.role === 'seller' && (
+                  <Link
+                    href="/seller/dashboard"
+                    className="text-gray-700 hover:text-gray-900"
+                  >
+                    Dashboard
+                  </Link>
+                )}
                 <span className="text-gray-700">Hi, {user.name}</span>
                 <button
                   onClick={logout}

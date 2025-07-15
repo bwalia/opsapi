@@ -144,6 +144,12 @@ class ApiClient {
       body: JSON.stringify(data),
     }, true);
   }
+
+  // Categories
+  async getCategories(storeId?: string) {
+    const query = storeId ? `?store_id=${storeId}` : '';
+    return this.publicRequest(`/api/v2/categories${query}`);
+  }
 }
 
 export const api = new ApiClient(API_BASE_URL);

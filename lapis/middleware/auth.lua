@@ -1,6 +1,7 @@
 local jwt = require("resty.jwt")
 local Global = require("helper.global")
 local UserQueries = require("queries.UserQueries")
+local cJson = require("cjson")
 
 local AuthMiddleware = {}
 
@@ -21,8 +22,8 @@ function AuthMiddleware.authenticate(self)
     end
 
     local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
-    if not jwt_obj or not jwt_obj.valid then
-        return nil, { error = "Invalid or expired token", status = 401 }
+    if not jwt_obj or not jwt_obj.verified then
+        return nil, { error = "Invalid or expired token: " .. (jwt_obj and jwt_obj.reason or "unknown"), status = 401 }
     end
 
     local user_info = jwt_obj.payload.userinfo
@@ -39,7 +40,7 @@ function AuthMiddleware.requireAuth(handler)
         if err then
             return { json = { error = err.error }, status = err.status }
         end
-        
+
         self.current_user = user
         return handler(self)
     end
@@ -50,6 +51,10 @@ function AuthMiddleware.requireRole(role, handler)
         local user, err = AuthMiddleware.authenticate(self)
         if err then
             return { json = { error = err.error }, status = err.status }
+        end
+
+        if not user then
+            return { json = { error = "User information missing" }, status = 401 }
         end
 
         local user_data = UserQueries.show(user.sub or user.uuid)
