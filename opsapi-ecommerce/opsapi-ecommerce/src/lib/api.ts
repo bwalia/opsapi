@@ -150,6 +150,52 @@ class ApiClient {
     const query = storeId ? `?store_id=${storeId}` : '';
     return this.publicRequest(`/api/v2/categories${query}`);
   }
+
+  async createCategory(data: any) {
+    return this.request('/api/v2/categories', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  }
+
+  async updateCategory(id: string, data: any) {
+    return this.request(`/api/v2/categories/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, true);
+  }
+
+  async deleteCategory(id: string) {
+    return this.request(`/api/v2/categories/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Products
+  async createProduct(storeId: string, data: any) {
+    return this.request(`/api/v2/stores/${storeId}/products`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  }
+
+  async updateProduct(productId: string, data: any) {
+    return this.request(`/api/v2/products/${productId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, true);
+  }
+
+  async getStore(storeId: string) {
+    return this.request(`/api/v2/stores/${storeId}`);
+  }
+
+  async updateStore(storeId: string, data: any) {
+    return this.request(`/api/v2/stores/${storeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, true);
+  }
 }
 
 export const api = new ApiClient(API_BASE_URL);

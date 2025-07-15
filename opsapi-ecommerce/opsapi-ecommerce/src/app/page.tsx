@@ -45,7 +45,8 @@ export default function Home() {
   };
 
   const handleAddToCart = () => {
-    console.log('Product added to cart');
+    // Show success message or update cart count
+    console.log('Product added to cart successfully');
   };
 
   if (loading) {

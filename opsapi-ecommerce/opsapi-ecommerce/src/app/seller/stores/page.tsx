@@ -46,10 +46,15 @@ export default function SellerStores() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.createStore(formData);
+      const newStore = await api.createStore(formData);
       setShowForm(false);
       setFormData({ name: "", description: "", slug: "" });
       loadStores();
+      
+      // Suggest creating categories
+      if (confirm('Store created successfully! Would you like to create categories for your products?')) {
+        router.push(`/seller/categories?store=${newStore.id}`);
+      }
     } catch (error: any) {
       alert("Failed to create store: " + error.message);
     }
@@ -190,22 +195,30 @@ export default function SellerStores() {
                   <span className="text-sm text-gray-500">/{store.slug}</span>
                 </div>
 
-                <div className="flex space-x-2">
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <button
+                    onClick={() =>
+                      router.push(`/seller/categories?store=${store.uuid}`)
+                    }
+                    className="bg-purple-600 text-white py-2 px-3 rounded text-sm hover:bg-purple-700"
+                  >
+                    Categories
+                  </button>
                   <button
                     onClick={() =>
                       router.push(`/seller/products?store=${store.uuid}`)
                     }
-                    className="flex-1 bg-blue-600 text-white py-2 px-3 rounded text-sm hover:bg-blue-700"
+                    className="bg-blue-600 text-white py-2 px-3 rounded text-sm hover:bg-blue-700"
                   >
-                    Manage Products
-                  </button>
-                  <button
-                    onClick={() => router.push(`/seller/stores/${store.uuid}`)}
-                    className="flex-1 border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
-                  >
-                    Edit Store
+                    Products
                   </button>
                 </div>
+                <button
+                  onClick={() => router.push(`/seller/stores/${store.uuid}`)}
+                  className="w-full border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
+                >
+                  Edit Store
+                </button>
               </div>
             ))}
         </div>

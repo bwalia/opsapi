@@ -20,8 +20,16 @@ return function(app)
             end
             
             -- Get or create session cart
-            local session = require("resty.session").start()
-            local cart = session:get("cart") or {}
+            local session, err = require("resty.session").start()
+            if not session then
+                ngx.log(ngx.ERR, "Session start failed: ", err or "unknown")
+                return { json = { error = "Session error" }, status = 500 }
+            end
+            
+            local cart = session:get("cart")
+            if not cart then
+                cart = {}
+            end
             
             -- Add/update item in cart
             if cart[product_uuid] then

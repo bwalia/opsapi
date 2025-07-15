@@ -14,6 +14,11 @@ function StoreproductQueries.create(params)
     if not params.track_inventory then
         params.track_inventory = true
     end
+    local store = StoreModel:find({ uuid = params.store_id })
+    if not store then
+        return nil, "Store not found"
+    end
+    params.store_id = store.id
     return StoreproductModel:create(params, { returning = "*" })
 end
 
@@ -22,7 +27,7 @@ function StoreproductQueries.updateInventory(product_uuid, quantity_change)
     if not product then
         return nil, "Product not found"
     end
-    
+
     if product.track_inventory then
         local new_quantity = product.inventory_quantity + quantity_change
         if new_quantity < 0 then
@@ -30,7 +35,7 @@ function StoreproductQueries.updateInventory(product_uuid, quantity_change)
         end
         product:update({ inventory_quantity = new_quantity })
     end
-    
+
     return product, nil
 end
 
@@ -39,28 +44,28 @@ function StoreproductQueries.checkInventory(product_uuid, required_quantity)
     if not product then
         return false, "Product not found"
     end
-    
+
     if product.track_inventory and product.inventory_quantity < required_quantity then
         return false, "Insufficient inventory. Available: " .. product.inventory_quantity
     end
-    
+
     return true, nil
 end
 
 function StoreproductQueries.all(params)
     local page, perPage, orderField, orderDir =
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
+
     local paginated = StoreproductModel:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
-    
+
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
         product:get_store()
         product:get_category()
     end
-    
+
     return {
         data = products,
         total = paginated:total_items()
@@ -69,18 +74,20 @@ end
 
 -- Get products by store
 function StoreproductQueries.getByStore(store_id, params)
+    local store = StoreModel:find({ uuid = store_id })
     local page, perPage, orderField, orderDir =
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
-    local paginated = StoreproductModel:paginated("WHERE store_id = ? ORDER BY " .. orderField .. " " .. orderDir, {
-        per_page = perPage
-    }, store_id)
-    
+
+    local paginated = StoreproductModel:paginated(
+        "WHERE store_id = " .. store.id .. " ORDER BY " .. orderField .. " " .. orderDir, {
+            per_page = perPage
+        })
+
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
         product:get_category()
     end
-    
+
     return {
         data = products,
         total = paginated:total_items()
@@ -91,11 +98,12 @@ end
 function StoreproductQueries.getByStoreAndCategory(store_id, category_id, params)
     local page, perPage, orderField, orderDir =
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
-    local paginated = StoreproductModel:paginated("WHERE store_id = ? AND category_id = ? ORDER BY " .. orderField .. " " .. orderDir, {
-        per_page = perPage
-    }, store_id, category_id)
-    
+
+    local paginated = StoreproductModel:paginated(
+        "WHERE store_id = ? AND category_id = ? ORDER BY " .. orderField .. " " .. orderDir, {
+            per_page = perPage
+        }, store_id, category_id)
+
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()
