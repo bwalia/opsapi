@@ -93,11 +93,15 @@ function UserQueries.destroy(id)
 end
 
 function UserQueries.verify(email, plain_password)
-    local user = Users:find({ username = email })
+    local user = Users:find({ email = email })
     if user and bcrypt.verify(plain_password, user.password) then
         return user
     end
     return nil
+end
+
+function UserQueries.findByEmail(email)
+    return Users:find({ email = email })
 end
 
 -- SCIM user response

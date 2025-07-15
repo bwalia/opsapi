@@ -9,6 +9,6 @@ chmod -R +x lapis/pgdata
 chmod -R +x lapis/keycloak_data
 
 cd lapis
-sed -i 's|COPY lapis/\. /app/|COPY . /app|' Dockerfile
+sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 docker compose down
 docker compose up --build -d

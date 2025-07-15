@@ -2,6 +2,7 @@ local schema = require("lapis.db.schema")
 local types = schema.types
 local db = require("lapis.db")
 local Global = require "helper.global"
+local ecommerce_migrations = require("ecommerce-migrations")
 
 return {
     ['01_create_users'] = function()
@@ -43,12 +44,28 @@ return {
         }) }, { "updated_at", types.time({
             null = true
         }) }, "PRIMARY KEY (id)" })
-        local roleExists = db.select("id from roles where role_name = ?", "administrative")
-        if not roleExists or #roleExists == 0 then
+        local adminRoleExists = db.select("id from roles where role_name = ?", "administrative")
+        if not adminRoleExists or #adminRoleExists == 0 then
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
       ]], Global.generateStaticUUID(), "administrative", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+        end
+        
+        local sellerRoleExists = db.select("id from roles where role_name = ?", "seller")
+        if not sellerRoleExists or #sellerRoleExists == 0 then
+            db.query([[
+        INSERT INTO roles (uuid, role_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), "seller", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+        end
+        
+        local buyerRoleExists = db.select("id from roles where role_name = ?", "buyer")
+        if not buyerRoleExists or #buyerRoleExists == 0 then
+            db.query([[
+        INSERT INTO roles (uuid, role_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), "buyer", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
         end
     end,
     ['create_user__roles'] = function()
@@ -260,5 +277,15 @@ return {
             { "created_at",        types.time({ null = true }) },
             { "updated_at",        types.time({ null = true }) }
         })
-    end
+    end,
+
+    -- Ecommerce migrations
+    ['12_create_stores'] = ecommerce_migrations[1],
+    ['13_create_categories'] = ecommerce_migrations[2], 
+    ['14_create_storeproducts'] = ecommerce_migrations[3],
+    ['15_create_customers'] = ecommerce_migrations[4],
+    ['16_create_orders'] = ecommerce_migrations[5],
+    ['17_create_orderitems'] = ecommerce_migrations[6],
+    ['18_create_product_variants'] = ecommerce_migrations[7],
+    ['19_create_inventory_transactions'] = ecommerce_migrations[8]
 }
