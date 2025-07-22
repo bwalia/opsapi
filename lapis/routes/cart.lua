@@ -20,14 +20,13 @@ return function(app)
             end
             
             -- Get or create session cart
-            local session, err = require("resty.session").start()
+            local session = require("resty.session").start()
             if not session then
-                ngx.log(ngx.ERR, "Session start failed: ", err or "unknown")
                 return { json = { error = "Session error" }, status = 500 }
             end
             
             local cart = session:get("cart")
-            if not cart then
+            if type(cart) ~= "table" then
                 cart = {}
             end
             
@@ -59,14 +58,21 @@ return function(app)
     app:match("get_cart", "/api/v2/cart", respond_to({
         GET = function(self)
             local session = require("resty.session").start()
-            local cart = session:get("cart") or {}
-            
-            local total = 0
-            for _, item in pairs(cart) do
-                total = total + (item.price * item.quantity)
+            local cart = session:get("cart")
+            if type(cart) ~= "table" then
+                cart = {}
             end
             
-            return { json = { cart = cart, total = total }, status = 200 }
+            local total = 0
+            local items = {}
+            for uuid, item in pairs(cart) do
+                if type(item) == "table" and item.price and item.quantity then
+                    total = total + (tonumber(item.price) * tonumber(item.quantity))
+                    table.insert(items, item)
+                end
+            end
+            
+            return { json = { cart = cart, items = items, total = total }, status = 200 }
         end
     }))
     

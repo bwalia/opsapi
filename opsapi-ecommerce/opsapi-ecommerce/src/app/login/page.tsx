@@ -12,11 +12,6 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  interface User {
-    role?: string;
-    // add other user properties if needed
-  }
-
   const { login } = useAuth();
   const router = useRouter();
 
@@ -25,11 +20,13 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      await login(formData.username, formData.password);
-      // After login, get the user from context if needed, or redirect
-      // For now, just redirect to home or seller dashboard as needed
-      // You may need to update this logic if you want to check the user's role after login
-      router.push("/");
+      const user = await login(formData.username, formData.password);
+      // Role-based redirect
+      if (user?.role === 'seller') {
+        router.push('/seller/dashboard');
+      } else {
+        router.push('/');
+      }
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {

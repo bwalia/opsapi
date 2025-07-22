@@ -1,7 +1,7 @@
-'use client';
-import { useState, useEffect } from 'react';
-import ProductCard from '@/components/ProductCard';
-import api from '@/lib/api';
+"use client";
+import { useState, useEffect } from "react";
+import ProductCard from "@/components/ProductCard";
+import api from "@/lib/api";
 
 interface Product {
   uuid: string;
@@ -15,7 +15,7 @@ interface Product {
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   useEffect(() => {
     loadProducts();
@@ -24,9 +24,9 @@ export default function Home() {
   const loadProducts = async () => {
     try {
       setLoading(true);
-      setError('');
+      setError("");
       const response = await api.getProducts({ page: 1, perPage: 20 });
-      
+
       // Handle different response structures
       if (response && Array.isArray(response.data)) {
         setProducts(response.data);
@@ -36,8 +36,8 @@ export default function Home() {
         setProducts([]);
       }
     } catch (err: any) {
-      console.error('Failed to load products:', err);
-      setError(err.message || 'Failed to load products');
+      console.error("Failed to load products:", err);
+      setError(err.message || "Failed to load products");
       setProducts([]);
     } finally {
       setLoading(false);
@@ -46,7 +46,7 @@ export default function Home() {
 
   const handleAddToCart = () => {
     // Show success message or update cart count
-    console.log('Product added to cart successfully');
+    console.log("Product added to cart successfully");
   };
 
   if (loading) {
@@ -68,17 +68,27 @@ export default function Home() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">Featured Products</h1>
-        <p className="text-gray-600">Discover amazing products from our multi-tenant marketplace</p>
+        <h1 className="text-3xl text-white font-bold text-gray-900 mb-4">
+          Featured Products
+        </h1>
+        <p className="text-gray-600">
+          Discover amazing products from our multi-tenant marketplace
+        </p>
       </div>
 
       {!products || products.length === 0 ? (
         <div className="text-center py-12">
           <div className="max-w-md mx-auto">
             <div className="text-6xl mb-4">🛍️</div>
-            <h2 className="text-xl font-semibold text-gray-700 mb-2">No Products Yet</h2>
-            <p className="text-gray-500 mb-4">Be the first to add products to our marketplace!</p>
-            <p className="text-sm text-gray-400">Sellers can register and create stores to start selling.</p>
+            <h2 className="text-xl font-semibold text-gray-700 mb-2">
+              No Products Yet
+            </h2>
+            <p className="text-gray-500 mb-4">
+              Be the first to add products to our marketplace!
+            </p>
+            <p className="text-sm text-gray-400">
+              Sellers can register and create stores to start selling.
+            </p>
           </div>
         </div>
       ) : (

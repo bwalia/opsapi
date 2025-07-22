@@ -1,11 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 import { Product } from "@/types";
 
-export default function SellerProducts() {
+function ProductsContent() {
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -453,7 +453,10 @@ export default function SellerProducts() {
                 >
                   Edit
                 </button>
-                <button className="flex-1 border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50">
+                <button 
+                  onClick={() => router.push(`/seller/products/${product.uuid}/variants`)}
+                  className="flex-1 border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
+                >
                   Variants
                 </button>
               </div>
@@ -462,5 +465,13 @@ export default function SellerProducts() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SellerProducts() {
+  return (
+    <Suspense fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}>
+      <ProductsContent />
+    </Suspense>
   );
 }

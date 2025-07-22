@@ -1,15 +1,16 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 
-export default function SellerCategories() {
+function CategoriesContent() {
   const [categories, setCategories] = useState([]);
   const [stores, setStores] = useState([]);
   const [selectedStore, setSelectedStore] = useState("");
   const [dataLoading, setDataLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  
   type Category = {
     uuid: string;
     name: string;
@@ -364,5 +365,13 @@ export default function SellerCategories() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SellerCategories() {
+  return (
+    <Suspense fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}>
+      <CategoriesContent />
+    </Suspense>
   );
 }

@@ -102,7 +102,7 @@ class ApiClient {
 
   // Cart
   async getCart() {
-    return this.request('/api/v2/cart');
+    return this.request('/api/v2/cart', { method: 'GET' });
   }
 
   async addToCart(data: any) {
@@ -187,7 +187,11 @@ class ApiClient {
   }
 
   async getStore(storeId: string) {
-    return this.request(`/api/v2/stores/${storeId}`);
+    return this.request(`/api/v2/stores/${storeId}`, { method: 'GET' });
+  }
+
+  async getVariants(productId: string) {
+    return this.request(`/api/v2/products/${productId}`, { method: 'GET' });
   }
 
   async updateStore(storeId: string, data: any) {

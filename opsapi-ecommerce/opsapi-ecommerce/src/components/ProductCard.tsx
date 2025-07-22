@@ -20,6 +20,11 @@ export default function ProductCard({ product, onAddToCart }: ProductCardProps) 
   const [quantity, setQuantity] = useState(1);
 
   const handleAddToCart = async () => {
+    if (!product.uuid) {
+      alert('Invalid product');
+      return;
+    }
+    
     setLoading(true);
     try {
       await api.addToCart({
@@ -27,9 +32,22 @@ export default function ProductCard({ product, onAddToCart }: ProductCardProps) 
         quantity: quantity
       });
       onAddToCart?.();
-    } catch (error) {
+      // Show success message
+      const successMsg = document.createElement('div');
+      successMsg.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded z-50';
+      successMsg.textContent = 'Added to cart successfully!';
+      document.body.appendChild(successMsg);
+      setTimeout(() => {
+        if (document.body.contains(successMsg)) {
+          document.body.removeChild(successMsg);
+        }
+      }, 3000);
+      
+      // Trigger cart refresh
+      window.dispatchEvent(new CustomEvent('cartUpdated'));
+    } catch (error: any) {
       console.error('Failed to add to cart:', error);
-      alert('Failed to add to cart');
+      alert(error.message || 'Failed to add to cart');
     } finally {
       setLoading(false);
     }

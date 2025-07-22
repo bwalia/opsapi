@@ -1,7 +1,7 @@
-'use client';
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import api from '@/lib/api';
+"use client";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import api from "@/lib/api";
 
 interface CartItem {
   product_uuid: string;
@@ -25,7 +25,7 @@ export default function Cart() {
       setCart(response?.cart || {});
       setTotal(response?.total || 0);
     } catch (error) {
-      console.error('Failed to load cart:', error);
+      console.error("Failed to load cart:", error);
       setCart({});
       setTotal(0);
     } finally {
@@ -38,7 +38,7 @@ export default function Cart() {
       await api.removeFromCart(productId);
       await loadCart();
     } catch (error) {
-      console.error('Failed to remove from cart:', error);
+      console.error("Failed to remove from cart:", error);
     }
   };
 
@@ -48,7 +48,7 @@ export default function Cart() {
       setCart({});
       setTotal(0);
     } catch (error) {
-      console.error('Failed to clear cart:', error);
+      console.error("Failed to clear cart:", error);
     }
   };
 
@@ -67,7 +67,9 @@ export default function Cart() {
       <div className="container mx-auto px-4 py-8">
         <div className="text-center py-12">
           <h1 className="text-2xl font-bold mb-4">Your Cart is Empty</h1>
-          <p className="text-gray-600 mb-6">Add some products to get started!</p>
+          <p className="text-gray-600 mb-6">
+            Add some products to get started!
+          </p>
           <Link
             href="/"
             className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
@@ -95,11 +97,16 @@ export default function Cart() {
         <div className="lg:col-span-2">
           <div className="space-y-4">
             {cartItems.map((item) => (
-              <div key={item.product_uuid} className="border rounded-lg p-4 flex items-center justify-between">
+              <div
+                key={item.product_uuid}
+                className="border rounded-lg p-4 flex items-center justify-between"
+              >
                 <div className="flex-1">
                   <h3 className="font-semibold">{item.name}</h3>
                   <p className="text-gray-600">${item.price.toFixed(2)} each</p>
-                  <p className="text-sm text-gray-500">Quantity: {item.quantity}</p>
+                  <p className="text-sm text-gray-500">
+                    Quantity: {item.quantity}
+                  </p>
                 </div>
                 <div className="flex items-center space-x-4">
                   <span className="font-semibold">
@@ -120,7 +127,7 @@ export default function Cart() {
         <div className="lg:col-span-1">
           <div className="border rounded-lg p-6 sticky top-4">
             <h2 className="text-xl font-semibold mb-4">Order Summary</h2>
-            
+
             <div className="space-y-2 mb-4">
               <div className="flex justify-between">
                 <span>Subtotal:</span>
@@ -142,7 +149,7 @@ export default function Cart() {
             >
               Proceed to Checkout
             </Link>
-            
+
             <Link
               href="/"
               className="w-full mt-2 border border-gray-300 py-3 px-4 rounded hover:bg-gray-50 block text-center"
