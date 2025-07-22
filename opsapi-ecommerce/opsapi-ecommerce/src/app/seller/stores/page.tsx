@@ -28,7 +28,7 @@ export default function SellerStores() {
 
   const loadStores = async () => {
     try {
-      const response = await api.getStores();
+      const response = await api.getMyStores();
       const storesData = Array.isArray(response?.data)
         ? response.data
         : Array.isArray(response)

@@ -46,8 +46,8 @@ function ProductsContent() {
 
   const loadData = async () => {
     try {
-      // Load stores
-      const storesResponse = await api.getStores();
+      // Load user's stores
+      const storesResponse = await api.getMyStores();
       const storesData = Array.isArray(storesResponse?.data)
         ? storesResponse.data
         : Array.isArray(storesResponse)

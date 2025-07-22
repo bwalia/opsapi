@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import api from '@/lib/api';
+import { useCart } from '@/contexts/CartContext';
 
 interface Product {
   uuid: string;
@@ -16,8 +16,8 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product, onAddToCart }: ProductCardProps) {
-  const [loading, setLoading] = useState(false);
   const [quantity, setQuantity] = useState(1);
+  const { addToCart, loading } = useCart();
 
   const handleAddToCart = async () => {
     if (!product.uuid) {
@@ -25,13 +25,10 @@ export default function ProductCard({ product, onAddToCart }: ProductCardProps) 
       return;
     }
     
-    setLoading(true);
     try {
-      await api.addToCart({
-        product_uuid: product.uuid,
-        quantity: quantity
-      });
+      await addToCart(product.uuid, quantity);
       onAddToCart?.();
+      
       // Show success message
       const successMsg = document.createElement('div');
       successMsg.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded z-50';
@@ -42,14 +39,9 @@ export default function ProductCard({ product, onAddToCart }: ProductCardProps) 
           document.body.removeChild(successMsg);
         }
       }, 3000);
-      
-      // Trigger cart refresh
-      window.dispatchEvent(new CustomEvent('cartUpdated'));
     } catch (error: any) {
       console.error('Failed to add to cart:', error);
       alert(error.message || 'Failed to add to cart');
-    } finally {
-      setLoading(false);
     }
   };
 

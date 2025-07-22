@@ -9,16 +9,22 @@ return function(app)
             return { json = StoreQueries.all(self.params) }
         end,
         POST = AuthMiddleware.requireRole("seller", function(self)
+            -- Use the authenticated user's internal ID
             self.params.user_id = self.user_data.internal_id
             return { json = StoreQueries.create(self.params), status = 201 }
         end)
     }))
     
-    -- User's own stores
-    app:match("my_stores", "/api/v2/users/:user_id/stores", respond_to({
-        GET = function(self)
-            return { json = StoreQueries.getByUser(self.params.user_id, self.params) }
-        end
+    -- User's own stores (authenticated)
+    app:match("my_stores", "/api/v2/my/stores", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            -- Get user data to get internal ID
+            local user_data = require("queries.UserQueries").show(self.current_user.sub or self.current_user.uuid)
+            if not user_data then
+                return { json = { error = "User not found" }, status = 404 }
+            end
+            return { json = StoreQueries.getByUser(user_data.internal_id, self.params) }
+        end)
     }))
 
     app:match("edit_store", "/api/v2/stores/:id", respond_to({
@@ -31,18 +37,22 @@ return function(app)
         GET = function(self)
             return { json = self.store, status = 200 }
         end,
-        PUT = function(self)
-            if self.params.user_id and self.store.user_id ~= tonumber(self.params.user_id) then
+        PUT = AuthMiddleware.requireAuth(function(self)
+            -- Get current user info
+            local user_data = require("queries.UserQueries").show(self.current_user.sub or self.current_user.uuid)
+            if not user_data or self.store.user_id ~= user_data.internal_id then
                 return { json = { error = "Access denied" }, status = 403 }
             end
-            return { json = StoreQueries.update(self.params.id, self.params), status = 204 }
-        end,
-        DELETE = function(self)
-            if self.params.user_id and self.store.user_id ~= tonumber(self.params.user_id) then
+            return { json = StoreQueries.update(self.params.id, self.params), status = 200 }
+        end),
+        DELETE = AuthMiddleware.requireAuth(function(self)
+            -- Get current user info
+            local user_data = require("queries.UserQueries").show(self.current_user.sub or self.current_user.uuid)
+            if not user_data or self.store.user_id ~= user_data.internal_id then
                 return { json = { error = "Access denied" }, status = 403 }
             end
-            return { json = StoreQueries.destroy(self.params.id), status = 204 }
-        end
+            return { json = StoreQueries.destroy(self.params.id), status = 200 }
+        end)
     }))
     
     -- Store products
@@ -52,6 +62,12 @@ return function(app)
             return { json = StoreproductQueries.getByStore(self.params.store_id, self.params) }
         end,
         POST = AuthMiddleware.requireRole("seller", function(self)
+            -- Verify store ownership
+            local store = StoreQueries.show(self.params.store_id)
+            if not store or store.user_id ~= self.user_data.internal_id then
+                return { json = { error = "Access denied - not your store" }, status = 403 }
+            end
+            
             local StoreproductQueries = require "queries.StoreproductQueries"
             self.params.store_id = self.params.store_id
             return { json = StoreproductQueries.create(self.params), status = 201 }

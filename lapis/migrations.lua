@@ -287,5 +287,9 @@ return {
     ['16_create_orders'] = ecommerce_migrations[5],
     ['17_create_orderitems'] = ecommerce_migrations[6],
     ['18_create_product_variants'] = ecommerce_migrations[7],
-    ['19_create_inventory_transactions'] = ecommerce_migrations[8]
+    ['19_create_inventory_transactions'] = ecommerce_migrations[8],
+    ['20_create_cart_sessions'] = ecommerce_migrations[9],
+    ['21_create_cart_items'] = ecommerce_migrations[10],
+    ['22_create_store_settings'] = ecommerce_migrations[11],
+    ['23_create_product_reviews'] = ecommerce_migrations[12]
 }

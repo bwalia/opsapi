@@ -92,7 +92,40 @@ class ApiClient {
   // Products (public access)
   async getProducts(params?: any) {
     const query = params ? `?${new URLSearchParams(params)}` : '';
-    return this.publicRequest(`/api/v2/storeproducts${query}`);
+    return this.publicRequest(`/api/v2/products${query}`);
+  }
+
+  // Enhanced product search
+  async searchProducts(searchParams: {
+    search?: string;
+    category_id?: string;
+    store_id?: string;
+    min_price?: number;
+    max_price?: number;
+    is_featured?: boolean;
+    page?: number;
+    perPage?: number;
+    orderBy?: string;
+    orderDir?: 'asc' | 'desc';
+  }) {
+    const query = new URLSearchParams();
+    Object.entries(searchParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        query.append(key, value.toString());
+      }
+    });
+    return this.publicRequest(`/api/v2/products?${query}`);
+  }
+
+  // Get featured products
+  async getFeaturedProducts(params?: any) {
+    const query = params ? `?${new URLSearchParams(params)}` : '';
+    return this.publicRequest(`/api/v2/products/featured${query}`);
+  }
+
+  // Get single product
+  async getProduct(productId: string) {
+    return this.publicRequest(`/api/v2/products/${productId}`);
   }
 
   async getStoreProducts(storeId: string, params?: any) {
@@ -136,6 +169,12 @@ class ApiClient {
   async getStores(params?: any) {
     const query = params ? `?${new URLSearchParams(params)}` : '';
     return this.publicRequest(`/api/v2/stores${query}`);
+  }
+
+  // Get user's own stores (authenticated)
+  async getMyStores(params?: any) {
+    const query = params ? `?${new URLSearchParams(params)}` : '';
+    return this.request(`/api/v2/my/stores${query}`);
   }
 
   async createStore(data: any) {

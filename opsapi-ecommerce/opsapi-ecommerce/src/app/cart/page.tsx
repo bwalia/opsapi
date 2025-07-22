@@ -1,56 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
 import Link from "next/link";
-import api from "@/lib/api";
-
-interface CartItem {
-  product_uuid: string;
-  name: string;
-  price: number;
-  quantity: number;
-}
+import { useCart } from "@/contexts/CartContext";
 
 export default function Cart() {
-  const [cart, setCart] = useState<Record<string, CartItem>>({});
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadCart();
-  }, []);
-
-  const loadCart = async () => {
-    try {
-      const response = await api.getCart();
-      setCart(response?.cart || {});
-      setTotal(response?.total || 0);
-    } catch (error) {
-      console.error("Failed to load cart:", error);
-      setCart({});
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const removeFromCart = async (productId: string) => {
-    try {
-      await api.removeFromCart(productId);
-      await loadCart();
-    } catch (error) {
-      console.error("Failed to remove from cart:", error);
-    }
-  };
-
-  const clearCart = async () => {
-    try {
-      await api.clearCart();
-      setCart({});
-      setTotal(0);
-    } catch (error) {
-      console.error("Failed to clear cart:", error);
-    }
-  };
+  const { cart, total, loading, removeFromCart, clearCart } = useCart();
 
   if (loading) {
     return (

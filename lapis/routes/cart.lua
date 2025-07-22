@@ -20,9 +20,14 @@ return function(app)
             end
             
             -- Get or create session cart
-            local session = require("resty.session").start()
+            local session_lib = require("resty.session")
+            local session = session_lib.start()
             if not session then
-                return { json = { error = "Session error" }, status = 500 }
+                -- Fallback: try to open/create a new session
+                session = session_lib.new()
+                if not session then
+                    return { json = { error = "Session initialization failed" }, status = 500 }
+                end
             end
             
             local cart = session:get("cart")
@@ -57,10 +62,15 @@ return function(app)
     -- Get cart
     app:match("get_cart", "/api/v2/cart", respond_to({
         GET = function(self)
-            local session = require("resty.session").start()
-            local cart = session:get("cart")
-            if type(cart) ~= "table" then
-                cart = {}
+            local session_lib = require("resty.session")
+            local session = session_lib.start()
+            local cart = {}
+            
+            if session then
+                cart = session:get("cart")
+                if type(cart) ~= "table" then
+                    cart = {}
+                end
             end
             
             local total = 0
@@ -80,23 +90,31 @@ return function(app)
     app:match("remove_from_cart", "/api/v2/cart/remove/:product_uuid", respond_to({
         DELETE = function(self)
             local product_uuid = self.params.product_uuid
-            local session = require("resty.session").start()
-            local cart = session:get("cart") or {}
+            local session_lib = require("resty.session")
+            local session = session_lib.start()
             
-            cart[product_uuid] = nil
-            session:set("cart", cart)
-            session:save()
-            
-            return { json = { message = "Removed from cart", cart = cart }, status = 200 }
+            if session then
+                local cart = session:get("cart") or {}
+                cart[product_uuid] = nil
+                session:set("cart", cart)
+                session:save()
+                return { json = { message = "Removed from cart", cart = cart }, status = 200 }
+            else
+                return { json = { message = "Removed from cart", cart = {} }, status = 200 }
+            end
         end
     }))
     
     -- Clear cart
     app:match("clear_cart", "/api/v2/cart/clear", respond_to({
         DELETE = function(self)
-            local session = require("resty.session").start()
-            session:set("cart", {})
-            session:save()
+            local session_lib = require("resty.session")
+            local session = session_lib.start()
+            
+            if session then
+                session:set("cart", {})
+                session:save()
+            end
             
             return { json = { message = "Cart cleared" }, status = 200 }
         end
