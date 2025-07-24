@@ -97,6 +97,22 @@ services:
       - ../node/opsapi-node:/usr/src/app
     env_file: "../node/opsapi-node/.env"
 
+  frontend:
+    container_name: opsapi-ecommerce
+    build:
+      context: ../opsapi-ecommerce/opsapi-ecommerce
+    ports:
+      - "3033:3000"
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.15
+    volumes:
+      - ../opsapi-ecommerce/opsapi-ecommerce:/kisaan
+    environment:
+      - NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
+    depends_on:
+      - lapis
+
 networks:
   opsapi-network:
     driver: bridge

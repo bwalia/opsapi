@@ -32,6 +32,17 @@ return function(app)
             }
         end
 
+        -- Get user with roles
+        local userWithRoles = UserQueries.show(user.uuid)
+        if not userWithRoles then
+            return {
+                status = 500,
+                json = {
+                    error = "Failed to load user data"
+                }
+            }
+        end
+
         local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
         local token = jwt:sign(JWT_SECRET_KEY, {
             header = {
@@ -39,8 +50,12 @@ return function(app)
                 alg = "HS256"
             },
             payload = {
-                userinfo = user,
-                token_response = {}
+                userinfo = {
+                    uuid = userWithRoles.uuid,
+                    email = userWithRoles.email,
+                    name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
+                    roles = userWithRoles.roles and userWithRoles.roles[1] and userWithRoles.roles[1].name or "buyer"
+                },
             }
         })
 
@@ -49,9 +64,10 @@ return function(app)
             status = 200,
             json = {
                 user = {
-                    id = user.uuid,
-                    email = user.email,
-                    name = user.name
+                    id = userWithRoles.uuid,
+                    email = userWithRoles.email,
+                    name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
+                    role = userWithRoles.roles and userWithRoles.roles[1] and userWithRoles.roles[1].name or "buyer"
                 },
                 token = token
             }

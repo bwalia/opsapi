@@ -1,6 +1,6 @@
 # opsapi/node/opsapi-node/Dockerfile
 
-FROM node:22
+FROM node:22-alpine
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
