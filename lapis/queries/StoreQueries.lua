@@ -61,6 +61,10 @@ function StoreQueries.all(params)
     }
 end
 
+function StoreQueries.showByUUID(uuid)
+    return StoreModel:find({ uuid = uuid })
+end
+
 function StoreQueries.show(id)
     local store = StoreModel:find({ uuid = id })
     if store then
@@ -91,6 +95,12 @@ end
 function StoreQueries.destroy(id)
     local record = StoreModel:find({ uuid = id })
     if not record then return nil end
+
+    -- Delete associated products, categories, and orders
+    record:get_products():delete_all()
+    record:get_categories():delete_all()
+    record:get_orders():delete_all()
+
     return record:delete()
 end
 

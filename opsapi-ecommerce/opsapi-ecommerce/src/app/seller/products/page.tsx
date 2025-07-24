@@ -71,6 +71,8 @@ function ProductsContent() {
   const loadCategories = async (storeId: string) => {
     try {
       const response = await api.getCategories(storeId);
+      console.log("Categories response:", response);
+
       const categoriesData = Array.isArray(response?.data)
         ? response.data
         : Array.isArray(response)
@@ -173,7 +175,7 @@ function ProductsContent() {
       description: product.description || "",
       price: product.price.toString(),
       sku: product.sku || "",
-      category_id: product.category_id?.toString() || "",
+      category_id: product.category?.uuid || "",
       inventory_quantity: product.inventory_quantity?.toString() || "0",
       track_inventory: product.track_inventory !== false,
     });
@@ -297,7 +299,7 @@ function ProductsContent() {
                     >
                       <option value="">No Category</option>
                       {categories.map((category: any) => (
-                        <option key={category.id} value={category.id}>
+                        <option key={category.uuid} value={category.uuid}>
                           {category.name}
                         </option>
                       ))}
@@ -453,8 +455,10 @@ function ProductsContent() {
                 >
                   Edit
                 </button>
-                <button 
-                  onClick={() => router.push(`/seller/products/${product.uuid}/variants`)}
+                <button
+                  onClick={() =>
+                    router.push(`/seller/products/${product.uuid}/variants`)
+                  }
                   className="flex-1 border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
                 >
                   Variants
@@ -470,7 +474,9 @@ function ProductsContent() {
 
 export default function SellerProducts() {
   return (
-    <Suspense fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}>
+    <Suspense
+      fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}
+    >
       <ProductsContent />
     </Suspense>
   );

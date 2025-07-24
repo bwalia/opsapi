@@ -130,7 +130,7 @@ class ApiClient {
 
   async getStoreProducts(storeId: string, params?: any) {
     const query = params ? `?${new URLSearchParams(params)}` : '';
-    return this.publicRequest(`/api/v2/stores/${storeId}/products${query}`);
+    return this.publicRequest(`/api/v2/products?store_id=${storeId}${query ? `&${query}` : ''}`);
   }
 
   // Cart
@@ -212,7 +212,8 @@ class ApiClient {
 
   // Products
   async createProduct(storeId: string, data: any) {
-    return this.request(`/api/v2/stores/${storeId}/products`, {
+    data.store_id = storeId;
+    return this.request(`/api/v2/products`, {
       method: 'POST',
       body: JSON.stringify(data),
     }, true);

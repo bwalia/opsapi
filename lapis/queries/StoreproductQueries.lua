@@ -162,6 +162,11 @@ end
 function StoreproductQueries.destroy(id)
     local record = StoreproductModel:find({ uuid = id })
     if not record then return nil end
+
+    -- Delete associated variants and order items
+    record:get_variants():delete_all()
+    record:get_orderitems():delete_all()
+
     return record:delete()
 end
 
@@ -221,8 +226,10 @@ function StoreproductQueries.searchProducts(params)
     
     local paginated = StoreproductModel:paginated(
         "WHERE " .. where_clause .. " " .. order_clause,
-        { per_page = perPage },
-        unpack(where_params)
+        unpack(where_params),
+        {
+            per_page = perPage
+        }
     )
     
     local products = paginated:get_page(page)

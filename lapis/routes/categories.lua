@@ -8,7 +8,7 @@ return function(app)
         GET = function(self)
             return { json = CategoryQueries.all(self.params) }
         end,
-        POST = AuthMiddleware.requireRole("seller", function(self)
+        POST = AuthMiddleware.requireRole("seller", function(self)   
             -- Verify store ownership if store_id is provided
             if self.params.store_id then
                 local store = StoreQueries.showByOwner(self.params.store_id, self.user_data.internal_id)

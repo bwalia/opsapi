@@ -10,7 +10,7 @@ function CategoriesContent() {
   const [selectedStore, setSelectedStore] = useState("");
   const [dataLoading, setDataLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  
+
   type Category = {
     uuid: string;
     name: string;
@@ -32,6 +32,8 @@ function CategoriesContent() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  console.log({ selectedStore, user, authLoading, searchParams, categories });
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -106,7 +108,7 @@ function CategoriesContent() {
     try {
       const categoryData = {
         ...formData,
-        store_id: parseInt(selectedStore),
+        store_id: selectedStore,
       };
 
       if (editingCategory) {
@@ -370,7 +372,9 @@ function CategoriesContent() {
 
 export default function SellerCategories() {
   return (
-    <Suspense fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}>
+    <Suspense
+      fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}
+    >
       <CategoriesContent />
     </Suspense>
   );

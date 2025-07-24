@@ -36,6 +36,15 @@ end
 
 function AuthMiddleware.requireAuth(handler)
     return function(self)
+        -- Check for public browse header
+        local public_browse = self.req.headers["x-public-browse"]
+        if public_browse and public_browse:lower() == "true" then
+            -- Allow public access without authentication
+            self.current_user = nil
+            self.is_public_browse = true
+            return handler(self)
+        end
+
         local user, err = AuthMiddleware.authenticate(self)
         if err then
             return { json = { error = err.error }, status = err.status }
@@ -48,6 +57,14 @@ end
 
 function AuthMiddleware.requireRole(role, handler)
     return function(self)
+        -- Check for public browse header - role-based endpoints typically don't allow public access
+        -- but we can add this check if needed for specific cases
+        local public_browse = self.req.headers["x-public-browse"]
+        if public_browse and public_browse:lower() == "true" then
+            -- For role-based endpoints, we still require authentication even with public browse
+            -- This is a security measure, but can be customized per endpoint if needed
+        end
+
         local user, err = AuthMiddleware.authenticate(self)
         if err then
             return { json = { error = err.error }, status = err.status }
