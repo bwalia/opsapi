@@ -22,7 +22,9 @@ function ProductsContent() {
     category_id: "",
     inventory_quantity: "0",
     track_inventory: true,
+    images: [] as string[],
   });
+  const [imageUrl, setImageUrl] = useState("");
 
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -35,14 +37,22 @@ function ProductsContent() {
     }
 
     if (user) {
-      const storeParam = searchParams.get("store");
-      if (storeParam) {
-        setSelectedStore(storeParam);
-      }
-
       loadData();
     }
-  }, [user, authLoading, router, searchParams]);
+  }, [user, authLoading, router]);
+
+  useEffect(() => {
+    const storeParam = searchParams.get("store");
+    if (storeParam && storeParam !== selectedStore) {
+      setSelectedStore(storeParam);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (selectedStore && stores.length > 0) {
+      loadProductsForStore(selectedStore);
+    }
+  }, [selectedStore, stores]);
 
   const loadData = async () => {
     try {
@@ -55,9 +65,12 @@ function ProductsContent() {
         : [];
       setStores(storesData);
 
-      // Load products if store is selected
-      if (selectedStore) {
-        loadProductsForStore(selectedStore);
+      // Auto-select store from URL or first store
+      const storeParam = searchParams.get("store");
+      if (storeParam && storesData.find((s: any) => s.uuid === storeParam)) {
+        setSelectedStore(storeParam);
+      } else if (storesData.length > 0 && !selectedStore) {
+        setSelectedStore(storesData[0].uuid);
       }
     } catch (error) {
       console.error("Failed to load data:", error);
@@ -69,15 +82,27 @@ function ProductsContent() {
   };
 
   const loadCategories = async (storeId: string) => {
+    if (!storeId) return;
+
     try {
       const response = await api.getCategories(storeId);
       console.log("Categories response:", response);
 
-      const categoriesData = Array.isArray(response?.data)
-        ? response.data
-        : Array.isArray(response)
-        ? response
-        : [];
+      let categoriesData = [];
+      if (Array.isArray(response?.data)) {
+        categoriesData = response.data;
+      } else if (Array.isArray(response)) {
+        categoriesData = response;
+      } else if (
+        response &&
+        typeof response === "object" &&
+        response.categories
+      ) {
+        categoriesData = Array.isArray(response.categories)
+          ? response.categories
+          : [];
+      }
+
       setCategories(categoriesData);
     } catch (error) {
       console.error("Failed to load categories:", error);
@@ -86,8 +111,15 @@ function ProductsContent() {
   };
 
   const loadProductsForStore = async (storeId: string) => {
+    if (!storeId) return;
+
     try {
-      const productsResponse = await api.getStoreProducts(storeId);
+      // Load both products and categories in parallel
+      const [productsResponse, categoriesResponse] = await Promise.all([
+        api.getStoreProducts(storeId),
+        api.getCategories(storeId),
+      ]);
+
       const productsData = Array.isArray(productsResponse?.data)
         ? productsResponse.data
         : Array.isArray(productsResponse)
@@ -95,11 +127,18 @@ function ProductsContent() {
         : [];
       setProducts(productsData);
 
-      // Load categories for selected store
-      loadCategories(storeId);
+      // Handle categories response
+      let categoriesData = [];
+      if (Array.isArray(categoriesResponse?.data)) {
+        categoriesData = categoriesResponse.data;
+      } else if (Array.isArray(categoriesResponse)) {
+        categoriesData = categoriesResponse;
+      }
+      setCategories(categoriesData);
     } catch (error) {
       console.error("Failed to load products:", error);
       setProducts([]);
+      setCategories([]);
     }
   };
 
@@ -120,11 +159,40 @@ function ProductsContent() {
       return;
     }
 
+    if (!formData.name.trim()) {
+      alert("Product name is required");
+      return;
+    }
+
+    if (!formData.price || parseFloat(formData.price) <= 0) {
+      alert("Please enter a valid price");
+      return;
+    }
+
     try {
+      const submitData = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        price: parseFloat(formData.price),
+        sku: formData.sku.trim(),
+        category_id: formData.category_id || null,
+        inventory_quantity: parseInt(formData.inventory_quantity) || 0,
+        track_inventory: formData.track_inventory,
+        images: JSON.stringify(formData.images.filter((img) => img.trim())),
+      };
+
+      console.log("Submitting product data:", submitData);
+
       if (editingProduct) {
-        await api.updateProduct(editingProduct.uuid, formData);
+        console.log("Updating product:", editingProduct.uuid);
+        const result = await api.updateProduct(editingProduct.uuid, submitData);
+        console.log("Update result:", result);
+        alert("Product updated successfully!");
       } else {
-        await api.createProduct(selectedStore, formData);
+        console.log("Creating product for store:", selectedStore);
+        const result = await api.createProduct(selectedStore, submitData);
+        console.log("Create result:", result);
+        alert("Product created successfully!");
       }
 
       setShowForm(false);
@@ -137,20 +205,17 @@ function ProductsContent() {
         category_id: "",
         inventory_quantity: "0",
         track_inventory: true,
+        images: [],
       });
+      setImageUrl("");
 
-      // Reload products
-      const response = await api.getStoreProducts(selectedStore);
-      const productsData = Array.isArray(response?.data)
-        ? response.data
-        : Array.isArray(response)
-        ? response
-        : [];
-      setProducts(productsData);
+      // Reload products and categories
+      await loadProductsForStore(selectedStore);
     } catch (error: any) {
+      console.error("Failed to save product:", error);
       alert(
         `Failed to ${editingProduct ? "update" : "create"} product: ` +
-          error.message
+          (error?.message || "Unknown error")
       );
     }
   };
@@ -168,16 +233,58 @@ function ProductsContent() {
     }));
   };
 
+  const handleDeleteProduct = async (product: any) => {
+    if (!product?.uuid) return;
+
+    const confirmMessage = `Are you sure you want to delete "${product.name}"? This action cannot be undone and will also delete all variants.`;
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      await api.deleteProduct(product.uuid);
+      alert("Product deleted successfully");
+      // Reload products
+      if (selectedStore) {
+        await loadProductsForStore(selectedStore);
+      }
+    } catch (error: any) {
+      console.error("Failed to delete product:", error);
+      alert("Failed to delete product: " + (error?.message || "Unknown error"));
+    }
+  };
+
   const handleEdit = (product: any) => {
+    if (!product) return;
+
+    let productImages = [];
+    try {
+      if (product.images && typeof product.images === "string") {
+        const parsed = JSON.parse(product.images);
+        productImages = Array.isArray(parsed)
+          ? parsed.filter((img) => typeof img === "string" && img.trim())
+          : [];
+      } else if (Array.isArray(product.images)) {
+        productImages = product.images.filter(
+          (img: string) => typeof img === "string" && img.trim()
+        );
+      }
+    } catch (error) {
+      console.error("Failed to parse product images:", error);
+      productImages = [];
+    }
+
     setEditingProduct(product);
     setFormData({
-      name: product.name,
+      name: product.name || "",
       description: product.description || "",
-      price: product.price.toString(),
+      price: (typeof product.price === "number" ? product.price : 0).toString(),
       sku: product.sku || "",
       category_id: product.category?.uuid || "",
-      inventory_quantity: product.inventory_quantity?.toString() || "0",
+      inventory_quantity: (typeof product.inventory_quantity === "number"
+        ? product.inventory_quantity
+        : 0
+      ).toString(),
       track_inventory: product.track_inventory !== false,
+      images: productImages,
     });
     setShowForm(true);
   };
@@ -355,6 +462,80 @@ function ProductsContent() {
                 </div>
               </div>
 
+              {/* Product Images */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Product Images
+                </label>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                      placeholder="Enter image URL"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = imageUrl.trim();
+                        if (
+                          url &&
+                          (url.startsWith("http://") ||
+                            url.startsWith("https://"))
+                        ) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            images: [...prev.images, url],
+                          }));
+                          setImageUrl("");
+                        } else if (url) {
+                          alert(
+                            "Please enter a valid image URL starting with http:// or https://"
+                          );
+                        }
+                      }}
+                      className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {formData.images.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {formData.images.map((img, index) => (
+                        <div key={index} className="relative">
+                          <img
+                            src={img}
+                            alt={`Product ${index + 1}`}
+                            className="w-full h-20 object-cover rounded"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src =
+                                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMiAxNkM5Ljc5IDEzLjc5IDkuNzkgMTAuMjEgMTIgOEMxNC4yMSAxMC4yMSAxNC4yMSAxMy43OSAxMiAxNloiIGZpbGw9IiM5Q0EzQUYiLz4KPC9zdmc+";
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData((prev) => ({
+                                ...prev,
+                                images: prev.images.filter(
+                                  (_, i) => i !== index
+                                ),
+                              }));
+                            }}
+                            className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs hover:bg-red-600"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="flex justify-end space-x-2 pt-4">
                 <button
                   type="button"
@@ -369,7 +550,9 @@ function ProductsContent() {
                       category_id: "",
                       inventory_quantity: "0",
                       track_inventory: true,
+                      images: [],
                     });
+                    setImageUrl("");
                   }}
                   className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
                 >
@@ -462,6 +645,12 @@ function ProductsContent() {
                   className="flex-1 border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
                 >
                   Variants
+                </button>
+                <button
+                  onClick={() => handleDeleteProduct(product)}
+                  className="bg-red-600 text-white py-2 px-3 rounded text-sm hover:bg-red-700"
+                >
+                  Delete
                 </button>
               </div>
             </div>

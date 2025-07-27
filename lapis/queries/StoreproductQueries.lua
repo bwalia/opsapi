@@ -77,14 +77,28 @@ function StoreproductQueries.updateInventory(product_uuid, quantity_change)
     return product, nil
 end
 
-function StoreproductQueries.checkInventory(product_uuid, required_quantity)
+function StoreproductQueries.checkInventory(product_uuid, required_quantity, variant_uuid)
     local product = StoreproductModel:find({ uuid = product_uuid })
     if not product then
         return false, "Product not found"
     end
 
-    if product.track_inventory and product.inventory_quantity < required_quantity then
-        return false, "Insufficient inventory. Available: " .. product.inventory_quantity
+    -- Check variant inventory if variant is specified
+    if variant_uuid then
+        local ProductVariantModel = require "models.ProductVariantModel"
+        local variant = ProductVariantModel:find({ uuid = variant_uuid })
+        if not variant then
+            return false, "Variant not found"
+        end
+        
+        if variant.inventory_quantity < required_quantity then
+            return false, "Insufficient variant inventory. Available: " .. variant.inventory_quantity
+        end
+    else
+        -- Check product inventory
+        if product.track_inventory and product.inventory_quantity < required_quantity then
+            return false, "Insufficient inventory. Available: " .. product.inventory_quantity
+        end
     end
 
     return true, nil
@@ -155,7 +169,24 @@ end
 function StoreproductQueries.update(id, params)
     local record = StoreproductModel:find({ uuid = id })
     if not record then return nil end
-    params.id = record.id
+    
+    -- Handle category_id conversion
+    if params.category_id and params.category_id ~= "" then
+        local CategoryModel = require "models.CategoryModel"
+        local category = CategoryModel:find({ uuid = params.category_id })
+        if category then
+            params.category_id = category.id
+        else
+            params.category_id = nil
+        end
+    else
+        params.category_id = nil
+    end
+    
+    -- Remove id from params to avoid conflicts
+    params.id = nil
+    params.uuid = nil
+    
     return record:update(params, { returning = "*" })
 end
 

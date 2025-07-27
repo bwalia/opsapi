@@ -4,7 +4,9 @@ import api from '@/lib/api';
 
 interface CartItem {
   product_uuid: string;
+  variant_uuid?: string;
   name: string;
+  variant_title?: string;
   price: number;
   quantity: number;
 }
@@ -14,7 +16,7 @@ interface CartContextType {
   total: number;
   itemCount: number;
   loading: boolean;
-  addToCart: (productUuid: string, quantity?: number) => Promise<void>;
+  addToCart: (productUuid: string, quantity?: number, variantUuid?: string) => Promise<void>;
   removeFromCart: (productUuid: string) => Promise<void>;
   clearCart: () => Promise<void>;
   refreshCart: () => Promise<void>;
@@ -31,15 +33,35 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const refreshCart = async () => {
     try {
       setLoading(true);
-      const response = await api.getCart();
-      setCart(response?.cart || {});
-      setTotal(response?.total || 0);
       
-      // Calculate item count
-      const count = Object.values(response?.cart || {}).reduce(
-        (sum: number, item: any) => sum + (item?.quantity || 0), 
-        0
-      );
+      // Use localStorage for cart with safe parsing
+      let cartData = {};
+      try {
+        const cartString = localStorage.getItem('cart');
+        if (cartString) {
+          const parsed = JSON.parse(cartString);
+          cartData = typeof parsed === 'object' && parsed !== null ? parsed : {};
+        }
+      } catch (parseError) {
+        console.error('Failed to parse cart data:', parseError);
+        localStorage.removeItem('cart'); // Clear corrupted data
+      }
+      
+      let totalAmount = 0;
+      let count = 0;
+      
+      Object.values(cartData).forEach((item: any) => {
+        if (item && typeof item === 'object' && 
+            typeof item.price === 'number' && 
+            typeof item.quantity === 'number' && 
+            item.price > 0 && item.quantity > 0) {
+          totalAmount += item.price * item.quantity;
+          count += item.quantity;
+        }
+      });
+      
+      setCart(cartData);
+      setTotal(totalAmount);
       setItemCount(count);
     } catch (error) {
       console.error('Failed to load cart:', error);
@@ -51,10 +73,76 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addToCart = async (productUuid: string, quantity: number = 1) => {
+  const addToCart = async (productUuid: string, quantity: number = 1, variantUuid?: string) => {
+    if (!productUuid || quantity <= 0) {
+      throw new Error('Invalid product or quantity');
+    }
+    
     try {
       setLoading(true);
-      await api.addToCart({ product_uuid: productUuid, quantity });
+      
+      // Get product details
+      const product = await api.getProduct(productUuid);
+      if (!product || !product.name) {
+        throw new Error('Product not found or invalid');
+      }
+      
+      // Get current cart from localStorage safely
+      let currentCart = {};
+      try {
+        const cartString = localStorage.getItem('cart');
+        if (cartString) {
+          const parsed = JSON.parse(cartString);
+          currentCart = typeof parsed === 'object' && parsed !== null ? parsed : {};
+        }
+      } catch {
+        currentCart = {};
+      }
+      
+      // Create cart key
+      const cartKey = variantUuid ? `${productUuid}_${variantUuid}` : productUuid;
+      
+      // Get variant details if needed
+      let itemPrice = typeof product.price === 'number' ? product.price : 0;
+      let variantTitle = null;
+      
+      if (variantUuid) {
+        try {
+          const variants = await api.getVariants(productUuid);
+          if (Array.isArray(variants)) {
+            const variant = variants.find((v: any) => v?.uuid === variantUuid);
+            if (variant) {
+              itemPrice = typeof variant.price === 'number' ? variant.price : itemPrice;
+              variantTitle = variant.title || null;
+            }
+          }
+        } catch (variantError) {
+          console.error('Failed to load variant details:', variantError);
+        }
+      }
+      
+      // Add/update item
+      if (currentCart[cartKey] && typeof currentCart[cartKey] === 'object') {
+        currentCart[cartKey].quantity = (currentCart[cartKey].quantity || 0) + quantity;
+      } else {
+        currentCart[cartKey] = {
+          product_uuid: productUuid,
+          variant_uuid: variantUuid || null,
+          name: product.name,
+          variant_title: variantTitle,
+          price: itemPrice,
+          quantity: quantity
+        };
+      }
+      
+      // Save to localStorage safely
+      try {
+        localStorage.setItem('cart', JSON.stringify(currentCart));
+      } catch (storageError) {
+        console.error('Failed to save cart to localStorage:', storageError);
+        throw new Error('Failed to save cart');
+      }
+      
       await refreshCart();
     } catch (error) {
       console.error('Failed to add to cart:', error);
@@ -65,9 +153,37 @@ export function CartProvider({ children }: { children: ReactNode }) {
   };
 
   const removeFromCart = async (productUuid: string) => {
+    if (!productUuid) {
+      throw new Error('Invalid product UUID');
+    }
+    
     try {
       setLoading(true);
-      await api.removeFromCart(productUuid);
+      
+      let currentCart = {};
+      try {
+        const cartString = localStorage.getItem('cart');
+        if (cartString) {
+          const parsed = JSON.parse(cartString);
+          currentCart = typeof parsed === 'object' && parsed !== null ? parsed : {};
+        }
+      } catch {
+        currentCart = {};
+      }
+      
+      // Remove all variants of this product
+      Object.keys(currentCart).forEach(key => {
+        if (key === productUuid || key.startsWith(`${productUuid}_`)) {
+          delete currentCart[key];
+        }
+      });
+      
+      try {
+        localStorage.setItem('cart', JSON.stringify(currentCart));
+      } catch (storageError) {
+        console.error('Failed to save cart after removal:', storageError);
+      }
+      
       await refreshCart();
     } catch (error) {
       console.error('Failed to remove from cart:', error);
@@ -80,7 +196,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const clearCart = async () => {
     try {
       setLoading(true);
-      await api.clearCart();
+      try {
+        localStorage.removeItem('cart');
+      } catch (storageError) {
+        console.error('Failed to clear cart from localStorage:', storageError);
+      }
       setCart({});
       setTotal(0);
       setItemCount(0);
