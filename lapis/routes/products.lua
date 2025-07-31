@@ -24,4 +24,44 @@ return function(app)
             return { json = product, status = 201 }
         end)
     }))
+
+    app:match("product", "/api/v2/products/:id", respond_to({
+        GET = function(self)
+            local product = StoreproductQueries.show(self.params.id)
+            if not product then
+                return { json = { error = "Product not found" }, status = 404 }
+            end
+            return { json = product }
+        end,
+        PUT = AuthMiddleware.requireRole("seller", function(self)
+            local product = StoreproductQueries.show(self.params.id)
+            if not product then
+                return { json = { error = "Product not found" }, status = 404 }
+            end
+            
+            -- Verify store ownership
+            product:get_store()
+            if product.store and product.store.user_id ~= self.user_data.internal_id then
+                return { json = { error = "Access denied - not your product" }, status = 403 }
+            end
+            
+            local updated = StoreproductQueries.update(self.params.id, self.params)
+            return { json = updated }
+        end),
+        DELETE = AuthMiddleware.requireRole("seller", function(self)
+            local product = StoreproductQueries.show(self.params.id)
+            if not product then
+                return { json = { error = "Product not found" }, status = 404 }
+            end
+            
+            -- Verify store ownership
+            product:get_store()
+            if product.store and product.store.user_id ~= self.user_data.internal_id then
+                return { json = { error = "Access denied - not your product" }, status = 403 }
+            end
+            
+            StoreproductQueries.destroy(self.params.id)
+            return { json = { message = "Product deleted successfully" } }
+        end)
+    }))
 end

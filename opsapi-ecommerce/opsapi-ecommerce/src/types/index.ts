@@ -67,7 +67,9 @@ export interface ProductVariant {
 
 export interface CartItem {
   product_uuid: string;
+  variant_uuid?: string;
   name: string;
+  variant_title?: string;
   price: number;
   quantity: number;
 }
@@ -102,4 +104,10 @@ export interface Customer {
   addresses?: any[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ProductCardProps {
+  product: Product & { description?: string };
+  onAddToCart?: () => void;
+  showVariants?: boolean;
 }

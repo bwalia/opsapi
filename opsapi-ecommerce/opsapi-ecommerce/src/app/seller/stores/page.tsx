@@ -60,6 +60,22 @@ export default function SellerStores() {
     }
   };
 
+  const handleDeleteStore = async (store: any) => {
+    if (!store?.uuid) return;
+    
+    const confirmMessage = `Are you sure you want to delete "${store.name}"? This will permanently delete the store, all its products, categories, and variants. This action cannot be undone.`;
+    if (!confirm(confirmMessage)) return;
+    
+    try {
+      await api.deleteStore(store.uuid);
+      alert('Store deleted successfully');
+      await loadStores();
+    } catch (error: any) {
+      console.error('Failed to delete store:', error);
+      alert('Failed to delete store: ' + (error?.message || 'Unknown error'));
+    }
+  };
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
@@ -213,12 +229,20 @@ export default function SellerStores() {
                     Products
                   </button>
                 </div>
-                <button
-                  onClick={() => router.push(`/seller/stores/${store.uuid}`)}
-                  className="w-full border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
-                >
-                  Edit Store
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => router.push(`/seller/stores/${store.uuid}`)}
+                    className="border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
+                  >
+                    Edit Store
+                  </button>
+                  <button
+                    onClick={() => handleDeleteStore(store)}
+                    className="bg-red-600 text-white py-2 px-3 rounded text-sm hover:bg-red-700"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
         </div>

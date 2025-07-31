@@ -2,15 +2,7 @@
 import { useState, useEffect } from "react";
 import ProductCard from "@/components/ProductCard";
 import api from "@/lib/api";
-
-interface Product {
-  uuid: string;
-  name: string;
-  description: string;
-  price: number;
-  inventory_quantity: number;
-  images?: string[];
-}
+import { Product } from "@/types";
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -68,7 +60,7 @@ export default function Home() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl text-white font-bold text-gray-900 mb-4">
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">
           Featured Products
         </h1>
         <p className="text-gray-600">
@@ -98,6 +90,7 @@ export default function Home() {
               key={product.uuid}
               product={product}
               onAddToCart={handleAddToCart}
+              showVariants={true}
             />
           ))}
         </div>

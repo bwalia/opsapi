@@ -157,6 +157,10 @@ class ApiClient {
     });
   }
 
+  async debugCart() {
+    return this.request('/api/v2/cart/debug', { method: 'GET' });
+  }
+
   // Checkout
   async checkout(data: any) {
     return this.request('/api/v2/checkout', {
@@ -226,12 +230,38 @@ class ApiClient {
     }, true);
   }
 
+  async deleteProduct(productId: string) {
+    return this.request(`/api/v2/products/${productId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async getStore(storeId: string) {
     return this.request(`/api/v2/stores/${storeId}`, { method: 'GET' });
   }
 
   async getVariants(productId: string) {
-    return this.request(`/api/v2/products/${productId}`, { method: 'GET' });
+    return this.request(`/api/v2/products/${productId}/variants`, { method: 'GET' });
+  }
+
+  async createVariant(productId: string, data: any) {
+    return this.request(`/api/v2/products/${productId}/variants`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  }
+
+  async updateVariant(variantId: string, data: any) {
+    return this.request(`/api/v2/variants/${variantId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, true);
+  }
+
+  async deleteVariant(variantId: string) {
+    return this.request(`/api/v2/variants/${variantId}`, {
+      method: 'DELETE',
+    });
   }
 
   async updateStore(storeId: string, data: any) {
@@ -239,6 +269,12 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify(data),
     }, true);
+  }
+
+  async deleteStore(storeId: string) {
+    return this.request(`/api/v2/stores/${storeId}`, {
+      method: 'DELETE',
+    });
   }
 }
 
