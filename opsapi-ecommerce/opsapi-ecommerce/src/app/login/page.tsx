@@ -42,82 +42,124 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center py-12 px-4">
+      <div className="max-w-md w-full">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <Link href="/" className="inline-flex items-center space-x-2">
+            <div className="w-12 h-12 bg-[#fe004d] rounded-xl flex items-center justify-center">
+              <span className="text-white font-bold text-xl">M</span>
+            </div>
+            <span className="text-2xl font-bold text-gray-900">MarketPlace</span>
+          </Link>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-              {error}
-            </div>
-          )}
 
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor="username"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Email
-              </label>
-              <input
-                id="username"
-                name="username"
-                type="email"
-                required
-                value={formData.username}
-                onChange={handleChange}
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Enter your email"
-              />
+        <div className="card">
+          <div className="card-body">
+            <div className="text-center mb-8">
+              <h1 className="heading-3 text-gray-900 mb-2">Welcome back</h1>
+              <p className="text-muted">Sign in to your account to continue</p>
             </div>
 
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700"
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {error}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="username" className="block text-sm font-medium text-gray-900 mb-2">
+                    Email Address
+                  </label>
+                  <input
+                    id="username"
+                    name="username"
+                    type="email"
+                    required
+                    value={formData.username}
+                    onChange={handleChange}
+                    className="input"
+                    placeholder="Enter your email"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-900 mb-2">
+                    Password
+                  </label>
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    required
+                    value={formData.password}
+                    onChange={handleChange}
+                    className="input"
+                    placeholder="Enter your password"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary w-full"
               >
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                value={formData.password}
-                onChange={handleChange}
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Enter your password"
-              />
+                {loading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Signing in...
+                  </>
+                ) : (
+                  "Sign In"
+                )}
+              </button>
+
+              <div className="text-center pt-4">
+                <p className="text-sm text-gray-600">
+                  Don't have an account?{" "}
+                  <Link href="/register" className="font-medium text-[#fe004d] hover:text-[#e6003d]">
+                    Create account
+                  </Link>
+                </p>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        {/* Features */}
+        <div className="mt-8 text-center">
+          <div className="grid grid-cols-3 gap-4 text-xs text-gray-500">
+            <div className="flex items-center justify-center space-x-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <span>Secure</span>
+            </div>
+            <div className="flex items-center justify-center space-x-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span>Fast</span>
+            </div>
+            <div className="flex items-center justify-center space-x-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+              <span>Trusted</span>
             </div>
           </div>
-
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400"
-            >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
-          </div>
-
-          <div className="text-center">
-            <span className="text-sm text-gray-600">
-              Don't have an account?{" "}
-              <Link
-                href="/register"
-                className="font-medium text-blue-600 hover:text-blue-500"
-              >
-                Sign up
-              </Link>
-            </span>
-          </div>
-        </form>
+        </div>
       </div>
     </div>
   );

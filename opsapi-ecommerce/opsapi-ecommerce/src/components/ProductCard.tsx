@@ -121,83 +121,94 @@ export default function ProductCard({ product, onAddToCart, showVariants = true 
   const images = getProductImages();
 
   return (
-    <div className="border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+    <div className="card group hover:shadow-lg transition-all duration-300">
       <Link href={`/products/${product.uuid}`}>
-        <div className="aspect-square bg-gray-200 rounded-md mb-4 flex items-center justify-center cursor-pointer">
+        <div className="aspect-square bg-gray-100 rounded-lg mb-4 overflow-hidden cursor-pointer">
           {images.length > 0 ? (
             <img 
               src={images[0]} 
               alt={product.name}
-              className="w-full h-full object-cover rounded-md"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 target.style.display = 'none';
                 const parent = target.parentElement;
                 if (parent) {
-                  parent.innerHTML = '<span class="text-gray-400">Image Error</span>';
+                  parent.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400"><svg class="icon-xl" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div>';
                 }
               }}
             />
           ) : (
-            <span className="text-gray-400">No Image</span>
+            <div className="w-full h-full flex items-center justify-center text-gray-400">
+              <svg className="icon-xl" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
           )}
         </div>
       </Link>
       
-      <Link href={`/products/${product.uuid}`}>
-        <h3 className="font-semibold text-lg mb-2 hover:text-blue-600 cursor-pointer">{product.name}</h3>
-      </Link>
-      <p className="text-gray-600 text-sm mb-3 line-clamp-2">{product.description || ''}</p>
-      
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xl font-bold text-green-600">
-          ${currentPrice.toFixed(2)}
-        </span>
-        <span className="text-sm text-gray-500">
-          Stock: {currentStock}
-        </span>
-      </div>
+      <div className="space-y-3">
+        <Link href={`/products/${product.uuid}`}>
+          <h3 className="font-semibold text-lg text-gray-900 hover:text-[#fe004d] cursor-pointer transition-colors line-clamp-2">
+            {product.name}
+          </h3>
+        </Link>
+        
+        <p className="text-gray-600 text-sm line-clamp-2">{product.description || ''}</p>
+        
+        <div className="flex items-center justify-between">
+          <span className="text-2xl font-bold text-[#fe004d]">
+            ${currentPrice.toFixed(2)}
+          </span>
+          <span className={`text-sm px-2 py-1 rounded-full ${
+            currentStock > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+          }`}>
+            {currentStock > 0 ? `${currentStock} in stock` : 'Out of stock'}
+          </span>
+        </div>
 
-      {/* Variant Selection */}
-      {showVariants && variants.length > 0 && (
-        <div className="mb-3">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Options:
-          </label>
-          <select
-            value={selectedVariant}
-            onChange={(e) => handleVariantChange(e.target.value)}
-            className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        {/* Variant Selection */}
+        {showVariants && variants.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Options:
+            </label>
+            <select
+              value={selectedVariant}
+              onChange={(e) => handleVariantChange(e.target.value)}
+              className="input-field text-sm"
+            >
+              <option value="">Select variant...</option>
+              {variants.filter(v => v.is_active).map((variant) => (
+                <option key={variant.uuid} value={variant.uuid}>
+                  {variant.title} {variant.price && variant.price !== product.price && `(+$${(variant.price - product.price).toFixed(2)})`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3">
+          <select 
+            value={quantity} 
+            onChange={(e) => setQuantity(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#fe004d] focus:border-transparent"
+            disabled={currentStock === 0}
           >
-            <option value="">Select variant...</option>
-            {variants.filter(v => v.is_active).map((variant) => (
-              <option key={variant.uuid} value={variant.uuid}>
-                {variant.title} {variant.price && variant.price !== product.price && `(+$${(variant.price - product.price).toFixed(2)})`}
-              </option>
+            {Array.from({ length: Math.min(10, currentStock) }, (_, i) => (
+              <option key={i + 1} value={i + 1}>{i + 1}</option>
             ))}
           </select>
+          
+          <button
+            onClick={handleAddToCart}
+            disabled={loading || currentStock === 0}
+            className="flex-1 btn-primary text-sm disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Adding...' : currentStock === 0 ? 'Out of Stock' : 'Add to Cart'}
+          </button>
         </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        <select 
-          value={quantity} 
-          onChange={(e) => setQuantity(Number(e.target.value))}
-          className="border rounded px-2 py-1 text-sm"
-          disabled={currentStock === 0}
-        >
-          {Array.from({ length: Math.min(10, currentStock) }, (_, i) => (
-            <option key={i + 1} value={i + 1}>{i + 1}</option>
-          ))}
-        </select>
-        
-        <button
-          onClick={handleAddToCart}
-          disabled={loading || currentStock === 0}
-          className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
-        >
-          {loading ? 'Adding...' : currentStock === 0 ? 'Out of Stock' : 'Add to Cart'}
-        </button>
       </div>
     </div>
   );

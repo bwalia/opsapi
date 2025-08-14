@@ -2,6 +2,10 @@ local lapis = require("lapis")
 local app = lapis.Application()
 app:enable("etlua")
 
+-- Enable CORS for all routes
+local CorsMiddleware = require("middleware.cors")
+CorsMiddleware.enable(app)
+
 require("routes.index")(app)
 require("routes.auth")(app)
 require("routes.users")(app)

@@ -51,7 +51,6 @@ export default function SellerStores() {
       setFormData({ name: "", description: "", slug: "" });
       loadStores();
       
-      // Suggest creating categories
       if (confirm('Store created successfully! Would you like to create categories for your products?')) {
         router.push(`/seller/categories?store=${newStore.id}`);
       }
@@ -89,164 +88,221 @@ export default function SellerStores() {
   };
 
   if (storesLoading) {
-    return <div className="container mx-auto px-4 py-8">Loading stores...</div>;
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#fe004d] mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading stores...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">My Stores</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Create Store
-        </button>
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">Create New Store</h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Store Name
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  required
-                  value={formData.name}
-                  onChange={handleChange}
-                  className="text-black w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
-                </label>
-                <textarea
-                  name="description"
-                  rows={3}
-                  value={formData.description}
-                  onChange={handleChange}
-                  className="text-black w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Store Slug (URL)
-                </label>
-                <input
-                  type="text"
-                  name="slug"
-                  required
-                  value={formData.slug}
-                  onChange={handleChange}
-                  className="text-black w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div className="flex justify-end space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Create Store
-                </button>
-              </div>
-            </form>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="container py-8">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">My Stores</h1>
+              <p className="text-gray-600 text-sm mt-1">Manage your stores and track performance</p>
+            </div>
+            <button
+              onClick={() => setShowForm(true)}
+              className="btn-primary btn-sm"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Create Store
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {stores.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">🏪</div>
-          <h2 className="text-xl font-semibold text-gray-700 mb-2">
-            No Stores Yet
-          </h2>
-          <p className="text-gray-500 mb-4">
-            Create your first store to start selling products
-          </p>
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
-          >
-            Create Your First Store
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {stores &&
-            stores.length > 0 &&
-            stores.map((store: any) => (
-              <div
-                key={store.uuid}
-                className="bg-white border rounded-lg p-6 shadow-sm"
+      <div className="container py-8">
+        {showForm && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl w-full max-w-md animate-fade-in shadow-xl">
+              <div className="px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-gray-900">Create New Store</h2>
+                  <button
+                    onClick={() => setShowForm(false)}
+                    className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Store Name
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    value={formData.name}
+                    onChange={handleChange}
+                    className="input"
+                    placeholder="Enter your store name"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    name="description"
+                    rows={3}
+                    value={formData.description}
+                    onChange={handleChange}
+                    className="input"
+                    placeholder="Describe your store..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Store URL
+                  </label>
+                  <div className="flex">
+                    <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-200 bg-gray-50 text-gray-500 text-sm">
+                      /store/
+                    </span>
+                    <input
+                      type="text"
+                      name="slug"
+                      required
+                      value={formData.slug}
+                      onChange={handleChange}
+                      className="input rounded-l-none"
+                      placeholder="your-store-name"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowForm(false)}
+                    className="btn-outline btn-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary btn-sm"
+                  >
+                    Create Store
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {stores.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="max-w-md mx-auto">
+              <div className="empty-state-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-semibold text-gray-900 mb-3">
+                No Stores Yet
+              </h2>
+              <p className="text-gray-600 text-sm mb-6">
+                Create your first store to start selling products and reach customers worldwide
+              </p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="btn-primary"
               >
-                <h3 className="text-lg font-semibold mb-2">{store.name}</h3>
-                <p className="text-gray-600 mb-4">{store.description}</p>
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Create Your First Store
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {stores.map((store: any) => (
+              <div key={store.uuid} className="card hover-lift">
+                <div className="card-body">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">{store.name}</h3>
+                      <p className="text-gray-600 text-sm line-clamp-2">{store.description}</p>
+                    </div>
+                    <span className={`badge ml-3 ${
+                      store.status === "active" ? 'badge-success' : 'badge-gray'
+                    }`}>
+                      {store.status}
+                    </span>
+                  </div>
 
-                <div className="flex items-center justify-between mb-4">
-                  <span
-                    className={`px-2 py-1 rounded text-xs ${
-                      store.status === "active"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-100 text-gray-800"
-                    }`}
-                  >
-                    {store.status}
-                  </span>
-                  <span className="text-sm text-gray-500">/{store.slug}</span>
-                </div>
+                  <div className="flex items-center text-xs text-gray-500 mb-4">
+                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    /{store.slug}
+                  </div>
 
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    onClick={() =>
-                      router.push(`/seller/categories?store=${store.uuid}`)
-                    }
-                    className="bg-purple-600 text-white py-2 px-3 rounded text-sm hover:bg-purple-700"
-                  >
-                    Categories
-                  </button>
-                  <button
-                    onClick={() =>
-                      router.push(`/seller/products?store=${store.uuid}`)
-                    }
-                    className="bg-blue-600 text-white py-2 px-3 rounded text-sm hover:bg-blue-700"
-                  >
-                    Products
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => router.push(`/seller/stores/${store.uuid}`)}
-                    className="border border-gray-300 py-2 px-3 rounded text-sm hover:bg-gray-50"
-                  >
-                    Edit Store
-                  </button>
-                  <button
-                    onClick={() => handleDeleteStore(store)}
-                    className="bg-red-600 text-white py-2 px-3 rounded text-sm hover:bg-red-700"
-                  >
-                    Delete
-                  </button>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <button
+                      onClick={() => router.push(`/seller/categories?store=${store.uuid}`)}
+                      className="px-3 py-2 text-xs font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-md hover:bg-purple-100 transition-colors flex items-center justify-center"
+                    >
+                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                      </svg>
+                      Categories
+                    </button>
+                    <button
+                      onClick={() => router.push(`/seller/products?store=${store.uuid}`)}
+                      className="px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors flex items-center justify-center"
+                    >
+                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                      Products
+                    </button>
+                  </div>
+
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => router.push(`/seller/stores/${store.uuid}`)}
+                      className="flex-1 px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center"
+                    >
+                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteStore(store)}
+                      className="px-3 py-2 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors flex items-center justify-center"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
