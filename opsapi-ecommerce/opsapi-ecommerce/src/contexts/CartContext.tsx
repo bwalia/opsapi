@@ -35,7 +35,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       
       // Use localStorage for cart with safe parsing
-      let cartData = {};
+      let cartData: Record<string, CartItem> = {};
       try {
         const cartString = localStorage.getItem('cart');
         if (cartString) {
@@ -88,7 +88,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       }
       
       // Get current cart from localStorage safely
-      let currentCart = {};
+      let currentCart: Record<string, CartItem> = {};
       try {
         const cartString = localStorage.getItem('cart');
         if (cartString) {
@@ -104,7 +104,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       
       // Get variant details if needed
       let itemPrice = typeof product.price === 'number' ? product.price : 0;
-      let variantTitle = null;
+      let variantTitle: string | undefined = undefined;
       
       if (variantUuid) {
         try {
@@ -113,7 +113,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
             const variant = variants.find((v: any) => v?.uuid === variantUuid);
             if (variant) {
               itemPrice = typeof variant.price === 'number' ? variant.price : itemPrice;
-              variantTitle = variant.title || null;
+              variantTitle = variant.title || undefined;
             }
           }
         } catch (variantError) {
@@ -127,7 +127,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       } else {
         currentCart[cartKey] = {
           product_uuid: productUuid,
-          variant_uuid: variantUuid || null,
+          variant_uuid: variantUuid || undefined,
           name: product.name,
           variant_title: variantTitle,
           price: itemPrice,
@@ -160,7 +160,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
       
-      let currentCart = {};
+      let currentCart: Record<string, CartItem> = {};
       try {
         const cartString = localStorage.getItem('cart');
         if (cartString) {

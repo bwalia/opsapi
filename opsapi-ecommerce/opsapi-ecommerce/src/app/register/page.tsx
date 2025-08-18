@@ -60,26 +60,30 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-16 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-xl w-full">
+        <div className="text-center mb-8">
+          <h2 className="text-3xl font-bold text-gray-900">
             Create your account
           </h2>
+          <p className="text-gray-600 mt-2">
+            Join our marketplace to start buying or selling today.
+          </p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+
+        <form className="space-y-6" onSubmit={handleSubmit}>
           {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
               {error}
             </div>
           )}
 
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label
                   htmlFor="first_name"
-                  className="block text-sm font-medium text-black"
+                  className="block text-base font-medium text-gray-900 mb-2"
                 >
                   First Name
                 </label>
@@ -90,13 +94,13 @@ export default function Register() {
                   required
                   value={formData.first_name}
                   onChange={handleChange}
-                  className="text-black mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="input"
                 />
               </div>
               <div>
                 <label
                   htmlFor="last_name"
-                  className="block text-sm font-medium text-gray-700"
+                  className="block text-base font-medium text-gray-900 mb-2"
                 >
                   Last Name
                 </label>
@@ -107,7 +111,7 @@ export default function Register() {
                   required
                   value={formData.last_name}
                   onChange={handleChange}
-                  className="text-black mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="input"
                 />
               </div>
             </div>
@@ -115,7 +119,7 @@ export default function Register() {
             <div>
               <label
                 htmlFor="username"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-base font-medium text-gray-900 mb-2"
               >
                 Username
               </label>
@@ -126,14 +130,14 @@ export default function Register() {
                 required
                 value={formData.username}
                 onChange={handleChange}
-                className="text-black mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="input"
               />
             </div>
 
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-base font-medium text-gray-900 mb-2"
               >
                 Email
               </label>
@@ -144,14 +148,14 @@ export default function Register() {
                 required
                 value={formData.email}
                 onChange={handleChange}
-                className="text-black mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="input"
               />
             </div>
 
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-base font-medium text-gray-900 mb-2"
               >
                 Password
               </label>
@@ -163,14 +167,14 @@ export default function Register() {
                 minLength={8}
                 value={formData.password}
                 onChange={handleChange}
-                className="text-black mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="input"
               />
             </div>
 
             <div>
               <label
                 htmlFor="role"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-base font-medium text-gray-900 mb-2"
               >
                 Account Type
               </label>
@@ -179,7 +183,7 @@ export default function Register() {
                 name="role"
                 value={formData.role}
                 onChange={handleChange}
-                className="text-black mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="input"
               >
                 <option value="buyer">Buyer - Shop products</option>
                 <option value="seller">
@@ -193,7 +197,7 @@ export default function Register() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400"
+              className="btn-primary w-full"
             >
               {loading ? "Creating account..." : "Create account"}
             </button>
@@ -204,7 +208,7 @@ export default function Register() {
               Already have an account?{" "}
               <Link
                 href="/login"
-                className="font-medium text-blue-600 hover:text-blue-500"
+                className="font-medium text-[#fe004d] hover:text-[#e6003d]"
               >
                 Sign in
               </Link>
