@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AuthProvider } from '@/contexts/AuthContext';
-import { CartProvider } from '@/contexts/CartContext';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
+import { AuthProvider } from "@/contexts/AuthContext";
+import { CartProvider } from "@/contexts/CartContext";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
   title: "MarketPlace - Multi-Tenant Ecommerce Platform",
-  description: "Connect with sellers worldwide. Buy and sell products on our trusted multi-tenant marketplace.",
+  description:
+    "Connect with sellers worldwide. Buy and sell products on our trusted multi-tenant marketplace.",
 };
 
 export default function RootLayout({
@@ -23,7 +24,9 @@ export default function RootLayout({
             <div className="flex flex-col min-h-screen">
               <Navbar />
               <main className="flex-1">
-                {children}
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                  {children}
+                </div>
               </main>
               <Footer />
             </div>

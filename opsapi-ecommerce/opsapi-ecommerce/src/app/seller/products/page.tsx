@@ -4,14 +4,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 import { Product } from "@/types";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 function ProductsContent() {
-  const [products, setProducts] = useState([]);
-  const [stores, setStores] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [stores, setStores] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [selectedStore, setSelectedStore] = useState("");
   const [dataLoading, setDataLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    product: any | null;
+  }>({ open: false, product: null });
 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
@@ -43,15 +48,12 @@ function ProductsContent() {
 
   useEffect(() => {
     const storeParam = searchParams.get("store");
-    if (storeParam && storeParam !== selectedStore) {
+    if (storeParam && storeParam !== selectedStore)
       setSelectedStore(storeParam);
-    }
   }, [searchParams]);
 
   useEffect(() => {
-    if (selectedStore && stores.length > 0) {
-      loadProductsForStore(selectedStore);
-    }
+    if (selectedStore && stores.length > 0) loadProductsForStore(selectedStore);
   }, [selectedStore, stores]);
 
   const loadData = async () => {
@@ -65,11 +67,10 @@ function ProductsContent() {
       setStores(storesData);
 
       const storeParam = searchParams.get("store");
-      if (storeParam && storesData.find((s: any) => s.uuid === storeParam)) {
+      if (storeParam && storesData.find((s: any) => s.uuid === storeParam))
         setSelectedStore(storeParam);
-      } else if (storesData.length > 0 && !selectedStore) {
+      else if (storesData.length > 0 && !selectedStore)
         setSelectedStore(storesData[0].uuid);
-      }
     } catch (error) {
       console.error("Failed to load data:", error);
       setStores([]);
@@ -81,26 +82,22 @@ function ProductsContent() {
 
   const loadProductsForStore = async (storeId: string) => {
     if (!storeId) return;
-
     try {
       const [productsResponse, categoriesResponse] = await Promise.all([
         api.getStoreProducts(storeId),
         api.getCategories(storeId),
       ]);
-
       const productsData = Array.isArray(productsResponse?.data)
         ? productsResponse.data
         : Array.isArray(productsResponse)
         ? productsResponse
         : [];
       setProducts(productsData);
-
-      let categoriesData = [];
-      if (Array.isArray(categoriesResponse?.data)) {
+      let categoriesData: any[] = [];
+      if (Array.isArray(categoriesResponse?.data))
         categoriesData = categoriesResponse.data;
-      } else if (Array.isArray(categoriesResponse)) {
+      else if (Array.isArray(categoriesResponse))
         categoriesData = categoriesResponse;
-      }
       setCategories(categoriesData);
     } catch (error) {
       console.error("Failed to load products:", error);
@@ -111,30 +108,37 @@ function ProductsContent() {
 
   const handleStoreChange = (storeId: string) => {
     setSelectedStore(storeId);
-    if (storeId) {
-      loadProductsForStore(storeId);
-    } else {
+    if (storeId) loadProductsForStore(storeId);
+    else {
       setProducts([]);
       setCategories([]);
     }
   };
 
+  const handleChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >
+  ) => {
+    const target = e.target as
+      | HTMLInputElement
+      | HTMLTextAreaElement
+      | HTMLSelectElement;
+    const { name } = target as any;
+    const type = (target as HTMLInputElement).type;
+    const value =
+      type === "checkbox"
+        ? (target as HTMLInputElement).checked
+        : (target as any).value;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStore) {
-      alert("Please select a store first");
-      return;
-    }
-
-    if (!formData.name.trim()) {
-      alert("Product name is required");
-      return;
-    }
-
-    if (!formData.price || parseFloat(formData.price) <= 0) {
-      alert("Please enter a valid price");
-      return;
-    }
+    if (!selectedStore) return alert("Please select a store first");
+    if (!formData.name.trim()) return alert("Product name is required");
+    if (!formData.price || parseFloat(formData.price) <= 0)
+      return alert("Please enter a valid price");
 
     try {
       const submitData = {
@@ -148,13 +152,9 @@ function ProductsContent() {
         images: JSON.stringify(formData.images.filter((img) => img.trim())),
       };
 
-      if (editingProduct) {
+      if (editingProduct)
         await api.updateProduct(editingProduct.uuid, submitData);
-        alert("Product updated successfully!");
-      } else {
-        await api.createProduct(selectedStore, submitData);
-        alert("Product created successfully!");
-      }
+      else await api.createProduct(selectedStore, submitData);
 
       setShowForm(false);
       setEditingProduct(null);
@@ -169,7 +169,6 @@ function ProductsContent() {
         images: [],
       });
       setImageUrl("");
-
       await loadProductsForStore(selectedStore);
     } catch (error: any) {
       console.error("Failed to save product:", error);
@@ -180,41 +179,26 @@ function ProductsContent() {
     }
   };
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) => {
-    const { name, value, type } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]:
-        type === "checkbox" ? (e.target as HTMLInputElement).checked : value,
-    }));
-  };
+  const requestDeleteProduct = (product: any) =>
+    setDeleteDialog({ open: true, product });
 
-  const handleDeleteProduct = async (product: any) => {
-    if (!product?.uuid) return;
-
-    const confirmMessage = `Are you sure you want to delete "${product.name}"? This action cannot be undone and will also delete all variants.`;
-    if (!confirm(confirmMessage)) return;
-
+  const confirmDeleteProduct = async () => {
+    const product = deleteDialog.product;
+    if (!product?.uuid) return setDeleteDialog({ open: false, product: null });
     try {
       await api.deleteProduct(product.uuid);
-      alert("Product deleted successfully");
-      if (selectedStore) {
-        await loadProductsForStore(selectedStore);
-      }
+      if (selectedStore) await loadProductsForStore(selectedStore);
     } catch (error: any) {
       console.error("Failed to delete product:", error);
       alert("Failed to delete product: " + (error?.message || "Unknown error"));
+    } finally {
+      setDeleteDialog({ open: false, product: null });
     }
   };
 
   const handleEdit = (product: any) => {
     if (!product) return;
-
-    let productImages = [];
+    let productImages: string[] = [];
     try {
       if (product.images && typeof product.images === "string") {
         const parsed = JSON.parse(product.images);
@@ -266,16 +250,30 @@ function ProductsContent() {
         <div className="container py-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Manage Products</h1>
-              <p className="text-gray-600 text-sm mt-1">Add and manage your store products</p>
+              <h1 className="text-2xl font-bold text-gray-900">
+                Manage Products
+              </h1>
+              <p className="text-gray-600 text-sm mt-1">
+                Add and manage your store products
+              </p>
             </div>
             <button
               onClick={() => setShowForm(true)}
               disabled={!selectedStore}
               className="btn-primary btn-sm disabled:bg-gray-400"
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                />
               </svg>
               Add Product
             </button>
@@ -302,6 +300,18 @@ function ProductsContent() {
             ))}
           </select>
         </div>
+
+        {/* Confirm Delete Dialog */}
+        <ConfirmDialog
+          open={deleteDialog.open}
+          title="Delete Product"
+          message={`Are you sure you want to delete "${
+            deleteDialog.product?.name || ""
+          }"? This will also delete all variants.`}
+          onCancel={() => setDeleteDialog({ open: false, product: null })}
+          onConfirm={confirmDeleteProduct}
+          confirmText="Delete"
+        />
 
         {/* Add Product Form Modal */}
         {showForm && (
@@ -330,13 +340,23 @@ function ProductsContent() {
                     }}
                     className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
               </div>
-              
+
               <form onSubmit={handleSubmit} className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -561,10 +581,7 @@ function ProductsContent() {
                   >
                     Cancel
                   </button>
-                  <button
-                    type="submit"
-                    className="btn-primary btn-sm"
-                  >
+                  <button type="submit" className="btn-primary btn-sm">
                     {editingProduct ? "Update" : "Add"} Product
                   </button>
                 </div>
@@ -579,13 +596,20 @@ function ProductsContent() {
             <div className="max-w-md mx-auto">
               <div className="empty-state-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                  />
                 </svg>
               </div>
               <h2 className="text-xl font-semibold text-gray-900 mb-3">
                 Select a Store
               </h2>
-              <p className="text-gray-600 text-sm">Choose a store to manage its products</p>
+              <p className="text-gray-600 text-sm">
+                Choose a store to manage its products
+              </p>
             </div>
           </div>
         ) : products.length === 0 ? (
@@ -593,7 +617,12 @@ function ProductsContent() {
             <div className="max-w-md mx-auto">
               <div className="empty-state-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                  />
                 </svg>
               </div>
               <h2 className="text-xl font-semibold text-gray-900 mb-3">
@@ -602,12 +631,19 @@ function ProductsContent() {
               <p className="text-gray-600 text-sm mb-6">
                 Add your first product to start selling
               </p>
-              <button
-                onClick={() => setShowForm(true)}
-                className="btn-primary"
-              >
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              <button onClick={() => setShowForm(true)} className="btn-primary">
+                <svg
+                  className="w-4 h-4 mr-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                  />
                 </svg>
                 Add Your First Product
               </button>
@@ -616,12 +652,11 @@ function ProductsContent() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {products.map((product: any) => (
-              <div
-                key={product.uuid}
-                className="card hover-lift"
-              >
+              <div key={product.uuid} className="card hover-lift">
                 <div className="card-body">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{product.name}</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {product.name}
+                  </h3>
                   <p className="text-gray-600 text-sm mb-3 line-clamp-2">
                     {product.description}
                   </p>
@@ -641,9 +676,7 @@ function ProductsContent() {
                     </span>
                     <span
                       className={`badge ${
-                        product.is_active
-                          ? "badge-success"
-                          : "badge-gray"
+                        product.is_active ? "badge-success" : "badge-gray"
                       }`}
                     >
                       {product.is_active ? "Active" : "Inactive"}
@@ -666,7 +699,7 @@ function ProductsContent() {
                       Variants
                     </button>
                     <button
-                      onClick={() => handleDeleteProduct(product)}
+                      onClick={() => requestDeleteProduct(product)}
                       className="px-2 py-1 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
                     >
                       Delete

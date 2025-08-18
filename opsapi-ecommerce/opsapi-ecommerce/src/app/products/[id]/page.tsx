@@ -119,8 +119,13 @@ export default function ProductDetails() {
 
   const getProductImages = () => {
     try {
-      if (!product?.images || product.images === '') return [];
-      const parsed = JSON.parse(product.images);
+      if (!product?.images || product.images.length === 0) return [];
+      // If images is already an array, return it directly
+      if (Array.isArray(product.images)) {
+        return product.images.filter(img => typeof img === 'string' && img.trim());
+      }
+      // If images is a string, try to parse it as JSON
+      const parsed = JSON.parse(product.images as string);
       return Array.isArray(parsed) ? parsed.filter(img => typeof img === 'string' && img.trim()) : [];
     } catch {
       return [];

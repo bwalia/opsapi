@@ -65,17 +65,23 @@ export default function Home() {
         <div className="container mx-auto px-4 py-16">
           <div className="max-w-4xl mx-auto text-center">
             <h1 className="text-4xl md:text-6xl font-bold mb-6">
-              Your Multi-Tenant
-              <span className="block text-pink-200">Marketplace</span>
+              Your Own Store By
+              <span className="block text-pink-200">Kisaan</span>
             </h1>
             <p className="text-xl md:text-2xl mb-8 text-pink-100">
               Discover amazing products from sellers worldwide
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/register" className="bg-white text-[#fe004d] px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors">
+              <Link
+                href="/register"
+                className="bg-white text-[#fe004d] px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+              >
                 Start Selling Today
               </Link>
-              <Link href="#products" className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-[#fe004d] transition-colors">
+              <Link
+                href="#products"
+                className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-[#fe004d] transition-colors"
+              >
                 Browse Products
               </Link>
             </div>
@@ -99,7 +105,12 @@ export default function Home() {
             <div className="max-w-md mx-auto">
               <div className="empty-state-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+                  />
                 </svg>
               </div>
               <h3 className="text-2xl font-semibold text-gray-900 mb-4">
@@ -134,7 +145,8 @@ export default function Home() {
             Ready to Start Selling?
           </h2>
           <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
-            Join thousands of sellers who trust our platform to grow their business
+            Join thousands of sellers who trust our platform to grow their
+            business
           </p>
           <Link href="/register" className="btn-primary text-lg px-8 py-4">
             Get Started for Free

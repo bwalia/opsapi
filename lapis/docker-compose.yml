@@ -101,15 +101,20 @@ services:
     container_name: opsapi-ecommerce
     build:
       context: ../opsapi-ecommerce/opsapi-ecommerce
+      dockerfile: Dockerfile.dev
     ports:
       - "3033:3000"
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.15
     volumes:
-      - ../opsapi-ecommerce/opsapi-ecommerce:/kisaan
+      - ../opsapi-ecommerce/opsapi-ecommerce:/app
+      - /app/node_modules
+      - /app/.next
     environment:
       - NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
     depends_on:
       - lapis
 

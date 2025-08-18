@@ -4,13 +4,20 @@ import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 import { ProductVariant } from "@/types";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 export default function ProductVariants() {
   const [product, setProduct] = useState<any>(null);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
+  const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(
+    null
+  );
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    id: string | null;
+  }>({ open: false, id: null });
   const [formData, setFormData] = useState({
     title: "",
     option1: "",
@@ -19,7 +26,7 @@ export default function ProductVariants() {
     sku: "",
     price: "",
     inventory_quantity: "0",
-    is_active: true
+    is_active: true,
   });
 
   const { user, loading: authLoading } = useAuth();
@@ -33,9 +40,7 @@ export default function ProductVariants() {
       return;
     }
 
-    if (user && productId) {
-      loadData();
-    }
+    if (user && productId) loadData();
   }, [user, authLoading, router, productId]);
 
   const loadData = async () => {
@@ -43,9 +48,8 @@ export default function ProductVariants() {
       setLoading(true);
       const [productResponse, variantsResponse] = await Promise.all([
         api.getProduct(productId),
-        api.getVariants(productId)
+        api.getVariants(productId),
       ]);
-      
       setProduct(productResponse);
       setVariants(Array.isArray(variantsResponse) ? variantsResponse : []);
     } catch (error) {
@@ -59,18 +63,19 @@ export default function ProductVariants() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (editingVariant) {
+      if (editingVariant)
         await api.updateVariant(editingVariant.uuid, formData);
-      } else {
-        await api.createVariant(productId, formData);
-      }
-      
+      else await api.createVariant(productId, formData);
       setShowForm(false);
       setEditingVariant(null);
       resetForm();
       await loadData();
     } catch (error: any) {
-      alert(`Failed to ${editingVariant ? 'update' : 'create'} variant: ${error.message}`);
+      alert(
+        `Failed to ${editingVariant ? "update" : "create"} variant: ${
+          error.message
+        }`
+      );
     }
   };
 
@@ -84,19 +89,23 @@ export default function ProductVariants() {
       sku: variant.sku || "",
       price: variant.price?.toString() || "",
       inventory_quantity: variant.inventory_quantity.toString(),
-      is_active: variant.is_active
+      is_active: variant.is_active,
     });
     setShowForm(true);
   };
 
-  const handleDelete = async (variantId: string) => {
-    if (confirm('Are you sure you want to delete this variant?')) {
-      try {
-        await api.deleteVariant(variantId);
-        await loadData();
-      } catch (error: any) {
-        alert(`Failed to delete variant: ${error.message}`);
-      }
+  const requestDelete = (variantId: string) =>
+    setDeleteDialog({ open: true, id: variantId });
+
+  const confirmDelete = async () => {
+    if (!deleteDialog.id) return setDeleteDialog({ open: false, id: null });
+    try {
+      await api.deleteVariant(deleteDialog.id);
+      await loadData();
+    } catch (error: any) {
+      alert(`Failed to delete variant: ${error.message}`);
+    } finally {
+      setDeleteDialog({ open: false, id: null });
     }
   };
 
@@ -109,51 +118,62 @@ export default function ProductVariants() {
       sku: "",
       price: "",
       inventory_quantity: "0",
-      is_active: true
+      is_active: true,
     });
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
     const { name, value, type } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
+      [name]:
+        type === "checkbox" ? (e.target as HTMLInputElement).checked : value,
     }));
   };
 
-  if (loading || authLoading) {
+  if (loading || authLoading)
     return <div className="container mx-auto px-4 py-8">Loading...</div>;
-  }
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
         <button
           onClick={() => router.back()}
-          className="text-blue-600 hover:text-blue-800 mb-4"
+          className="text-[#fe004d] hover:text-[#e6003d] mb-4"
         >
           ← Back to Products
         </button>
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Product Variants</h1>
-            <p className="text-gray-600">Managing variants for: {product?.name}</p>
+            <p className="text-gray-600">
+              Managing variants for: {product?.name}
+            </p>
           </div>
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
+          <button onClick={() => setShowForm(true)} className="btn-primary">
             Add Variant
           </button>
         </div>
       </div>
 
+      {/* Confirm Delete */}
+      <ConfirmDialog
+        open={deleteDialog.open}
+        title="Delete Variant"
+        message="Are you sure you want to delete this variant?"
+        onCancel={() => setDeleteDialog({ open: false, id: null })}
+        onConfirm={confirmDelete}
+        confirmText="Delete"
+      />
+
       {/* Variant Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-full max-w-2xl max-h-screen overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-xl w-full max-w-2xl max-h-screen overflow-y-auto shadow-xl">
             <h2 className="text-xl font-semibold mb-4">
-              {editingVariant ? 'Edit Variant' : 'Add New Variant'}
+              {editingVariant ? "Edit Variant" : "Add New Variant"}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -167,10 +187,9 @@ export default function ProductVariants() {
                   value={formData.title}
                   onChange={handleChange}
                   placeholder="e.g., Red / Large"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="input"
                 />
               </div>
-
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -182,7 +201,7 @@ export default function ProductVariants() {
                     value={formData.option1}
                     onChange={handleChange}
                     placeholder="Red"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="input"
                   />
                 </div>
                 <div>
@@ -195,7 +214,7 @@ export default function ProductVariants() {
                     value={formData.option2}
                     onChange={handleChange}
                     placeholder="Large"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="input"
                   />
                 </div>
                 <div>
@@ -208,11 +227,10 @@ export default function ProductVariants() {
                     value={formData.option3}
                     onChange={handleChange}
                     placeholder="Cotton"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="input"
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -223,7 +241,7 @@ export default function ProductVariants() {
                     name="sku"
                     value={formData.sku}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="input"
                   />
                 </div>
                 <div>
@@ -237,11 +255,10 @@ export default function ProductVariants() {
                     value={formData.price}
                     onChange={handleChange}
                     placeholder="Leave empty to use product price"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="input"
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -254,7 +271,7 @@ export default function ProductVariants() {
                     required
                     value={formData.inventory_quantity}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="input"
                   />
                 </div>
                 <div className="flex items-center pt-6">
@@ -270,8 +287,7 @@ export default function ProductVariants() {
                   </label>
                 </div>
               </div>
-
-              <div className="flex justify-end space-x-2 pt-4">
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -283,11 +299,8 @@ export default function ProductVariants() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  {editingVariant ? 'Update' : 'Add'} Variant
+                <button type="submit" className="btn-primary">
+                  {editingVariant ? "Update" : "Add"} Variant
                 </button>
               </div>
             </form>
@@ -305,10 +318,7 @@ export default function ProductVariants() {
           <p className="text-gray-500 mb-4">
             Add variants to offer different options for this product
           </p>
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
-          >
+          <button onClick={() => setShowForm(true)} className="btn-primary">
             Add Your First Variant
           </button>
         </div>
@@ -352,25 +362,29 @@ export default function ProductVariants() {
                     <div className="text-sm text-gray-500">
                       {[variant.option1, variant.option2, variant.option3]
                         .filter(Boolean)
-                        .join(' / ')}
+                        .join(" / ")}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {variant.sku || 'N/A'}
+                    {variant.sku || "N/A"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {variant.price ? `$${parseFloat(variant.price.toString()).toFixed(2)}` : 'Default'}
+                    {variant.price
+                      ? `$${parseFloat(variant.price.toString()).toFixed(2)}`
+                      : "Default"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {variant.inventory_quantity}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      variant.is_active 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-gray-100 text-gray-800'
-                    }`}>
-                      {variant.is_active ? 'Active' : 'Inactive'}
+                    <span
+                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        variant.is_active
+                          ? "bg-green-100 text-green-800"
+                          : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      {variant.is_active ? "Active" : "Inactive"}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -381,7 +395,7 @@ export default function ProductVariants() {
                       Edit
                     </button>
                     <button
-                      onClick={() => handleDelete(variant.uuid)}
+                      onClick={() => requestDelete(variant.uuid)}
                       className="text-red-600 hover:text-red-900"
                     >
                       Delete
