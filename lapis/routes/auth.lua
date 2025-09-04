@@ -4,6 +4,7 @@ local cJson = require("cjson")
 local lapis = require("lapis")
 local UserQueries = require "queries.UserQueries"
 local Global = require "helper.global"
+local UserRolesQueries = require "queries.UserRoleQueries"
 
 return function(app)
     ----------------- Auth Routes --------------------
@@ -59,7 +60,6 @@ return function(app)
             }
         })
 
-        -- You can also return a JWT token here
         return {
             status = 200,
             json = {
@@ -74,42 +74,60 @@ return function(app)
         }
     end)
 
-    app:get("/auth/login", function(self)
-        local keycloak_auth_url = Global.getEnvVar("KEYCLOAK_AUTH_URL")
-        local client_id = Global.getEnvVar("KEYCLOAK_CLIENT_ID")
-        local redirect_uri = Global.getEnvVar("KEYCLOAK_REDIRECT_URI")
+    -- Google OAuth Routes
+    app:get("/auth/google", function(self)
+        local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
+        local google_redirect_uri = Global.getEnvVar("GOOGLE_REDIRECT_URI")
+        
+        if not google_client_id or not google_redirect_uri then
+            return {
+                status = 500,
+                json = {
+                    error = "Google OAuth not configured"
+                }
+            }
+        end
 
-        self.cookies.redirect_from = self.params.from
-
-        local session, sessionErr = require "resty.session".new()
-        session:set("redirect_from", self.params.from)
-        session:save()
-
-        -- Redirect to Keycloak's login page
-        local login_url = string.format("%s?client_id=%s&redirect_uri=%s&response_type=code&scope=openid+profile+email",
-            keycloak_auth_url, client_id, redirect_uri)
+        local redirect_from = self.params.from or "/"
+        
+        local auth_url = string.format(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid+profile+email&state=%s",
+            google_client_id, ngx.escape_uri(google_redirect_uri), ngx.escape_uri(redirect_from)
+        )
+        
         return {
-            redirect_to = login_url
+            redirect_to = auth_url
         }
     end)
 
-    app:get("/auth/callback", function(self)
-        local httpc = http.new()
-        local token_url = Global.getEnvVar("KEYCLOAK_TOKEN_URL")
-        local client_id = Global.getEnvVar("KEYCLOAK_CLIENT_ID")
-        local client_secret = Global.getEnvVar("KEYCLOAK_CLIENT_SECRET")
-        local redirect_uri = Global.getEnvVar("KEYCLOAK_REDIRECT_URI")
+    app:get("/auth/google/callback", function(self)
+        local code = self.params.code
+        local redirect_from = self.params.state or "/"
+        
+        if not code then
+            return {
+                status = 400,
+                json = {
+                    error = "Authorization code not provided"
+                }
+            }
+        end
 
-        -- Exchange the authorization code for a token
-        local res, err = httpc:request_uri(token_url, {
+        local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
+        local google_client_secret = Global.getEnvVar("GOOGLE_CLIENT_SECRET")
+        local google_redirect_uri = Global.getEnvVar("GOOGLE_REDIRECT_URI")
+
+        local httpc = http.new()
+        
+        -- Exchange code for access token
+        local token_res, token_err = httpc:request_uri("https://oauth2.googleapis.com/token", {
             method = "POST",
             body = ngx.encode_args({
+                client_id = google_client_id,
+                client_secret = google_client_secret,
+                code = code,
                 grant_type = "authorization_code",
-                code = self.params.code,
-                redirect_uri = redirect_uri,
-                client_id = client_id,
-                client_secret = client_secret,
-                scope = "openid profile email"
+                redirect_uri = google_redirect_uri
             }),
             headers = {
                 ["Content-Type"] = "application/x-www-form-urlencoded"
@@ -117,142 +135,166 @@ return function(app)
             ssl_verify = false
         })
 
-        if not res then
+        if not token_res then
             return {
                 status = 500,
                 json = {
-                    error = "Failed to fetch token: " .. (err or "unknown")
+                    error = "Failed to exchange code for token: " .. (token_err or "unknown")
                 }
             }
         end
 
-        local token_response = cJson.decode(res.body)
+        local token_data = cJson.decode(token_res.body)
+        if not token_data.access_token then
+            return {
+                status = 500,
+                json = {
+                    error = "No access token received"
+                }
+            }
+        end
 
-        local userinfo_url = Global.getEnvVar("KEYCLOAK_USERINFO_URL")
-        local usrRes, usrErr = httpc:request_uri(userinfo_url, {
+        -- Get user info from Google
+        local user_res, user_err = httpc:request_uri("https://www.googleapis.com/oauth2/v2/userinfo", {
             method = "GET",
             headers = {
-                ["Authorization"] = "Bearer " .. token_response.access_token
+                ["Authorization"] = "Bearer " .. token_data.access_token
             },
-            scope = "openid profile email",
             ssl_verify = false
         })
 
-        if not usrRes then
+        if not user_res then
             return {
                 status = 500,
                 json = {
-                    error = "Failed to fetch user info: " .. (usrErr or "unknown")
+                    error = "Failed to get user info: " .. (user_err or "unknown")
                 }
             }
         end
 
-        local userinfo = cJson.decode(usrRes.body)
-        if userinfo.email ~= nil and userinfo.sub ~= nil then
-            local session, sessionErr = require "resty.session".start()
-            session:set(userinfo.sub, cJson.encode(token_response))
-            session:save()
-
-            local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
-            local token = jwt:sign(JWT_SECRET_KEY, {
-                header = {
-                    typ = "JWT",
-                    alg = "HS256"
-                },
-                payload = {
-                    userinfo = userinfo,
-                    token_response = token_response
+        local google_user = cJson.decode(user_res.body)
+        if not google_user.email then
+            return {
+                status = 500,
+                json = {
+                    error = "No email received from Google"
                 }
-            })
-            local redirectURL = self.cookies.redirect_from or ngx.redirect_uri
-            local externalUrl = redirectURL .. "?token=" .. ngx.escape_uri(token)
-            ngx.redirect(externalUrl, ngx.HTTP_MOVED_TEMPORARILY)
+            }
         end
+
+        -- Find or create user
+        local user = UserQueries.findByEmail(google_user.email)
+        if not user then
+            local names = {}
+            if google_user.name then
+                names = Global.splitName(google_user.name)
+            end
+            
+            user = UserQueries.createOAuthUser({
+                uuid = Global.generateUUID(),
+                email = google_user.email,
+                username = google_user.email,
+                first_name = names.first_name or google_user.given_name or "",
+                last_name = names.last_name or google_user.family_name or "",
+                password = Global.generateRandomPassword(),
+                role = "buyer",
+                oauth_provider = "google",
+                oauth_id = google_user.id,
+                active = true
+            })
+        end
+
+        -- Get user with roles
+        local userWithRoles = UserQueries.show(user.uuid)
+        if not userWithRoles then
+            return {
+                status = 500,
+                json = {
+                    error = "Failed to load user data"
+                }
+            }
+        end
+
+        -- Generate JWT token
+        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
+        local token = jwt:sign(JWT_SECRET_KEY, {
+            header = {
+                typ = "JWT",
+                alg = "HS256"
+            },
+            payload = {
+                userinfo = {
+                    uuid = userWithRoles.uuid,
+                    email = userWithRoles.email,
+                    name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
+                    roles = userWithRoles.roles and userWithRoles.roles[1] and userWithRoles.roles[1].name or "buyer"
+                },
+            }
+        })
+
+        -- Redirect to frontend with token
+        local frontend_url = Global.getEnvVar("FRONTEND_URL") or "http://localhost:3033"
+        local final_url = string.format("%s/auth/callback?token=%s&redirect=%s", 
+            frontend_url, ngx.escape_uri(token), ngx.escape_uri(redirect_from))
+        
         return {
-            json = userinfo
+            redirect_to = final_url
         }
     end)
 
+    -- Logout endpoint
     app:post("/auth/logout", function(self)
-        local payloads = self.params
-        if not payloads then
+        -- Clear any session data
+        if self.session then
+            for k, _ in pairs(self.session) do
+                self.session[k] = nil
+            end
+        end
+        
+        return {
+            json = {
+                message = "Logged out successfully"
+            },
+            status = 200
+        }
+    end)
+
+    -- OAuth token validation endpoint
+    app:post("/auth/oauth/validate", function(self)
+        local token = self.params.token
+        if not token then
             return {
                 status = 400,
                 json = {
-                    error = "Refresh and Access Tokens are required."
+                    error = "Token is required"
                 }
             }
         end
 
-        local refreshToken, accessToken = nil, nil
-        if payloads then
-            refreshToken = payloads.refreshToken
-            accessToken = payloads.accessToken
-
-            local keycloakAuthUrl = Global.getEnvVar("KEYCLOAK_AUTH_URL") or ""
-            local client_id = Global.getEnvVar("KEYCLOAK_CLIENT_ID")
-            local client_secret = Global.getEnvVar("KEYCLOAK_CLIENT_SECRET")
-            local logoutUrl = keycloakAuthUrl:gsub("/auth$", "/logout")
-
-            if refreshToken ~= nil and accessToken ~= nil then
-                local postData = {
-                    client_id = client_id,
-                    client_secret = client_secret,
-                    refresh_token = refreshToken
-                }
-
-                local httpc = http.new()
-                local res, err = httpc:request_uri(logoutUrl, {
-                    method = "POST",
-                    body = ngx.encode_args(postData),
-                    headers = {
-                        ["Authorization"] = "Bearer " .. accessToken,
-                        ["Content-Type"] = "application/x-www-form-urlencoded"
-                    },
-                    ssl_verify = false
-                })
-
-                if not res then
-                    return {
-                        status = 500,
-                        json = {
-                            error = "Failed to connect to Keycloak",
-                            details = err
-                        }
-                    }
-                end
-                if res.status == 200 then
-                    return {
-                        status = 200,
-                        json = {
-                            message = "Logout successful!",
-                            body = res.body
-                        }
-                    }
-                else
-                    return {
-                        status = res.status,
-                        json = {
-                            error = "Logout failed",
-                            details = res.body
-                        }
-                    }
-                end
-            else
-                return {
-                    status = 500,
-                    json = {
-                        error = "Session Data for token not found."
-                    }
-                }
-            end
-        else
+        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
+        local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
+        
+        if not jwt_obj.valid then
             return {
-                status = 500,
+                status = 401,
                 json = {
-                    error = "Session Data not found."
+                    error = "Invalid token"
                 }
             }
         end
+
+        local userinfo = jwt_obj.payload.userinfo
+        return {
+            status = 200,
+            json = {
+                user = {
+                    id = userinfo.uuid,
+                    email = userinfo.email,
+                    name = userinfo.name,
+                    role = userinfo.roles
+                },
+                token = token
+            }
+        }
     end)
 end

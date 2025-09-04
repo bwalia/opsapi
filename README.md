@@ -1,6 +1,12 @@
 # OPSAPI
 
-Opsapi built on the top of Lua.
+Opsapi built on the top of Lua with ecommerce frontend built in Next.js.
+
+## Components
+
+- **OPSAPI (Backend)**: Lua-based API server with authentication and ecommerce functionality
+- **OPSAPI Node**: Node.js service for additional features
+- **OPSAPI Ecommerce**: Next.js frontend for multi-tenant ecommerce platform
 
 ## Deploy on Kubernates
 
@@ -35,7 +41,12 @@ To deploy OPSAPI on kubernates, please follow the instructions.
         MINIO_ACCESS_KEY:
         MINIO_SECRET_KEY:
         MINIO_BUCKET:
+        MINIO_REGION:
         NODE_API_URL:
+        GOOGLE_CLIENT_ID:
+        GOOGLE_CLIENT_SECRET:
+        GOOGLE_REDIRECT_URI:
+        FRONTEND_URL:
 
         NOTE: For LAPIS_CONFIG_LUA_FILE please add your variables to existing config.lua and encode the file base64, and For NODE_API_URL please add the Opsapi-Node Url.
 
@@ -61,9 +72,14 @@ To deploy OPSAPI on kubernates, please follow the instructions.
             MINIO_BUCKET:
             MINIO_ENDPOINT:
             MINIO_SECRET_KEY:
+            MINIO_REGION:
             NODE_API_URL:
             OPENSSL_SECRET_IV:
             OPENSSL_SECRET_KEY:
+            GOOGLE_CLIENT_ID:
+            GOOGLE_CLIENT_SECRET:
+            GOOGLE_REDIRECT_URI:
+            FRONTEND_URL:
         kind: Secret
         metadata:
             creationTimestamp: null
@@ -137,35 +153,117 @@ To deploy OPSAPI UI on kubernates, please follow the instructions.
         --set image.tag=latest \
         --namespace <namespace> --create-namespace
 
-
-
 ## Run Opsapi On Local
 
-#### Requirments:
+#### Requirements:
 
-    docker
+    1. docker
+    2. docker-compose
 
 #### Installation
 
-    1. Update the opsapi/Dockerfile:
-        from this
-
-        COPY lapis/. /app
-
-        to this
-
-        COPY . /app
+    1. Update the lapis/Dockerfile:
+        Open file: lapis/Dockerfile
+        Find line: COPY lapis/. /app
+        Replace with: COPY . /app
 
     2. Update the node/opsapi-node/Dockerfile:
-        from this
+        Open file: node/opsapi-node/Dockerfile
+        Find lines:
+            COPY node/opsapi-node/package*.json /app/
+            COPY node/opsapi-node/. /app/
+        Replace with:
+            COPY ./package*.json /app/
+            COPY . /app/
 
-        COPY node/opsapi-node/package*.json /app/
-        COPY node/opsapi-node/. /app/
+    3. Update the opsapi-ecommerce/opsapi-ecommerce/Dockerfile:
+        Open file: opsapi-ecommerce/opsapi-ecommerce/Dockerfile
+        Find lines:
+            COPY opsapi-ecommerce/opsapi-ecommerce/package*.json ./
+            COPY opsapi-ecommerce/opsapi-ecommerce/. ./
+        Replace with:
+            COPY package*.json ./
+            COPY . ./
 
-        to this
+    4. Setup environment variables:
 
-        COPY ./package*.json /app/
-        COPY . /app/
+        a) Backend Environment (OPSAPI):
+        Copy lapis/.sample.env to lapis/.env and update with your values:
 
-    3. Run the command:
+        # Database
+        DB_HOST=localhost
+        DB_PORT=5432
+        DB_USER=pguser
+        DB_PASSWORD=pgpassword
+        DATABASE=opsapi
+
+        # JWT
+        JWT_SECRET_KEY=your-jwt-secret-key
+
+        # OpenSSL
+        OPENSSL_SECRET_KEY=your-openssl-key
+        OPENSSL_SECRET_IV=your-openssl-iv
+
+        # MinIO
+        MINIO_ENDPOINT=your-minio-endpoint
+        MINIO_ACCESS_KEY=your-access-key
+        MINIO_SECRET_KEY=your-secret-key
+        MINIO_BUCKET=your-bucket
+        MINIO_REGION=your-region
+
+        # Google OAuth (Optional)
+        GOOGLE_CLIENT_ID=your-google-client-id
+        GOOGLE_CLIENT_SECRET=your-google-client-secret
+        GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+
+        # Frontend URL
+        FRONTEND_URL=http://localhost:3000
+
+        # Node API
+        NODE_API_URL=http://localhost:3001/api
+
+        b) Frontend Environment (OPSAPI Ecommerce):
+        Create opsapi-ecommerce/opsapi-ecommerce/.env.local with:
+
+        NEXT_PUBLIC_API_URL=http://localhost:4010
+        NEXT_PUBLIC_APP_NAME=Multi-Tenant Ecommerce
+        NEXT_PUBLIC_APP_VERSION=1.0.0
+
+        c) Node Service Environment (OPSAPI Node):
+        Create node/opsapi-node/.env with:
+
+        PORT=3000
+
+        # MinIO settings
+        MINIO_ENDPOINT=your-minio-endpoint
+        MINIO_PORT=9000
+        MINIO_ACCESS_KEY=your-access-key
+        MINIO_SECRET_KEY=your-secret-key
+        MINIO_BUCKET=your-bucket
+        MINIO_REGION=your-region
+
+        # JWT (must match OPSAPI JWT_SECRET_KEY)
+        JWT_SECRET=your-jwt-secret-key
+
+    5. Run all services with Docker:
         bash ./run-development.sh
+
+    6. Access the application:
+        - Frontend (Ecommerce): http://localhost:3000
+        - Backend API (OPSAPI): http://localhost:4010
+        - Node Service (OPSAPI Node): http://localhost:3001
+
+## Google OAuth Setup
+
+To enable Google OAuth authentication:
+
+    1. Go to Google Cloud Console
+    2. Create a new project or select existing
+    3. Enable Google+ API
+    4. Create OAuth 2.0 credentials
+    5. Add authorized redirect URI: http://localhost:4010/auth/google/callback
+    6. Update environment variables in lapis/.env:
+        GOOGLE_CLIENT_ID=your-client-id
+        GOOGLE_CLIENT_SECRET=your-client-secret
+        GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+        FRONTEND_URL=http://localhost:3000

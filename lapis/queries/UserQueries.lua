@@ -104,6 +104,33 @@ function UserQueries.findByEmail(email)
     return Users:find({ email = email })
 end
 
+function UserQueries.findByOAuth(provider, oauth_id)
+    return Users:find({ oauth_provider = provider, oauth_id = oauth_id })
+end
+
+function UserQueries.createOAuthUser(params)
+    local userData = {
+        uuid = params.uuid or Global.generateUUID(),
+        email = params.email,
+        username = params.username or params.email,
+        first_name = params.first_name or "",
+        last_name = params.last_name or "",
+        password = params.password,
+        oauth_provider = params.oauth_provider,
+        oauth_id = params.oauth_id,
+        active = params.active or true
+    }
+    
+    local user = Users:create(userData, {
+        returning = "*"
+    })
+    user.password = nil
+    
+    -- Add default role
+    UserRolesQueries.addRole(user.id, params.role or "buyer")
+    return user
+end
+
 -- SCIM user response
 function UserQueries.SCIMall(params)
     local page, perPage, orderField, orderDir =

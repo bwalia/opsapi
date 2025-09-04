@@ -62,7 +62,7 @@ export default function Home() {
     <div className="min-h-screen">
       {/* Hero Section */}
       <div className="bg-gradient-to-br from-[#fe004d] to-[#e6003d] text-white">
-        <div className="container mx-auto px-4 py-16">
+        <div className="px-4 py-16">
           <div className="max-w-4xl mx-auto text-center">
             <h1 className="text-4xl md:text-6xl font-bold mb-6">
               Your Own Store By
@@ -90,7 +90,7 @@ export default function Home() {
       </div>
 
       {/* Products Section */}
-      <div id="products" className="container mx-auto px-4 py-16">
+      <div id="products" className="px-4 py-16">
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
             Featured Products
