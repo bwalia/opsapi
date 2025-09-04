@@ -201,6 +201,32 @@ function Global.getEnvVar(name)
     return Global.trim(value)
 end
 
+function Global.splitName(fullName)
+    if not fullName or fullName == "" then
+        return { first_name = "", last_name = "" }
+    end
+    
+    local parts = Global.splitStr(fullName, " ")
+    local first_name = parts[1] or ""
+    local last_name = ""
+    
+    if #parts > 1 then
+        last_name = table.concat(parts, " ", 2)
+    end
+    
+    return { first_name = first_name, last_name = last_name }
+end
+
+function Global.generateRandomPassword()
+    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+    local password = ""
+    for i = 1, 16 do
+        local rand = math.random(#chars)
+        password = password .. string.sub(chars, rand, rand)
+    end
+    return password
+end
+
 function Global.uploadToMinio(file, file_name)
     local http = require("resty.http")
     local cjson = require("cjson.safe")

@@ -3,7 +3,7 @@ import Link from "next/link";
 export default function Footer() {
   return (
     <footer className="bg-gray-900 text-white">
-      <div className="container py-12">
+      <div className="container py-8 px-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Brand */}
           <div className="lg:col-span-1">

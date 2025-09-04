@@ -291,5 +291,11 @@ return {
     ['20_create_cart_sessions'] = ecommerce_migrations[9],
     ['21_create_cart_items'] = ecommerce_migrations[10],
     ['22_create_store_settings'] = ecommerce_migrations[11],
-    ['23_create_product_reviews'] = ecommerce_migrations[12]
+    ['23_create_product_reviews'] = ecommerce_migrations[12],
+    
+    ['24_add_oauth_fields_to_users'] = function()
+        schema.add_column("users", "oauth_provider", types.varchar({ null = true }))
+        schema.add_column("users", "oauth_id", types.varchar({ null = true }))
+        schema.create_index("users", "oauth_provider", "oauth_id")
+    end
 }

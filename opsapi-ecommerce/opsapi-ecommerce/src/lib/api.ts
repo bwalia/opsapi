@@ -89,6 +89,37 @@ class ApiClient {
     return response;
   }
 
+  async logout() {
+    return this.request('/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }, true);
+  }
+
+  // OAuth methods
+  async validateOAuthToken(token: string) {
+    return this.request('/auth/oauth/validate', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }, true);
+  }
+
+  getGoogleAuthUrl(redirectPath?: string) {
+    const params = new URLSearchParams();
+    if (redirectPath) {
+      params.append('from', redirectPath);
+    }
+    return `${this.baseURL}/auth/google?${params}`;
+  }
+
+  getFacebookAuthUrl(redirectPath?: string) {
+    const params = new URLSearchParams();
+    if (redirectPath) {
+      params.append('from', redirectPath);
+    }
+    return `${this.baseURL}/auth/facebook?${params}`;
+  }
+
   // Products (public access)
   async getProducts(params?: any) {
     const query = params ? `?${new URLSearchParams(params)}` : '';

@@ -30,20 +30,26 @@ export default function ProductDetails() {
       router.push("/");
       return;
     }
-    
+
     try {
       setLoading(true);
       const productResponse = await api.getProduct(productId);
-      
+
       if (!productResponse) {
         router.push("/");
         return;
       }
-      
+
       setProduct(productResponse);
-      setCurrentPrice(typeof productResponse.price === 'number' ? productResponse.price : 0);
-      setCurrentStock(typeof productResponse.inventory_quantity === 'number' ? productResponse.inventory_quantity : 0);
-      
+      setCurrentPrice(
+        typeof productResponse.price === "number" ? productResponse.price : 0
+      );
+      setCurrentStock(
+        typeof productResponse.inventory_quantity === "number"
+          ? productResponse.inventory_quantity
+          : 0
+      );
+
       // Load variants separately to avoid blocking product display
       try {
         const variantsResponse = await api.getVariants(productId);
@@ -63,16 +69,26 @@ export default function ProductDetails() {
   const handleVariantChange = (variantUuid: string) => {
     setSelectedVariant(variantUuid);
     setQuantity(1);
-    
+
     if (variantUuid && product && variants.length > 0) {
-      const variant = variants.find(v => v.uuid === variantUuid);
+      const variant = variants.find((v) => v.uuid === variantUuid);
       if (variant) {
-        setCurrentPrice(typeof variant.price === 'number' ? variant.price : product.price);
-        setCurrentStock(typeof variant.inventory_quantity === 'number' ? variant.inventory_quantity : 0);
+        setCurrentPrice(
+          typeof variant.price === "number" ? variant.price : product.price
+        );
+        setCurrentStock(
+          typeof variant.inventory_quantity === "number"
+            ? variant.inventory_quantity
+            : 0
+        );
       }
     } else if (product) {
-      setCurrentPrice(typeof product.price === 'number' ? product.price : 0);
-      setCurrentStock(typeof product.inventory_quantity === 'number' ? product.inventory_quantity : 0);
+      setCurrentPrice(typeof product.price === "number" ? product.price : 0);
+      setCurrentStock(
+        typeof product.inventory_quantity === "number"
+          ? product.inventory_quantity
+          : 0
+      );
     }
   };
 
@@ -81,17 +97,17 @@ export default function ProductDetails() {
       alert("Invalid product");
       return;
     }
-    
+
     if (currentStock <= 0) {
       alert("Product is out of stock");
       return;
     }
-    
+
     if (quantity <= 0 || quantity > currentStock) {
       alert(`Please select a valid quantity (1-${currentStock})`);
       return;
     }
-    
+
     try {
       await addToCart(product.uuid, quantity, selectedVariant || undefined);
       alert("Added to cart successfully!");
@@ -122,16 +138,20 @@ export default function ProductDetails() {
       if (!product?.images || product.images.length === 0) return [];
       // If images is already an array, return it directly
       if (Array.isArray(product.images)) {
-        return product.images.filter(img => typeof img === 'string' && img.trim());
+        return product.images.filter(
+          (img) => typeof img === "string" && img.trim()
+        );
       }
       // If images is a string, try to parse it as JSON
       const parsed = JSON.parse(product.images as string);
-      return Array.isArray(parsed) ? parsed.filter(img => typeof img === 'string' && img.trim()) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((img) => typeof img === "string" && img.trim())
+        : [];
     } catch {
       return [];
     }
   };
-  
+
   const images = getProductImages();
 
   return (
@@ -149,7 +169,7 @@ export default function ProductDetails() {
         </div>
       </div>
 
-      <div className="container py-8">
+      <div className="py-6 px-4">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
           {/* Product Images */}
           <div className="space-y-4">
@@ -161,21 +181,32 @@ export default function ProductDetails() {
                   className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
-                    target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgdmlld0JveD0iMCAwIDQwMCA0MDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI0MDAiIGhlaWdodD0iNDAwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0yMDAgMzAwQzE2Ni42NjcgMjY2LjY2NyAxNjYuNjY3IDIwMC4wMDEgMjAwIDE2NkMyMzMuMzMzIDIwMC4wMDEgMjMzLjMzMyAyNjYuNjY3IDIwMCAzMDBaIiBmaWxsPSIjOUNBM0FGIi8+Cjwvc3ZnPg==';
+                    target.src =
+                      "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgdmlld0JveD0iMCAwIDQwMCA0MDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI0MDAiIGhlaWdodD0iNDAwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0yMDAgMzAwQzE2Ni42NjcgMjY2LjY2NyAxNjYuNjY3IDIwMC4wMDEgMjAwIDE2NkMyMzMuMzMzIDIwMC4wMDEgMjMzLjMzMyAyNjYuNjY3IDIwMCAzMDBaIiBmaWxsPSIjOUNBM0FGIi8+Cjwvc3ZnPg==";
                   }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-gray-100">
                   <div className="text-center">
-                    <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    <svg
+                      className="w-16 h-16 text-gray-400 mx-auto mb-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
                     </svg>
                     <p className="text-gray-500">No image available</p>
                   </div>
                 </div>
               )}
             </div>
-            
+
             {images.length > 1 && (
               <div className="grid grid-cols-4 gap-3">
                 {images.map((img: string, index: number) => (
@@ -183,12 +214,16 @@ export default function ProductDetails() {
                     key={index}
                     onClick={() => setSelectedImage(index)}
                     className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                      selectedImage === index 
-                        ? "border-[#fe004d] ring-2 ring-[#fe004d]/20" 
+                      selectedImage === index
+                        ? "border-[#fe004d] ring-2 ring-[#fe004d]/20"
                         : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
-                    <img src={img} alt={`${product.name} ${index + 1}`} className="w-full h-full object-cover" />
+                    <img
+                      src={img}
+                      alt={`${product.name} ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
                   </button>
                 ))}
               </div>
@@ -210,23 +245,31 @@ export default function ProductDetails() {
                     </span>
                   )}
                 </div>
-                <span className={`badge ${
-                  currentStock > 0 ? 'badge-success' : 'badge-error'
-                }`}>
-                  {currentStock > 0 ? `${currentStock} in stock` : 'Out of stock'}
+                <span
+                  className={`badge ${
+                    currentStock > 0 ? "badge-success" : "badge-error"
+                  }`}
+                >
+                  {currentStock > 0
+                    ? `${currentStock} in stock`
+                    : "Out of stock"}
                 </span>
               </div>
             </div>
 
             {product.description && (
               <div>
-                <p className="text-gray-600 leading-relaxed text-lg">{product.description}</p>
+                <p className="text-gray-600 leading-relaxed text-lg">
+                  {product.description}
+                </p>
               </div>
             )}
 
             {/* Product Details */}
             <div className="bg-gray-50 rounded-xl p-6">
-              <h3 className="font-semibold text-gray-900 mb-4">Product Details</h3>
+              <h3 className="font-semibold text-gray-900 mb-4">
+                Product Details
+              </h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-gray-500">SKU</span>
@@ -234,17 +277,23 @@ export default function ProductDetails() {
                 </div>
                 <div>
                   <span className="text-gray-500">Availability</span>
-                  <p className={`font-medium ${
-                    currentStock > 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {currentStock > 0 ? `${currentStock} available` : "Out of stock"}
+                  <p
+                    className={`font-medium ${
+                      currentStock > 0 ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
+                    {currentStock > 0
+                      ? `${currentStock} available`
+                      : "Out of stock"}
                   </p>
                 </div>
                 <div>
                   <span className="text-gray-500">Status</span>
-                  <span className={`badge ${
-                    product.is_active ? 'badge-success' : 'badge-gray'
-                  }`}>
+                  <span
+                    className={`badge ${
+                      product.is_active ? "badge-success" : "badge-gray"
+                    }`}
+                  >
                     {product.is_active ? "Active" : "Inactive"}
                   </span>
                 </div>
@@ -263,14 +312,16 @@ export default function ProductDetails() {
                   className="input"
                 >
                   <option value="">Choose an option</option>
-                  {variants.filter(v => v.is_active).map((variant) => (
-                    <option key={variant.uuid} value={variant.uuid}>
-                      {variant.title} 
-                      {variant.price && variant.price !== product.price && 
-                        ` (+$${(variant.price - product.price).toFixed(2)})`
-                      }
-                    </option>
-                  ))}
+                  {variants
+                    .filter((v) => v.is_active)
+                    .map((variant) => (
+                      <option key={variant.uuid} value={variant.uuid}>
+                        {variant.title}
+                        {variant.price &&
+                          variant.price !== product.price &&
+                          ` ($${(variant.price - product.price).toFixed(2)})`}
+                      </option>
+                    ))}
                 </select>
               </div>
             )}
@@ -278,21 +329,67 @@ export default function ProductDetails() {
             {/* Quantity and Add to Cart */}
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
+                <label className="block text-sm font-medium text-gray-900 mb-3">
                   Quantity
                 </label>
-                <select
-                  value={quantity}
-                  onChange={(e) => setQuantity(Number(e.target.value))}
-                  className="input w-32"
-                  disabled={currentStock === 0}
-                >
-                  {Array.from({ length: Math.min(10, currentStock) }, (_, i) => (
-                    <option key={i + 1} value={i + 1}>{i + 1}</option>
-                  ))}
-                </select>
+                <div className="flex items-center border border-gray-200 rounded-lg w-32">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                    disabled={quantity <= 1 || currentStock === 0}
+                    className="p-3 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M20 12H4"
+                      />
+                    </svg>
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max={currentStock}
+                    value={quantity}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value) || 1;
+                      setQuantity(Math.min(Math.max(1, value), currentStock));
+                    }}
+                    className="flex-1 text-center border-0 focus:outline-none focus:ring-0 text-sm font-medium py-3"
+                    disabled={currentStock === 0}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuantity(Math.min(currentStock, quantity + 1))
+                    }
+                    disabled={quantity >= currentStock || currentStock === 0}
+                    className="p-3 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
-              
+
               <div className="flex space-x-4">
                 <button
                   onClick={handleAddToCart}
@@ -301,9 +398,25 @@ export default function ProductDetails() {
                 >
                   {cartLoading ? (
                     <>
-                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      <svg
+                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
                       </svg>
                       Adding to Cart...
                     </>
@@ -311,16 +424,36 @@ export default function ProductDetails() {
                     "Out of Stock"
                   ) : (
                     <>
-                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-1.1 5M7 13l-1.1 5m0 0h9.1M17 13v6a2 2 0 01-2 2H9a2 2 0 01-2-2v-6" />
+                      <svg
+                        className="w-5 h-5 mr-2"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-1.1 5M7 13l-1.1 5m0 0h9.1M17 13v6a2 2 0 01-2 2H9a2 2 0 01-2-2v-6"
+                        />
                       </svg>
                       Add to Cart
                     </>
                   )}
                 </button>
                 <button className="btn-outline px-6">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                    />
                   </svg>
                 </button>
               </div>
@@ -331,8 +464,18 @@ export default function ProductDetails() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    <svg
+                      className="w-5 h-5 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                      />
                     </svg>
                   </div>
                   <div>
@@ -342,8 +485,18 @@ export default function ProductDetails() {
                 </div>
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg
+                      className="w-5 h-5 text-blue-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
                     </svg>
                   </div>
                   <div>
@@ -353,8 +506,18 @@ export default function ProductDetails() {
                 </div>
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    <svg
+                      className="w-5 h-5 text-purple-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                      />
                     </svg>
                   </div>
                   <div>
