@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.9'
 
 services:
   lapis:
@@ -15,12 +15,13 @@ services:
 
   postgres:
     container_name: opsapi-postgres
-    image: postgres:16
+    image: postgres:17.6
     ports:
       - "5439:5432"
     volumes:
       - ./pgdata:/var/lib/postgresql/data
     environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_USER: pguser
       POSTGRES_PASSWORD: pgpassword
       POSTGRES_DB: opsapi

@@ -1,4 +1,28 @@
 env LAPIS_ENVIRONMENT=development;
+env KEYCLOAK_AUTH_URL;
+env KEYCLOAK_TOKEN_URL;
+env KEYCLOAK_USERINFO_URL;
+env KEYCLOAK_CLIENT_ID;
+env KEYCLOAK_CLIENT_SECRET;
+env KEYCLOAK_REDIRECT_URI;
+env DB_HOST;
+env DB_USER;
+env DB_PASSWORD;
+env DATABASE;
+env OPENSSL_SECRET_KEY;
+env OPENSSL_SECRET_IV;
+env JWT_SECRET_KEY;
+env LAPIS_CONFIG;
+env MINIO_ENDPOINT;
+env MINIO_ACCESS_KEY;
+env MINIO_SECRET_KEY;
+env MINIO_BUCKET;
+env MINIO_REGION;
+env NODE_API_URL;
+env GOOGLE_CLIENT_ID;
+env GOOGLE_CLIENT_SECRET;
+env GOOGLE_REDIRECT_URI;
+
 worker_processes 1;
 error_log stderr notice;
 daemon off;
@@ -9,6 +33,13 @@ events {
 }
 
 http {
+
+  client_body_temp_path /tmp/client_body_temp;
+  proxy_temp_path /tmp/proxy_temp;
+  fastcgi_temp_path /tmp/fastcgi_temp;
+  uwsgi_temp_path /tmp/uwsgi_temp;
+  scgi_temp_path /tmp/scgi_temp;
+  
   include mime.types;
       log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
                 '$status $body_bytes_sent "$http_referer" '
@@ -21,16 +52,92 @@ http {
 
   init_by_lua_block {
     require "lpeg"
+    require "resty.session".init({
+      remember = true,
+      store_metadata = true,
+      storage = "cookie",
+      secret = "RaJKp8UQW1",
+      cookie_name = "session",
+    })
   }
 
-  resolver 8.8.8.8;
-
+  resolver 127.0.0.11 ipv6=off;
+  # for kubernetes use this resolver can also try kube-dns.kube-system.svc.cluster.local if you do not know the IP
+  #resolver 10.43.0.10 ipv6=off;
   server {
     listen 8080;
     lua_code_cache off;
 
     location / {
       default_type text/html;
+      add_header 'Access-Control-Allow-Origin' '*';
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
+      add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, Cookies, Session, X-Public-Browse';
+
+      if ($request_method = 'OPTIONS') {
+          add_header 'Access-Control-Allow-Origin' '*';
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
+          add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, Cookies, Session, X-Public-Browse';
+          add_header 'Content-Length' 0;
+          add_header 'Content-Type' 'text/plain';
+          return 204;
+      }
+
+        access_by_lua_block {
+        local uri = ngx.var.request_uri
+        local method = ngx.req.get_method()
+        local public_browse_header = ngx.var.http_x_public_browse
+
+        -- Allow /auth/* routes without JWT
+          if uri == "/" or uri == "/swagger/swagger.json" or uri:match("^/auth/") then
+            return
+          end
+          if uri == "/api/v2/enquiries" and method == "POST" then return end
+          if uri == "/api/v2/register" and method == "POST" then return end
+          
+          -- Allow public browsing of products and stores for GET requests
+          if method == "GET" and public_browse_header == "true" then
+            if uri:match("^/api/v2/storeproducts") or 
+               uri:match("^/api/v2/stores/[^/]+/products") or
+               uri:match("^/api/v2/stores") or
+               uri:match("^/api/v2/products") or
+               uri:match("^/api/v2/categories") then
+              return
+            end
+          end
+
+        local jwt = require "resty.jwt"
+        local cjson = require "cjson"
+
+        local auth_header = ngx.var.http_authorization
+        if not auth_header then
+          ngx.status = ngx.HTTP_UNAUTHORIZED
+          ngx.say(cjson.encode({ error = "Missing Authorization header" }))
+          return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+        end
+
+        local token = auth_header:match("Bearer%s+(.+)")
+        if not token then
+          ngx.status = ngx.HTTP_UNAUTHORIZED
+          ngx.say(cjson.encode({ error = "Invalid Authorization format. Use Bearer <token>" }))
+          return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+        end
+
+        local secret = os.getenv("JWT_SECRET_KEY")
+        local jwt_obj = jwt:verify(secret, token)
+
+        if not jwt_obj.verified then
+          ngx.status = ngx.HTTP_UNAUTHORIZED
+          ngx.say(cjson.encode({ error = "Invalid token", reason = jwt_obj.reason }))
+          return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+        end
+
+        -- Optionally forward user claims to Lapis
+        local userinfo = jwt_obj.payload.userinfo or {}
+        ngx.req.set_header("X-User-Id", userinfo.id or "")
+        ngx.req.set_header("X-User-Email", userinfo.email or "")
+      }
+
       content_by_lua_block {
         require("lapis").serve("app")
       }

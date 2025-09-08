@@ -31,7 +31,7 @@ RUN wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc
 
 WORKDIR /app
 
-COPY lapis/. /app
+COPY . /app
 
 EXPOSE 8080
 

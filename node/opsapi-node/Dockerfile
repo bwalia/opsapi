@@ -12,8 +12,8 @@ RUN npm install -g pnpm
 WORKDIR /app
 
 # Copy the rest of the application code to the working directory
-COPY node/opsapi-node/package*.json /app/
-COPY node/opsapi-node/. /app/
+COPY ./package*.json /app/
+COPY . /app/
 
 # Install Node.js dependencies
 RUN pnpm install

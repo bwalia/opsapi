@@ -176,16 +176,7 @@ To deploy OPSAPI UI on kubernates, please follow the instructions.
             COPY ./package*.json /app/
             COPY . /app/
 
-    3. Update the opsapi-ecommerce/opsapi-ecommerce/Dockerfile:
-        Open file: opsapi-ecommerce/opsapi-ecommerce/Dockerfile
-        Find lines:
-            COPY opsapi-ecommerce/opsapi-ecommerce/package*.json ./
-            COPY opsapi-ecommerce/opsapi-ecommerce/. ./
-        Replace with:
-            COPY package*.json ./
-            COPY . ./
-
-    4. Setup environment variables:
+    3. Setup environment variables:
 
         a) Backend Environment (OPSAPI):
         Copy lapis/.sample.env to lapis/.env and update with your values:
