@@ -1,7 +1,5 @@
 local respond_to = require("lapis.application").respond_to
 local SecretQueries = require "queries.SecretQueries"
-local Route = require("lapis.application").Route
-local Global = require "helper.global"
 
 return function(app)
     app:match("secrets", "/api/v2/secrets", respond_to({

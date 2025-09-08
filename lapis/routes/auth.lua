@@ -1,10 +1,8 @@
 local http = require("resty.http")
 local jwt = require("resty.jwt")
 local cJson = require("cjson")
-local lapis = require("lapis")
 local UserQueries = require "queries.UserQueries"
 local Global = require "helper.global"
-local UserRolesQueries = require "queries.UserRoleQueries"
 
 return function(app)
     ----------------- Auth Routes --------------------
@@ -78,7 +76,7 @@ return function(app)
     app:get("/auth/google", function(self)
         local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
         local google_redirect_uri = Global.getEnvVar("GOOGLE_REDIRECT_URI")
-        
+
         if not google_client_id or not google_redirect_uri then
             return {
                 status = 500,
@@ -89,12 +87,13 @@ return function(app)
         end
 
         local redirect_from = self.params.from or "/"
-        
+
         local auth_url = string.format(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid+profile+email&state=%s",
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s" ..
+            "&response_type=code&scope=openid+profile+email&state=%s",
             google_client_id, ngx.escape_uri(google_redirect_uri), ngx.escape_uri(redirect_from)
         )
-        
+
         return {
             redirect_to = auth_url
         }
@@ -103,7 +102,7 @@ return function(app)
     app:get("/auth/google/callback", function(self)
         local code = self.params.code
         local redirect_from = self.params.state or "/"
-        
+
         if not code then
             return {
                 status = 400,
@@ -118,7 +117,7 @@ return function(app)
         local google_redirect_uri = Global.getEnvVar("GOOGLE_REDIRECT_URI")
 
         local httpc = http.new()
-        
+
         -- Exchange code for access token
         local token_res, token_err = httpc:request_uri("https://oauth2.googleapis.com/token", {
             method = "POST",
@@ -189,7 +188,7 @@ return function(app)
             if google_user.name then
                 names = Global.splitName(google_user.name)
             end
-            
+
             user = UserQueries.createOAuthUser({
                 uuid = Global.generateUUID(),
                 email = google_user.email,
@@ -234,9 +233,9 @@ return function(app)
 
         -- Redirect to frontend with token
         local frontend_url = Global.getEnvVar("FRONTEND_URL") or "http://localhost:3033"
-        local final_url = string.format("%s/auth/callback?token=%s&redirect=%s", 
+        local final_url = string.format("%s/auth/callback?token=%s&redirect=%s",
             frontend_url, ngx.escape_uri(token), ngx.escape_uri(redirect_from))
-        
+
         return {
             redirect_to = final_url
         }
@@ -250,7 +249,7 @@ return function(app)
                 self.session[k] = nil
             end
         end
-        
+
         return {
             json = {
                 message = "Logged out successfully"
@@ -273,7 +272,7 @@ return function(app)
 
         local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
         local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
-        
+
         if not jwt_obj.valid then
             return {
                 status = 401,

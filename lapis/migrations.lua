@@ -51,7 +51,7 @@ return {
         VALUES (?, ?, ?, ?)
       ]], Global.generateStaticUUID(), "administrative", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
         end
-        
+
         local sellerRoleExists = db.select("id from roles where role_name = ?", "seller")
         if not sellerRoleExists or #sellerRoleExists == 0 then
             db.query([[
@@ -59,7 +59,7 @@ return {
         VALUES (?, ?, ?, ?)
       ]], Global.generateStaticUUID(), "seller", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
         end
-        
+
         local buyerRoleExists = db.select("id from roles where role_name = ?", "buyer")
         if not buyerRoleExists or #buyerRoleExists == 0 then
             db.query([[
@@ -281,7 +281,7 @@ return {
 
     -- Ecommerce migrations
     ['12_create_stores'] = ecommerce_migrations[1],
-    ['13_create_categories'] = ecommerce_migrations[2], 
+    ['13_create_categories'] = ecommerce_migrations[2],
     ['14_create_storeproducts'] = ecommerce_migrations[3],
     ['15_create_customers'] = ecommerce_migrations[4],
     ['16_create_orders'] = ecommerce_migrations[5],
@@ -292,7 +292,7 @@ return {
     ['21_create_cart_items'] = ecommerce_migrations[10],
     ['22_create_store_settings'] = ecommerce_migrations[11],
     ['23_create_product_reviews'] = ecommerce_migrations[12],
-    
+
     ['24_add_oauth_fields_to_users'] = function()
         schema.add_column("users", "oauth_provider", types.varchar({ null = true }))
         schema.add_column("users", "oauth_id", types.varchar({ null = true }))

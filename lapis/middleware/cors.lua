@@ -7,7 +7,7 @@ function CorsMiddleware.enable(app)
         self.res.headers["Access-Control-Allow-Credentials"] = "true"
         self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Email, X-Public-Browse"
-        
+
         -- Handle preflight OPTIONS requests
         if self.req.method == "OPTIONS" then
             return { status = 200 }

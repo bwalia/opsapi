@@ -14,7 +14,7 @@ return function(app)
             return { json = StoreQueries.create(self.params), status = 201 }
         end)
     }))
-    
+
     -- User's own stores (authenticated)
     app:match("my_stores", "/api/v2/my/stores", respond_to({
         GET = AuthMiddleware.requireAuth(function(self)
@@ -54,7 +54,7 @@ return function(app)
             return { json = StoreQueries.destroy(self.params.id), status = 200 }
         end)
     }))
-    
+
     -- Store products
     app:match("store_products", "/api/v2/stores/:store_id/products", respond_to({
         GET = function(self)
@@ -67,7 +67,7 @@ return function(app)
             if not store or store.user_id ~= self.user_data.internal_id then
                 return { json = { error = "Access denied - not your store" }, status = 403 }
             end
-            
+
             local StoreproductQueries = require "queries.StoreproductQueries"
             self.params.store_id = self.params.store_id
             return { json = StoreproductQueries.create(self.params), status = 201 }

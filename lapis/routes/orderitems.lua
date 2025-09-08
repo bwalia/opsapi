@@ -11,11 +11,11 @@ return function(app)
             local success, result = pcall(function()
                 return OrderitemQueries.create(self.params)
             end)
-            
+
             if not success then
                 return { json = { error = result }, status = 400 }
             end
-            
+
             return { json = result, status = 201 }
         end)
     }))

@@ -1,7 +1,6 @@
 local jwt = require("resty.jwt")
 local Global = require("helper.global")
 local UserQueries = require("queries.UserQueries")
-local cJson = require("cjson")
 
 local AuthMiddleware = {}
 
@@ -57,13 +56,8 @@ end
 
 function AuthMiddleware.requireRole(role, handler)
     return function(self)
-        -- Check for public browse header - role-based endpoints typically don't allow public access
-        -- but we can add this check if needed for specific cases
-        local public_browse = self.req.headers["x-public-browse"]
-        if public_browse and public_browse:lower() == "true" then
-            -- For role-based endpoints, we still require authentication even with public browse
-            -- This is a security measure, but can be customized per endpoint if needed
-        end
+        -- Note: role-based endpoints require authentication regardless of public browse setting
+        -- This is a security measure for endpoints that check user roles
 
         local user, err = AuthMiddleware.authenticate(self)
         if err then

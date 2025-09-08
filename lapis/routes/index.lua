@@ -1,4 +1,4 @@
-local lapis = require("lapis")
+-- local lapis = require("lapis") -- unused
 local cJson = require("cjson")
 local File = require "helper.file"
 local SwaggerUi = require "api-docs.swaggerUi"

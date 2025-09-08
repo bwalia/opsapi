@@ -21,9 +21,12 @@ function SchemaUpdates.updateStoresTable()
         { "timezone", "VARCHAR DEFAULT 'UTC'" },
         { "is_verified", "BOOLEAN DEFAULT FALSE" }
     }
-    
+
     for _, column in ipairs(columns_to_add) do
-        local exists = db.select("column_name FROM information_schema.columns WHERE table_name = 'stores' AND column_name = ?", column[1])
+        local exists = db.select(
+            "column_name FROM information_schema.columns WHERE table_name = 'stores' AND column_name = ?",
+            column[1]
+        )
         if not exists or #exists == 0 then
             db.query("ALTER TABLE stores ADD COLUMN " .. column[1] .. " " .. column[2])
             print("Added column " .. column[1] .. " to stores table")
@@ -44,15 +47,18 @@ function SchemaUpdates.updateStoreproductsTable()
         { "rating_average", "NUMERIC DEFAULT 0" },
         { "rating_count", "INTEGER DEFAULT 0" }
     }
-    
+
     for _, column in ipairs(columns_to_add) do
-        local exists = db.select("column_name FROM information_schema.columns WHERE table_name = 'storeproducts' AND column_name = ?", column[1])
+        local exists = db.select(
+            "column_name FROM information_schema.columns WHERE table_name = 'storeproducts' AND column_name = ?",
+            column[1]
+        )
         if not exists or #exists == 0 then
             db.query("ALTER TABLE storeproducts ADD COLUMN " .. column[1] .. " " .. column[2])
             print("Added column " .. column[1] .. " to storeproducts table")
         end
     end
-    
+
     -- Add new indexes
     local indexes_to_add = {
         { "idx_storeproducts_barcode", "barcode" },
@@ -64,9 +70,12 @@ function SchemaUpdates.updateStoreproductsTable()
         { "idx_storeproducts_store_featured_active", "store_id, is_featured, is_active" },
         { "idx_storeproducts_active_price", "is_active, price" }
     }
-    
+
     for _, index in ipairs(indexes_to_add) do
-        local exists = db.select("indexname FROM pg_indexes WHERE tablename = 'storeproducts' AND indexname = ?", index[1])
+        local exists = db.select(
+            "indexname FROM pg_indexes WHERE tablename = 'storeproducts' AND indexname = ?",
+            index[1]
+        )
         if not exists or #exists == 0 then
             db.query("CREATE INDEX " .. index[1] .. " ON storeproducts (" .. index[2] .. ")")
             print("Created index " .. index[1])
@@ -81,26 +90,32 @@ function SchemaUpdates.updateCategoriesTable()
         { "meta_title", "VARCHAR" },
         { "meta_description", "TEXT" }
     }
-    
+
     for _, column in ipairs(columns_to_add) do
-        local exists = db.select("column_name FROM information_schema.columns WHERE table_name = 'categories' AND column_name = ?", column[1])
+        local exists = db.select(
+            "column_name FROM information_schema.columns WHERE table_name = 'categories' AND column_name = ?",
+            column[1]
+        )
         if not exists or #exists == 0 then
             db.query("ALTER TABLE categories ADD COLUMN " .. column[1] .. " " .. column[2])
             print("Added column " .. column[1] .. " to categories table")
         end
     end
-    
+
     -- Add indexes
     local indexes_to_add = {
         { "idx_categories_parent_id", "parent_id" },
         { "idx_categories_store_active_sort", "store_id, is_active, sort_order" }
     }
-    
+
     for _, index in ipairs(indexes_to_add) do
         local indexName = index[1]
         local indexColumns = index[2]:match("%S") and index[2] or nil  -- Trim and check if non-empty
         if indexColumns then
-            local exists = db.select("indexname FROM pg_indexes WHERE tablename = 'categories' AND indexname = ?", indexName)
+            local exists = db.select(
+                "indexname FROM pg_indexes WHERE tablename = 'categories' AND indexname = ?",
+                indexName
+            )
             if not exists or #exists == 0 then
                 local sql = "CREATE INDEX " .. indexName .. " ON categories (" .. indexColumns .. ")"
                 print("Creating index with SQL: " .. sql)
@@ -116,7 +131,9 @@ end
 -- Create new tables if they don't exist
 function SchemaUpdates.createNewTables()
     -- Check if cart_sessions table exists
-    local cart_sessions_exists = db.select("table_name FROM information_schema.tables WHERE table_name = 'cart_sessions'")
+    local cart_sessions_exists = db.select(
+        "table_name FROM information_schema.tables WHERE table_name = 'cart_sessions'"
+    )
     if not cart_sessions_exists or #cart_sessions_exists == 0 then
         db.query([[
             CREATE TABLE cart_sessions (
@@ -129,13 +146,13 @@ function SchemaUpdates.createNewTables()
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         ]])
-        
+
         db.query("CREATE INDEX idx_cart_sessions_session_id ON cart_sessions (session_id)")
         db.query("CREATE INDEX idx_cart_sessions_user_id ON cart_sessions (user_id)")
         db.query("CREATE INDEX idx_cart_sessions_expires_at ON cart_sessions (expires_at)")
         print("Created cart_sessions table")
     end
-    
+
     -- Check if cart_items table exists
     local cart_items_exists = db.select("table_name FROM information_schema.tables WHERE table_name = 'cart_items'")
     if not cart_items_exists or #cart_items_exists == 0 then
@@ -153,13 +170,13 @@ function SchemaUpdates.createNewTables()
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         ]])
-        
+
         db.query("CREATE INDEX idx_cart_items_session_id ON cart_items (session_id)")
         db.query("CREATE INDEX idx_cart_items_user_id ON cart_items (user_id)")
         db.query("CREATE INDEX idx_cart_items_product_id ON cart_items (product_id)")
         print("Created cart_items table")
     end
-    
+
     -- Check if product_reviews table exists
     local reviews_exists = db.select("table_name FROM information_schema.tables WHERE table_name = 'product_reviews'")
     if not reviews_exists or #reviews_exists == 0 then
@@ -180,14 +197,14 @@ function SchemaUpdates.createNewTables()
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         ]])
-        
+
         db.query("CREATE INDEX idx_product_reviews_product_id ON product_reviews (product_id)")
         db.query("CREATE INDEX idx_product_reviews_customer_id ON product_reviews (customer_id)")
         db.query("CREATE INDEX idx_product_reviews_rating ON product_reviews (rating)")
         db.query("CREATE INDEX idx_product_reviews_approved ON product_reviews (is_approved)")
         print("Created product_reviews table")
     end
-    
+
     -- Check if store_settings table exists
     local settings_exists = db.select("table_name FROM information_schema.tables WHERE table_name = 'store_settings'")
     if not settings_exists or #settings_exists == 0 then
@@ -203,7 +220,7 @@ function SchemaUpdates.createNewTables()
                 UNIQUE (store_id, key)
             )
         ]])
-        
+
         db.query("CREATE INDEX idx_store_settings_store_id ON store_settings (store_id)")
         db.query("CREATE INDEX idx_store_settings_key ON store_settings (key)")
         print("Created store_settings table")
@@ -223,13 +240,13 @@ end
 -- Main update function
 function SchemaUpdates.runAll()
     print("Starting schema updates...")
-    
+
     SchemaUpdates.updateStoresTable()
     SchemaUpdates.updateStoreproductsTable()
     SchemaUpdates.updateCategoriesTable()
     SchemaUpdates.createNewTables()
     SchemaUpdates.generateMissingSlugs()
-    
+
     print("Schema updates completed successfully!")
 end
 

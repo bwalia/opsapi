@@ -15,12 +15,12 @@ return function(app)
             if not store or store.user_id ~= self.user_data.internal_id then
                 return { json = { error = "Access denied - not your store" }, status = 403 }
             end
-            
+
             local product, err = pcall(StoreproductQueries.create, self.params)
             if not product then
                 return { json = { error = err }, status = 400 }
             end
-            
+
             return { json = product, status = 201 }
         end)
     }))
@@ -38,13 +38,13 @@ return function(app)
             if not product then
                 return { json = { error = "Product not found" }, status = 404 }
             end
-            
+
             -- Verify store ownership
             product:get_store()
             if product.store and product.store.user_id ~= self.user_data.internal_id then
                 return { json = { error = "Access denied - not your product" }, status = 403 }
             end
-            
+
             local updated = StoreproductQueries.update(self.params.id, self.params)
             return { json = updated }
         end),
@@ -53,13 +53,13 @@ return function(app)
             if not product then
                 return { json = { error = "Product not found" }, status = 404 }
             end
-            
+
             -- Verify store ownership
             product:get_store()
             if product.store and product.store.user_id ~= self.user_data.internal_id then
                 return { json = { error = "Access denied - not your product" }, status = 403 }
             end
-            
+
             StoreproductQueries.destroy(self.params.id)
             return { json = { message = "Product deleted successfully" } }
         end)

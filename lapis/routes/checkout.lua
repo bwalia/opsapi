@@ -10,15 +10,15 @@ return function(app)
             local params = self.params
             local session = require("resty.session").start()
             local cart = session:get("cart") or {}
-            
+
             if not next(cart) then
                 return { json = { error = "Cart is empty" }, status = 400 }
             end
-            
+
             if not params.billing_address or not params.billing_address.name then
                 return { json = { error = "Billing address required" }, status = 400 }
             end
-            
+
             local success, result = pcall(function()
                 local customer
                 if params.customer_email then
@@ -29,22 +29,22 @@ return function(app)
                         phone = params.customer_phone
                     })
                 end
-                
+
                 local subtotal = 0
                 local store_orders = {}
-                
+
                 for product_uuid, item in pairs(cart) do
                     local StoreproductQueries = require("queries.StoreproductQueries")
                     local product = StoreproductQueries.show(product_uuid)
                     if not product then
                         error("Product not found: " .. product_uuid)
                     end
-                    
+
                     local store_id = product.store_id
                     if not store_orders[store_id] then
                         store_orders[store_id] = { items = {}, subtotal = 0 }
                     end
-                    
+
                     local item_total = product.price * item.quantity
                     table.insert(store_orders[store_id].items, {
                         product = product,
@@ -52,14 +52,14 @@ return function(app)
                         price = product.price,
                         total = item_total
                     })
-                    
+
                     store_orders[store_id].subtotal = store_orders[store_id].subtotal + item_total
                     subtotal = subtotal + item_total
                 end
-                
+
                 local tax_amount = params.tax_amount or (subtotal * 0.1)
                 local total_amount = subtotal + tax_amount
-                
+
                 local orders = {}
                 for store_id, store_order in pairs(store_orders) do
                     local order = OrderQueries.create({
@@ -71,7 +71,7 @@ return function(app)
                         billing_address = params.billing_address,
                         shipping_address = params.shipping_address or params.billing_address
                     })
-                    
+
                     for _, item in ipairs(store_order.items) do
                         OrderitemQueries.create({
                             order_id = order.id,
@@ -83,20 +83,20 @@ return function(app)
                             sku = item.product.sku
                         })
                     end
-                    
+
                     table.insert(orders, order)
                 end
-                
+
                 session:set("cart", {})
                 session:save()
-                
+
                 return { orders = orders, total_amount = total_amount, message = "Checkout successful" }
             end)
-            
+
             if not success then
                 return { json = { error = result }, status = 400 }
             end
-            
+
             return { json = result, status = 201 }
         end)
     }))

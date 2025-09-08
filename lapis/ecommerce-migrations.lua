@@ -69,7 +69,7 @@ return {
     schema.create_index("categories", "is_active")
     schema.create_index("categories", "sort_order")
     schema.create_index("categories", "slug")
-    
+
     -- Composite index for store categories
   end,
 
@@ -125,7 +125,7 @@ return {
     schema.create_index("storeproducts", "rating_average")
     schema.create_index("storeproducts", "created_at")
     schema.create_index("storeproducts", "slug")
-    
+
     -- Composite indexes for common queries
   end,
 
@@ -269,7 +269,7 @@ return {
     schema.create_index("inventory_transactions", "type")
     schema.create_index("inventory_transactions", "created_at")
   end,
-  
+
   -- Cart Sessions table for persistent cart management
   [9] = function()
     schema.create_table("cart_sessions", {
@@ -288,7 +288,7 @@ return {
     schema.create_index("cart_sessions", "user_id")
     schema.create_index("cart_sessions", "expires_at")
   end,
-  
+
   -- Cart Items table for individual cart items (alternative to session-based)
   [10] = function()
     schema.create_table("cart_items", {
@@ -313,7 +313,7 @@ return {
     schema.create_index("cart_items", "product_id")
     schema.create_index("cart_items", "created_at")
   end,
-  
+
   -- Store Settings table for advanced store configuration
   [11] = function()
     schema.create_table("store_settings", {
@@ -332,7 +332,7 @@ return {
     schema.create_index("store_settings", "store_id")
     schema.create_index("store_settings", "key")
   end,
-  
+
   -- Product Reviews table
   [12] = function()
     schema.create_table("product_reviews", {

@@ -49,7 +49,8 @@ return function(app)
                         lapis = {
                             version = require("lapis.version")
                         },
-                        error = "assert_valid was not captured: Please pass the uuid of document that you want to update"
+                        error = "assert_valid was not captured: " ..
+                                "Please pass the uuid of document that you want to update"
                     },
                     status = 500
                 }
