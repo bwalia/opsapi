@@ -14,3 +14,7 @@ cd lapis
 
 docker compose down
 docker compose up --build -d
+
+sleep 30
+
+docker exec -it opsapi lapis migrate
