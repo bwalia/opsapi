@@ -15,9 +15,11 @@ cd lapis
 docker compose down --volumes
 docker compose up --build -d
 
+sleep 15
+
 docker exec -it opsapi lapis migrate
 
-sleep 10
+sleep 5
 
 HOSTNAME="opsapi-dev.local"
 K3S_LB_IP=127.0.0.1
@@ -42,4 +44,4 @@ else
     echo "$K3S_LB_IP $HOSTNAME" | sudo tee -a $HOSTS_FILE > /dev/null
 fi
 
-sleep 10
+sleep 5
