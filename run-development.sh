@@ -12,9 +12,34 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
-docker compose down
+docker compose down --volumes
 docker compose up --build -d
 
-sleep 30
-
 docker exec -it opsapi lapis migrate
+
+sleep 10
+
+HOSTNAME="opsapi-dev.local"
+K3S_LB_IP=127.0.0.1
+HOSTS_FILE="/etc/hosts"
+
+echo "[+] Removing lines matching '$HOSTNAME' from $HOSTS_FILE"
+
+# Backup before change
+sudo cp "$HOSTS_FILE" "$HOSTS_FILE.bak"
+
+# Delete lines containing the host entry
+sudo sed -i '' "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
+
+echo "[+] House keeping Done. Backup saved as $HOSTS_FILE.bak"
+
+# Check if the entry already exists
+if grep -q "$HOSTNAME" $HOSTS_FILE; then
+    echo "[+] Updating existing entry for $HOSTNAME"
+    sudo sed -i '' "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+else
+    echo "[+] Adding new entry: $K3S_LB_IP $HOSTNAME"
+    echo "$K3S_LB_IP $HOSTNAME" | sudo tee -a $HOSTS_FILE > /dev/null
+fi
+
+sleep 10

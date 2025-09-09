@@ -6,6 +6,7 @@ services:
     build: .
     ports:
       - "4010:8080"
+      - "8580:8081"
     volumes:
       - .:/app
     env_file: ".env"
@@ -25,6 +26,7 @@ services:
       POSTGRES_USER: pguser
       POSTGRES_PASSWORD: pgpassword
       POSTGRES_DB: opsapi
+    command: ["postgres", "-c", "max_connections=200"]
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.10
@@ -47,7 +49,7 @@ services:
     image: adminer:latest
     container_name: adminer
     environment:
-      ADMINER_DEFAULT_SERVER: mariadb
+      ADMINER_DEFAULT_SERVER: postgres
     ports:
       - 7779:8080
     networks:
