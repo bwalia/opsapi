@@ -1,4 +1,4 @@
-env: test
+env: CICD_NAMESPACE_PLACEHOLDER
 
 image:
   repository: bwalia/opsapi
@@ -36,7 +36,7 @@ ingress:
   className: "nginx"
   annotations: {}
   hosts:
-    - host: test-opsapi.workstation.co.uk
+    - host: CICD_NAMESPACE_PLACEHOLDER-opsapi.workstation.co.uk
       paths:
         - path: /
           pathType: Prefix

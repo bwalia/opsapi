@@ -229,7 +229,9 @@ content = content.replace('MINIO_REGION', '$MINIO_REGION')
 content = content.replace('MINIO_SECRET_KEY', '$MINIO_SECRET_KEY')
 content = content.replace('OPENSSL_SECRET_KEY', '$OPENSSL_SECRET_KEY')
 content = content.replace('OPENSSL_SECRET_IV', '$OPENSSL_SECRET_IV')
-
+content = content.replace('NODE_API_URL', '$NODE_API_URL')
+content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
+content = content.replace('prod-opsapi.', 'opsapi.')
 # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
