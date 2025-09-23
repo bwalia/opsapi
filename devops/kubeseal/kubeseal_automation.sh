@@ -27,6 +27,7 @@ else
     ENV_REF="$2"
 fi
 
+echo "Environment reference: $ENV_REF"
 echo "OSTYPE variable: $OSTYPE"
 
 # Method 3: Check for specific OS
@@ -177,22 +178,22 @@ fi
 
 cp $HELM_VALUES_INPUT_PATH $HELM_VALUES_OUTPUT_PATH
 
-JWT_SECRET_KEY = $(yq .spec.encryptedData.JWT_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_AUTH_URL = $(yq .spec.encryptedData.KEYCLOAK_AUTH_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_ID = $(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_SECRET = $(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_REDIRECT_URI = $(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_TOKEN_URL = $(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_USERINFO_URL = $(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-LAPIS_CONFIG_LUA_FILE = $(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ACCESS_KEY = $(yq .spec.encryptedData.MINIO_ACCESS_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_BUCKET = $(yq .spec.encryptedData.MINIO_BUCKET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ENDPOINT = $(yq .spec.encryptedData.MINIO_ENDPOINT devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_REGION = $(yq .spec.encryptedData.MINIO_REGION devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_SECRET_KEY = $(yq .spec.encryptedData.MINIO_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_IV = $(yq .spec.encryptedData.OPENSSL_SECRET_IV devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-NODE_API_URL = $(yq .spec.encryptedData.NODE_API_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_KEY = $(yq .spec.encryptedData.OPENSSL_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_CLIENT_ID=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_CLIENT_SECRET=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_REDIRECT_URI=$(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_TOKEN_URL=$(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_USERINFO_URL=$(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+LAPIS_CONFIG_LUA_FILE=$(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_ACCESS_KEY=$(yq .spec.encryptedData.MINIO_ACCESS_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_BUCKET=$(yq .spec.encryptedData.MINIO_BUCKET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_ENDPOINT=$(yq .spec.encryptedData.MINIO_ENDPOINT devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_REGION=$(yq .spec.encryptedData.MINIO_REGION devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
 
 echo "Extracted encrypted values from sealed secret."
 
@@ -226,7 +227,7 @@ content = content.replace('MINIO_BUCKET', '$MINIO_BUCKET')
 content = content.replace('MINIO_ENDPOINT', '$MINIO_ENDPOINT')
 content = content.replace('MINIO_REGION', '$MINIO_REGION')
 content = content.replace('MINIO_SECRET_KEY', '$MINIO_SECRET_KEY')
-content = content.replace('JWT_SECRET_KEY', '$JWT_SECRET_KEY')
+content = content.replace('OPENSSL_SECRET_KEY', '$OPENSSL_SECRET_KEY')
 content = content.replace('OPENSSL_SECRET_IV', '$OPENSSL_SECRET_IV')
 
 # Write back to file
@@ -241,7 +242,7 @@ cat $HELM_VALUES_OUTPUT_PATH
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
 rm -Rf $SEALED_SECRET_OUTPUT_PATH
-rm -Rf devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
+#rm -Rf devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
 rm -Rf temp.txt
 
 
