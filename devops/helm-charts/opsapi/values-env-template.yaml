@@ -1,0 +1,43 @@
+env: test
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+app_secrets:
+    jwt_secret_key: JWT_SECRET_KEY
+    keycloak_auth_url: KEYCLOAK_AUTH_URL
+    keycloak_client_id: KEYCLOAK_CLIENT_ID
+    keycloak_client_secret: KEYCLOAK_CLIENT_SECRET
+    keycloak_redirect_uri: KEYCLOAK_REDIRECT_URI
+    keycloak_token_url: KEYCLOAK_TOKEN_URL
+    keycloak_userinfo_url: KEYCLOAK_USERINFO_URL
+    lapis_config_lua_file: LAPIS_CONFIG_LUA_FILE
+    minio_access_key: MINIO_ACCESS_KEY
+    minio_bucket: MINIO_BUCKET
+    minio_endpoint: MINIO_ENDPOINT
+    minio_region: MINIO_REGION
+    minio_secret_key: MINIO_SECRET_KEY
+    node_api_url: NODE_API_URL
+    openssl_secret_iv: OPENSSL_SECRET_IV
+    openssl_secret_key: OPENSSL_SECRET_KEY
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+svcAccessPort: 32136
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: test-opsapi.workstation.co.uk
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
