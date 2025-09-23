@@ -19,9 +19,9 @@ app_secrets:
     minio_endpoint: 
     minio_region: 
     minio_secret_key: 
-    node_api_url: NODE_API_URL
+    node_api_url: 
     openssl_secret_iv: 
-    openssl_secret_key: OPENSSL_SECRET_KEY
+    openssl_secret_key: 
 
 replicaCount: 1
 
