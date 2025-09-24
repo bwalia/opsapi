@@ -7,24 +7,34 @@ function OrderitemQueries.create(params)
     if not params.uuid then
         params.uuid = Global.generateUUID()
     end
-    
+
     -- Validate required fields
     if not params.order_id or not params.product_id or not params.quantity or not params.price then
         error("Missing required fields: order_id, product_id, quantity, price")
     end
-    
+
+    -- Convert product UUID to internal ID if needed
+    local product_uuid = params.product_id
+    local StoreproductQueries = require "queries.StoreproductQueries"
+    local product = StoreproductQueries.show(product_uuid)
+    if not product then
+        error("Product not found: " .. product_uuid)
+    end
+
+    -- Use internal product ID for the database relation
+    params.product_id = product.id
+
     -- Calculate total if not provided
     if not params.total then
         params.total = params.quantity * params.price
     end
-    
+
     -- Update inventory if product tracks inventory
-    local StoreproductQueries = require "queries.StoreproductQueries"
-    local product, err = StoreproductQueries.updateInventory(params.product_id, -params.quantity)
+    local updated_product, err = StoreproductQueries.updateInventory(product_uuid, -params.quantity)
     if err then
         error(err)
     end
-    
+
     return OrderitemModel:create(params, { returning = "*" })
 end
 

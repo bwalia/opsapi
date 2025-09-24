@@ -269,49 +269,27 @@ return {
     schema.create_index("inventory_transactions", "type")
     schema.create_index("inventory_transactions", "created_at")
   end,
-
-  -- Cart Sessions table for persistent cart management
+  
+  -- Cart Items table for authenticated user carts
   [9] = function()
-    schema.create_table("cart_sessions", {
-      { "id",             types.serial },
-      { "session_id",     types.varchar({ unique = true }) },
-      { "user_id",        types.foreign_key({ null = true }) },
-      { "cart_data",      types.text({ default = "'{}'" }) },
-      { "expires_at",     types.time },
-      { "created_at",     types.time({ null = true }) },
-      { "updated_at",     types.time({ null = true }) },
-      "PRIMARY KEY (id)",
-      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
-    })
-
-    schema.create_index("cart_sessions", "session_id")
-    schema.create_index("cart_sessions", "user_id")
-    schema.create_index("cart_sessions", "expires_at")
-  end,
-
-  -- Cart Items table for individual cart items (alternative to session-based)
-  [10] = function()
     schema.create_table("cart_items", {
       { "id",             types.serial },
-      { "uuid",           types.varchar({ unique = true }) },
-      { "session_id",     types.varchar },
-      { "user_id",        types.foreign_key({ null = true }) },
-      { "product_id",     types.foreign_key },
-      { "variant_id",     types.foreign_key({ null = true }) },
-      { "quantity",       types.integer({ default = 1 }) },
-      { "price_at_time",  types.numeric },
+      { "user_id",        types.integer },
+      { "cart_key",       types.varchar },
+      { "product_uuid",   types.varchar },
+      { "variant_uuid",   types.varchar({ null = true }) },
+      { "name",           types.varchar },
+      { "variant_title",  types.varchar({ null = true }) },
+      { "price",          types.numeric },
+      { "quantity",       types.integer },
       { "created_at",     types.time({ null = true }) },
       { "updated_at",     types.time({ null = true }) },
       "PRIMARY KEY (id)",
-      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
-      "FOREIGN KEY (product_id) REFERENCES storeproducts(id) ON DELETE CASCADE",
-      "FOREIGN KEY (variant_id) REFERENCES product_variants(id) ON DELETE CASCADE"
+      "UNIQUE (user_id, cart_key)"
     })
 
-    schema.create_index("cart_items", "session_id")
     schema.create_index("cart_items", "user_id")
-    schema.create_index("cart_items", "product_id")
-    schema.create_index("cart_items", "created_at")
+    schema.create_index("cart_items", "product_uuid")
   end,
 
   -- Store Settings table for advanced store configuration

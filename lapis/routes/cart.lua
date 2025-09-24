@@ -1,10 +1,13 @@
 local respond_to = require("lapis.application").respond_to
 local StoreproductQueries = require("queries.StoreproductQueries")
+local AuthMiddleware = require("middleware.auth")
+local db = require("lapis.db")
+local cjson = require("cjson")
 
 return function(app)
-    -- Add to cart (session-based)
+    -- Add to cart (database-based)
     app:match("add_to_cart", "/api/v2/cart/add", respond_to({
-        POST = function(self)
+        POST = AuthMiddleware.requireAuth(function(self)
             local product_uuid = self.params.product_uuid
             local variant_uuid = self.params.variant_uuid
             local quantity = tonumber(self.params.quantity) or 1
@@ -18,157 +21,194 @@ return function(app)
             if not available then
                 return { json = { error = err }, status = 400 }
             end
-
-            -- Get cart from cookie (simplified approach)
-            local cart = {}
-            local json = require("cjson")
-
-            local cart_cookie = ngx.var.cookie_cart
-            if cart_cookie then
-                local ok, decoded = pcall(json.decode, ngx.unescape_uri(cart_cookie))
-                if ok and type(decoded) == "table" then
-                    cart = decoded
-                end
+            
+            -- Get user UUID from headers
+            local user_uuid = ngx.var.http_x_user_id
+            if not user_uuid or user_uuid == "" then
+                return { json = { error = "Authentication required" }, status = 401 }
             end
-
-            -- Create unique cart key for product+variant combination
+            
+            -- Get user's internal ID from database
+            local user_result = db.select("id from users where uuid = ?", user_uuid)
+            if not user_result or #user_result == 0 then
+                return { json = { error = "User not found" }, status = 404 }
+            end
+            local user_id = user_result[1].id
+            
+            -- Get product details
+            local product = StoreproductQueries.show(product_uuid)
+            if not product then
+                return { json = { error = "Product not found" }, status = 404 }
+            end
+            
+            local item_price = product.price
+            local variant_title = nil
+            
+            -- Get variant details if specified
+            if variant_uuid then
+                local ProductVariantQueries = require "queries.ProductVariantQueries"
+                local variant = ProductVariantQueries.show(variant_uuid)
+                if not variant then
+                    return { json = { error = "Variant not found" }, status = 404 }
+                end
+                if variant.price then
+                    item_price = variant.price
+                end
+                variant_title = variant.title
+            end
+            
+            -- Create cart key
             local cart_key = product_uuid
             if variant_uuid then
                 cart_key = product_uuid .. "_" .. variant_uuid
             end
-
-            -- Add/update item in cart
-            if cart[cart_key] then
-                cart[cart_key].quantity = cart[cart_key].quantity + quantity
+            
+            -- Check if item already exists in cart
+            local existing = db.select("* from cart_items where user_id = ? and cart_key = ?", user_id, cart_key)
+            
+            if existing and #existing > 0 then
+                -- Update existing item
+                local new_quantity = existing[1].quantity + quantity
+                db.update("cart_items", {
+                    quantity = new_quantity,
+                    updated_at = db.format_date()
+                }, "user_id = ? and cart_key = ?", user_id, cart_key)
             else
-                local product = StoreproductQueries.show(product_uuid)
-                if not product then
-                    return { json = { error = "Product not found" }, status = 404 }
-                end
-
-                local item_price = product.price
-                local variant_title = nil
-
-                -- Get variant details if specified
-                if variant_uuid then
-                    local ProductVariantQueries = require "queries.ProductVariantQueries"
-                    local variant = ProductVariantQueries.show(variant_uuid)
-                    if not variant then
-                        return { json = { error = "Variant not found" }, status = 404 }
-                    end
-                    if variant.price then
-                        item_price = variant.price
-                    end
-                    variant_title = variant.title
-                end
-
-                cart[cart_key] = {
+                -- Insert new item
+                db.insert("cart_items", {
+                    user_id = user_id,
+                    cart_key = cart_key,
                     product_uuid = product_uuid,
                     variant_uuid = variant_uuid,
                     name = product.name,
                     variant_title = variant_title,
                     price = item_price,
-                    quantity = quantity
+                    quantity = quantity,
+                    created_at = db.format_date(),
+                    updated_at = db.format_date()
+                })
+            end
+            
+            -- Get updated cart
+            local cart_items = db.select("* from cart_items where user_id = ?", user_id)
+            local cart = {}
+            for _, item in ipairs(cart_items) do
+                cart[item.cart_key] = {
+                    product_uuid = item.product_uuid,
+                    variant_uuid = item.variant_uuid,
+                    name = item.name,
+                    variant_title = item.variant_title,
+                    price = item.price,
+                    quantity = item.quantity
                 }
             end
-
-            -- Save to cookie
-            local cart_json = json.encode(cart)
-            ngx.header["Set-Cookie"] = "cart=" .. ngx.escape_uri(cart_json) ..
-                "; Path=/; Max-Age=604800; SameSite=None; Secure=false"
-
+            
             return { json = { message = "Added to cart", cart = cart }, status = 200 }
-        end
+        end)
     }))
 
     -- Get cart
     app:match("get_cart", "/api/v2/cart", respond_to({
-        GET = function(_self)
-            local cart = {}
-            local json = require("cjson")
-
-            -- Get from cookie
-            local cart_cookie = ngx.var.cookie_cart
-            if cart_cookie then
-                local ok, decoded = pcall(json.decode, ngx.unescape_uri(cart_cookie))
-                if ok and type(decoded) == "table" then
-                    cart = decoded
-                end
+        GET = AuthMiddleware.requireAuth(function(self)
+            -- Get user UUID from headers
+            local user_uuid = ngx.var.http_x_user_id
+            if not user_uuid or user_uuid == "" then
+                return { json = { error = "Authentication required" }, status = 401 }
             end
-
-            local total = 0
+            
+            -- Get user's internal ID from database
+            local user_result = db.select("id from users where uuid = ?", user_uuid)
+            if not user_result or #user_result == 0 then
+                return { json = { error = "User not found" }, status = 404 }
+            end
+            local user_id = user_result[1].id
+            
+            -- Get cart items from database
+            local cart_items = db.select("* from cart_items where user_id = ?", user_id)
+            
+            local cart = {}
             local items = {}
-            for _, item in pairs(cart) do
-                if type(item) == "table" and item.price and item.quantity then
-                    total = total + (tonumber(item.price) * tonumber(item.quantity))
-                    table.insert(items, item)
-                end
+            local total = 0
+            
+            for _, item in ipairs(cart_items) do
+                local cart_item = {
+                    product_uuid = item.product_uuid,
+                    variant_uuid = item.variant_uuid,
+                    name = item.name,
+                    variant_title = item.variant_title,
+                    price = tonumber(item.price),
+                    quantity = tonumber(item.quantity)
+                }
+                
+                cart[item.cart_key] = cart_item
+                table.insert(items, cart_item)
+                total = total + (cart_item.price * cart_item.quantity)
             end
 
             return { json = { cart = cart, items = items, total = total }, status = 200 }
-        end
+        end)
     }))
 
     -- Remove from cart
     app:match("remove_from_cart", "/api/v2/cart/remove/:product_uuid", respond_to({
-        DELETE = function(self)
+        DELETE = AuthMiddleware.requireAuth(function(self)
             local product_uuid = self.params.product_uuid
-            local cart = {}
-            local json = require("cjson")
-
-            -- Get current cart from cookie
-            local cart_cookie = ngx.var.cookie_cart
-            if cart_cookie then
-                local ok, decoded = pcall(json.decode, ngx.unescape_uri(cart_cookie))
-                if ok and type(decoded) == "table" then
-                    cart = decoded
-                end
+            
+            -- Get user UUID from headers
+            local user_uuid = ngx.var.http_x_user_id
+            if not user_uuid or user_uuid == "" then
+                return { json = { error = "Authentication required" }, status = 401 }
             end
-
+            
+            -- Get user's internal ID from database
+            local user_result = db.select("id from users where uuid = ?", user_uuid)
+            if not user_result or #user_result == 0 then
+                return { json = { error = "User not found" }, status = 404 }
+            end
+            local user_id = user_result[1].id
+            
             -- Remove all variants of this product
-            for key, _ in pairs(cart) do
-                if key == product_uuid or key:match("^" .. product_uuid .. "_") then
-                    cart[key] = nil
-                end
+            db.delete("cart_items", "user_id = ? and (cart_key = ? or cart_key LIKE ?)", 
+                user_id, product_uuid, product_uuid .. "_%")
+            
+            -- Get updated cart
+            local cart_items = db.select("* from cart_items where user_id = ?", user_id)
+            local cart = {}
+            for _, item in ipairs(cart_items) do
+                cart[item.cart_key] = {
+                    product_uuid = item.product_uuid,
+                    variant_uuid = item.variant_uuid,
+                    name = item.name,
+                    variant_title = item.variant_title,
+                    price = item.price,
+                    quantity = item.quantity
+                }
             end
-
-            -- Save updated cart
-            local cart_json = json.encode(cart)
-            ngx.header["Set-Cookie"] = "cart=" .. ngx.escape_uri(cart_json) ..
-                "; Path=/; Max-Age=604800; SameSite=None; Secure=false"
-
+            
             return { json = { message = "Removed from cart", cart = cart }, status = 200 }
-        end
+        end)
     }))
 
     -- Clear cart
     app:match("clear_cart", "/api/v2/cart/clear", respond_to({
-        DELETE = function(_self)
-            -- Clear cookie
-            ngx.header["Set-Cookie"] = "cart=; Path=/; Max-Age=0; SameSite=None; Secure=false"
-
-            return { json = { message = "Cart cleared" }, status = 200 }
-        end
-    }))
-
-    -- Debug session endpoint
-    app:match("debug_session", "/api/v2/cart/debug", respond_to({
-        GET = function(_self)
-            local session_lib = require("resty.session")
-            local session, err = session_lib.start()
-
-            local debug_info = {
-                session_available = session ~= nil,
-                session_error = err,
-                cookie_cart = ngx.var.cookie_cart,
-                headers = ngx.req.get_headers()
-            }
-
-            if session then
-                debug_info.session_data = session:get("cart") or "no_cart_data"
+        DELETE = AuthMiddleware.requireAuth(function(self)
+            -- Get user UUID from headers
+            local user_uuid = ngx.var.http_x_user_id
+            if not user_uuid or user_uuid == "" then
+                return { json = { error = "Authentication required" }, status = 401 }
             end
-
-            return { json = debug_info, status = 200 }
-        end
+            
+            -- Get user's internal ID from database
+            local user_result = db.select("id from users where uuid = ?", user_uuid)
+            if not user_result or #user_result == 0 then
+                return { json = { error = "User not found" }, status = 404 }
+            end
+            local user_id = user_result[1].id
+            
+            -- Clear all cart items for user
+            db.delete("cart_items", "user_id = ?", user_id)
+            
+            return { json = { message = "Cart cleared" }, status = 200 }
+        end)
     }))
 end

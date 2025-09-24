@@ -3,6 +3,7 @@ local types = schema.types
 local db = require("lapis.db")
 local Global = require "helper.global"
 local ecommerce_migrations = require("ecommerce-migrations")
+local production_schema_upgrade = require("production-schema-upgrade")
 
 return {
     ['01_create_users'] = function()
@@ -68,7 +69,7 @@ return {
       ]], Global.generateStaticUUID(), "buyer", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
         end
     end,
-    ['create_user__roles'] = function()
+    ['02create_user__roles'] = function()
         schema.create_table("user__roles", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
         }) }, { "role_id", types.foreign_key }, { "user_id", types.foreign_key }, { "created_at", types.time({
@@ -85,7 +86,7 @@ return {
       ]], Global.generateStaticUUID(), 1, 1, Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
         end
     end,
-    ['create_modules'] = function()
+    ['03create_modules'] = function()
         schema.create_table("modules", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
         }) }, { "machine_name", types.varchar({
@@ -98,7 +99,7 @@ return {
             null = true
         }) }, "PRIMARY KEY (id)" })
     end,
-    ['create_permissions'] = function()
+    ['04create_permissions'] = function()
         schema.create_table("permissions", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
         }) }, { "module_id", types.foreign_key }, { "permissions", types.text({
@@ -110,7 +111,7 @@ return {
         }) }, "PRIMARY KEY (id)", "FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE",
             "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE" })
     end,
-    ['create_groups'] = function()
+    ['05create_groups'] = function()
         schema.create_table("groups", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
         }) }, { "machine_name", types.varchar({
@@ -123,7 +124,7 @@ return {
             null = true
         }) }, "PRIMARY KEY (id)" })
     end,
-    ['create_user__groups'] = function()
+    ['06create_user__groups'] = function()
         schema.create_table("user__groups", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
         }) }, { "user_id", types.foreign_key }, { "group_id", types.foreign_key }, { "created_at", types.time({
@@ -134,7 +135,7 @@ return {
             "FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE" })
     end,
 
-    ['create_secrets'] = function()
+    ['07create_secrets'] = function()
         schema.create_table("secrets", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
         }) }, { "secret", types.varchar }, { "name", types.varchar }, { "description", types.text({
@@ -288,14 +289,36 @@ return {
     ['17_create_orderitems'] = ecommerce_migrations[6],
     ['18_create_product_variants'] = ecommerce_migrations[7],
     ['19_create_inventory_transactions'] = ecommerce_migrations[8],
-    ['20_create_cart_sessions'] = ecommerce_migrations[9],
-    ['21_create_cart_items'] = ecommerce_migrations[10],
-    ['22_create_store_settings'] = ecommerce_migrations[11],
-    ['23_create_product_reviews'] = ecommerce_migrations[12],
-
+    ['20_create_cart_items'] = ecommerce_migrations[9],
+    ['21_create_store_settings'] = ecommerce_migrations[10],
+    ['22_create_product_reviews'] = ecommerce_migrations[11],
+    
     ['24_add_oauth_fields_to_users'] = function()
         schema.add_column("users", "oauth_provider", types.varchar({ null = true }))
         schema.add_column("users", "oauth_id", types.varchar({ null = true }))
         schema.create_index("users", "oauth_provider", "oauth_id")
-    end
+    end,
+    
+    ['25_add_payment_fields_to_orders'] = function()
+        schema.add_column("orders", "payment_intent_id", types.text({ null = true }))
+        schema.add_column("orders", "payment_status", types.varchar({ default = "pending" }))
+        schema.add_column("orders", "payment_method", types.varchar({ default = "stripe" }))
+        schema.add_column("orders", "stripe_customer_id", types.text({ null = true }))
+        schema.create_index("orders", "payment_intent_id")
+        schema.create_index("orders", "payment_status")
+    end,
+
+    -- Production-Grade Database Schema Upgrades
+    ['26_fix_orderitems_variant_field'] = production_schema_upgrade['26_fix_orderitems_variant_field'],
+    ['27_enable_uuid_extensions'] = production_schema_upgrade['27_enable_uuid_extensions'],
+    ['28_enhance_stores_table'] = production_schema_upgrade['28_enhance_stores_table'],
+    ['29_enhance_products_table'] = production_schema_upgrade['29_enhance_products_table'],
+    ['30_enhance_orders_tracking'] = production_schema_upgrade['30_enhance_orders_tracking'],
+    ['31_enhance_customers_table'] = production_schema_upgrade['31_enhance_customers_table'],
+    ['32_create_inventory_analytics'] = production_schema_upgrade['32_create_inventory_analytics'],
+    ['33_create_analytics_tables'] = production_schema_upgrade['33_create_analytics_tables'],
+    ['34_create_data_integrity_functions'] = production_schema_upgrade['34_create_data_integrity_functions'],
+    ['35_create_performance_indexes'] = production_schema_upgrade['35_create_performance_indexes'],
+    ['36_enable_row_level_security'] = production_schema_upgrade['36_enable_row_level_security'],
+    ['37_fix_regex_constraints'] = production_schema_upgrade['37_fix_regex_constraints'],
 }

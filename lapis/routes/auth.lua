@@ -249,7 +249,17 @@ return function(app)
                 self.session[k] = nil
             end
         end
-
+        
+        -- Clear user's cart from database
+        local user_uuid = ngx.var.http_x_user_id
+        if user_uuid and user_uuid ~= "guest" then
+            local db = require("lapis.db")
+            local user_result = db.select("id from users where uuid = ?", user_uuid)
+            if user_result and #user_result > 0 then
+                db.delete("cart_items", "user_id = ?", user_result[1].id)
+            end
+        end
+        
         return {
             json = {
                 message = "Logged out successfully"
