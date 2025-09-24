@@ -220,7 +220,7 @@ function SwaggerUi.generate()
 
     local swagger_json = cjson.encode(swagger)
 
-    local file = io.open("/tmp/swagger.json", "w")
+    local file = io.open("/app/api-docs/swagger.json", "w")
     if file then
         file:write(swagger_json)
         file:close()

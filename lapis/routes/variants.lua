@@ -6,6 +6,7 @@ local StoreproductQueries = require "queries.StoreproductQueries"
 return function(app)
     app:match("variants", "/api/v2/products/:product_id/variants", respond_to({
         GET = function(self)
+            -- Public endpoint - no auth required
             return { json = ProductVariantQueries.all(self.params.product_id) }
         end,
         POST = AuthMiddleware.requireRole("seller", function(self)
