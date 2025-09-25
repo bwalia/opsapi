@@ -55,7 +55,7 @@ jobs:
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWD }}
           # docker build -f lapis/Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
           cd lapis/
-          docker build -f Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
+          docker build -f Dockerfile --build-arg TAG=latest --build-arg TARGET_NGINX_CONF=nginx-kubernetes.conf -t test-${{ env.TARGET_STACK }} . --no-cache
           docker tag test-${{ env.TARGET_STACK }} ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
           docker push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
         shell: bash
