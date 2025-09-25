@@ -39,7 +39,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubworker00
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -89,7 +89,7 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
   deploy:
-    runs-on: ubworker00
+    runs-on: ubuntu-latest
     needs: [build]
     steps:
       - name: Checkout code
