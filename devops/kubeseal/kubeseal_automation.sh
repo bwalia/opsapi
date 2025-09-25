@@ -211,6 +211,9 @@ else
     exit 1
 fi
 
+# for root postgres password run : export PGPASSWORD=$(kubectl get secret postgres.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
+# for user-prd password run : export PGPASSWORD=$(kubectl get secret user-prd.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
+
 # Use Python for reliable string replacement
 python3 << EOF
 import sys
@@ -252,6 +255,6 @@ echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
 rm -Rf $SEALED_SECRET_OUTPUT_PATH
 #rm -Rf devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
-rm -Rf temp.txt
+#rm -Rf temp.txt
 
 
