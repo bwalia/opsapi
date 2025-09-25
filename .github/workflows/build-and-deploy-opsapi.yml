@@ -53,7 +53,9 @@ jobs:
           echo "OPSAPI Docker image builder!"
           echo "Build, tag, and push image to the given Docker Registry."
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWD }}
-          docker build -f lapis/Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
+          # docker build -f lapis/Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
+          cd lapis/
+          docker build -f Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
           docker tag test-${{ env.TARGET_STACK }} ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
           docker push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
         shell: bash
@@ -159,6 +161,23 @@ jobs:
             --set image.repository=bwalia/opsapi \
             --set image.tag=latest \
             --namespace ${{ env.TARGET_ENV }} --create-namespace
+
+      - name: Kubeseal encrypt the env secrets file for node app
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+            export KUBECONFIG=$(pwd)/kubeconfig
+            if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_DEV }} "dev"
+            elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_TEST }} "test"
+            elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_ACC }} "acc"
+            elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_PROD }} "prod"
+            else
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_INT }} "int"
+            fi
+        shell: bash            
 
       - name: Deploy Helm Chart for OPSAPI-NODE
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
