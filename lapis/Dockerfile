@@ -38,6 +38,4 @@ COPY . /app
 
 EXPOSE 8080
 
-RUN mv /app/lapis/${TARGET_NGINX_CONF} /app/lapis/nginx.conf
-
 CMD ["lapis", "server"]
