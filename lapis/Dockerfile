@@ -1,5 +1,8 @@
 FROM openresty/openresty:alpine
 
+ARG TARGET_NGINX_CONF=nginx.conf
+ARG TAG=latest
+
 RUN apk add --no-cache wget make gcc libc-dev \
     && wget https://luarocks.github.io/luarocks/releases/luarocks-3.12.0.tar.gz \
     && tar zxpf luarocks-3.12.0.tar.gz \
@@ -34,5 +37,7 @@ WORKDIR /app
 COPY . /app
 
 EXPOSE 8080
+
+RUN mv /app/lapis/${TARGET_NGINX_CONF} /app/lapis/nginx.conf
 
 CMD ["lapis", "server"]
