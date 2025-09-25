@@ -15,8 +15,6 @@ else
     if ! echo "$ENV_FILE_CONTENT_BASE64" | base64 -d > /dev/null 2>&1; then
         echo "Error: Invalid base64 content provided"
         exit 1
-    else
-        echo "✓ Valid base64 content provided"
     fi
 fi
 
@@ -27,7 +25,13 @@ else
     ENV_REF="$2"
 fi
 
-echo "Environment reference: $ENV_REF"
+if [ -z "$3" ]; then
+    echo "Error: CICD Namespace referenced from 2nd parameter"
+    CICD_NAMESPACE=$ENV_REF
+else
+    CICD_NAMESPACE="$3"
+fi
+
 echo "OSTYPE variable: $OSTYPE"
 
 # Method 3: Check for specific OS
@@ -107,10 +111,10 @@ fi
 
 echo $ENV_FILE_CONTENT_BASE64 | base64 -d > temp.txt
 ENV_FILE_CONTENT_BASE64_DECODED_FILE="temp.txt"
-#"/Users/balinderwalia/Documents/Work/aws_keys/.env_opsapi_prod"
+#"/Users/balinderwalia/Documents/Work/aws_keys/.env_wsl_prod"
 
-SEALED_SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_per_env_input_template.yaml"
-SEALED_SECRET_OUTPUT_PATH="devops/kubeseal/secret_opsapi_${ENV_REF}.yaml"
+SEALED_SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_node_per_env_input_template.yaml"
+SEALED_SECRET_OUTPUT_PATH="devops/kubeseal/secret_opsapi_node_${ENV_REF}.yaml"
 
 if [ ! -f "$ENV_FILE_CONTENT_BASE64_DECODED_FILE" ]; then
     echo "Error: Environment file '$ENV_FILE_CONTENT_BASE64_DECODED_FILE' not found!"
@@ -139,12 +143,7 @@ fi
 rm -Rf $SEALED_SECRET_OUTPUT_PATH
 cp $SEALED_SECRET_INPUT_PATH $SEALED_SECRET_OUTPUT_PATH
 
-# Use cross-platform sed replacement
-if [[ "$OS_TYPE" == "macos" ]]; then
-    sed -i '' "s/CICD_NAMESPACE_PLACEHOLDER/$ENV_REF/g" $SEALED_SECRET_OUTPUT_PATH
-else
-    sed -i "s/CICD_NAMESPACE_PLACEHOLDER/$ENV_REF/g" $SEALED_SECRET_OUTPUT_PATH
-fi
+# Use cross-platform sed replacement using python below
 
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret output file '$SEALED_SECRET_OUTPUT_PATH' not found!"
@@ -154,11 +153,11 @@ fi
 # cat $SEALED_SECRET_OUTPUT_PATH
 
 echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SEALED_SECRET_OUTPUT_PATH > devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
+kubeseal --format yaml < $SEALED_SECRET_OUTPUT_PATH > sealed_secret_opsapi_node_${ENV_REF}.yaml
 
 # rm -Rf $SEALED_SECRET_OUTPUT_PATH
-# cat sealed_secret_opsapi_prod.yaml
-echo "Sealed secret created at 'devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml'"
+# cat sealed_secret_opsapi_node_prod.yaml
+echo "Sealed secret created at 'sealed_secret_opsapi_node_${ENV_REF}.yaml'"
 
 # extract the sealed secret env_file
 echo "Extracting sealed secret env_file encrypted value..."
@@ -168,8 +167,12 @@ if ! command -v yq &> /dev/null; then
     exit 1
 fi
 
-HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi/values-env-template.yaml
-HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi/values-${ENV_REF}.yaml
+yq .spec.encryptedData.env_file sealed_secret_opsapi_node_${ENV_REF}.yaml > sealed_secret_opsapi_node_${ENV_REF}.txt
+echo "Sealed env_file base64 content saved to 'sealed_secret_opsapi_node_${ENV_REF}.txt'"
+# cat sealed_secret_opsapi_node_prod.txt
+
+HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi-node/values-env-template.yaml
+HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi-node/values-${ENV_REF}.yaml
 
 if [ ! -f "$HELM_VALUES_INPUT_PATH" ]; then
     echo "Error: Helm values template file '$HELM_VALUES_INPUT_PATH' not found!"
@@ -178,31 +181,9 @@ fi
 
 cp $HELM_VALUES_INPUT_PATH $HELM_VALUES_OUTPUT_PATH
 
-JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_ID=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_SECRET=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_REDIRECT_URI=$(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_TOKEN_URL=$(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_USERINFO_URL=$(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-LAPIS_CONFIG_LUA_FILE=$(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ACCESS_KEY=$(yq .spec.encryptedData.MINIO_ACCESS_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_BUCKET=$(yq .spec.encryptedData.MINIO_BUCKET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ENDPOINT=$(yq .spec.encryptedData.MINIO_ENDPOINT devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_REGION=$(yq .spec.encryptedData.MINIO_REGION devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+SAFE_SEALEDSECRET_ENCRYPTED=$(<sealed_secret_opsapi_node_${ENV_REF}.txt)
 
-echo "Extracted encrypted values from sealed secret."
-
-if [ -z "$JWT_SECRET_KEY" ] || [ -z "$KEYCLOAK_AUTH_URL" ] || [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ] || [ -z "$KEYCLOAK_REDIRECT_URI" ] || [ -z "$KEYCLOAK_TOKEN_URL" ] || [ -z "$KEYCLOAK_USERINFO_URL" ] || [ -z "$LAPIS_CONFIG_LUA_FILE" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_BUCKET" ] || [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_REGION" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_IV" ] || [ -z "$NODE_API_URL" ]; then
-    echo "Error: One or more extracted encrypted values are empty!"
-    exit 1
-fi
-
-echo "Replacing placeholders in Helm values file..."
+# echo $SAFE_SEALEDSECRET_ENCRYPTED
 
 if python3 --version &> /dev/null; then
     echo "Python3 is installed"
@@ -220,25 +201,10 @@ with open('$HELM_VALUES_OUTPUT_PATH', 'r') as f:
     content = f.read()
 
 # Replace the placeholder with the encrypted secret
-content = content.replace('JWT_SECRET_KEY', '$JWT_SECRET_KEY')
-content = content.replace('KEYCLOAK_AUTH_URL', '$KEYCLOAK_AUTH_URL')
-content = content.replace('KEYCLOAK_CLIENT_ID', '$KEYCLOAK_CLIENT_ID')
-content = content.replace('KEYCLOAK_CLIENT_SECRET', '$KEYCLOAK_CLIENT_SECRET')
-content = content.replace('KEYCLOAK_REDIRECT_URI', '$KEYCLOAK_REDIRECT_URI')
-content = content.replace('KEYCLOAK_TOKEN_URL', '$KEYCLOAK_TOKEN_URL')
-content = content.replace('KEYCLOAK_USERINFO_URL', '$KEYCLOAK_USERINFO_URL')
-content = content.replace('KEYCLOAK_TOKEN_URL', '$KEYCLOAK_TOKEN_URL')
-content = content.replace('LAPIS_CONFIG_LUA_FILE', '$LAPIS_CONFIG_LUA_FILE')
-content = content.replace('MINIO_ACCESS_KEY', '$MINIO_ACCESS_KEY')
-content = content.replace('MINIO_BUCKET', '$MINIO_BUCKET')
-content = content.replace('MINIO_ENDPOINT', '$MINIO_ENDPOINT')
-content = content.replace('MINIO_REGION', '$MINIO_REGION')
-content = content.replace('MINIO_SECRET_KEY', '$MINIO_SECRET_KEY')
-content = content.replace('OPENSSL_SECRET_KEY', '$OPENSSL_SECRET_KEY')
-content = content.replace('OPENSSL_SECRET_IV', '$OPENSSL_SECRET_IV')
-content = content.replace('NODE_API_URL', '$NODE_API_URL')
-content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
-content = content.replace('prod-opsapi.', 'opsapi.')
+content = content.replace('helmfilesecretsplaceholder', '$SAFE_SEALEDSECRET_ENCRYPTED')
+content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$CICD_NAMESPACE')
+content = content.replace('CICD_ENV_FILE_PLACEHOLDER_BASE64', '$ENV_FILE_CONTENT_BASE64')
+content = content.replace('CICD_ENV_REF_PLACEHOLDER', '$ENV_REF')
 # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
@@ -246,12 +212,13 @@ with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
 print("Successfully replaced placeholder with encrypted secret")
 EOF
 
-#   cat $HELM_VALUES_OUTPUT_PATH
+cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
 rm -Rf $SEALED_SECRET_OUTPUT_PATH
-#rm -Rf devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
+rm -Rf sealed_secret_opsapi_node_${ENV_REF}.yaml
 rm -Rf temp.txt
+rm -Rf sealed_secret_opsapi_node_${ENV_REF}.txt
 
 
