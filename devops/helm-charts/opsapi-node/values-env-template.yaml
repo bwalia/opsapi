@@ -1,5 +1,5 @@
 app:
-  env: test
+  env: CICD_ENV_REF_PLACEHOLDER
   name: opsapi-node
   image:
     repository: bwalia/opsapi-node
@@ -12,7 +12,7 @@ app:
 replicaCount: 1
 
 secrets:
-  env_file: null
+  env_file: helmfilesecretsplaceholder
 
 service:
   type: ClusterIP
@@ -23,7 +23,7 @@ ingress:
   className: nginx
   annotations: {}
   hosts:
-    - host: test-opsapi-node.workstation.co.uk
+    - host: CICD_NAMESPACE_PLACEHOLDER-opsapi-node.workstation.co.uk
       paths:
         - path: /
           pathType: Prefix
