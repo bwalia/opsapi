@@ -33,12 +33,13 @@ RUN wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc
     --tries=3 --timeout=30 && \
     chmod +x /usr/local/bin/mc
 
-RUN mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json && chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
-COPY --chown=nobody:root lapis/api-docs/swagger.json /tmp/swagger.json
-
 WORKDIR /app
 
 COPY . /app
+
+RUN mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
+RUN chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
+RUN cp /app/api-docs/swagger.json /tmp/swagger.json
 
 EXPOSE 8080
 
