@@ -109,16 +109,16 @@ echo $ENV_FILE_CONTENT_BASE64 | base64 -d > temp.txt
 ENV_FILE_CONTENT_BASE64_DECODED_FILE="temp.txt"
 #"/Users/balinderwalia/Documents/Work/aws_keys/.env_opsapi_prod"
 
-SEALED_SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_per_env_input_template.yaml"
-SEALED_SECRET_OUTPUT_PATH="/tmp/secret_opsapi_${ENV_REF}.yaml"
+SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_per_env_input_template.yaml"
+SECRET_OUTPUT_PATH="/tmp/secret_opsapi_${ENV_REF}.yaml"
 
 if [ ! -f "$ENV_FILE_CONTENT_BASE64_DECODED_FILE" ]; then
     echo "Error: Environment file '$ENV_FILE_CONTENT_BASE64_DECODED_FILE' not found!"
     exit 1
 fi
 
-if [ ! -f "$SEALED_SECRET_INPUT_PATH" ]; then
-    echo "Error: Sealed secret template file '$SEALED_SECRET_INPUT_PATH' not found!"
+if [ ! -f "$SECRET_INPUT_PATH" ]; then
+    echo "Error: Sealed secret template file '$SECRET_INPUT_PATH' not found!"
     exit 1
 fi
 
@@ -135,29 +135,29 @@ fi
 # cat temp.txt
 # rm temp.txt
 
-rm -Rf $SEALED_SECRET_OUTPUT_PATH
-cp $SEALED_SECRET_INPUT_PATH $SEALED_SECRET_OUTPUT_PATH
+rm -Rf $SECRET_OUTPUT_PATH
+cp $SECRET_INPUT_PATH $SECRET_OUTPUT_PATH
 
 # Use cross-platform sed replacement
 if [[ "$OS_TYPE" == "macos" ]]; then
-    sed -i '' "s/CICD_NAMESPACE_PLACEHOLDER/$ENV_REF/g" $SEALED_SECRET_OUTPUT_PATH
+    sed -i '' "s/CICD_NAMESPACE_PLACEHOLDER/$ENV_REF/g" $SECRET_OUTPUT_PATH
 else
-    sed -i "s/CICD_NAMESPACE_PLACEHOLDER/$ENV_REF/g" $SEALED_SECRET_OUTPUT_PATH
+    sed -i "s/CICD_NAMESPACE_PLACEHOLDER/$ENV_REF/g" $SECRET_OUTPUT_PATH
 fi
 
-if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
-    echo "Error: Sealed secret output file '$SEALED_SECRET_OUTPUT_PATH' not found!"
+if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
 
-# cat $SEALED_SECRET_OUTPUT_PATH
+# cat $SECRET_OUTPUT_PATH
 
 echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SEALED_SECRET_OUTPUT_PATH > /tmp/sealed_secret_opsapi_${ENV_REF}.yaml
+kubeseal --format yaml < $SECRET_OUTPUT_PATH > /tmp/$SEALED_SECRET_OUTPUT_PATH
 
-# rm -Rf $SEALED_SECRET_OUTPUT_PATH
+# rm -Rf $SECRET_OUTPUT_PATH
 # cat sealed_secret_opsapi_prod.yaml
-echo "Sealed secret created at '/tmp/sealed_secret_opsapi_${ENV_REF}.yaml'"
+echo "Sealed secret created at '/tmp/$SEALED_SECRET_OUTPUT_PATH'"
 
 # extract the sealed secret env_file
 echo "Extracting sealed secret env_file encrypted value..."
@@ -177,22 +177,22 @@ fi
 
 cp $HELM_VALUES_INPUT_PATH $HELM_VALUES_OUTPUT_PATH
 
-JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_ID=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_SECRET=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_REDIRECT_URI=$(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_TOKEN_URL=$(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_USERINFO_URL=$(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-LAPIS_CONFIG_LUA_FILE=$(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ACCESS_KEY=$(yq .spec.encryptedData.MINIO_ACCESS_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_BUCKET=$(yq .spec.encryptedData.MINIO_BUCKET /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ENDPOINT=$(yq .spec.encryptedData.MINIO_ENDPOINT /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_REGION=$(yq .spec.encryptedData.MINIO_REGION /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
-NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY /tmp/$SEALED_SECRET_OUTPUT_PATH)
+KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL /tmp/$SEALED_SECRET_OUTPUT_PATH)
+KEYCLOAK_CLIENT_ID=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID /tmp/$SEALED_SECRET_OUTPUT_PATH)
+KEYCLOAK_CLIENT_SECRET=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET /tmp/$SEALED_SECRET_OUTPUT_PATH)
+KEYCLOAK_REDIRECT_URI=$(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI /tmp/$SEALED_SECRET_OUTPUT_PATH)
+KEYCLOAK_TOKEN_URL=$(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL /tmp/$SEALED_SECRET_OUTPUT_PATH)
+KEYCLOAK_USERINFO_URL=$(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL /tmp/$SEALED_SECRET_OUTPUT_PATH)
+LAPIS_CONFIG_LUA_FILE=$(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE /tmp/$SEALED_SECRET_OUTPUT_PATH)
+MINIO_ACCESS_KEY=$(yq .spec.encryptedData.MINIO_ACCESS_KEY /tmp/$SEALED_SECRET_OUTPUT_PATH)
+MINIO_BUCKET=$(yq .spec.encryptedData.MINIO_BUCKET /tmp/$SEALED_SECRET_OUTPUT_PATH)
+MINIO_ENDPOINT=$(yq .spec.encryptedData.MINIO_ENDPOINT /tmp/$SEALED_SECRET_OUTPUT_PATH)
+MINIO_REGION=$(yq .spec.encryptedData.MINIO_REGION /tmp/$SEALED_SECRET_OUTPUT_PATH)
+MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY /tmp/$SEALED_SECRET_OUTPUT_PATH)
+OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY /tmp/$SEALED_SECRET_OUTPUT_PATH)
+OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV /tmp/$SEALED_SECRET_OUTPUT_PATH)
+NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL /tmp/$SEALED_SECRET_OUTPUT_PATH)
 
 echo "Extracted encrypted values from sealed secret."
 
@@ -271,8 +271,8 @@ cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
-rm -Rf $SEALED_SECRET_OUTPUT_PATH
-#rm -Rf /tmp/sealed_secret_opsapi_${ENV_REF}.yaml
+rm -Rf $SECRET_OUTPUT_PATH
+#rm -Rf /tmp/$SEALED_SECRET_OUTPUT_PATH
 #rm -Rf temp.txt
 
 
