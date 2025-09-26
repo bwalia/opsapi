@@ -249,7 +249,7 @@ with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
 print("Successfully replaced placeholder with encrypted secret")
 EOF
 
-#   cat $HELM_VALUES_OUTPUT_PATH
+cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
