@@ -62,7 +62,7 @@ jobs:
         shell: bash
 
       - name: Build OPSAPI-NODE Docker image and push to Docker Hub
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
           echo "Building Node.js app Docker image..."
           docker build -f node/opsapi-node/Dockerfile -t ${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }} .
@@ -164,7 +164,7 @@ jobs:
             --namespace ${{ env.TARGET_ENV }} --create-namespace
 
       - name: Kubeseal encrypt the env secrets file for node app
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
             export KUBECONFIG=$(pwd)/kubeconfig
             if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
@@ -181,7 +181,7 @@ jobs:
         shell: bash            
 
       - name: Deploy Helm Chart for OPSAPI-NODE
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
           echo "Deploying Helm chart for Node.js app to ${{ env.TARGET_ENV }}..."
