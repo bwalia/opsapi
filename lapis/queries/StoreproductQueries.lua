@@ -255,13 +255,26 @@ function StoreproductQueries.searchProducts(params)
     local where_clause = table.concat(where_conditions, " AND ")
     local order_clause = "ORDER BY " .. orderBy .. " " .. orderDir
     
-    local paginated = StoreproductModel:paginated(
-        "WHERE " .. where_clause .. " " .. order_clause,
-        unpack(where_params),
-        {
+    local where_clause_full = "WHERE " .. where_clause .. " " .. order_clause
+
+    -- Use the correct Lapis pagination syntax from official docs
+    local paginated
+    if #where_params > 0 then
+        -- Build arguments table: query, param1, param2, ..., options
+        local args = {where_clause_full}
+        for i, param in ipairs(where_params) do
+            table.insert(args, param)
+        end
+        table.insert(args, {per_page = perPage})
+
+        -- Call paginated with explicit arguments
+        paginated = StoreproductModel:paginated(unpack(args))
+    else
+        -- For queries without parameters: Model:paginated("WHERE clause", {options})
+        paginated = StoreproductModel:paginated(where_clause_full, {
             per_page = perPage
-        }
-    )
+        })
+    end
     
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
