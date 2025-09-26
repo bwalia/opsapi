@@ -213,6 +213,21 @@ else
     exit 1
 fi
 
+# Example: Set service port number based on environment
+if [ "$ENV_REF" == "prod" ]; then
+OPSAPI_SVC_PORT_NUM=32136
+    elif [ "$ENV_REF" == "test" ]; then
+    OPSAPI_SVC_PORT_NUM=32134
+        elif [ "$ENV_REF" == "acc" ]; then
+        OPSAPI_SVC_PORT_NUM=32135
+            elif [ "$ENV_REF" == "int" ]; then
+            OPSAPI_SVC_PORT_NUM=32133
+                elif [ "$ENV_REF" == "dev" ]; then
+                OPSAPI_SVC_PORT_NUM=32132
+                    else
+                    OPSAPI_SVC_PORT_NUM=32136
+fi
+
 # for root postgres password run : export PGPASSWORD=$(kubectl get secret postgres.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
 # for user-prd password run : export PGPASSWORD=$(kubectl get secret user-prd.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
 
@@ -244,6 +259,7 @@ content = content.replace('OPENSSL_SECRET_IV', '$OPENSSL_SECRET_IV')
 content = content.replace('NODE_API_URL', '$NODE_API_URL')
 content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('prod-opsapi.', 'opsapi.')
+content = content.replace('CICD_ENV_FILE_PLACEHOLDER_BASE64', '$OPSAPI_SVC_PORT_NUM')
 # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
