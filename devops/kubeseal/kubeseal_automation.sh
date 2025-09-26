@@ -132,7 +132,7 @@ else
     BASE64_WRAP_OPTION="-b 0"
 fi
 
-#   cat temp.txt 
+cat temp.txt 
 
 # rm temp.txt
 
