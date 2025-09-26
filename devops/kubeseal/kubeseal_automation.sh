@@ -110,7 +110,7 @@ ENV_FILE_CONTENT_BASE64_DECODED_FILE="temp.txt"
 #"/Users/balinderwalia/Documents/Work/aws_keys/.env_opsapi_prod"
 
 SEALED_SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_per_env_input_template.yaml"
-SEALED_SECRET_OUTPUT_PATH="devops/kubeseal/secret_opsapi_${ENV_REF}.yaml"
+SEALED_SECRET_OUTPUT_PATH="/tmp/secret_opsapi_${ENV_REF}.yaml"
 
 if [ ! -f "$ENV_FILE_CONTENT_BASE64_DECODED_FILE" ]; then
     echo "Error: Environment file '$ENV_FILE_CONTENT_BASE64_DECODED_FILE' not found!"
@@ -153,11 +153,11 @@ fi
 # cat $SEALED_SECRET_OUTPUT_PATH
 
 echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SEALED_SECRET_OUTPUT_PATH > devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
+kubeseal --format yaml < $SEALED_SECRET_OUTPUT_PATH > /tmp/sealed_secret_opsapi_${ENV_REF}.yaml
 
 # rm -Rf $SEALED_SECRET_OUTPUT_PATH
 # cat sealed_secret_opsapi_prod.yaml
-echo "Sealed secret created at 'devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml'"
+echo "Sealed secret created at '/tmp/sealed_secret_opsapi_${ENV_REF}.yaml'"
 
 # extract the sealed secret env_file
 echo "Extracting sealed secret env_file encrypted value..."
@@ -177,27 +177,27 @@ fi
 
 cp $HELM_VALUES_INPUT_PATH $HELM_VALUES_OUTPUT_PATH
 
-JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_ID=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_CLIENT_SECRET=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_REDIRECT_URI=$(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_TOKEN_URL=$(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-KEYCLOAK_USERINFO_URL=$(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-LAPIS_CONFIG_LUA_FILE=$(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ACCESS_KEY=$(yq .spec.encryptedData.MINIO_ACCESS_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_BUCKET=$(yq .spec.encryptedData.MINIO_BUCKET devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_ENDPOINT=$(yq .spec.encryptedData.MINIO_ENDPOINT devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_REGION=$(yq .spec.encryptedData.MINIO_REGION devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
-NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
+JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_CLIENT_ID=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_ID /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_CLIENT_SECRET=$(yq .spec.encryptedData.KEYCLOAK_CLIENT_SECRET /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_REDIRECT_URI=$(yq .spec.encryptedData.KEYCLOAK_REDIRECT_URI /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_TOKEN_URL=$(yq .spec.encryptedData.KEYCLOAK_TOKEN_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+KEYCLOAK_USERINFO_URL=$(yq .spec.encryptedData.KEYCLOAK_USERINFO_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+LAPIS_CONFIG_LUA_FILE=$(yq .spec.encryptedData.LAPIS_CONFIG_LUA_FILE /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_ACCESS_KEY=$(yq .spec.encryptedData.MINIO_ACCESS_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_BUCKET=$(yq .spec.encryptedData.MINIO_BUCKET /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_ENDPOINT=$(yq .spec.encryptedData.MINIO_ENDPOINT /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_REGION=$(yq .spec.encryptedData.MINIO_REGION /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
+NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL /tmp/sealed_secret_opsapi_${ENV_REF}.yaml)
 
 echo "Extracted encrypted values from sealed secret."
 
-echo "LAPIS_CONFIG_LUA_FILE: "
-echo $LAPIS_CONFIG_LUA_FILE
+# echo "LAPIS_CONFIG_LUA_FILE: "
+# echo $LAPIS_CONFIG_LUA_FILE
 
 if [ -z "$JWT_SECRET_KEY" ] || [ -z "$KEYCLOAK_AUTH_URL" ] || [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ] || [ -z "$KEYCLOAK_REDIRECT_URI" ] || [ -z "$KEYCLOAK_TOKEN_URL" ] || [ -z "$KEYCLOAK_USERINFO_URL" ] || [ -z "$LAPIS_CONFIG_LUA_FILE" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_BUCKET" ] || [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_REGION" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_IV" ] || [ -z "$NODE_API_URL" ]; then
     echo "Error: One or more extracted encrypted values are empty!"
@@ -256,7 +256,7 @@ cat $HELM_VALUES_OUTPUT_PATH
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
 rm -Rf $SEALED_SECRET_OUTPUT_PATH
-#rm -Rf devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml
+#rm -Rf /tmp/sealed_secret_opsapi_${ENV_REF}.yaml
 #rm -Rf temp.txt
 
 
