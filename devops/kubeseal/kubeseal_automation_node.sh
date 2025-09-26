@@ -26,7 +26,7 @@ else
 fi
 
 if [ -z "$3" ]; then
-    echo "Error: CICD Namespace referenced from 2nd parameter"
+    echo "Notice: CICD Namespace referenced from 2nd parameter"
     CICD_NAMESPACE=$ENV_REF
 else
     CICD_NAMESPACE="$3"
