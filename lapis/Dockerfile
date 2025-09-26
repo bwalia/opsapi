@@ -37,6 +37,10 @@ WORKDIR /app
 
 COPY . /app
 
+RUN mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
+RUN chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
+RUN cp /app/api-docs/swagger.json /tmp/swagger.json
+
 EXPOSE 8080
 
 CMD ["lapis", "server"]

@@ -13,6 +13,10 @@ data:
         lapis migrate
         echo "==========================="
 
+        mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
+        chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
+        cp /app/api-docs/swagger.json /tmp/swagger.json
+
 ---
 apiVersion: v1
 kind: ConfigMap
