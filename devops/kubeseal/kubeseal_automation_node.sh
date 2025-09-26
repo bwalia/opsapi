@@ -113,16 +113,16 @@ echo $ENV_FILE_CONTENT_BASE64 | base64 -d > temp.txt
 ENV_FILE_CONTENT_BASE64_DECODED_FILE="temp.txt"
 #"/Users/balinderwalia/Documents/Work/aws_keys/.env_wsl_prod"
 
-SEALED_SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_node_per_env_input_template.yaml"
-SEALED_SECRET_OUTPUT_PATH="devops/kubeseal/secret_opsapi_node_${ENV_REF}.yaml"
+SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_node_per_env_input_template.yaml"
+SECRET_OUTPUT_PATH="devops/kubeseal/secret_opsapi_node_${ENV_REF}.yaml"
 
 if [ ! -f "$ENV_FILE_CONTENT_BASE64_DECODED_FILE" ]; then
     echo "Error: Environment file '$ENV_FILE_CONTENT_BASE64_DECODED_FILE' not found!"
     exit 1
 fi
 
-if [ ! -f "$SEALED_SECRET_INPUT_PATH" ]; then
-    echo "Error: Sealed secret template file '$SEALED_SECRET_INPUT_PATH' not found!"
+if [ ! -f "$SECRET_INPUT_PATH" ]; then
+    echo "Error: Sealed secret template file '$SECRET_INPUT_PATH' not found!"
     exit 1
 fi
 
@@ -140,22 +140,22 @@ fi
 
 # rm temp.txt
 
-rm -Rf $SEALED_SECRET_OUTPUT_PATH
-cp $SEALED_SECRET_INPUT_PATH $SEALED_SECRET_OUTPUT_PATH
+rm -Rf $SECRET_OUTPUT_PATH
+cp $SECRET_INPUT_PATH $SECRET_OUTPUT_PATH
 
 # Use cross-platform sed replacement using python below
 
-if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
-    echo "Error: Sealed secret output file '$SEALED_SECRET_OUTPUT_PATH' not found!"
+if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
 
-# cat $SEALED_SECRET_OUTPUT_PATH
+# cat $SECRET_OUTPUT_PATH
 
 echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SEALED_SECRET_OUTPUT_PATH > sealed_secret_opsapi_node_${ENV_REF}.yaml
+kubeseal --format yaml < $SECRET_OUTPUT_PATH > sealed_secret_opsapi_node_${ENV_REF}.yaml
 
-# rm -Rf $SEALED_SECRET_OUTPUT_PATH
+# rm -Rf $SECRET_OUTPUT_PATH
 # cat sealed_secret_opsapi_node_prod.yaml
 echo "Sealed secret created at 'sealed_secret_opsapi_node_${ENV_REF}.yaml'"
 
@@ -216,7 +216,7 @@ cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
-rm -Rf $SEALED_SECRET_OUTPUT_PATH
+rm -Rf $SECRET_OUTPUT_PATH
 rm -Rf sealed_secret_opsapi_node_${ENV_REF}.yaml
 rm -Rf temp.txt
 rm -Rf sealed_secret_opsapi_node_${ENV_REF}.txt
