@@ -259,7 +259,7 @@ content = content.replace('OPENSSL_SECRET_IV', '$OPENSSL_SECRET_IV')
 content = content.replace('NODE_API_URL', '$NODE_API_URL')
 content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('prod-opsapi.', 'opsapi.')
-content = content.replace('CICD_ENV_FILE_PLACEHOLDER_BASE64', '$OPSAPI_SVC_PORT_NUM')
+content = content.replace('CICD_SVC_PORT_PLACEHOLDER', '$OPSAPI_SVC_PORT_NUM')
 # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
