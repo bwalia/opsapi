@@ -27,7 +27,15 @@ else
     ENV_REF="$2"
 fi
 
+if [ -z "$3" ]; then
+    echo "Notice: CICD Namespace referenced from 2nd parameter"
+    CICD_NAMESPACE=$ENV_REF
+else
+    CICD_NAMESPACE="$3"
+fi
+
 echo "Environment reference: $ENV_REF"
+echo "CICD Namespace: $CICD_NAMESPACE"
 echo "OSTYPE variable: $OSTYPE"
 
 # Method 3: Check for specific OS
@@ -146,7 +154,7 @@ fi
 # Use cross-platform sed replacement
 if [[ "$OS_TYPE" == "macos" ]]; then
     sed -i '' "s/CICD_NAMESPACE_PLACEHOLDER/$CICD_NAMESPACE/g" $SECRET_OUTPUT_PATH
-    sed -i '' "s/CICD_ENV_REF_PLACEHOLDER/$CICD_ENV_REF/g" $SECRET_OUTPUT_PATH
+    sed -i '' "s/CICD_ENV_REF_PLACEHOLDER/$ENV_REF/g" $SECRET_OUTPUT_PATH
     sed -i '' "s/CICD_ENV_FILE_PLACEHOLDER_BASE64/$CICD_ENV_FILE_PLACEHOLDER_BASE64/g" $SECRET_OUTPUT_PATH
 elif [[ "$OS_TYPE" == "linux" || "$OS_TYPE" == "ubuntu" ]]; then
     sed -i "s/CICD_NAMESPACE_PLACEHOLDER/$CICD_NAMESPACE/g" $SECRET_OUTPUT_PATH
@@ -163,7 +171,8 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     exit 1
 fi
 
-# cat $SECRET_OUTPUT_PATH
+cat $SECRET_OUTPUT_PATH
+exit 0
 
 echo "Sealing the secret using kubeseal..."
 kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
