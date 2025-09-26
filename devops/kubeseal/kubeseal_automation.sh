@@ -138,6 +138,10 @@ fi
 
 rm -Rf $SECRET_OUTPUT_PATH
 cp $SECRET_INPUT_PATH $SECRET_OUTPUT_PATH
+if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
+    exit 1
+fi
 
 # Use cross-platform sed replacement
 if [[ "$OS_TYPE" == "macos" ]]; then
