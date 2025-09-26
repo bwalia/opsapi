@@ -172,7 +172,6 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
 fi
 
 cat $SECRET_OUTPUT_PATH
-exit 0
 
 echo "Sealing the secret using kubeseal..."
 kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
