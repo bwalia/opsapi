@@ -132,8 +132,7 @@ else
     BASE64_WRAP_OPTION="-b 0"
 fi
 
-cat temp.txt 
-
+# cat temp.txt
 # rm temp.txt
 
 rm -Rf $SEALED_SECRET_OUTPUT_PATH
@@ -196,6 +195,9 @@ OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV devops/kubeseal/sea
 NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL devops/kubeseal/sealed_secret_opsapi_${ENV_REF}.yaml)
 
 echo "Extracted encrypted values from sealed secret."
+
+echo "LAPIS_CONFIG_LUA_FILE: "
+echo $LAPIS_CONFIG_LUA_FILE
 
 if [ -z "$JWT_SECRET_KEY" ] || [ -z "$KEYCLOAK_AUTH_URL" ] || [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ] || [ -z "$KEYCLOAK_REDIRECT_URI" ] || [ -z "$KEYCLOAK_TOKEN_URL" ] || [ -z "$KEYCLOAK_USERINFO_URL" ] || [ -z "$LAPIS_CONFIG_LUA_FILE" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_BUCKET" ] || [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_REGION" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_IV" ] || [ -z "$NODE_API_URL" ]; then
     echo "Error: One or more extracted encrypted values are empty!"
