@@ -188,7 +188,8 @@ jobs:
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
           echo "Deploying Helm chart for Node.js app to ${{ env.TARGET_ENV }}..."
-          helm delete ${{ env.NODE_IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
+          # helm delete ${{ env.NODE_IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
+          helm list -n ${{ env.TARGET_ENV }} | grep -q "${{ env.NODE_IMAGE_NAME }}" && helm delete ${{ env.NODE_IMAGE_NAME }} -n ${{ env.TARGET_ENV }} || echo "Release ${{ env.NODE_IMAGE_NAME }} not found in namespace ${{ env.TARGET_ENV }}, skipping deletion"
           helm upgrade --install ${{ env.NODE_IMAGE_NAME }} ./devops/helm-charts/opsapi-node \
             -f ./devops/helm-charts/opsapi-node/values-${{ env.TARGET_ENV }}.yaml \
             --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }} \
