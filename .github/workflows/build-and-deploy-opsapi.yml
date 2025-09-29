@@ -38,7 +38,7 @@ on:
           - opsapi-kisaan
 
 env:
-  PROJECT_NAME: opsapi
+  PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}
   IMAGE_REGISTRY: bwalia
   TARGET_STACK: openresty_lua
   IMAGE_NAME: opsapi
