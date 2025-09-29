@@ -111,15 +111,15 @@ jobs:
         run: |
             export KUBECONFIG=$(pwd)/kubeconfig
             if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_DEV }} "dev"
+                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_DEV }} "dev" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_TEST }} "test"
+                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_TEST }} "test" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_ACC }} "acc"
+                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_ACC }} "acc" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_PROD }} "prod"
+                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_PROD }} "prod" ${{ env.PROJECT_NAME }}
             else
-                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_INT }} "int"
+                ./devops/kubeseal/kubeseal_automation.sh ${{ secrets.DOT_OPSAPI_ENV_CREDS_INT }} "int" ${{ env.PROJECT_NAME }}
             fi
         shell: bash
 
