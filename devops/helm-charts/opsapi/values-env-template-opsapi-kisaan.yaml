@@ -38,7 +38,7 @@ ingress:
   className: "nginx"
   annotations: {}
   hosts:
-    - host: CICD_NAMESPACE_PLACEHOLDER-opsapi.kisaan.com
+    - host: CICD_NAMESPACE_PLACEHOLDER-api.kisaan.com
       paths:
         - path: /
           pathType: Prefix
