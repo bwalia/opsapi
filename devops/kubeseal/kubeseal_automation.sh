@@ -251,6 +251,7 @@ if [ "$PROJECT_NAME" == "opsapi" ]; then
                     OPSAPI_SVC_PORT_NUM=32142
                         else
                         OPSAPI_SVC_PORT_NUM=32146
+fi
     elif [ "$PROJECT_NAME" == "opsapi" ]; then
 if [ "$ENV_REF" == "prod" ]; then
 OPSAPI_SVC_PORT_NUM=33136
