@@ -154,7 +154,7 @@ jobs:
           echo "Helm deleting existing release if it exists..."
           helm delete ${{ env.PROJECT_NAME }} --namespace ${{ env.TARGET_ENV }} || true
           echo "Helm upgrading or installing the release..."
-          helm list -n ${{ env.PROJECT_NAME }} | grep -q "${{ env.PROJECT_NAME }}" && helm delete ${{ env.PROJECT_NAME }} -n ${{ env.TARGET_ENV }} || echo "Release ${ env.PROJECT_NAME } not found in namespace ${{ env.TARGET_ENV }}, skipping deletion"
+          helm list -n ${{ env.PROJECT_NAME }} | grep -q "${{ env.PROJECT_NAME }}" && helm delete ${{ env.PROJECT_NAME }} -n ${{ env.TARGET_ENV }} || echo "Release ${{ env.PROJECT_NAME }} not found in namespace ${{ env.TARGET_ENV }}, skipping deletion"
           helm upgrade --install ${{ env.PROJECT_NAME }} ./devops/helm-charts/opsapi \
             -f ./devops/helm-charts/opsapi/values-${{ env.PROJECT_NAME }}-${{ env.TARGET_ENV }}.yaml \
             --set image.repository=bwalia/opsapi \
