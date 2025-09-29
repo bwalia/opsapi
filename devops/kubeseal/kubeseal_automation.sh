@@ -238,18 +238,33 @@ else
 fi
 
 # Example: Set service port number based on environment
+if [ "$PROJECT_NAME" == "opsapi" ]; then
+    if [ "$ENV_REF" == "prod" ]; then
+    OPSAPI_SVC_PORT_NUM=32146
+        elif [ "$ENV_REF" == "test" ]; then
+        OPSAPI_SVC_PORT_NUM=32144
+            elif [ "$ENV_REF" == "acc" ]; then
+            OPSAPI_SVC_PORT_NUM=32145
+                elif [ "$ENV_REF" == "int" ]; then
+                OPSAPI_SVC_PORT_NUM=32143
+                    elif [ "$ENV_REF" == "dev" ]; then
+                    OPSAPI_SVC_PORT_NUM=32142
+                        else
+                        OPSAPI_SVC_PORT_NUM=32146
+    elif [ "$PROJECT_NAME" == "opsapi" ]; then
 if [ "$ENV_REF" == "prod" ]; then
-OPSAPI_SVC_PORT_NUM=32136
+OPSAPI_SVC_PORT_NUM=33136
     elif [ "$ENV_REF" == "test" ]; then
-    OPSAPI_SVC_PORT_NUM=32134
+    OPSAPI_SVC_PORT_NUM=33134
         elif [ "$ENV_REF" == "acc" ]; then
-        OPSAPI_SVC_PORT_NUM=32135
+        OPSAPI_SVC_PORT_NUM=33135
             elif [ "$ENV_REF" == "int" ]; then
-            OPSAPI_SVC_PORT_NUM=32133
+            OPSAPI_SVC_PORT_NUM=33133
                 elif [ "$ENV_REF" == "dev" ]; then
-                OPSAPI_SVC_PORT_NUM=32132
+                OPSAPI_SVC_PORT_NUM=33132
                     else
-                    OPSAPI_SVC_PORT_NUM=32136
+                    OPSAPI_SVC_PORT_NUM=33136
+fi
 fi
 
 # for root postgres password run : export PGPASSWORD=$(kubectl get secret postgres.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
