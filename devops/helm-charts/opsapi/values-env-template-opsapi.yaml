@@ -1,3 +1,5 @@
+app: opsapi
+
 env: CICD_NAMESPACE_PLACEHOLDER
 
 image:
