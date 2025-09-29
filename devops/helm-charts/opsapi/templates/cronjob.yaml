@@ -3,7 +3,7 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: opsapi-{{ .Release.Namespace }}-db-backup-hourly
+  name:  {{ .Values.app }}-{{ .Release.Namespace }}-db-backup-hourly
 spec:
   schedule: "0 * * * *"
   #testing 1 min "0 */1 * * *"
