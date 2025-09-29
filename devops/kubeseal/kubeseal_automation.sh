@@ -34,6 +34,9 @@ else
     CICD_NAMESPACE="$3"
 fi
 
+PROJECT_NAME=${4:-"opsapi"}
+
+echo "Project Name: $PROJECT_NAME"
 echo "Environment reference: $ENV_REF"
 echo "CICD Namespace: $CICD_NAMESPACE"
 echo "OSTYPE variable: $OSTYPE"
@@ -188,8 +191,8 @@ if ! command -v yq &> /dev/null; then
     exit 1
 fi
 
-HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi/values-env-template.yaml
-HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi/values-${ENV_REF}.yaml
+HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi/values-env-template-${PROJECT_NAME}.yaml
+HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi/values-${PROJECT_NAME}-${ENV_REF}.yaml
 
 if [ ! -f "$HELM_VALUES_INPUT_PATH" ]; then
     echo "Error: Helm values template file '$HELM_VALUES_INPUT_PATH' not found!"

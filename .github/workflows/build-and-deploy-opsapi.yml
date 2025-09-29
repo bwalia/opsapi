@@ -27,9 +27,18 @@ on:
         options:
           - build
           - deploy
-          - build-and-deploy
+          - build-and-deploy          
+      PROJECT_NAME:
+        type: choice
+        description: "Please select the project name"
+        default: "opsapi"
+        required: true
+        options:
+          - opsapi
+          - opsapi-kisaan
 
 env:
+  PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}
   IMAGE_REGISTRY: bwalia
   TARGET_STACK: openresty_lua
   IMAGE_NAME: opsapi
@@ -80,19 +89,6 @@ jobs:
               sleep 10 # Give 10s for OpenResty to start
               curl -I http://localhost:80
         shell: bash
-
-      - name: Slack Notification for OPSAPI release
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_CHANNEL: general
-          SLACK_COLOR: ${{ job.status }}
-          SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI deployed to https://${{ env.TARGET_ENV }}.opsapi.io/ (${{ env.TARGET_ENV }}) env :rocket:"
-          SLACK_TITLE: OPSAPI deployment status
-          SLACK_USERNAME: rtCamp
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
   deploy:
     runs-on: ubuntu-latest
     needs: [build]
@@ -150,23 +146,22 @@ jobs:
             echo "Helm is already installed."
           fi
         shell: bash
-
-      - name: Deploy Helm Chart
+      - name: Deploy Helm Chart ${{ env.PROJECT_NAME }} app
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
-          echo "Deploying Helm chart for ${{ env.TARGET_ENV }} environment..."
+          echo "Deploying Helm chart - ${{ env.PROJECT_NAME }} ${{ env.TARGET_ENV }} environment..."
           echo "Helm deleting existing release if it exists..."
-          helm delete ${{ env.IMAGE_NAME }} --namespace ${{ env.TARGET_ENV }} || true
+          helm delete ${{ env.PROJECT_NAME }} --namespace ${{ env.TARGET_ENV }} || true
           echo "Helm upgrading or installing the release..."
-          helm upgrade --install ${{ env.IMAGE_NAME }} ./devops/helm-charts/opsapi \
-            -f ./devops/helm-charts/opsapi/values-${{ env.TARGET_ENV }}.yaml \
+          helm upgrade --install ${{ env.PROJECT_NAME }} ./devops/helm-charts/opsapi \
+            -f ./devops/helm-charts/opsapi/values-${{ env.PROJECT_NAME }}-${{ env.TARGET_ENV }}.yaml \
             --set image.repository=bwalia/opsapi \
             --set image.tag=latest \
             --namespace ${{ env.TARGET_ENV }} --create-namespace
         shell: bash
 
-      - name: Kubeseal encrypt the env secrets file for node app
+      - name: Kubeseal encrypt the env secrets file for node Helper app [Deactivated for now]
         if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
             export KUBECONFIG=$(pwd)/kubeconfig
@@ -183,7 +178,7 @@ jobs:
             fi
         shell: bash            
 
-      - name: Deploy Helm Chart for OPSAPI-NODE
+      - name: Deploy Helm Chart for OPSAPI-NODE Helper app [Deactivated for now]
         if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
@@ -197,3 +192,14 @@ jobs:
             --namespace ${{ env.TARGET_ENV }} --create-namespace
         shell: bash
 
+      - name: Slack Notification for OPSAPI ${{ env.PROJECT_NAME }} release
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: general
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_MESSAGE: "${{ env.PROJECT_NAME }} deployed to https://${{ env.TARGET_ENV }}.opsapi.io/ (${{ env.TARGET_ENV }}) env :rocket:"
+          SLACK_TITLE: "${{ env.PROJECT_NAME }} deployment status"
+          SLACK_USERNAME: rtCamp
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
