@@ -2,6 +2,7 @@ local respond_to = require("lapis.application").respond_to
 local Stripe = require("lib.stripe")
 local OrderQueries = require("queries.OrderQueries")
 local AuthMiddleware = require("middleware.auth")
+local CartCalculator = require("lib.cart-calculator")
 local Global = require("helper.global")
 local cjson = require("cjson")
 
@@ -98,12 +99,19 @@ return function(app)
             local success, result = pcall(function()
                 local stripe = Stripe.new()
 
+                -- Calculate totals using the new cart calculator
+                local totals = CartCalculator.calculateCheckoutTotals(user_id)
+
+                if totals.total_amount == 0 then
+                    error("Cart total is zero")
+                end
+
                 -- Build line items for Stripe Checkout
                 local line_items = {}
-                local total_amount = 0
 
                 ngx.log(ngx.INFO, "Building line items for " .. #cart_items .. " cart items")
 
+                -- Add product line items
                 for _, item in ipairs(cart_items) do
                     local item_price = tonumber(item.price)
                     local item_quantity = tonumber(item.quantity)
@@ -133,24 +141,39 @@ return function(app)
                         },
                         quantity = item_quantity
                     })
-
-                    total_amount = total_amount + (item_price * item_quantity)
                 end
 
-                -- Add tax as a separate line item (10%)
-                local tax_amount = total_amount * 0.1
-                ngx.log(ngx.INFO, "Adding tax line item: $" .. tax_amount)
+                -- Add tax as a separate line item if applicable
+                if totals.tax_amount > 0 then
+                    ngx.log(ngx.INFO, "Adding tax line item: $" .. totals.tax_amount)
 
-                table.insert(line_items, {
-                    price_data = {
-                        currency = "usd",
-                        product_data = {
-                            name = "Tax (10%)"
+                    table.insert(line_items, {
+                        price_data = {
+                            currency = "usd",
+                            product_data = {
+                                name = "Tax"
+                            },
+                            unit_amount = math.floor(totals.tax_amount * 100)
                         },
-                        unit_amount = math.floor(tax_amount * 100)
-                    },
-                    quantity = 1
-                })
+                        quantity = 1
+                    })
+                end
+
+                -- Add shipping as a separate line item if applicable
+                if totals.shipping_amount > 0 then
+                    ngx.log(ngx.INFO, "Adding shipping line item: $" .. totals.shipping_amount)
+
+                    table.insert(line_items, {
+                        price_data = {
+                            currency = "usd",
+                            product_data = {
+                                name = "Shipping"
+                            },
+                            unit_amount = math.floor(totals.shipping_amount * 100)
+                        },
+                        quantity = 1
+                    })
+                end
 
                 ngx.log(ngx.INFO, "Total line items: " .. #line_items)
 
@@ -164,8 +187,10 @@ return function(app)
                     billing_address_collection = "required",
                     metadata = {
                         user_id = tostring(user_id),
-                        cart_total = tostring(total_amount),
-                        tax_amount = tostring(tax_amount)
+                        subtotal = tostring(totals.subtotal),
+                        tax_amount = tostring(totals.tax_amount),
+                        shipping_amount = tostring(totals.shipping_amount),
+                        total_amount = tostring(totals.total_amount)
                     }
                 })
 
