@@ -70,7 +70,8 @@ return {
     schema.create_index("categories", "sort_order")
     schema.create_index("categories", "slug")
 
-    -- Composite index for store categories
+    -- Composite index for store categories and unique constraint for category names per store
+    schema.create_index("categories", "store_id", "name", { unique = true, name = "categories_store_name_unique" })
   end,
 
   -- Store Products table - Enhanced for better product management
@@ -338,5 +339,19 @@ return {
     schema.create_index("product_reviews", "rating")
     schema.create_index("product_reviews", "is_approved")
     schema.create_index("product_reviews", "created_at")
+  end,
+
+  -- Add shipping configuration fields to stores table
+  [13] = function()
+    schema.add_column("stores", "shipping_enabled", types.boolean({ default = false }))
+    schema.add_column("stores", "shipping_flat_rate", types.numeric({ default = 0 }))
+    schema.add_column("stores", "free_shipping_threshold", types.numeric({ default = 0 }))
+  end,
+
+  -- Add unique constraint for category names per store to prevent duplicates
+  [14] = function()
+    local db = require("lapis.db")
+    -- Add unique constraint on (store_id, name) combination
+    db.query("CREATE UNIQUE INDEX IF NOT EXISTS categories_store_name_unique ON categories (store_id, LOWER(name))")
   end
 }

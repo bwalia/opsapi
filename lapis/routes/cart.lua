@@ -1,6 +1,7 @@
 local respond_to = require("lapis.application").respond_to
 local StoreproductQueries = require("queries.StoreproductQueries")
 local AuthMiddleware = require("middleware.auth")
+local CartCalculator = require("lib.cart-calculator")
 local db = require("lapis.db")
 local cjson = require("cjson")
 
@@ -125,11 +126,11 @@ return function(app)
             
             -- Get cart items from database
             local cart_items = db.select("* from cart_items where user_id = ?", user_id)
-            
+
             local cart = {}
             local items = {}
-            local total = 0
-            
+            local subtotal = 0
+
             for _, item in ipairs(cart_items) do
                 local cart_item = {
                     product_uuid = item.product_uuid,
@@ -139,13 +140,22 @@ return function(app)
                     price = tonumber(item.price),
                     quantity = tonumber(item.quantity)
                 }
-                
+
                 cart[item.cart_key] = cart_item
                 table.insert(items, cart_item)
-                total = total + (cart_item.price * cart_item.quantity)
+                subtotal = subtotal + (cart_item.price * cart_item.quantity)
             end
 
-            return { json = { cart = cart, items = items, total = total }, status = 200 }
+            -- Calculate totals with dynamic tax and shipping
+            local totals = CartCalculator.calculateCheckoutTotals(user_id)
+
+            return { json = {
+                cart = cart,
+                items = items,
+                subtotal = subtotal,
+                total = subtotal, -- Keep backward compatibility
+                totals = totals  -- New detailed totals
+            }, status = 200 }
         end)
     }))
 
@@ -186,6 +196,29 @@ return function(app)
             end
             
             return { json = { message = "Removed from cart", cart = cart }, status = 200 }
+        end)
+    }))
+
+    -- Get cart totals with tax and shipping calculations
+    app:match("cart_totals", "/api/v2/cart/totals", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            -- Get user UUID from headers
+            local user_uuid = ngx.var.http_x_user_id
+            if not user_uuid or user_uuid == "" then
+                return { json = { error = "Authentication required" }, status = 401 }
+            end
+
+            -- Get user's internal ID from database
+            local user_result = db.select("id from users where uuid = ?", user_uuid)
+            if not user_result or #user_result == 0 then
+                return { json = { error = "User not found" }, status = 404 }
+            end
+            local user_id = user_result[1].id
+
+            -- Calculate totals with dynamic tax and shipping
+            local totals = CartCalculator.calculateCheckoutTotals(user_id)
+
+            return { json = totals, status = 200 }
         end)
     }))
 

@@ -292,6 +292,8 @@ return {
     ['20_create_cart_items'] = ecommerce_migrations[9],
     ['21_create_store_settings'] = ecommerce_migrations[10],
     ['22_create_product_reviews'] = ecommerce_migrations[11],
+    ['23_alter_store_table'] = ecommerce_migrations[13],
+    ['38_alter_category_table'] = ecommerce_migrations[14],
     
     ['24_add_oauth_fields_to_users'] = function()
         schema.add_column("users", "oauth_provider", types.varchar({ null = true }))

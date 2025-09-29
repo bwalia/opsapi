@@ -16,7 +16,46 @@ return function(app)
                     return { json = { error = "Access denied - not your store" }, status = 403 }
                 end
             end
-            return { json = CategoryQueries.create(self.params), status = 201 }
+
+            local success, result = pcall(function()
+                return CategoryQueries.create(self.params)
+            end)
+
+            if not success then
+                return { json = { error = result }, status = 400 }
+            end
+
+            return { json = result, status = 201 }
+        end)
+    }))
+
+    -- Search categories endpoint
+    app:match("search_categories", "/api/v2/categories/search", respond_to({
+        GET = AuthMiddleware.requireRole("seller", function(self)
+            -- Verify store ownership
+            if self.params.store_id then
+                local store = StoreQueries.showByOwner(self.params.store_id, self.user_data.internal_id)
+                if not store then
+                    return { json = { error = "Access denied - not your store" }, status = 403 }
+                end
+            end
+            return { json = CategoryQueries.search(self.params) }
+        end)
+    }))
+
+    -- Check if category exists endpoint
+    app:match("check_category", "/api/v2/categories/check", respond_to({
+        GET = AuthMiddleware.requireRole("seller", function(self)
+            -- Verify store ownership
+            if self.params.store_id then
+                local store = StoreQueries.showByOwner(self.params.store_id, self.user_data.internal_id)
+                if not store then
+                    return { json = { error = "Access denied - not your store" }, status = 403 }
+                end
+            end
+
+            local exists = CategoryQueries.checkExists(self.params.store_id, self.params.name)
+            return { json = { exists = exists } }
         end)
     }))
 
