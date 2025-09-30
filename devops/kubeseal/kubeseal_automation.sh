@@ -2,7 +2,7 @@
 
 # This bash script automates the process of sealing Kubernetes secrets using kubeseal.
 
-# set -x
+set -x
 
 # Validate input parameter
 if [ -z "$1" ]; then
@@ -330,8 +330,16 @@ cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
-rm -Rf $SECRET_OUTPUT_PATH
-#rm -Rf $SEALED_SECRET_OUTPUT_PATH
-#rm -Rf temp.txt
 
+if [ -f $SECRET_OUTPUT_PATH ]; then
+    rm -Rf $SECRET_OUTPUT_PATH
+fi
+
+if [ -f $SEALED_SECRET_OUTPUT_PATH ]; then
+    rm -Rf $SEALED_SECRET_OUTPUT_PATH
+fi
+
+if [ -f temp.txt ]; then
+    rm -Rf temp.txt
+fi
 
