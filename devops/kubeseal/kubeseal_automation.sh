@@ -255,17 +255,17 @@ if [ "$PROJECT_NAME" == "opsapi" ]; then
 
 elif [ "$PROJECT_NAME" == "opsapi-kisaan" ]; then
 if [ "$ENV_REF" == "prod" ]; then
-OPSAPI_SVC_PORT_NUM=33136
+OPSAPI_SVC_PORT_NUM=32236
     elif [ "$ENV_REF" == "test" ]; then
-    OPSAPI_SVC_PORT_NUM=33134
+    OPSAPI_SVC_PORT_NUM=32234
         elif [ "$ENV_REF" == "acc" ]; then
-        OPSAPI_SVC_PORT_NUM=33135
+        OPSAPI_SVC_PORT_NUM=32235
             elif [ "$ENV_REF" == "int" ]; then
-            OPSAPI_SVC_PORT_NUM=33133
+            OPSAPI_SVC_PORT_NUM=32233
                 elif [ "$ENV_REF" == "dev" ]; then
-                OPSAPI_SVC_PORT_NUM=33132
+                OPSAPI_SVC_PORT_NUM=32232
                     else
-                    OPSAPI_SVC_PORT_NUM=33136
+                    OPSAPI_SVC_PORT_NUM=32236
 fi
 fi
 
