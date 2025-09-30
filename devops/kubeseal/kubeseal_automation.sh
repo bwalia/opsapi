@@ -251,8 +251,9 @@ if [ "$PROJECT_NAME" == "opsapi" ]; then
                     OPSAPI_SVC_PORT_NUM=32142
                         else
                         OPSAPI_SVC_PORT_NUM=32146
-fi
-    elif [ "$PROJECT_NAME" == "opsapi" ]; then
+    fi
+
+elif [ "$PROJECT_NAME" == "opsapi-kisaan" ]; then
 if [ "$ENV_REF" == "prod" ]; then
 OPSAPI_SVC_PORT_NUM=33136
     elif [ "$ENV_REF" == "test" ]; then
@@ -300,6 +301,7 @@ content = content.replace('NODE_API_URL', '$NODE_API_URL')
 content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('prod-opsapi.', 'opsapi.')
 content = content.replace('CICD_SVC_PORT_PLACEHOLDER', '$OPSAPI_SVC_PORT_NUM')
+content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
 # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
