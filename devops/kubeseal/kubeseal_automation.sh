@@ -194,12 +194,14 @@ fi
 HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi/values-env-template-${PROJECT_NAME}.yaml
 HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi/values-${PROJECT_NAME}-${ENV_REF}.yaml
 
+
 if [ ! -f "$HELM_VALUES_INPUT_PATH" ]; then
     echo "Error: Helm values template file '$HELM_VALUES_INPUT_PATH' not found!"
     exit 1
 fi
 
 cp $HELM_VALUES_INPUT_PATH $HELM_VALUES_OUTPUT_PATH
+echo "Helm values template copied to '$HELM_VALUES_OUTPUT_PATH'"
 
 JWT_SECRET_KEY=$(yq .spec.encryptedData.JWT_SECRET_KEY $SEALED_SECRET_OUTPUT_PATH)
 KEYCLOAK_AUTH_URL=$(yq .spec.encryptedData.KEYCLOAK_AUTH_URL $SEALED_SECRET_OUTPUT_PATH)
@@ -278,7 +280,7 @@ import sys
 
 # Read the file
 with open('$HELM_VALUES_OUTPUT_PATH', 'r') as f:
-    content = f.read()
+content = f.read()
 
 # Replace the placeholder with the encrypted secret
 content = content.replace('JWT_SECRET_KEY', '$JWT_SECRET_KEY')
@@ -302,7 +304,7 @@ content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('prod-opsapi.', 'opsapi.')
 content = content.replace('CICD_SVC_PORT_PLACEHOLDER', '$OPSAPI_SVC_PORT_NUM')
 content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
-# Write back to file
+    # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
 
