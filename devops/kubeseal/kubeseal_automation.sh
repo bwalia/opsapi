@@ -280,7 +280,7 @@ import sys
 
 # Read the file
 with open('$HELM_VALUES_OUTPUT_PATH', 'r') as f:
-content = f.read()
+    content = f.read()
 
 # Replace the placeholder with the encrypted secret
 content = content.replace('JWT_SECRET_KEY', '$JWT_SECRET_KEY')
