@@ -23,11 +23,11 @@ return function(app)
                 return { json = { error = err }, status = 400 }
             end
             
-            -- Get user UUID from headers
-            local user_uuid = ngx.var.http_x_user_id
-            if not user_uuid or user_uuid == "" then
+            -- Get user UUID from authenticated user
+            if not self.current_user or not self.current_user.uuid then
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+            local user_uuid = self.current_user.uuid
             
             -- Get user's internal ID from database
             local user_result = db.select("id from users where uuid = ?", user_uuid)
@@ -111,11 +111,11 @@ return function(app)
     -- Get cart
     app:match("get_cart", "/api/v2/cart", respond_to({
         GET = AuthMiddleware.requireAuth(function(self)
-            -- Get user UUID from headers
-            local user_uuid = ngx.var.http_x_user_id
-            if not user_uuid or user_uuid == "" then
+            -- Get user UUID from authenticated user
+            if not self.current_user or not self.current_user.uuid then
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+            local user_uuid = self.current_user.uuid
             
             -- Get user's internal ID from database
             local user_result = db.select("id from users where uuid = ?", user_uuid)
@@ -164,11 +164,11 @@ return function(app)
         DELETE = AuthMiddleware.requireAuth(function(self)
             local product_uuid = self.params.product_uuid
             
-            -- Get user UUID from headers
-            local user_uuid = ngx.var.http_x_user_id
-            if not user_uuid or user_uuid == "" then
+            -- Get user UUID from authenticated user
+            if not self.current_user or not self.current_user.uuid then
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+            local user_uuid = self.current_user.uuid
             
             -- Get user's internal ID from database
             local user_result = db.select("id from users where uuid = ?", user_uuid)
@@ -202,11 +202,11 @@ return function(app)
     -- Get cart totals with tax and shipping calculations
     app:match("cart_totals", "/api/v2/cart/totals", respond_to({
         GET = AuthMiddleware.requireAuth(function(self)
-            -- Get user UUID from headers
-            local user_uuid = ngx.var.http_x_user_id
-            if not user_uuid or user_uuid == "" then
+            -- Get user UUID from authenticated user
+            if not self.current_user or not self.current_user.uuid then
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+            local user_uuid = self.current_user.uuid
 
             -- Get user's internal ID from database
             local user_result = db.select("id from users where uuid = ?", user_uuid)
@@ -225,11 +225,11 @@ return function(app)
     -- Clear cart
     app:match("clear_cart", "/api/v2/cart/clear", respond_to({
         DELETE = AuthMiddleware.requireAuth(function(self)
-            -- Get user UUID from headers
-            local user_uuid = ngx.var.http_x_user_id
-            if not user_uuid or user_uuid == "" then
+            -- Get user UUID from authenticated user
+            if not self.current_user or not self.current_user.uuid then
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+            local user_uuid = self.current_user.uuid
             
             -- Get user's internal ID from database
             local user_result = db.select("id from users where uuid = ?", user_uuid)
