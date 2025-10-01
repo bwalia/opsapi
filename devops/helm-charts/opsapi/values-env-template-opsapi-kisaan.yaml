@@ -8,6 +8,11 @@ image:
   pullPolicy: Always
 
 app_secrets:
+    database_host: DB_HOST 
+    database_port: DB_PORT
+    database_user: DB_USER
+    database_password: DB_PASSWORD
+    database_name: DATABASE_NAME
     jwt_secret_key: JWT_SECRET_KEY
     keycloak_auth_url: KEYCLOAK_AUTH_URL
     keycloak_client_id: KEYCLOAK_CLIENT_ID
@@ -28,6 +33,7 @@ app_secrets:
 replicaCount: 1
 
 service:
+  name: opsapi-kisaan-svc
   type: ClusterIP
   port: 80
 
