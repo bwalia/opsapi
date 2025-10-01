@@ -151,8 +151,8 @@ fi
 #"/Users/balinderwalia/Documents/Work/aws_keys/.env_opsapi_prod"
 
 SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_per_env_input_template.yaml"
-SECRET_OUTPUT_PATH="/tmp/secret_opsapi_${ENV_REF}.yaml"
-SEALED_SECRET_OUTPUT_PATH="/tmp/sealed_secret_opsapi_${ENV_REF}.yaml"
+SECRET_OUTPUT_PATH="secret_opsapi_${ENV_REF}.yaml"
+SEALED_SECRET_OUTPUT_PATH="sealed_secret_opsapi_${ENV_REF}.yaml"
 
 echo $ENV_FILE_CONTENT_BASE64 | base64 -d > $SECRET_OUTPUT_PATH
 
@@ -166,25 +166,32 @@ python3 << EOF
 import sys
 
 # Read the file
-with open('$HELM_VALUES_OUTPUT_PATH', 'r') as f:
+with open('$SECRET_OUTPUT_PATH', 'r') as f:
     content = f.read()
 
 # Replace the placeholder with the encrypted secret
 content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
     # Write back to file
-with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
+with open('$SECRET_OUTPUT_PATH', 'w') as f:
     f.write(content)
 
 print("Successfully replaced placeholder with encrypted secret")
 EOF
+echo "Replaced placeholders in secret template file '$SECRET_OUTPUT_PATH'"
 if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
 
+if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Secret template file '$SECRET_OUTPUT_PATH' not found!"
+    exit 1
+fi
+
 echo "Sealing the secret using kubeseal..."
 kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+echo "Sealed the secret using kubeseal...'$SEALED_SECRET_OUTPUT_PATH'"
 
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret template file '$SEALED_SECRET_OUTPUT_PATH' not found!"
@@ -245,13 +252,17 @@ MINIO_SECRET_KEY=$(yq .spec.encryptedData.MINIO_SECRET_KEY $SEALED_SECRET_OUTPUT
 OPENSSL_SECRET_KEY=$(yq .spec.encryptedData.OPENSSL_SECRET_KEY $SEALED_SECRET_OUTPUT_PATH)
 OPENSSL_SECRET_IV=$(yq .spec.encryptedData.OPENSSL_SECRET_IV $SEALED_SECRET_OUTPUT_PATH)
 NODE_API_URL=$(yq .spec.encryptedData.NODE_API_URL $SEALED_SECRET_OUTPUT_PATH)
-
+DATABASE_HOST=$(yq .spec.encryptedData.DATABASE_HOST $SEALED_SECRET_OUTPUT_PATH)
+DATABASE_PORT=$(yq .spec.encryptedData.DATABASE_PORT $SEALED_SECRET_OUTPUT_PATH)
+DATABASE_NAME=$(yq .spec.encryptedData.DATABASE_NAME $SEALED_SECRET_OUTPUT_PATH)
+DATABASE_USER=$(yq .spec.encryptedData.DATABASE_USER $SEALED_SECRET_OUTPUT_PATH)
+DATABASE_PASSWORD=$(yq .spec.encryptedData.DATABASE_PASSWORD $SEALED_SECRET_OUTPUT_PATH)
 echo "Extracted encrypted values from sealed secret."
 
 # echo "LAPIS_CONFIG_LUA_FILE: "
 # echo $LAPIS_CONFIG_LUA_FILE
 
-if [ -z "$JWT_SECRET_KEY" ] || [ -z "$KEYCLOAK_AUTH_URL" ] || [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ] || [ -z "$KEYCLOAK_REDIRECT_URI" ] || [ -z "$KEYCLOAK_TOKEN_URL" ] || [ -z "$KEYCLOAK_USERINFO_URL" ] || [ -z "$LAPIS_CONFIG_LUA_FILE" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_BUCKET" ] || [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_REGION" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_IV" ] || [ -z "$NODE_API_URL" ]; then
+if [ -z "$JWT_SECRET_KEY" ] || [ -z "$KEYCLOAK_AUTH_URL" ] || [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_PORT" ] || [ -z "$DATABASE_NAME" ] || [ -z "$DATABASE_USER" ] || [ -z "$DATABASE_PASSWORD" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ] || [ -z "$KEYCLOAK_REDIRECT_URI" ] || [ -z "$KEYCLOAK_TOKEN_URL" ] || [ -z "$KEYCLOAK_USERINFO_URL" ] || [ -z "$LAPIS_CONFIG_LUA_FILE" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_BUCKET" ] || [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_REGION" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_IV" ] || [ -z "$NODE_API_URL" ]; then
     echo "Error: One or more extracted encrypted values are empty!"
     exit 1
 fi
@@ -297,6 +308,12 @@ content = content.replace('NODE_API_URL', '$NODE_API_URL')
 content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('prod-opsapi.', 'opsapi.')
 content = content.replace('CICD_SVC_PORT_PLACEHOLDER', '$OPSAPI_SVC_PORT_NUM')
+content = content.replace('DATABASE_HOST', '$DATABASE_HOST')
+content = content.replace('DATABASE_PORT', '$DATABASE_PORT')
+content = content.replace('DATABASE_NAME', '$DATABASE_NAME')
+content = content.replace('DATABASE_USER', '$DATABASE_USER')
+content = content.replace('DATABASE_PASSWORD', '$DATABASE_PASSWORD')
+content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
     # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
@@ -331,4 +348,4 @@ fi
 if [ -f $SEALED_SECRET_OUTPUT_PATH ]; then
     rm -Rf $SEALED_SECRET_OUTPUT_PATH
 fi
-echo "Temporary files cleaned up."
+# echo "Temporary files cleaned up."
