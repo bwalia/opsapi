@@ -341,11 +341,11 @@ cat $HELM_VALUES_OUTPUT_PATH
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
 # Clean up temporary files
 
-# if [ -f $SECRET_OUTPUT_PATH ]; then
-#     rm -Rf $SECRET_OUTPUT_PATH
-# fi
+if [ -f $SECRET_OUTPUT_PATH ]; then
+    rm -Rf $SECRET_OUTPUT_PATH
+fi
 
-# if [ -f $SEALED_SECRET_OUTPUT_PATH ]; then
-#     rm -Rf $SEALED_SECRET_OUTPUT_PATH
-# fi
+if [ -f $SEALED_SECRET_OUTPUT_PATH ]; then
+    rm -Rf $SEALED_SECRET_OUTPUT_PATH
+fi
 # echo "Temporary files cleaned up."
