@@ -116,21 +116,78 @@ if ! command -v yq &> /dev/null; then
     exit 1
 fi
 
-echo $ENV_FILE_CONTENT_BASE64 | base64 -d > temp.txt
-ENV_FILE_CONTENT_BASE64_DECODED_FILE="temp.txt"
+# Example: Set service port number based on environment
+if [ "$PROJECT_NAME" == "opsapi" ]; then
+    if [ "$ENV_REF" == "prod" ]; then
+    OPSAPI_SVC_PORT_NUM=32146
+        elif [ "$ENV_REF" == "test" ]; then
+        OPSAPI_SVC_PORT_NUM=32144
+            elif [ "$ENV_REF" == "acc" ]; then
+            OPSAPI_SVC_PORT_NUM=32145
+                elif [ "$ENV_REF" == "int" ]; then
+                OPSAPI_SVC_PORT_NUM=32143
+                    elif [ "$ENV_REF" == "dev" ]; then
+                    OPSAPI_SVC_PORT_NUM=32142
+                        else
+                        OPSAPI_SVC_PORT_NUM=32146
+    fi
+
+elif [ "$PROJECT_NAME" == "opsapi-kisaan" ]; then
+if [ "$ENV_REF" == "prod" ]; then
+OPSAPI_SVC_PORT_NUM=32236
+    elif [ "$ENV_REF" == "test" ]; then
+    OPSAPI_SVC_PORT_NUM=32234
+        elif [ "$ENV_REF" == "acc" ]; then
+        OPSAPI_SVC_PORT_NUM=32235
+            elif [ "$ENV_REF" == "int" ]; then
+            OPSAPI_SVC_PORT_NUM=32233
+                elif [ "$ENV_REF" == "dev" ]; then
+                OPSAPI_SVC_PORT_NUM=32232
+                    else
+                    OPSAPI_SVC_PORT_NUM=32236
+fi
+fi
+
 #"/Users/balinderwalia/Documents/Work/aws_keys/.env_opsapi_prod"
 
 SECRET_INPUT_PATH="devops/kubeseal/secret_opsapi_per_env_input_template.yaml"
 SECRET_OUTPUT_PATH="/tmp/secret_opsapi_${ENV_REF}.yaml"
 SEALED_SECRET_OUTPUT_PATH="/tmp/sealed_secret_opsapi_${ENV_REF}.yaml"
 
-if [ ! -f "$ENV_FILE_CONTENT_BASE64_DECODED_FILE" ]; then
-    echo "Error: Environment file '$ENV_FILE_CONTENT_BASE64_DECODED_FILE' not found!"
+echo $ENV_FILE_CONTENT_BASE64 | base64 -d > $SECRET_OUTPUT_PATH
+
+if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Environment file '$SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
 
-if [ ! -f "$SECRET_INPUT_PATH" ]; then
-    echo "Error: Sealed secret template file '$SECRET_INPUT_PATH' not found!"
+# Use Python for reliable string replacement
+python3 << EOF
+import sys
+
+# Read the file
+with open('$HELM_VALUES_OUTPUT_PATH', 'r') as f:
+    content = f.read()
+
+# Replace the placeholder with the encrypted secret
+content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
+content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
+    # Write back to file
+with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
+    f.write(content)
+
+print("Successfully replaced placeholder with encrypted secret")
+EOF
+if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
+    exit 1
+fi
+
+echo "Sealing the secret using kubeseal..."
+kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+
+if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
+    echo "Error: Sealed secret template file '$SEALED_SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
 
@@ -144,40 +201,13 @@ else
     BASE64_WRAP_OPTION="-b 0"
 fi
 
-# cat temp.txt
-# rm temp.txt
-
-rm -Rf $SECRET_OUTPUT_PATH
-cp $SECRET_INPUT_PATH $SECRET_OUTPUT_PATH
 if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
 
-# Use cross-platform sed replacement
-if [[ "$OS_TYPE" == "macos" ]]; then
-    sed -i '' "s/CICD_NAMESPACE_PLACEHOLDER/$CICD_NAMESPACE/g" $SECRET_OUTPUT_PATH
-    sed -i '' "s/CICD_ENV_REF_PLACEHOLDER/$ENV_REF/g" $SECRET_OUTPUT_PATH
-    sed -i '' "s/CICD_ENV_FILE_PLACEHOLDER_BASE64/$CICD_ENV_FILE_PLACEHOLDER_BASE64/g" $SECRET_OUTPUT_PATH
-elif [[ "$OS_TYPE" == "linux" || "$OS_TYPE" == "ubuntu" ]]; then
-    sed -i "s/CICD_NAMESPACE_PLACEHOLDER/$CICD_NAMESPACE/g" $SECRET_OUTPUT_PATH
-    sed -i "s/CICD_ENV_REF_PLACEHOLDER/$ENV_REF/g" $SECRET_OUTPUT_PATH
-    sed -i "s/CICD_ENV_FILE_PLACEHOLDER_BASE64/$ENV_FILE_CONTENT_BASE64/g" $SECRET_OUTPUT_PATH
-else
-    sed -i "s/CICD_NAMESPACE_PLACEHOLDER/$CICD_NAMESPACE/g" $SECRET_OUTPUT_PATH
-    sed -i "s/CICD_ENV_REF_PLACEHOLDER/$ENV_REF/g" $SECRET_OUTPUT_PATH
-    sed -i "s/CICD_ENV_FILE_PLACEHOLDER_BASE64/$ENV_FILE_CONTENT_BASE64/g" $SECRET_OUTPUT_PATH
-fi
-
-if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
-    echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
-    exit 1
-fi
-
-cat $SECRET_OUTPUT_PATH
-
-echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi/values-env-template-${PROJECT_NAME}.yaml
+HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi/values-${PROJECT_NAME}-${ENV_REF}.yaml
 
 # rm -Rf $SECRET_OUTPUT_PATH
 # cat sealed_secret_opsapi_prod.yaml
@@ -190,10 +220,6 @@ if ! command -v yq &> /dev/null; then
     echo "Error: yq is not installed!"
     exit 1
 fi
-
-HELM_VALUES_INPUT_PATH=devops/helm-charts/opsapi/values-env-template-${PROJECT_NAME}.yaml
-HELM_VALUES_OUTPUT_PATH=devops/helm-charts/opsapi/values-${PROJECT_NAME}-${ENV_REF}.yaml
-
 
 if [ ! -f "$HELM_VALUES_INPUT_PATH" ]; then
     echo "Error: Helm values template file '$HELM_VALUES_INPUT_PATH' not found!"
@@ -239,38 +265,6 @@ else
     exit 1
 fi
 
-# Example: Set service port number based on environment
-if [ "$PROJECT_NAME" == "opsapi" ]; then
-    if [ "$ENV_REF" == "prod" ]; then
-    OPSAPI_SVC_PORT_NUM=32146
-        elif [ "$ENV_REF" == "test" ]; then
-        OPSAPI_SVC_PORT_NUM=32144
-            elif [ "$ENV_REF" == "acc" ]; then
-            OPSAPI_SVC_PORT_NUM=32145
-                elif [ "$ENV_REF" == "int" ]; then
-                OPSAPI_SVC_PORT_NUM=32143
-                    elif [ "$ENV_REF" == "dev" ]; then
-                    OPSAPI_SVC_PORT_NUM=32142
-                        else
-                        OPSAPI_SVC_PORT_NUM=32146
-    fi
-
-elif [ "$PROJECT_NAME" == "opsapi-kisaan" ]; then
-if [ "$ENV_REF" == "prod" ]; then
-OPSAPI_SVC_PORT_NUM=32236
-    elif [ "$ENV_REF" == "test" ]; then
-    OPSAPI_SVC_PORT_NUM=32234
-        elif [ "$ENV_REF" == "acc" ]; then
-        OPSAPI_SVC_PORT_NUM=32235
-            elif [ "$ENV_REF" == "int" ]; then
-            OPSAPI_SVC_PORT_NUM=32233
-                elif [ "$ENV_REF" == "dev" ]; then
-                OPSAPI_SVC_PORT_NUM=32232
-                    else
-                    OPSAPI_SVC_PORT_NUM=32236
-fi
-fi
-
 # for root postgres password run : export PGPASSWORD=$(kubectl get secret postgres.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
 # for user-prd password run : export PGPASSWORD=$(kubectl get secret user-prd.pgsql.credentials.postgresql.acid.zalan.do -o 'jsonpath={.data.password}' | base64 -d)
 
@@ -303,7 +297,6 @@ content = content.replace('NODE_API_URL', '$NODE_API_URL')
 content = content.replace('CICD_NAMESPACE_PLACEHOLDER', '$ENV_REF')
 content = content.replace('prod-opsapi.', 'opsapi.')
 content = content.replace('CICD_SVC_PORT_PLACEHOLDER', '$OPSAPI_SVC_PORT_NUM')
-content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
     # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
     f.write(content)
@@ -338,8 +331,4 @@ fi
 if [ -f $SEALED_SECRET_OUTPUT_PATH ]; then
     rm -Rf $SEALED_SECRET_OUTPUT_PATH
 fi
-
-if [ -f temp.txt ]; then
-    rm -Rf temp.txt
-fi
-
+echo "Temporary files cleaned up."
