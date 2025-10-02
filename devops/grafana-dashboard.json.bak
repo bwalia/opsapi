@@ -1,0 +1,233 @@
+{
+  "dashboard": {
+    "title": "OpsAPI - Complete Monitoring Dashboard",
+    "tags": ["opsapi", "prometheus", "performance", "security", "business"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(nginx_http_requests_total[5m])",
+            "legendFormat": "{{method}} {{endpoint}} - {{status}}"
+          }
+        ]
+      },
+      {
+        "title": "Response Time (95th Percentile)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(nginx_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      },
+      {
+        "title": "Error Rate by Type",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(nginx_http_4xx_errors_total[5m])",
+            "legendFormat": "4xx - {{status}}"
+          },
+          {
+            "expr": "rate(nginx_http_5xx_errors_total[5m])",
+            "legendFormat": "5xx - {{status}}"
+          }
+        ]
+      },
+      {
+        "title": "🛡️ DDoS Detection - Top IPs by Request Rate",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "topk(20, rate(nginx_http_requests_by_ip_total[1m]))",
+            "format": "table"
+          }
+        ],
+        "alert": {
+          "name": "Possible DDoS Attack",
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [1000],
+                "type": "gt"
+              },
+              "query": {
+                "params": ["A", "1m", "now"]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "title": "🚨 Suspicious Request Patterns",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum by (reason) (rate(nginx_http_suspicious_requests_total[5m]))",
+            "legendFormat": "{{reason}}"
+          }
+        ]
+      },
+      {
+        "title": "Authentication Success Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(rate(api_auth_attempts_total{result='success'}[5m])) / sum(rate(api_auth_attempts_total[5m])) * 100"
+          }
+        ]
+      },
+      {
+        "title": "💳 Payment Success Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(rate(ecommerce_payment_operations_total{status='success'}[1h])) / sum(rate(ecommerce_payment_operations_total[1h])) * 100"
+          }
+        ],
+        "thresholds": {
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 90, "color": "yellow"},
+            {"value": 95, "color": "green"}
+          ]
+        }
+      },
+      {
+        "title": "🛒 Cart to Checkout Conversion",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(rate(ecommerce_cart_operations_total{operation='checkout'}[1h])) / sum(rate(ecommerce_cart_operations_total{operation='add'}[1h])) * 100"
+          }
+        ]
+      },
+      {
+        "title": "📊 Top 10 Most Viewed Products",
+        "type": "bar",
+        "targets": [
+          {
+            "expr": "topk(10, rate(ecommerce_product_views_total[1h]))",
+            "legendFormat": "Product {{product_id}}"
+          }
+        ]
+      },
+      {
+        "title": "API Endpoint Performance",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "sum by (endpoint) (rate(nginx_http_request_duration_seconds_bucket[5m]))"
+          }
+        ]
+      },
+      {
+        "title": "Database Query Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(api_database_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{operation}}"
+          }
+        ]
+      },
+      {
+        "title": "Cache Hit Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(rate(api_cache_hits_total[5m])) / (sum(rate(api_cache_hits_total[5m])) + sum(rate(api_cache_misses_total[5m]))) * 100"
+          }
+        ]
+      },
+      {
+        "title": "Bandwidth Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(nginx_http_request_size_bytes_sum[5m])",
+            "legendFormat": "Inbound"
+          },
+          {
+            "expr": "rate(nginx_http_response_size_bytes_sum[5m])",
+            "legendFormat": "Outbound"
+          }
+        ]
+      },
+      {
+        "title": "📦 Total Bytes Transferred by HTTP Status",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum by (status) (nginx_http_response_size_bytes_sum)",
+            "legendFormat": "HTTP {{status}}"
+          }
+        ],
+        "description": "Total response bytes sent per HTTP status code",
+        "yaxes": [
+          {
+            "format": "bytes",
+            "label": "Total Bytes"
+          }
+        ]
+      },
+      {
+        "title": "📊 Response Size Rate by Status (Bytes/sec)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum by (status, method) (rate(nginx_http_response_size_bytes_sum[5m]))",
+            "legendFormat": "{{method}} - {{status}}"
+          }
+        ],
+        "description": "Response size rate per HTTP status and method",
+        "yaxes": [
+          {
+            "format": "Bps",
+            "label": "Bytes per Second"
+          }
+        ],
+        "stack": true
+      },
+      {
+        "title": "Active Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "nginx_http_connections",
+            "legendFormat": "{{state}}"
+          }
+        ]
+      },
+      {
+        "title": "Upstream Service Health",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(nginx_upstream_requests_total[5m])",
+            "legendFormat": "{{upstream}} - {{status}}"
+          }
+        ]
+      },
+      {
+        "title": "Order Flow Analysis",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum by (operation) (rate(ecommerce_order_operations_total[10m]))",
+            "legendFormat": "{{operation}}"
+          }
+        ]
+      }
+    ],
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+  }
+}
