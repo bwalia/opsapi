@@ -69,3 +69,4 @@ function CorsMiddleware.enable(app)
 end
 
 return CorsMiddleware
+-- CORS middleware for Lapis with professional configuration
