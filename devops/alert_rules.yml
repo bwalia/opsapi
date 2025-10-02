@@ -1,0 +1,172 @@
+# Prometheus Alert Rules for OpsAPI
+
+groups:
+  - name: ddos_alerts
+    interval: 30s
+    rules:
+      # DDoS Attack Detection
+      - alert: PossibleDDoSAttack
+        expr: rate(nginx_http_requests_by_ip_total[1m]) > 1000
+        for: 2m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Possible DDoS attack from IP {{ $labels.ip }}"
+          description: "IP {{ $labels.ip }} is making {{ $value }} requests/sec on {{ $labels.host }}"
+          action: "Consider rate limiting or blocking this IP"
+
+      # Distributed DDoS
+      - alert: DistributedDDoSAttack
+        expr: sum(rate(nginx_http_requests_total[1m])) > 10000
+        for: 5m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Possible distributed DDoS attack detected"
+          description: "Total request rate: {{ $value }} req/sec"
+
+      # Suspicious Activity
+      - alert: SuspiciousActivitySpike
+        expr: sum(rate(nginx_http_suspicious_requests_total[5m])) > 100
+        for: 3m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "High rate of suspicious requests"
+          description: "{{ $value }} suspicious requests/sec detected"
+
+      # Credential Stuffing
+      - alert: CredentialStuffingAttack
+        expr: rate(api_auth_failures_total{reason="invalid_credentials"}[5m]) > 50
+        for: 2m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Possible credential stuffing attack"
+          description: "{{ $value }} authentication failures/sec"
+
+  - name: performance_alerts
+    interval: 30s
+    rules:
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(nginx_http_5xx_errors_total[5m])) / 
+          sum(rate(nginx_http_requests_total[5m])) > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Error rate above 5%"
+          description: "Current 5xx error rate: {{ $value | humanizePercentage }}"
+
+      # Slow Response Times
+      - alert: SlowResponseTime
+        expr: |
+          histogram_quantile(0.95, 
+            rate(nginx_http_request_duration_seconds_bucket[5m])
+          ) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "95th percentile response time > 2s"
+          description: "P95 latency: {{ $value }}s"
+
+      # High Request Rate
+      - alert: HighRequestRate
+        expr: sum(rate(nginx_http_requests_total[5m])) > 5000
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High request rate detected"
+          description: "Request rate: {{ $value }} req/sec"
+
+      # Database Performance
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95, 
+            rate(api_database_query_duration_seconds_bucket[5m])
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "Database queries are slow"
+          description: "P95 query latency: {{ $value }}s"
+
+  - name: business_alerts
+    interval: 1m
+    rules:
+      # Payment Failures
+      - alert: HighPaymentFailureRate
+        expr: |
+          sum(rate(ecommerce_payment_operations_total{status!="success"}[10m])) /
+          sum(rate(ecommerce_payment_operations_total[10m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          category: business
+        annotations:
+          summary: "Payment failure rate above 10%"
+          description: "Current failure rate: {{ $value | humanizePercentage }}"
+
+      # Low Conversion Rate
+      - alert: LowCartConversionRate
+        expr: |
+          sum(rate(ecommerce_cart_operations_total{operation="checkout"}[1h])) /
+          sum(rate(ecommerce_cart_operations_total{operation="add"}[1h])) < 0.05
+        for: 30m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "Cart conversion rate below 5%"
+          description: "Current conversion rate: {{ $value | humanizePercentage }}"
+
+      # Authentication Issues
+      - alert: HighAuthFailureRate
+        expr: |
+          sum(rate(api_auth_attempts_total{result="failure"}[10m])) /
+          sum(rate(api_auth_attempts_total[10m])) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "High authentication failure rate"
+          description: "{{ $value | humanizePercentage }} of auth attempts failing"
+
+  - name: availability_alerts
+    interval: 30s
+    rules:
+      # Service Down
+      - alert: OpsAPIDown
+        expr: up{job="opsapi"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "OpsAPI service is down"
+          description: "OpsAPI has been down for more than 1 minute"
+
+      # High Connection Usage
+      - alert: HighConnectionUsage
+        expr: sum(nginx_http_connections{state="waiting"}) > 800
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High number of waiting connections"
+          description: "{{ $value }} connections waiting"

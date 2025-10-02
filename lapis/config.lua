@@ -2,7 +2,7 @@ local config = require("lapis.config")
 
 config("development", {
   server = "nginx",
-  code_cache = "off",
+  code_cache = "on", -- Required for Prometheus metrics to work properly
   num_workers = "1",
   session_name = "opsapi_session",
   secret = "your-secret-key-here-change-in-production",

@@ -237,7 +237,7 @@ To deploy OPSAPI UI on kubernates, please follow the instructions.
         JWT_SECRET=your-jwt-secret-key
 
     5. Run all services with Docker:
-        bash ./run-development.sh
+        bash ./run-dev.sh
 
     6. Access the application:
         - Frontend (Ecommerce): http://localhost:3000

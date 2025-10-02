@@ -1,4 +1,4 @@
-version: '3.9'
+# version: '3.9'
 
 services:
   lapis:
@@ -87,18 +87,65 @@ services:
     networks:
       opsapi-network:
 
-  nodeapp:
-    container_name: opsapi-node
-    build:
-      context: ../node/opsapi-node
+
+
+  # nodeapp:
+  #   container_name: opsapi-node
+  #   build:
+  #     context: ../node/opsapi-node
+  #   ports:
+  #     - "4011:3000"  # Host port : container port (adjust as needed)
+  #   networks:
+  #     opsapi-network:
+  #       ipv4_address: 172.71.0.14
+  #   volumes:
+  #     - ../node/opsapi-node:/usr/src/app
+  #   env_file: "../node/opsapi-node/.env"
+
+  # Prometheus - Metrics collection and alerting
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: opsapi-prometheus
     ports:
-      - "4011:3000"  # Host port : container port (adjust as needed)
+      - "9090:9090"
+    volumes:
+      - ../devops/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../devops/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
     networks:
       opsapi-network:
-        ipv4_address: 172.71.0.14
+        ipv4_address: 172.71.0.15
+    depends_on:
+      - lapis
+
+  # Grafana - Metrics visualization and dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: opsapi-grafana
+    ports:
+      - "3000:3000"
     volumes:
-      - ../node/opsapi-node:/usr/src/app
-    env_file: "../node/opsapi-node/.env"
+      - grafana_data:/var/lib/grafana
+      - ../devops/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ../devops/grafana-dashboards-provisioning.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ../devops/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/opsapi-dashboard.json
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.16
+    depends_on:
+      - prometheus
 
 networks:
   opsapi-network:
@@ -111,3 +158,5 @@ networks:
 
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:
