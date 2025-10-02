@@ -1,12 +1,60 @@
 local CorsMiddleware = {}
 
-function CorsMiddleware.enable(app, pAllowCORSOrigins)
-    -- If pAllowCORSOrigins is not provided, try to get it from environment variable
-    if not pAllowCORSOrigins then
-        local Global = require("helper.global")
-        pAllowCORSOrigins = Global.getEnvVar("CORS_ORIGIN")
+-- Professional CORS configuration for development and production
+local CORS_CONFIG = {
+    -- Development origins
+    allowed_origins = {
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3033",
+        "http://localhost:4000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3033",
+        "http://127.0.0.1:4000"
+    },
+    -- Production domain patterns
+    domain_patterns = {
+        "^https?://kisaan%.com$",
+        "^https?://.*%.kisaan%.com$"
+    },
+    -- CORS headers
+    headers = {
+        methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+        headers = "Content-Type, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With",
+        max_age = "86400",
+        credentials = "true"
+    }
+}
+
+-- Check if origin is allowed
+local function isOriginAllowed(origin)
+    if not origin then
+        return false, "http://localhost:3000" -- default fallback
     end
+
+    -- Check exact matches for development origins
+    for _, allowed in ipairs(CORS_CONFIG.allowed_origins) do
+        if origin == allowed then
+            return true, origin
+        end
+    end
+
+    -- Check domain patterns for production
+    for _, pattern in ipairs(CORS_CONFIG.domain_patterns) do
+        if origin:match(pattern) then
+            return true, origin
+        end
+    end
+
+    return false, "http://localhost:3000" -- fallback for unmatched origins
+end
+
+function CorsMiddleware.enable(app)
     app:before_filter(function(self)
+        local origin = self.req.headers["origin"] or self.req.headers["Origin"]
+        local is_allowed, allowed_origin = isOriginAllowed(origin)
+
         -- Set CORS headers for all requests
         self.res.headers["Access-Control-Allow-Origin"] = pAllowCORSOrigins or "localhost:3133,http://localhost:4010,http://localhost:3000,http://localhost:8080,http://test-opsapi-node.workstation.co.uk,http://api.workstation.co.uk"
         self.res.headers["Access-Control-Allow-Credentials"] = "true"
