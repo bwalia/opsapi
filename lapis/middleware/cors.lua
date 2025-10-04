@@ -4,19 +4,19 @@ local CorsMiddleware = {}
 local CORS_CONFIG = {
     -- Development origins
     allowed_origins = {
-        "http://localhost:8080",
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3033",
         "http://localhost:4000",
-        "http://127.0.0.1:4001",
-        "http://127.0.0.1:4010",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174"
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3033",
+        "http://127.0.0.1:4000"
     },
     -- Production domain patterns
     domain_patterns = {
-        "^https?://googleapis%.com$",
-        "^https?://.*%.googleapis%.com$"
+        "^https?://kisaan%.com$",
+        "^https?://.*%.kisaan%.com$"
     },
     -- CORS headers
     headers = {
@@ -30,7 +30,7 @@ local CORS_CONFIG = {
 -- Check if origin is allowed
 local function isOriginAllowed(origin)
     if not origin then
-        return false, "http://localhost:8080" -- default fallback
+        return false, "http://localhost:3000" -- default fallback
     end
 
     -- Check exact matches for development origins
@@ -47,17 +47,16 @@ local function isOriginAllowed(origin)
         end
     end
 
-    return false, "http://localhost:8080" -- fallback for unmatched origins
+    return false, "http://localhost:3000" -- fallback for unmatched origins
 end
 
 function CorsMiddleware.enable(app)
-    ngx.log(ngx.INFO, "CORS middleware enabled")
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]
         local is_allowed, allowed_origin = isOriginAllowed(origin)
 
         -- Set CORS headers for all requests
-        self.res.headers["Access-Control-Allow-Origin"] = allowed_origin
+        self.res.headers["Access-Control-Allow-Origin"] = allowed_origin or "localhost:3133,http://localhost:4010,http://localhost:3000,http://localhost:8080,http://test-opsapi-node.workstation.co.uk,http://api.workstation.co.uk"
         self.res.headers["Access-Control-Allow-Credentials"] = "true"
         self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Email, X-Public-Browse"
