@@ -1,16 +1,18 @@
 #!/bin/bash
 
-mkdir -p lapis/logs
-mkdir -p lapis/pgdata
-mkdir -p lapis/keycloak_data
+set -e
 
-chmod -R +x lapis/logs
-chmod -R +x lapis/pgdata
-chmod -R +x lapis/keycloak_data
+mkdir -p logs
+mkdir -p pgdata
+mkdir -p keycloak_data
 
-cd lapis
+chmod -R +x logs
+chmod -R +x pgdata
+chmod -R +x keycloak_data
 
-#sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
+# cd lapis
+
+#sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' Dockerfil
 
 docker compose down --volumes
 docker compose up --build -d
