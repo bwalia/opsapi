@@ -56,7 +56,7 @@ function CorsMiddleware.enable(app)
         local is_allowed, allowed_origin = isOriginAllowed(origin)
 
         -- Set CORS headers for all requests
-        self.res.headers["Access-Control-Allow-Origin"] = pAllowCORSOrigins or "localhost:3133,http://localhost:4010,http://localhost:3000,http://localhost:8080,http://test-opsapi-node.workstation.co.uk,http://api.workstation.co.uk"
+        self.res.headers["Access-Control-Allow-Origin"] = allowed_origin or "localhost:3133,http://localhost:4010,http://localhost:3000,http://localhost:8080"
         self.res.headers["Access-Control-Allow-Credentials"] = "true"
         self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Email, X-Public-Browse"
