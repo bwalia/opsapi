@@ -20,11 +20,12 @@ function CategoryQueries.create(params)
 
     -- Check for duplicate category name in the same store (case-insensitive)
     if params.name and params.store_id then
-        local existing = CategoryModel:find({
-            store_id = params.store_id,
-            ["lower(name)"] = string.lower(params.name)
-        })
-        if existing then
+        local existing = db.select(
+            "* FROM categories WHERE store_id = ? AND LOWER(name) = ? LIMIT 1",
+            params.store_id,
+            string.lower(params.name)
+        )
+        if existing and #existing > 0 then
             error("Category with this name already exists in your store")
         end
     end
@@ -127,12 +128,13 @@ function CategoryQueries.checkExists(store_id, name)
         return false
     end
 
-    local existing = CategoryModel:find({
-        store_id = store.id,
-        ["lower(name)"] = string.lower(name)
-    })
+    local existing = db.select(
+        "* FROM categories WHERE store_id = ? AND LOWER(name) = ? LIMIT 1",
+        store.id,
+        string.lower(name)
+    )
 
-    return existing ~= nil
+    return existing and #existing > 0
 end
 
 return CategoryQueries

@@ -43,7 +43,7 @@ return function(app)
             end
 
             -- Get orders for this store with order items
-            local orders = db.select([[
+            local orders = db.query([[
                 SELECT o.*,
                        c.email as customer_email,
                        c.first_name as customer_first_name,
@@ -58,7 +58,7 @@ return function(app)
 
             -- Add order items to each order
             for _, order in ipairs(orders) do
-                local items = db.select([[
+                local items = db.query([[
                     SELECT oi.*, sp.name as current_product_name, sp.uuid as product_uuid
                     FROM orderitems oi
                     LEFT JOIN storeproducts sp ON oi.product_id = sp.id
@@ -87,7 +87,7 @@ return function(app)
             local order_id = self.params.id
 
             -- Get order with store info
-            local orders = db.select([[
+            local orders = db.query([[
                 SELECT o.*,
                        c.email as customer_email,
                        c.first_name as customer_first_name,
@@ -135,7 +135,7 @@ return function(app)
             end
 
             -- Get order items
-            local items = db.select([[
+            local items = db.query([[
                 SELECT oi.*, sp.name as current_product_name, sp.uuid as product_uuid
                 FROM orderitems oi
                 LEFT JOIN storeproducts sp ON oi.product_id = sp.id
@@ -172,7 +172,7 @@ return function(app)
             local valid_fulfillment_statuses = {"unfulfilled", "partial", "fulfilled", "cancelled"}
 
             -- Get order and verify ownership
-            local orders = db.select([[
+            local orders = db.query([[
                 SELECT o.*, s.user_id as store_owner_id
                 FROM orders o
                 LEFT JOIN stores s ON o.store_id = s.id

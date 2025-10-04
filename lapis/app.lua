@@ -32,4 +32,5 @@ require("routes.variants")(app)
 require("routes.products")(app)
 require("routes.payments")(app)
 
+require("routes.order_management")(app)  -- Enhanced seller order management
 return app

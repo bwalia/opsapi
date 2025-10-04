@@ -4,6 +4,7 @@ local db = require("lapis.db")
 local Global = require "helper.global"
 local ecommerce_migrations = require("ecommerce-migrations")
 local production_schema_upgrade = require("production-schema-upgrade")
+local order_management_migrations = require("migrations.order-management-enhancement")
 
 return {
     ['01_create_users'] = function()
@@ -323,4 +324,14 @@ return {
     ['35_create_performance_indexes'] = production_schema_upgrade['35_create_performance_indexes'],
     ['36_enable_row_level_security'] = production_schema_upgrade['36_enable_row_level_security'],
     ['37_fix_regex_constraints'] = production_schema_upgrade['37_fix_regex_constraints'],
+
+    -- Order Management Enhancement Migrations (Professional Seller Dashboard)
+    ['39_create_order_history_table'] = order_management_migrations[1],
+    ['40_create_notifications_table'] = order_management_migrations[2],
+    ['41_create_shipping_tracking_table'] = order_management_migrations[3],
+    ['42_create_order_refunds_table'] = order_management_migrations[4],
+    ['43_add_tracking_fields_to_orders'] = order_management_migrations[5],
+    ['44_create_seller_note_templates'] = order_management_migrations[6],
+    ['45_create_order_tags_table'] = order_management_migrations[7],
+    ['46_add_seller_order_indexes'] = order_management_migrations[8],
 }
