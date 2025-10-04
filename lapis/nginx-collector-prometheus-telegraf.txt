@@ -1,0 +1,18 @@
+[[inputs.nginx]]
+   urls = ["http://localhost/nginx_status"]
+   response_timeout = "5s"
+[[inputs.tail]]
+  name_override = "nginxlog"
+  files = ["/var/log/nginx/access.log"]
+  from_beginning = true
+  pipe = false
+  data_format = "grok"
+  grok_patterns = ["%{COMBINED_LOG_FORMAT}"]
+[[inputs.cpu]]
+  percpu = true
+[[inputs.disk]]
+[[inputs.diskio]]
+[[inputs.io]]
+[[inputs.net]]
+[[inputs.mem]]
+[[inputs.system]]
