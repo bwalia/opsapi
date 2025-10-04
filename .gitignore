@@ -15,3 +15,7 @@ devops/.DS_Store
 .DS_Store
 .qodo
 temp.txt
+
+*.src.rock
+*.tar.gz
+nginx-lua-prometheus-0.*/**
