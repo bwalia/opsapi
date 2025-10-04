@@ -15,8 +15,8 @@ local CORS_CONFIG = {
     },
     -- Production domain patterns
     domain_patterns = {
-        "^https?://kisaan%.com$",
-        "^https?://.*%.kisaan%.com$"
+        "^https?://googleapis%.com$",
+        "^https?://.*%.googleapis%.com$"
     },
     -- CORS headers
     headers = {
@@ -51,7 +51,7 @@ local function isOriginAllowed(origin)
 end
 
 function CorsMiddleware.enable(app)
-    ngx.log(ngx.INFO, "CORS Middleware enabled")
+    ngx.log(ngx.INFO, "CORS middleware enabled")
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]
         local is_allowed, allowed_origin = isOriginAllowed(origin)
