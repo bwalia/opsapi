@@ -57,6 +57,20 @@ events {
   use epoll;}
 
 http {
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" "$host" "$request_id" $msec $request_time '
+                    '$upstream_connect_time $upstream_header_time $upstream_response_time $ssl_protocol $ssl_cipher';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    error_log  /var/log/nginx/error.log info;
+
+  sendfile on;
+  tcp_nopush on;
+  tcp_nodelay on;
+  keepalive_timeout 65;
   lua_package_path "/app/?.lua;/usr/local/openresty/lualib/?.lua;/opt/nginx-lua-prometheus/?.lua;/opt/nginx-lua-prometheus/lib/?.lua;/opt/lua-resty-jwt/lib/?.lua;/opt/lua-resty-session/lib/?.lua;;";
   lua_package_cpath "/usr/local/openresty/lualib/?.so;;";
 
@@ -200,17 +214,20 @@ http {
   fastcgi_temp_path /tmp/fastcgi_temp;
   uwsgi_temp_path /tmp/uwsgi_temp;
   scgi_temp_path /tmp/scgi_temp;
-
-  include mime.types;
-      log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                '$status $body_bytes_sent "$http_referer" '
-                '"$http_user_agent" "$http_x_forwarded_for" "$host"';
-
-    log_format sslparams '$remote_addr - $remote_user [$time_local] "$request" $status '
-              '$body_bytes_sent "$http_referer" "$http_user_agent" '
-              '"$http_x_forwarded_for" $request_id $msec $request_time '
-              '$upstream_connect_time $upstream_header_time $upstream_response_time $host $ssl_protocol $ssl_cipher';
-
+  # lua_temp_path /tmp/lua_temp; nginx: [emerg] unknown directive "lua_temp_path" in /app/nginx.conf.compiled:217
+  lua_shared_dict sessions 10m;
+  lua_shared_dict sessions_data 50m;
+  lua_shared_dict ssl_certificates 1m;
+  lua_shared_dict ssl_ocsp 1m;
+  lua_shared_dict ssl_session 10m;
+  lua_shared_dict rate_limit_store 10m;
+  lua_shared_dict rate_limit_counters 10m;
+  lua_shared_dict rate_limit_locks 1m;
+  lua_shared_dict cache 50m;
+  lua_shared_dict locks 1m;
+  lua_shared_dict limit_req_store 10m;
+  lua_shared_dict limit_req_counters 10m;
+  lua_shared_dict limit_req_locks 1m;
 
   resolver 127.0.0.11 ipv6=off;
   # for kubernetes use this resolver can also try kube-dns.kube-system.svc.cluster.local if you do not know the IP
@@ -220,23 +237,42 @@ http {
     lua_code_cache on;
 
     location / {
+      default_type text/octet-stream;
 
-      access_log /var/log/nginx/access.log;
-      error_log /var/log/nginx/error.log;
+      # Professional CORS configuration with origin validation
+      set $cors_origin "";
 
-      # default_type text/html;
-      default_type application/octet-stream;
+      # Allow localhost origins for development
+      if ($http_origin ~* "^https?://localhost:([0-9]+)$") {
+          set $cors_origin $http_origin;
+      }
+      if ($http_origin ~* "^https?://127\.0\.0\.1:([0-9]+)$") {
+          set $cors_origin $http_origin;
+      }
 
-      add_header 'Access-Control-Allow-Origin' '*';
-      add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
-      add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, Cookies, Session, X-Public-Browse';
+      # Allow kisaan.com and all subdomains for production
+      if ($http_origin ~* "^https?://([a-zA-Z0-9\-]+\.)?googleapis\.com$") {
+          set $cors_origin $http_origin;
+      }
 
+      # Set CORS headers only for allowed origins
+      add_header 'Access-Control-Allow-Origin' $cors_origin always;
+      add_header 'Access-Control-Allow-Credentials' 'true' always;
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE, PATCH' always;
+      add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With' always;
+      add_header 'Access-Control-Max-Age' '86400' always;
+      add_header 'Vary' 'Origin' always;
+
+      # Handle preflight OPTIONS requests
       if ($request_method = 'OPTIONS') {
-          add_header 'Access-Control-Allow-Origin' '*';
-          add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
-          add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, Cookies, Session, X-Public-Browse';
-          add_header 'Content-Length' 0;
-          add_header 'Content-Type' 'text/plain';
+          add_header 'Access-Control-Allow-Origin' $cors_origin always;
+          add_header 'Access-Control-Allow-Credentials' 'true' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE, PATCH' always;
+          add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With' always;
+          add_header 'Access-Control-Max-Age' '86400' always;
+          add_header 'Vary' 'Origin' always;
+          add_header 'Content-Length' '0' always;
+          add_header 'Content-Type' 'text/plain' always;
           return 204;
       }
 
@@ -304,6 +340,9 @@ http {
       content_by_lua_block {
         require("lapis").serve("app")
       }
+
+      # try_files $uri $uri/ =404;
+
     }
 
     location /static/ {
@@ -314,9 +353,16 @@ http {
       alias static/favicon.ico;
     }
 
-    location = /basic_status {
+
+    location /nginx_status {
         stub_status;
-    }
+        allow 127.0.0.1;
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
+        allow 172.71.0.0/16;
+        deny all;
+      }
 
 
     location /metrics {
@@ -421,7 +467,7 @@ http {
     }
 
     location / {
-      proxy_pass http://host.docker.internal:3001/;
+      proxy_pass http://host.docker.internal:3000/;
       proxy_set_header Host $host;
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

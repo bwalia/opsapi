@@ -46,7 +46,11 @@ RUN chown -R nobody /opt/
 
 COPY lua/opt/ /opt/
 
-RUN mkdir -p /var/log/nginx/ && chown -R nobody /var/log/nginx/
+RUN mkdir -p /var/log/nginx/ && chown -R nobody:root /var/log/nginx/
+
+RUN chmod 755 /usr/local/openresty/nginx/logs && chown -R nobody:root /usr/local/openresty/nginx/logs
+RUN touch /usr/local/openresty/nginx/logs/nginx.pid && chown nobody:root /usr/local/openresty/nginx/logs/nginx.pid
+RUN chmod 775 /usr/local/openresty/nginx/logs/nginx.pid && echo "000" > /usr/local/openresty/nginx/logs/nginx.pid
 
 EXPOSE 8080
 

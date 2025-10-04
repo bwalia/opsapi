@@ -51,6 +51,7 @@ local function isOriginAllowed(origin)
 end
 
 function CorsMiddleware.enable(app)
+    ngx.log(ngx.INFO, "CORS Middleware enabled")
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]
         local is_allowed, allowed_origin = isOriginAllowed(origin)
