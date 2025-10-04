@@ -12,12 +12,12 @@ function StoreproductQueries.create(params)
     if not params.price or tonumber(params.price) <= 0 then
         error("Valid product price is required")
     end
-    
+
     -- Generate UUID if not provided
     if not params.uuid then
         params.uuid = Global.generateUUID()
     end
-    
+
     -- Set defaults
     if not params.inventory_quantity then
         params.inventory_quantity = 0
@@ -31,7 +31,33 @@ function StoreproductQueries.create(params)
     if not params.sort_order then
         params.sort_order = 0
     end
-    
+
+    -- Sanitize numeric fields - convert "null" string to actual nil
+    if params.weight == "null" or params.weight == "" then
+        params.weight = nil
+    elseif params.weight then
+        params.weight = tonumber(params.weight)
+    end
+
+    if params.compare_price == "null" or params.compare_price == "" then
+        params.compare_price = nil
+    elseif params.compare_price then
+        params.compare_price = tonumber(params.compare_price)
+    end
+
+    -- Sanitize text fields
+    if params.dimensions == "null" or params.dimensions == "" then
+        params.dimensions = nil
+    end
+
+    if params.tags == "null" or params.tags == "" then
+        params.tags = nil
+    end
+
+    if params.sku == "null" or params.sku == "" then
+        params.sku = nil
+    end
+
     -- Generate slug if not provided
     if not params.slug or params.slug == "" then
         params.slug = string.lower(params.name):gsub("[^a-z0-9-]", "-"):gsub("-+", "-")
@@ -169,7 +195,33 @@ end
 function StoreproductQueries.update(id, params)
     local record = StoreproductModel:find({ uuid = id })
     if not record then return nil end
-    
+
+    -- Sanitize numeric fields - convert "null" string to actual nil
+    if params.weight == "null" or params.weight == "" then
+        params.weight = nil
+    elseif params.weight then
+        params.weight = tonumber(params.weight)
+    end
+
+    if params.compare_price == "null" or params.compare_price == "" then
+        params.compare_price = nil
+    elseif params.compare_price then
+        params.compare_price = tonumber(params.compare_price)
+    end
+
+    -- Sanitize text fields
+    if params.dimensions == "null" or params.dimensions == "" then
+        params.dimensions = nil
+    end
+
+    if params.tags == "null" or params.tags == "" then
+        params.tags = nil
+    end
+
+    if params.sku == "null" or params.sku == "" then
+        params.sku = nil
+    end
+
     -- Handle category_id conversion
     if params.category_id and params.category_id ~= "" then
         local CategoryModel = require "models.CategoryModel"
@@ -182,11 +234,11 @@ function StoreproductQueries.update(id, params)
     else
         params.category_id = nil
     end
-    
+
     -- Remove id from params to avoid conflicts
     params.id = nil
     params.uuid = nil
-    
+
     return record:update(params, { returning = "*" })
 end
 
