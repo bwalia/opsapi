@@ -3,6 +3,8 @@
 set -e
 
 # Use Python for reliable string replacement
+# Input lapis/nginx-values-template.conf
+# Output lapis/nginx-values-output.conf
 
 if [ -z "$1" ]; then
 ENV_REF="test"
