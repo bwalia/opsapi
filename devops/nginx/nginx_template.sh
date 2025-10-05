@@ -34,6 +34,7 @@ python3 devops/nginx/render_config.py "lapis/nginx-values-template.conf" $NGINX_
 if [ "$RENDER_NGINX_MAKE_LIVE" = "true" ]; then
   mv "lapis/nginx.conf" "lapis/nginx.conf.bak"
   mv $NGINX_VALUES_OUTPUT_PATH "lapis/nginx.conf"
+  cat "lapis/nginx.conf"
   echo "Rendered nginx.conf and made it live."
 else
   echo "Rendered nginx-values-output.conf. To make it live, run the script with the second argument as 'true'."
