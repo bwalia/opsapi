@@ -124,6 +124,19 @@ services:
     depends_on:
       - lapis
 
+  # loki:
+  #     image: grafana/loki:2.8.2
+  #     container_name: opsapi-loki
+  #     ports:
+  #       - "3100:3100"
+  #     command: -config.file=/etc/loki/local-config.yaml
+  #     volumes:
+  #       - ./loki_data:/loki
+  #       - ../devops/loki-config.yaml:/etc/loki/local-config.yaml
+  #     networks:
+  #       opsapi-network:
+  #         ipv4_address: 172.71.0.9
+
   # Grafana - Metrics visualization and dashboards
   grafana:
     image: grafana/grafana:latest
