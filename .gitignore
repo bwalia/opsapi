@@ -19,3 +19,4 @@ temp.txt
 *.src.rock
 *.tar.gz
 nginx-lua-prometheus-0.*/**
+lapis/nginx.conf.compiled
