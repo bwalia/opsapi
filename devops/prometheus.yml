@@ -23,9 +23,9 @@ scrape_configs:
   # OpsAPI metrics endpoint
   - job_name: 'opsapi'
     static_configs:
-      - targets: ['lapis:8080']  # Using service name from docker-compose
+      - targets: ['lapis:80']  # Using service name from docker-compose
     metrics_path: '/metrics'
-    scrape_interval: 10s
+    scrape_interval: 5s
     scrape_timeout: 5s
     
   # Prometheus self-monitoring
