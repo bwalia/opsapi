@@ -62,7 +62,7 @@ jobs:
           echo "OPSAPI Docker image builder!"
           echo "Target Environment: $TARGET_ENV"
           echo "Nginx template render per environment..."
-          devops/nginx/nginx_template.sh ${{ env.TARGET_ENV }} true
+          devops/nginx/nginx_template.sh ${{ env.TARGET_ENV }} "true"
           echo "Building Docker image for $TARGET_ENV environment..."
           echo "Build, tag, and push image to the given Docker Registry."
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWD }}
