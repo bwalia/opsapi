@@ -15,7 +15,7 @@ chmod -R +x keycloak_data
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' Dockerfil
 
 docker compose down --volumes
-docker compose up --build -d
+docker compose up --build -d --remove-orphans
 
 sleep 15
 
@@ -23,7 +23,7 @@ docker exec -it opsapi lapis migrate
 
 sleep 5
 
-HOSTNAME="opsapi-dev.local"
+HOSTNAME="dev-opsapi.local"
 K3S_LB_IP=127.0.0.1
 HOSTS_FILE="/etc/hosts"
 

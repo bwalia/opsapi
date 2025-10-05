@@ -120,7 +120,7 @@ function Global.scimUserSchema(user)
         roles = user.roles,
         meta = {
             resourceType = "User",
-            location = "http://172.19.0.12:8080/api/v2/Users/" .. user.uuid,
+            location = "http://172.19.0.12:80/api/v2/Users/" .. user.uuid,
             created = Global.convertIso8601(user.created_at),
             lastModified = Global.convertIso8601(user.updated_at)
         }

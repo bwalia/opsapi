@@ -15,8 +15,8 @@ end
 app:enable("etlua")
 
 -- Enable CORS for all routes
--- local CorsMiddleware = require("middleware.cors")
--- CorsMiddleware.enable(app)
+local CorsMiddleware = require("middleware.cors")
+CorsMiddleware.enable(app)
 
 require("routes.index")(app)
 require("routes.auth")(app)
