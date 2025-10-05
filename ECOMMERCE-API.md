@@ -348,23 +348,23 @@ require("ecommerce-migrations")
 2. **Test the API**:
 ```bash
 # Create a store
-curl -X POST http://localhost:8080/api/v2/stores \
+curl -X POST http://localhost:80/api/v2/stores \
   -H "Content-Type: application/json" \
   -d '{"user_id": 1, "name": "My Store", "description": "Test store"}'
 
 # Get user's stores  
-curl http://localhost:8080/api/v2/users/1/stores
+curl http://localhost:80/api/v2/users/1/stores
 ```
 
 3. **Register and login**:
 ```bash
 # Register as seller
-curl -X POST http://localhost:8080/api/v2/register \
+curl -X POST http://localhost:80/api/v2/register \
   -H "Content-Type: application/json" \
   -d '{"username": "seller1", "email": "seller@test.com", "password": "password123", "role": "seller", "first_name": "John", "last_name": "Doe"}'
 
 # Login to get token
-curl -X POST http://localhost:8080/auth/login \
+curl -X POST http://localhost:80/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "seller@test.com", "password": "password123"}'
 ```
@@ -372,7 +372,7 @@ curl -X POST http://localhost:8080/auth/login \
 4. **Add products**:
 ```bash
 # Add product to store (with JWT token)
-curl -X POST http://localhost:8080/api/v2/stores/1/products \
+curl -X POST http://localhost:80/api/v2/stores/1/products \
   -H "Authorization: Bearer <jwt_token>" \
   -H "Content-Type: application/json" \
   -d '{"name": "Test Product", "price": 19.99, "sku": "TEST-001", "inventory_quantity": 50}'
