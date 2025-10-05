@@ -1,6 +1,7 @@
 local config = require("lapis.config")
 
 config("development", {
+  port = 80,
   server = "nginx",
   code_cache = "on", -- Required for Prometheus metrics to work properly
   num_workers = "1",

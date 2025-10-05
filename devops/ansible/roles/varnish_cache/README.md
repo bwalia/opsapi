@@ -29,7 +29,7 @@ varnish_cache_listening_port: 80
 varnish_cache_malloc_size: 2g
 varnish_cache_vcl_host: "127.0.0.1"
 #webserver port
-varnish_cache_existing_webserver_vcl_port: 8080
+varnish_cache_existing_webserver_vcl_port: 80
 # 
 varnish_cache_vcl_conf_files_path: templates/conf/*
 varnish_cache_default_vcl_file: root.vcl

@@ -159,7 +159,7 @@ Alerts are pre-configured in `devops/alert_rules.yml`:
 scrape_configs:
   - job_name: 'opsapi'
     static_configs:
-      - targets: ['lapis:8080']
+      - targets: ['lapis:80']
     metrics_path: '/metrics'
     scrape_interval: 10s
 ```

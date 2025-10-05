@@ -63,7 +63,7 @@ http {
     init_by_lua_file /usr/local/openresty/nginx/html/api/init.lua;
 
     server {
-        listen       8080;
+        listen       80;
         server_name  localhost;
 
         #charset koi8-r;
@@ -223,7 +223,7 @@ location /ping {
     #
     server {
         listen       8000;
-    #    listen       somename:8080;
+    #    listen       somename:80;
     #    server_name  somename  alias  another.alias;
 
 	#   include cdn.conf;
