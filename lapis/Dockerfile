@@ -52,6 +52,6 @@ RUN chmod 755 /usr/local/openresty/nginx/logs && chown -R nobody:root /usr/local
 RUN touch /usr/local/openresty/nginx/logs/nginx.pid && chown nobody:root /usr/local/openresty/nginx/logs/nginx.pid
 RUN chmod 775 /usr/local/openresty/nginx/logs/nginx.pid && echo "000" > /usr/local/openresty/nginx/logs/nginx.pid
 
-EXPOSE 8080
+EXPOSE 80
 
 CMD ["lapis", "server"]
