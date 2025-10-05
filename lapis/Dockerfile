@@ -42,9 +42,9 @@ RUN chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
 RUN cp /app/api-docs/swagger.json /tmp/swagger.json
 
 RUN mkdir -p /opt/
-RUN chown -R nobody /opt/
 
-COPY /opt/ /opt/
+COPY opt /opt/
+RUN chown -R nobody /opt/
 
 RUN mkdir -p /var/log/nginx/ && chown -R nobody:root /var/log/nginx/
 
