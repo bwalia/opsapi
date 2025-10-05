@@ -1,5 +1,17 @@
 local lapis = require("lapis")
 local app = lapis.Application()
+
+local lapis = require("lapis")
+local app = lapis.Application()
+
+-- Add error handler for debugging
+app:enable("etlua")
+app.handle_error = function(self, err, trace)
+    ngx.log(ngx.ERR, "Error: " .. tostring(err))
+    ngx.log(ngx.ERR, "Trace: " .. tostring(trace))
+    return { status = 500, json = { error = tostring(err) } }
+end
+
 app:enable("etlua")
 
 -- Enable CORS for all routes

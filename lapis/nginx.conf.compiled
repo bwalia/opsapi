@@ -57,6 +57,20 @@ events {
   use epoll;}
 
 http {
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" "$host" "$request_id" $msec $request_time '
+                    '$upstream_connect_time $upstream_header_time $upstream_response_time $ssl_protocol $ssl_cipher';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    error_log  /var/log/nginx/error.log debug;
+
+  sendfile on;
+  tcp_nopush on;
+  tcp_nodelay on;
+  keepalive_timeout 65;
   lua_package_path "/app/?.lua;/usr/local/openresty/lualib/?.lua;/opt/nginx-lua-prometheus/?.lua;/opt/nginx-lua-prometheus/lib/?.lua;/opt/lua-resty-jwt/lib/?.lua;/opt/lua-resty-session/lib/?.lua;;";
   lua_package_cpath "/usr/local/openresty/lualib/?.so;;";
 
@@ -200,17 +214,20 @@ http {
   fastcgi_temp_path /tmp/fastcgi_temp;
   uwsgi_temp_path /tmp/uwsgi_temp;
   scgi_temp_path /tmp/scgi_temp;
-
-  include mime.types;
-      log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                '$status $body_bytes_sent "$http_referer" '
-                '"$http_user_agent" "$http_x_forwarded_for" "$host"';
-
-    log_format sslparams '$remote_addr - $remote_user [$time_local] "$request" $status '
-              '$body_bytes_sent "$http_referer" "$http_user_agent" '
-              '"$http_x_forwarded_for" $request_id $msec $request_time '
-              '$upstream_connect_time $upstream_header_time $upstream_response_time $host $ssl_protocol $ssl_cipher';
-
+  # lua_temp_path /tmp/lua_temp; nginx: [emerg] unknown directive "lua_temp_path" in /app/nginx.conf.compiled:217
+  lua_shared_dict sessions 10m;
+  lua_shared_dict sessions_data 50m;
+  lua_shared_dict ssl_certificates 1m;
+  lua_shared_dict ssl_ocsp 1m;
+  lua_shared_dict ssl_session 10m;
+  lua_shared_dict rate_limit_store 10m;
+  lua_shared_dict rate_limit_counters 10m;
+  lua_shared_dict rate_limit_locks 1m;
+  lua_shared_dict cache 50m;
+  lua_shared_dict locks 1m;
+  lua_shared_dict limit_req_store 10m;
+  lua_shared_dict limit_req_counters 10m;
+  lua_shared_dict limit_req_locks 1m;
 
   resolver 127.0.0.11 ipv6=off;
   # for kubernetes use this resolver can also try kube-dns.kube-system.svc.cluster.local if you do not know the IP
@@ -218,81 +235,87 @@ http {
   server {
     listen 8080;
     lua_code_cache on;
-
+    server_name _;
     location / {
+      default_type text/octet-stream;
 
-      access_log /var/log/nginx/access.log;
-      error_log /var/log/nginx/error.log;
+      # Set CORS headers for all responses (use only more_set_headers, not add_header)
+      more_set_headers "Access-Control-Allow-Origin: *";
+      more_set_headers "Access-Control-Allow-Credentials: true";
+      more_set_headers "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE, PATCH";
+      more_set_headers "Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With";
+      more_set_headers "Access-Control-Max-Age: 86400";
+      more_set_headers "Server: opsapi-ghost";
 
-      # default_type text/html;
-      default_type application/octet-stream;
-
-      add_header 'Access-Control-Allow-Origin' '*';
-      add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
-      add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, Cookies, Session, X-Public-Browse';
-
+      # Handle preflight OPTIONS requests
       if ($request_method = 'OPTIONS') {
-          add_header 'Access-Control-Allow-Origin' '*';
-          add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
-          add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization, Cookies, Session, X-Public-Browse';
-          add_header 'Content-Length' 0;
-          add_header 'Content-Type' 'text/plain';
-          return 204;
+        more_set_headers "Access-Control-Allow-Origin: *";
+        more_set_headers "Access-Control-Allow-Credentials: true";
+        more_set_headers "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE, PATCH";
+        more_set_headers "Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With";
+        more_set_headers "Access-Control-Max-Age: 86400";
+        more_set_headers "Server: opsapi-ghost";
+        more_set_headers "Content-Length: 0";
+        more_set_headers "Content-Type: text/plain";
+        return 204;
       }
 
-        access_by_lua_block {
+      access_by_lua_block {
         local uri = ngx.var.request_uri
         local method = ngx.req.get_method()
         local public_browse_header = ngx.var.http_x_public_browse
 
+        -- Helper function to send CORS-enabled error responses
+        local function send_error(status, message)
+          ngx.header["Access-Control-Allow-Origin"] = "*"
+          ngx.header["Access-Control-Allow-Credentials"] = "true"
+          ngx.header["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+          ngx.header["Access-Control-Allow-Headers"] = "Origin, Content-Type, Accept, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With"
+          ngx.header["Content-Type"] = "application/json"
+          ngx.header["Server"] = "opsapi-ghost"
+          ngx.status = status
+          ngx.say(require("cjson").encode({ error = message }))
+          return ngx.exit(status)
+        end
+
         -- Allow /auth/* routes without JWT
-          if uri == "/" or uri == "/swagger/swagger.json" or uri:match("^/auth/") then
+        if uri == "/" or uri == "/swagger/swagger.json" or uri:match("^/auth/") then
+          return
+        end
+        if uri == "/api/v2/enquiries" and method == "POST" then return end
+        if uri == "/api/v2/register" and method == "POST" then return end
+        
+        -- Allow public browsing of products and stores for GET requests
+        if method == "GET" and public_browse_header == "true" then
+          if uri:match("^/api/v2/storeproducts") or 
+            uri:match("^/api/v2/stores/[^/]+/products") or
+            uri:match("^/api/v2/products/[^/]+/variants") or
+            uri:match("^/api/v2/stores") or
+            uri:match("^/api/v2/products") or
+            uri:match("^/api/v2/categories") then
+            ngx.req.set_header("X-User-Id", "guest")
             return
           end
-          if uri == "/api/v2/enquiries" and method == "POST" then return end
-          if uri == "/api/v2/register" and method == "POST" then return end
-          
-          -- Allow public browsing of products and stores for GET requests
-          if method == "GET" and public_browse_header == "true" then
-            if uri:match("^/api/v2/storeproducts") or 
-               uri:match("^/api/v2/stores/[^/]+/products") or
-               uri:match("^/api/v2/products/[^/]+/variants") or
-               uri:match("^/api/v2/stores") or
-               uri:match("^/api/v2/products") or
-               uri:match("^/api/v2/categories") then
-              -- Set guest user for public browsing
-              ngx.req.set_header("X-User-Id", "guest")
-              return
-            end
-          end
-          
-          -- Cart operations now require authentication
-          -- Remove guest cart access for security
+        end
 
         local jwt = require "resty.jwt"
         local cjson = require "cjson"
 
         local auth_header = ngx.var.http_authorization
         if not auth_header then
-          ngx.status = ngx.HTTP_UNAUTHORIZED
-          ngx.say(cjson.encode({ error = "Missing Authorization header" }))
-          return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+          return send_error(ngx.HTTP_UNAUTHORIZED, "Missing Authorization header")
         end
 
         local token = auth_header:match("Bearer%s+(.+)")
         if not token then
-          ngx.status = ngx.HTTP_UNAUTHORIZED
-          ngx.say(cjson.encode({ error = "Invalid Authorization format. Use Bearer <token>" }))
-          return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+          return send_error(ngx.HTTP_UNAUTHORIZED, "Invalid Authorization format. Use Bearer <token>")
         end
 
         local secret = os.getenv("JWT_SECRET_KEY")
         local jwt_obj = jwt:verify(secret, token)
 
         if not jwt_obj.verified then
-          ngx.status = ngx.HTTP_UNAUTHORIZED
-          ngx.say(cjson.encode({ error = "Invalid token", reason = jwt_obj.reason }))
-          return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+          return send_error(ngx.HTTP_UNAUTHORIZED, "Invalid token: " .. tostring(jwt_obj.reason))
         end
 
         -- Forward user claims to Lapis
@@ -304,129 +327,136 @@ http {
       content_by_lua_block {
         require("lapis").serve("app")
       }
-    }
+          }
 
-    location /static/ {
-      alias static/;
-    }
+        location /static/ {
+          alias static/;
+        }
 
-    location /favicon.ico {
-      alias static/favicon.ico;
-    }
-
-    location = /basic_status {
-        stub_status;
-    }
+        location /favicon.ico {
+          alias static/favicon.ico;
+        }
 
 
-    location /metrics {
-      allow 127.0.0.1;
-      allow 10.0.0.0/8;
-      allow 172.16.0.0/12;
-      allow 192.168.0.0/16;
-      allow 172.71.0.0/16;
-      deny all;
+        location /nginx_status {
+            stub_status;
+            allow 127.0.0.1;
+            allow 10.0.0.0/8;
+            allow 172.16.0.0/12;
+            allow 192.168.0.0/16;
+            allow 172.71.0.0/16;
+            deny all;
+          }
 
-      content_by_lua_block {
-        local ok, metrics = pcall(require, "lib.prometheus_metrics")
-        if ok then
-          local metric_connections = metrics.get_metric_connections()
-          local prometheus = metrics.get_prometheus()
-          if metric_connections and prometheus then
-            metric_connections:set(ngx.var.connections_reading, {"reading"})
-            metric_connections:set(ngx.var.connections_waiting, {"waiting"})
-            metric_connections:set(ngx.var.connections_writing, {"writing"})
-            prometheus:collect()
-          else
-            ngx.status = 200
-            ngx.header.content_type = "text/plain"
-            ngx.say("# Prometheus metrics not available")
-          end
-        else
-          ngx.log(ngx.ERR, "Failed to load metrics module: ", tostring(metrics))
-          ngx.status = 200
-          ngx.header.content_type = "text/plain"
-          ngx.say("# Prometheus metrics not available")
-        end
-      }
-    }
 
-        location /500 {
+        location /metrics {
           allow 127.0.0.1;
           allow 10.0.0.0/8;
           allow 172.16.0.0/12;
           allow 192.168.0.0/16;
           allow 172.71.0.0/16;
           deny all;
-          return 500;
-        }
-      location /401 {
-           return 401;
-        }
-      location /403 {
-           return 403;
-        }
-      location /404 {
-           return 404;
-        }
-      location /422 {
-           return 422;
-        }
-      location /429 {
-           return 429;
-        }
-      location /503 {
-           return 503;
-        }
-      location /504 {
-           return 504;
+
+          content_by_lua_block {
+            local ok, metrics = pcall(require, "lib.prometheus_metrics")
+            if ok then
+              local metric_connections = metrics.get_metric_connections()
+              local prometheus = metrics.get_prometheus()
+              if metric_connections and prometheus then
+                metric_connections:set(ngx.var.connections_reading, {"reading"})
+                metric_connections:set(ngx.var.connections_waiting, {"waiting"})
+                metric_connections:set(ngx.var.connections_writing, {"writing"})
+                prometheus:collect()
+              else
+                ngx.status = 200
+                ngx.header.content_type = "text/plain"
+                ngx.say("# Prometheus metrics not available")
+              end
+            else
+              ngx.log(ngx.ERR, "Failed to load metrics module: ", tostring(metrics))
+              ngx.status = 200
+              ngx.header.content_type = "text/plain"
+              ngx.say("# Prometheus metrics not available")
+            end
+          }
         }
 
-    location /metrics_dev {
-      stub_status;
-      allow 127.0.0.1;
-      allow 10.0.0.0/8;
-      allow 172.16.0.0/12;
-      allow 192.168.0.0/16;
-      allow 172.71.0.0/16;
-      deny all;
+            location /500 {
+              allow 127.0.0.1;
+              allow 10.0.0.0/8;
+              allow 172.16.0.0/12;
+              allow 192.168.0.0/16;
+              allow 172.71.0.0/16;
+              deny all;
+              return 500;
+            }
+          location /401 {
+              return 401;
+            }
+          location /403 {
+              return 403;
+            }
+          location /404 {
+              return 404;
+            }
+          location /422 {
+              return 422;
+            }
+          location /429 {
+              return 429;
+            }
+          location /503 {
+              return 503;
+            }
+          location /504 {
+              return 504;
+            }
 
-      content_by_lua_block {
-        local metric_connections = package.loaded.metric_connections
-        local prometheus = package.loaded.prometheus
+        location /metrics_dev {
+          stub_status;
+          allow 127.0.0.1;
+          allow 10.0.0.0/8;
+          allow 172.16.0.0/12;
+          allow 192.168.0.0/16;
+          allow 172.71.0.0/16;
+          deny all;
 
-        if metric_connections and prometheus then
-          metric_connections:set(ngx.var.connections_reading, {"reading"})
-          metric_connections:set(ngx.var.connections_waiting, {"waiting"})
-          metric_connections:set(ngx.var.connections_writing, {"writing"})
-          prometheus:collect()
-        else
-          ngx.log(ngx.ERR, "Prometheus metrics not initialized in metrics endpoint")
-          ngx.status = 500
-          ngx.say("Metrics not available")
-        end
+          content_by_lua_block {
+            local metric_connections = package.loaded.metric_connections
+            local prometheus = package.loaded.prometheus
+
+            if metric_connections and prometheus then
+              metric_connections:set(ngx.var.connections_reading, {"reading"})
+              metric_connections:set(ngx.var.connections_waiting, {"waiting"})
+              metric_connections:set(ngx.var.connections_writing, {"writing"})
+              prometheus:collect()
+            else
+              ngx.log(ngx.ERR, "Prometheus metrics not initialized in metrics endpoint")
+              ngx.status = 500
+              ngx.say("Metrics not available")
+            end
+          }
+        }
       }
-    }
-  }
 
-  server {
-    listen 8081;
-    server_name _;
-    location /api {
-      proxy_pass http://172.71.0.12:8080/;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
+      server {
+        listen 8081;
+        server_name _;
+        location /api {
+          proxy_pass http://172.71.0.12:8080/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
 
-    location / {
-      proxy_pass http://host.docker.internal:3001/;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-  }
+        location / {
+          proxy_pass http://host.docker.internal:3000/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+      }
 
-}
+    }
