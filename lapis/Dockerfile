@@ -47,6 +47,9 @@ COPY opt /opt/
 RUN chown -R nobody /opt/
 
 RUN mkdir -p /var/log/nginx/ && chown -R nobody:root /var/log/nginx/
+RUN touch /var/log/nginx/json_access.log && chown nobody:root /var/log/nginx/json_access.log
+RUN touch /var/log/nginx/access.log && chown nobody:root /var/log/nginx/access.log
+RUN touch /var/log/nginx/error.log && chown nobody:root /var/log/nginx/error.log
 
 RUN chmod 755 /usr/local/openresty/nginx/logs && chown -R nobody:root /usr/local/openresty/nginx/logs
 RUN touch /usr/local/openresty/nginx/logs/nginx.pid && chown nobody:root /usr/local/openresty/nginx/logs/nginx.pid
