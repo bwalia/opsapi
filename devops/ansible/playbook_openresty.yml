@@ -7,4 +7,4 @@
     - cloudflare
     - varnish_cache
   vars:
-    nginx_port: 8080
+    nginx_port: 80
