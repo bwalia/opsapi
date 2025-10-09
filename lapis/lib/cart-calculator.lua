@@ -56,7 +56,17 @@ function CartCalculator.calculateTotals(cart_items)
         -- Get store information for tax and shipping settings
         local store = StoreModel:find({ id = store_id })
         if store then
-            store_data.store_info = store
+            -- Include only necessary store info to avoid serialization issues
+            store_data.store_info = {
+                id = store.id,
+                uuid = store.uuid,
+                name = store.name,
+                slug = store.slug,
+                tax_rate = tonumber(store.tax_rate) or 0,
+                shipping_enabled = store.shipping_enabled,
+                shipping_flat_rate = tonumber(store.shipping_flat_rate) or 0,
+                free_shipping_threshold = tonumber(store.free_shipping_threshold) or 0
+            }
 
             -- Calculate tax based on store's tax rate
             local tax_rate = tonumber(store.tax_rate) or 0

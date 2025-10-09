@@ -5,6 +5,11 @@ local Global = require "helper.global"
 local ecommerce_migrations = require("ecommerce-migrations")
 local production_schema_upgrade = require("production-schema-upgrade")
 local order_management_migrations = require("migrations.order-management-enhancement")
+local payment_tracking_migrations = require("migrations.payment-tracking")
+local notification_migrations = require("migrations.notifications")
+local review_migrations = require("migrations.reviews")
+local customer_user_link_migrations = require("migrations.customer-user-link")
+local stripe_integration_migrations = require("migrations.stripe-integration")
 
 return {
     ['01_create_users'] = function()
@@ -334,4 +339,36 @@ return {
     ['44_create_seller_note_templates'] = order_management_migrations[6],
     ['45_create_order_tags_table'] = order_management_migrations[7],
     ['46_add_seller_order_indexes'] = order_management_migrations[8],
+
+    -- Payment Tracking & Webhook Support
+    ['47_create_payments_table'] = payment_tracking_migrations[1],
+    ['48_add_payment_indexes'] = payment_tracking_migrations[2],
+    ['49_add_payment_id_to_orders'] = payment_tracking_migrations[3],
+    ['50_update_order_status_enum'] = payment_tracking_migrations[4],
+    ['51_create_order_status_history'] = payment_tracking_migrations[5],
+    ['52_add_status_history_indexes'] = payment_tracking_migrations[6],
+    ['53_add_tracking_to_orders'] = payment_tracking_migrations[7],
+    ['54_create_refunds_table'] = payment_tracking_migrations[8],
+    ['55_add_refund_indexes'] = payment_tracking_migrations[9],
+    ['56_fix_order_status_constraint'] = payment_tracking_migrations[10],
+
+    -- Notifications System
+    ['57_create_notifications_table'] = notification_migrations[1],
+    ['58_add_notification_indexes'] = notification_migrations[2],
+    ['59_create_notification_preferences'] = notification_migrations[3],
+
+    -- Reviews System
+    ['60_create_store_reviews_table'] = review_migrations[1],
+    ['61_add_store_review_indexes'] = review_migrations[2],
+    ['62_create_product_reviews_table'] = review_migrations[3],
+    ['63_add_product_review_indexes'] = review_migrations[4],
+
+    -- Customer-User Link
+    ['64_add_user_id_to_customers'] = customer_user_link_migrations[1],
+    ['65_add_customer_user_id_index'] = customer_user_link_migrations[2],
+    ['66_migrate_customer_user_data'] = customer_user_link_migrations[3],
+
+    -- Stripe Integration
+    ['67_add_stripe_customer_id_to_customers'] = stripe_integration_migrations[1],
+    ['68_add_stripe_customer_id_index'] = stripe_integration_migrations[2],
 }

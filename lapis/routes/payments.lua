@@ -177,20 +177,84 @@ return function(app)
 
                 ngx.log(ngx.INFO, "Total line items: " .. #line_items)
 
+                -- Get or create customer
+                local CustomerQueries = require("queries.CustomerQueries")
+                local user = db.select("* from users where id = ?", user_id)
+                if not user or #user == 0 then
+                    error("User not found")
+                end
+                local user_data = user[1]
+
+                local customer
+                local stripe_customer_id = nil
+
+                -- Check if customer exists for this user
+                local existing_customer = db.select("* from customers where user_id = ?", user_id)
+
+                if existing_customer and #existing_customer > 0 then
+                    customer = existing_customer[1]
+                    stripe_customer_id = customer.stripe_customer_id
+                else
+                    -- Create new customer linked to user
+                    local customer_email = params.customer_email or user_data.email
+                    local customer_first_name = params.customer_first_name or user_data.first_name
+                    local customer_last_name = params.customer_last_name or user_data.last_name
+                    local customer_phone = params.customer_phone or user_data.phone_no
+
+                    customer = CustomerQueries.create({
+                        email = customer_email,
+                        first_name = customer_first_name,
+                        last_name = customer_last_name,
+                        phone = customer_phone,
+                        user_id = user_id
+                    })
+                end
+
+                -- Create Stripe customer if not exists
+                if not stripe_customer_id then
+                    local customer_name = (customer.first_name or "") .. " " .. (customer.last_name or "")
+                    customer_name = customer_name:match("^%s*(.-)%s*$") -- trim
+
+                    local stripe_customer, err = stripe:create_customer(
+                        customer.email,
+                        customer_name ~= "" and customer_name or nil,
+                        {
+                            phone = customer.phone,
+                            metadata = {
+                                customer_id = tostring(customer.id),
+                                user_id = tostring(user_id)
+                            }
+                        }
+                    )
+
+                    if stripe_customer and stripe_customer.id then
+                        stripe_customer_id = stripe_customer.id
+                        -- Update customer with Stripe ID
+                        db.update("customers", { stripe_customer_id = stripe_customer_id }, "id = ?", customer.id)
+                    else
+                        ngx.log(ngx.WARN, "Failed to create Stripe customer: " .. tostring(err))
+                    end
+                end
+
                 -- Create checkout session
                 local session, err = stripe:create_checkout_session({
                     mode = "payment",
                     line_items = line_items,
                     success_url = params.success_url or "http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
                     cancel_url = params.cancel_url or "http://localhost:3000/checkout",
-                    customer_email = params.customer_email,
+                    customer = stripe_customer_id,  -- Use Stripe customer ID
+                    customer_email = not stripe_customer_id and params.customer_email or nil,  -- Only if no customer
                     billing_address_collection = "required",
                     metadata = {
                         user_id = tostring(user_id),
+                        customer_id = tostring(customer.id),
                         subtotal = tostring(totals.subtotal),
                         tax_amount = tostring(totals.tax_amount),
                         shipping_amount = tostring(totals.shipping_amount),
-                        total_amount = tostring(totals.total_amount)
+                        total_amount = tostring(totals.total_amount),
+                        billing_address = cjson.encode(params.billing_address or {}),
+                        shipping_address = cjson.encode(params.shipping_address or params.billing_address or {}),
+                        customer_notes = params.customer_notes or ""
                     }
                 })
 
