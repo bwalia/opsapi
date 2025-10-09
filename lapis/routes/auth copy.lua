@@ -7,43 +7,9 @@ local Global = require "helper.global"
 return function(app)
     ----------------- Auth Routes --------------------
 
-        -- Helper function to parse JSON body
-    local function parse_json_body()
-        local ok, result = pcall(function()
-            ngx.req.read_body()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then
-                return {}
-            end
-            return cJson.decode(body)
-        end)
-        
-        if ok and type(result) == "table" then
-            return result
-        end
-        return {}
-    end
-
     app:post("/auth/login", function(self)
-    local email = self.params.username or self.params.email
-    local password = self.params.password
-    
-    -- If not found, try JSON body
-    if not email or not password then
-        local json_body = parse_json_body()
-        email = email or json_body.username or json_body.email
-        password = password or json_body.password
-    end
-    
-    -- Trim whitespace
-    if type(email) == "string" then
-        email = email:match("^%s*(.-)%s*$")
-    end
-    if type(password) == "string" then
-        password = password:match("^%s*(.-)%s*$")
-    end
-
-        ngx.log(ngx.NOTICE, "Login attempt - email: ", tostring(email), ", password: ", password and "***" or "nil")
+        local email = self.params.username
+        local password = self.params.password
 
         if not email or not password then
             return {

@@ -244,6 +244,48 @@ To deploy OPSAPI UI on kubernates, please follow the instructions.
         - Backend API (OPSAPI): http://localhost:4010
         - Node Service (OPSAPI Node): http://localhost:3001
 
+## Troubleshooting dev env
+
+# Test database connectivity
+docker exec -i opsapi psql -h 172.71.0.10 -U pguser -d opsapi -c "\dt"
+
+Enter pgsql database password - default dev env password for pgsql is `pgpassword`
+
+# Check if user exists
+docker exec -i opsapi psql -h 172.71.0.10 -U pguser -d opsapi -c "SELECT email, uuid FROM users WHERE email = 'administrative@admin.com';"
+
+Enter pgsql database password - default dev env password for pgsql is `pgpassword`
+
+# Test the endpoint (note run this on host computer but it will run inside the opsapi dev container)
+docker exec -i opsapi curl -s 'http://localhost/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"administrative@admin.com","password":"Admin@123"}'
+
+
+
+# Restart the container
+docker-compose restart lapis
+
+# Test 1: JSON body
+docker exec -i opsapi curl -X POST 'http://localhost/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"administrative@admin.com","password":"Admin@123"}'
+
+# Test 2: Form-encoded
+docker exec -i opsapi curl -X POST 'http://localhost/auth/login' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=administrative@admin.com&password=Admin@123'
+
+# Test 3: Using 'email' instead of 'username'
+docker exec -i opsapi curl -X POST 'http://localhost/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"administrative@admin.com","password":"Admin@123"}'
+
+# Check logs
+docker exec -i opsapi tail -30 /var/log/nginx/error.log
+
+
+
 ## Google OAuth Setup
 
 To enable Google OAuth authentication:
