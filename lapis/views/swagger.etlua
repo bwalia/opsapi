@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsAPI - API Documentation</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.10.3/swagger-ui.css">
+    <style>
+        body { margin: 0; padding: 0; }
+        .topbar { background-color: #1b1b1d; padding: 10px 0; }
+        .topbar-wrapper { max-width: 1460px; margin: 0 auto; padding: 0 20px; }
+        .topbar-wrapper .link { color: #fff; text-decoration: none; font-size: 1.5rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="topbar-wrapper">
+            <a class="link" href="/"><span>OpsAPI Documentation</span></a>
+        </div>
+    </div>
+    <div id="swagger-ui"></div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.10.3/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.10.3/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = () => {
+            console.log("Initializing Swagger UI...");
+            console.log("Fetching from: " + window.location.origin + "/openapi.json");
+            
+            window.ui = SwaggerUIBundle({
+                url: "/openapi.json",
+                dom_id: "#swagger-ui",
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                defaultModelsExpandDepth: 1,
+                defaultModelExpandDepth: 1,
+                docExpansion: "list",
+                filter: true,
+                showRequestHeaders: true,
+                tryItOutEnabled: true,
+                persistAuthorization: true,
+                onComplete: function() {
+                    console.log("Swagger UI loaded successfully");
+                },
+                onFailure: function(error) {
+                    console.error("Swagger UI failed to load:", error);
+                }
+            });
+        };
+    </script>
+</body>
+</html>

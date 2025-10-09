@@ -1,8 +1,10 @@
 local Global = require "helper.global"
-local Roles = require "models.RoleModel"
+local db = require("lapis.db")
+local Model = require("lapis.db.model").Model
 local Validation = require "helper.validations"
 
 
+local Roles = Model:extend("roles")
 local RoleQueries = {}
 
 function RoleQueries.create(roleData)
@@ -30,30 +32,25 @@ function RoleQueries.all(params)
 end
 
 function RoleQueries.show(id)
-    local role = Roles:find({
-        uuid = id
-    })
-    if role then
-        role.internal_id = role.id
-        role.id = role.uuid
-    end
-    return role
+    return Roles:find({ id = id }) or Roles:find({ uuid = id })
 end
 
 function RoleQueries.update(id, params)
-    local role = Roles:find({
-        uuid = id
-    })
-    params.id = role.id
-    return role:update(params, {
-        returning = "*"
-    })
+    local role = RoleQueries.show(id)
+    if not role then
+        return nil
+    end
+    
+    role:update(params)
+    return role
 end
 
 function RoleQueries.destroy(id)
-    local role = Roles:find({
-        uuid = id
-    })
+    local role = RoleQueries.show(id)
+    if not role then
+        return nil
+    end
+    
     return role:delete()
 end
 
