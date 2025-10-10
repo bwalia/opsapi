@@ -55,6 +55,11 @@ return function(app)
                         WHERE oi.order_id = ?
                     ]], order.id)
 
+                    -- Ensure items is an array
+                    if not items then
+                        items = {}
+                    end
+
                     -- Parse images JSON and extract first image
                     for _, item in ipairs(items) do
                         if item.product_images then
@@ -66,7 +71,7 @@ return function(app)
                         end
                     end
 
-                    order.items = items
+                    order.items = items or {}
 
                     -- Get status history
                     local status_history = db.query([[
@@ -127,8 +132,8 @@ return function(app)
                            s.name as store_name,
                            s.uuid as store_uuid,
                            s.slug as store_slug,
-                           s.email as store_email,
-                           s.phone as store_phone,
+                           s.contact_email as store_email,
+                           s.contact_phone as store_phone,
                            p.stripe_payment_intent_id,
                            p.card_brand,
                            p.card_last4,
@@ -153,9 +158,9 @@ return function(app)
                            sp.name as product_name,
                            sp.uuid as product_uuid,
                            sp.description as product_description,
-                           sp.image_url as product_image,
+                           sp.images as product_image,
                            sp.price as current_price,
-                           sp.stock as current_stock
+                           sp.inventory_quantity as current_stock
                     FROM orderitems oi
                     LEFT JOIN storeproducts sp ON oi.product_id = sp.id
                     WHERE oi.order_id = ?

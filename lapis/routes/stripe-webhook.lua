@@ -156,7 +156,7 @@ local function handle_checkout_session_completed(self, event)
 
         -- Create payment record
         local payment_uuid = Global.generateUUID()
-        local payment = db.insert("payments", {
+        db.insert("payments", {
             uuid = payment_uuid,
             stripe_payment_intent_id = null_to_nil(session.payment_intent),
             stripe_customer_id = null_to_nil(session.customer),
@@ -170,7 +170,14 @@ local function handle_checkout_session_completed(self, event)
             updated_at = db.format_date()
         })
 
-        ngx.log(ngx.INFO, "Payment record created from checkout session: " .. payment_uuid)
+        -- Get the inserted payment record with ID
+        local payment_result = db.select("* FROM payments WHERE uuid = ?", payment_uuid)
+        if not payment_result or #payment_result == 0 then
+            error("Failed to retrieve created payment record")
+        end
+        local payment = payment_result[1]
+
+        ngx.log(ngx.INFO, "Payment record created from checkout session: " .. payment_uuid .. " (ID: " .. payment.id .. ")")
 
         -- Get cart items for this user
         local cart_items = db.select("* from cart_items where user_id = ?", user_id)

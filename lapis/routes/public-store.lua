@@ -27,7 +27,7 @@ return function(app)
             -- Get product count
             local product_count = db.query([[
                 SELECT COUNT(*) as count FROM storeproducts
-                WHERE store_id = ? AND status = 'active'
+                WHERE store_id = ? AND is_active = true
             ]], store.id)
             store.product_count = product_count[1].count or 0
 
@@ -69,7 +69,7 @@ return function(app)
             local per_page = tonumber(self.params.per_page) or 20
             local category = self.params.category
             local search = self.params.search
-            local sort = self.params.sort or "created_at"  -- created_at, price_asc, price_desc, name
+            local sort = self.params.sort or "created_at" -- created_at, price_asc, price_desc, name
             local offset = (page - 1) * per_page
 
             -- Get store
@@ -80,14 +80,16 @@ return function(app)
             local store_id = store[1].id
 
             -- Build query
-            local where_clause = "store_id = " .. store_id .. " AND status = 'active'"
+            local where_clause = "store_id = " .. store_id .. " AND is_active = true"
 
             if category then
                 where_clause = where_clause .. " AND category = '" .. db.escape_literal(category) .. "'"
             end
 
-            if search then
-                where_clause = where_clause .. " AND (name ILIKE '%" .. db.escape_literal(search) .. "%' OR description ILIKE '%" .. db.escape_literal(search) .. "%')"
+            if search and search ~= "" then
+                where_clause = where_clause ..
+                    " AND (name ILIKE '%" ..
+                    db.escape_literal(search) .. "%' OR description ILIKE '%" .. db.escape_literal(search) .. "%')"
             end
 
             -- Sort mapping

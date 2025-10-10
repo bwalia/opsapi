@@ -443,15 +443,28 @@ return function(app)
                 local OrderitemQueries = require("queries.OrderitemQueries")
                 local CustomerQueries = require("queries.CustomerQueries")
                 local StoreproductQueries = require("queries.StoreproductQueries")
-                
-                -- Create customer if provided
-                local customer = nil
-                if params.customer_email then
+
+                -- Get or create customer linked to user
+                local customer
+                local existing_customer = db.select("* from customers where user_id = ?", user_id)
+
+                if existing_customer and #existing_customer > 0 then
+                    customer = existing_customer[1]
+                else
+                    -- Get user details to create customer
+                    local user = db.select("* from users where id = ?", user_id)
+                    if not user or #user == 0 then
+                        error("User not found")
+                    end
+                    local user_data = user[1]
+
+                    -- Create new customer linked to user
                     customer = CustomerQueries.create({
-                        email = params.customer_email,
-                        first_name = params.customer_first_name,
-                        last_name = params.customer_last_name,
-                        phone = params.customer_phone
+                        email = params.customer_email or user_data.email,
+                        first_name = params.customer_first_name or user_data.first_name,
+                        last_name = params.customer_last_name or user_data.last_name,
+                        phone = params.customer_phone or user_data.phone_no,
+                        user_id = user_id  -- CRITICAL: Link to user!
                     })
                 end
                 
