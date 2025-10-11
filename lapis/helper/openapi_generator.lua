@@ -239,6 +239,27 @@ function _M.generate()
                     }
                 }
             },
+            ["/metrics"] = {
+                get = {
+                    summary = "Prometheus Metrics",
+                    description = "Expose application metrics in Prometheus format for monitoring",
+                    tags = { "Public" },
+                    security = {},
+                    responses = {
+                        ["200"] = {
+                            description = "Prometheus metrics in text format",
+                            content = {
+                                ["text/plain"] = {
+                                    schema = {
+                                        type = "string",
+                                        example = "# HELP opsapi_up API is running\n# TYPE opsapi_up gauge\nopsapi_up 1\n"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             
             -- Authentication
             ["/auth/login"] = {

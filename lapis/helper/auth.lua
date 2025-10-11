@@ -10,6 +10,7 @@ local PUBLIC_ROUTES = {
     ["^/swagger$"] = true,
     ["^/api%-docs$"] = true,
     ["^/openapi%.json$"] = true,
+    ["^/metrics$"] = true,
     ["^/auth/login$"] = true,
     ["^/auth/register$"] = true,
 }

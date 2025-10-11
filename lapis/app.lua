@@ -79,7 +79,7 @@ app:before_filter(function(self)
     
     -- Double-check: Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/swagger" or 
-       uri == "/api-docs" or uri == "/openapi.json" or 
+       uri == "/api-docs" or uri == "/openapi.json" or uri == "/metrics" or
        uri:match("^/auth/") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
