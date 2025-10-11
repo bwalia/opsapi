@@ -7,7 +7,7 @@ local Global = require "helper.global"
 return function(app)
     ----------------- Auth Routes --------------------
 
-        -- Helper function to parse JSON body
+    -- Helper function to parse JSON body
     local function parse_json_body()
         local ok, result = pcall(function()
             ngx.req.read_body()
@@ -17,7 +17,7 @@ return function(app)
             end
             return cJson.decode(body)
         end)
-        
+
         if ok and type(result) == "table" then
             return result
         end
@@ -25,42 +25,25 @@ return function(app)
     end
 
     app:post("/auth/login", function(self)
-    local email = self.params.username or self.params.email
-    local password = self.params.password
-    
-    -- If not found, try JSON body
-    if not email or not password then
-        local json_body = parse_json_body()
-        email = email or json_body.username or json_body.email
-        password = password or json_body.password
-    end
-    
-    -- Trim whitespace
-    if type(email) == "string" then
-        email = email:match("^%s*(.-)%s*$")
-    end
-    if type(password) == "string" then
-        password = password:match("^%s*(.-)%s*$")
-    end
+        local identifier = self.params.username or self.params.identifier
+        local password = self.params.password
 
-        ngx.log(ngx.NOTICE, "Login attempt - email: ", tostring(email), ", password: ", password and "***" or "nil")
-
-        if not email or not password then
+        if not identifier or not password then
             return {
                 status = 400,
                 json = {
-                    error = "Email and password are required"
+                    error = "Email/Username and password are required"
                 }
             }
         end
 
-        local user = UserQueries.verify(email, password)
+        local user = UserQueries.verify(identifier, password)
 
         if not user then
             return {
                 status = 401,
                 json = {
-                    error = "Invalid email or password"
+                    error = "Invalid email/username or password"
                 }
             }
         end
@@ -283,7 +266,7 @@ return function(app)
                 self.session[k] = nil
             end
         end
-        
+
         -- Clear user's cart from database
         local user_uuid = ngx.var.http_x_user_id
         if user_uuid and user_uuid ~= "guest" then
@@ -293,7 +276,7 @@ return function(app)
                 db.delete("cart_items", "user_id = ?", user_result[1].id)
             end
         end
-        
+
         return {
             json = {
                 message = "Logged out successfully"

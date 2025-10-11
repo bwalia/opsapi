@@ -162,10 +162,14 @@ return {
     pcall(function() schema.add_column("customers", "notes", types.text({ null = true })) end)
     pcall(function() schema.add_column("customers", "verified_email", types.boolean({ default = false })) end)
     pcall(function() schema.add_column("customers", "tax_exempt", types.boolean({ default = false })) end)
-    pcall(function() schema.add_column("customers", "state", types.varchar({ default = "'enabled'" })) end)
+    -- Note: Using raw SQL for state default to avoid quote escaping issues
+    local db = require("lapis.db")
+    pcall(function()
+        schema.add_column("customers", "state", types.varchar({ null = true }))
+        db.query("ALTER TABLE customers ALTER COLUMN state SET DEFAULT 'enabled'")
+    end)
 
     -- Add constraints (with error handling)
-    local db = require("lapis.db")
     pcall(function() db.query("ALTER TABLE customers ADD CONSTRAINT customers_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')") end)
     pcall(function() db.query("ALTER TABLE customers ADD CONSTRAINT customers_total_spent_positive CHECK (total_spent >= 0)") end)
     pcall(function() db.query("ALTER TABLE customers ADD CONSTRAINT customers_orders_count_positive CHECK (orders_count >= 0)") end)

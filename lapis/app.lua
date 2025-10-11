@@ -43,6 +43,11 @@ require("routes.checkout")(app)
 require("routes.variants")(app)
 require("routes.products")(app)
 require("routes.payments")(app)
+require("routes.stripe-webhook")(app)  -- Stripe webhook handler
 
 require("routes.order_management")(app)  -- Enhanced seller order management
+require("routes.order-status")(app)  -- Order status workflow management
+require("routes.buyer-orders")(app)  -- Buyer order management
+require("routes.notifications")(app)  -- Notifications system
+require("routes.public-store")(app)  -- Public store profiles
 return app

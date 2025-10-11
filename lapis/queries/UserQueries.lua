@@ -92,8 +92,16 @@ function UserQueries.destroy(id)
     end
 end
 
-function UserQueries.verify(email, plain_password)
-    local user = Users:find({ email = email })
+function UserQueries.verify(identifier, plain_password)
+    -- Try to find user by email first
+    local user = Users:find({ email = identifier })
+
+    -- If not found by email, try username
+    if not user then
+        user = Users:find({ username = identifier })
+    end
+
+    -- Verify password
     if user and bcrypt.verify(plain_password, user.password) then
         return user
     end
