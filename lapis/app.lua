@@ -116,21 +116,54 @@ end
 -- Load all routes
 ngx.log(ngx.NOTICE, "Loading routes...")
 
+safe_load_routes("routes.index")
+
 safe_load_routes("routes.auth")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
 safe_load_routes("routes.roles")
+safe_load_routes("routes.customers")
 safe_load_routes("routes.products")
 safe_load_routes("routes.categories")
 safe_load_routes("routes.orders")
 safe_load_routes("routes.cart")
+safe_load_routes("routes.orderitems")
 safe_load_routes("routes.payments")
 safe_load_routes("routes.addresses")
 safe_load_routes("routes.tenants")
 safe_load_routes("routes.permissions")
 safe_load_routes("routes.hospitals")
 safe_load_routes("routes.patients")
+safe_load_routes("routes.module")
+safe_load_routes("routes.documents")
+safe_load_routes("routes.secrets")
+safe_load_routes("routes.tags")
+safe_load_routes("routes.templates")
+safe_load_routes("routes.projects")
+safe_load_routes("routes.enquiries")
+safe_load_routes("routes.stores")
+safe_load_routes("routes.categories")
+safe_load_routes("routes.storeproducts")
+safe_load_routes("routes.register")
+safe_load_routes("routes.checkout")
+safe_load_routes("routes.variants")
+safe_load_routes("routes.products")
+safe_load_routes("routes.payments")
 
-ngx.log(ngx.NOTICE, "All routes loaded")
+-- order management
+safe_load_routes("routes.stripe-webhook")   -- Stripe webhook handler
+safe_load_routes("routes.order_management") -- Enhanced seller order management
+safe_load_routes("routes.order-status") -- Order status workflow management
+safe_load_routes("routes.buyer-orders") -- Buyer order management
+safe_load_routes("routes.notifications")
+safe_load_routes("routes.public-store") -- Public store profiles
+
+-- delivery management
+
+safe_load_routes("routes.delivery-partners")    -- Delivery partner registration & profile
+safe_load_routes("routes.delivery-assignments") -- Delivery assignment management
+safe_load_routes("routes.delivery-requests") -- Delivery request system
+safe_load_routes("routes.delivery-partner-dashboard") -- Delivery partner dashboard & earnings
+safe_load_routes("routes.store-delivery-partners")
 
 return app

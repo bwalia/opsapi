@@ -35,9 +35,12 @@ end
 
 function AuthMiddleware.requireAuth(handler)
     return function(self)
+        ngx.log(ngx.INFO, "=== AUTH MIDDLEWARE CALLED for: " .. (self.req.parsed_url.path or "unknown"))
+        
         -- Check for public browse header
         local public_browse = self.req.headers["x-public-browse"]
         if public_browse and public_browse:lower() == "true" then
+            ngx.log(ngx.INFO, "Public browse access granted")
             -- Allow public access without authentication
             self.current_user = nil
             self.is_public_browse = true
@@ -46,9 +49,11 @@ function AuthMiddleware.requireAuth(handler)
 
         local user, err = AuthMiddleware.authenticate(self)
         if err then
+            ngx.log(ngx.INFO, "Authentication failed: " .. (err.error or "unknown error"))
             return { json = { error = err.error }, status = err.status }
         end
 
+        ngx.log(ngx.INFO, "Authentication successful for user: " .. (user.uuid or user.sub or "unknown"))
         self.current_user = user
         return handler(self)
     end

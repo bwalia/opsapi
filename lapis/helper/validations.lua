@@ -1,8 +1,32 @@
 local Validation = {}
 local validate = require("lapis.validate")
 
+-- Password strength validation
+function Validation.validatePasswordStrength(password)
+    if not password or #password < 8 then
+        error("Password must be at least 8 characters long")
+    end
+
+    if not string.match(password, "%u") then
+        error("Password must contain at least one uppercase letter")
+    end
+
+    if not string.match(password, "%l") then
+        error("Password must contain at least one lowercase letter")
+    end
+
+    if not string.match(password, "%d") then
+        error("Password must contain at least one number")
+    end
+
+    return true
+end
+
 -- User Validations
 function Validation.createUser(params)
+    -- Validate password strength
+    Validation.validatePasswordStrength(params.password)
+
     return validate.assert_valid(params, {
         { "username", exists = true, min_length = 3, max_length = 25 },
         { "role",     exists = true, min_length = 2, max_length = 25 },
@@ -10,7 +34,7 @@ function Validation.createUser(params)
             "password",
             exists = true,
             min_length = 8,
-            max_length = 32,
+            max_length = 128,
         },
         { "email", exists = true, min_length = 3, matches_pattern = "^[%w._%%+-]+@[%w.-]+%.%a%a+$" },
     })
