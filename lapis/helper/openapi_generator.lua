@@ -199,6 +199,204 @@ function _M.generate()
                         limit = { type = "integer" },
                         offset = { type = "integer" }
                     }
+                },
+                Hospital = {
+                    type = "object",
+                    properties = {
+                        id = { type = "integer" },
+                        uuid = { type = "string" },
+                        name = { type = "string" },
+                        type = { type = "string", enum = { "hospital", "care_home", "clinic" } },
+                        license_number = { type = "string" },
+                        address = { type = "string" },
+                        city = { type = "string" },
+                        state = { type = "string" },
+                        postal_code = { type = "string" },
+                        country = { type = "string" },
+                        phone = { type = "string" },
+                        email = { type = "string" },
+                        website = { type = "string" },
+                        capacity = { type = "integer" },
+                        specialties = { type = "array", items = { type = "string" } },
+                        services = { type = "array", items = { type = "string" } },
+                        facilities = { type = "array", items = { type = "string" } },
+                        emergency_services = { type = "boolean" },
+                        operating_hours = { type = "object" },
+                        contact_person = { type = "string" },
+                        contact_phone = { type = "string" },
+                        status = { type = "string", enum = { "active", "inactive", "suspended" } },
+                        created_at = { type = "string", format = "date-time" },
+                        updated_at = { type = "string", format = "date-time" }
+                    }
+                },
+                HospitalInput = {
+                    type = "object",
+                    required = { "name", "license_number", "address", "city", "state", "country", "phone", "email" },
+                    properties = {
+                        name = { type = "string" },
+                        type = { type = "string", enum = { "hospital", "care_home", "clinic" } },
+                        license_number = { type = "string" },
+                        address = { type = "string" },
+                        city = { type = "string" },
+                        state = { type = "string" },
+                        postal_code = { type = "string" },
+                        country = { type = "string" },
+                        phone = { type = "string" },
+                        email = { type = "string" },
+                        website = { type = "string" },
+                        capacity = { type = "integer" },
+                        specialties = { type = "array", items = { type = "string" } },
+                        services = { type = "array", items = { type = "string" } },
+                        facilities = { type = "array", items = { type = "string" } },
+                        emergency_services = { type = "boolean" },
+                        operating_hours = { type = "object" },
+                        contact_person = { type = "string" },
+                        contact_phone = { type = "string" },
+                        status = { type = "string", enum = { "active", "inactive", "suspended" } }
+                    }
+                },
+                Patient = {
+                    type = "object",
+                    properties = {
+                        id = { type = "integer" },
+                        uuid = { type = "string" },
+                        hospital_id = { type = "integer" },
+                        patient_id = { type = "string" },
+                        first_name = { type = "string" },
+                        last_name = { type = "string" },
+                        date_of_birth = { type = "string", format = "date" },
+                        gender = { type = "string", enum = { "male", "female", "other" } },
+                        phone = { type = "string" },
+                        email = { type = "string" },
+                        address = { type = "string" },
+                        city = { type = "string" },
+                        state = { type = "string" },
+                        postal_code = { type = "string" },
+                        country = { type = "string" },
+                        emergency_contact_name = { type = "string" },
+                        emergency_contact_phone = { type = "string" },
+                        emergency_contact_relation = { type = "string" },
+                        blood_type = { type = "string" },
+                        allergies = { type = "array", items = { type = "string" } },
+                        medical_conditions = { type = "array", items = { type = "string" } },
+                        medications = { type = "array", items = { type = "string" } },
+                        insurance_provider = { type = "string" },
+                        insurance_number = { type = "string" },
+                        admission_date = { type = "string", format = "date" },
+                        discharge_date = { type = "string", format = "date" },
+                        room_number = { type = "string" },
+                        bed_number = { type = "string" },
+                        status = { type = "string", enum = { "active", "discharged", "transferred", "deceased" } },
+                        notes = { type = "string" },
+                        created_at = { type = "string", format = "date-time" },
+                        updated_at = { type = "string", format = "date-time" }
+                    }
+                },
+                PatientInput = {
+                    type = "object",
+                    required = { "hospital_id", "patient_id", "first_name", "last_name", "date_of_birth", "gender" },
+                    properties = {
+                        hospital_id = { type = "integer" },
+                        patient_id = { type = "string" },
+                        first_name = { type = "string" },
+                        last_name = { type = "string" },
+                        date_of_birth = { type = "string", format = "date" },
+                        gender = { type = "string", enum = { "male", "female", "other" } },
+                        phone = { type = "string" },
+                        email = { type = "string" },
+                        address = { type = "string" },
+                        city = { type = "string" },
+                        state = { type = "string" },
+                        postal_code = { type = "string" },
+                        country = { type = "string" },
+                        emergency_contact_name = { type = "string" },
+                        emergency_contact_phone = { type = "string" },
+                        emergency_contact_relation = { type = "string" },
+                        blood_type = { type = "string" },
+                        allergies = { type = "array", items = { type = "string" } },
+                        medical_conditions = { type = "array", items = { type = "string" } },
+                        medications = { type = "array", items = { type = "string" } },
+                        insurance_provider = { type = "string" },
+                        insurance_number = { type = "string" },
+                        admission_date = { type = "string", format = "date" },
+                        discharge_date = { type = "string", format = "date" },
+                        room_number = { type = "string" },
+                        bed_number = { type = "string" },
+                        status = { type = "string", enum = { "active", "discharged", "transferred", "deceased" } },
+                        notes = { type = "string" }
+                    }
+                },
+                HealthRecord = {
+                    type = "object",
+                    properties = {
+                        id = { type = "integer" },
+                        uuid = { type = "string" },
+                        patient_id = { type = "integer" },
+                        record_type = { type = "string", enum = { "vital_signs", "medication", "meal", "activity", "note", "procedure" } },
+                        record_date = { type = "string", format = "date" },
+                        record_time = { type = "string", format = "time" },
+                        recorded_by = { type = "string" },
+                        temperature = { type = "number" },
+                        blood_pressure_systolic = { type = "integer" },
+                        blood_pressure_diastolic = { type = "integer" },
+                        heart_rate = { type = "integer" },
+                        respiratory_rate = { type = "integer" },
+                        oxygen_saturation = { type = "number" },
+                        weight = { type = "number" },
+                        height = { type = "number" },
+                        pain_level = { type = "integer", minimum = 1, maximum = 10 },
+                        medication_name = { type = "string" },
+                        medication_dose = { type = "string" },
+                        medication_time = { type = "string", format = "time" },
+                        medication_notes = { type = "string" },
+                        meal_type = { type = "string", enum = { "breakfast", "lunch", "dinner", "snack" } },
+                        meal_intake = { type = "string", enum = { "full", "partial", "refused" } },
+                        meal_notes = { type = "string" },
+                        activity_type = { type = "string" },
+                        activity_duration = { type = "integer" },
+                        activity_notes = { type = "string" },
+                        procedure_name = { type = "string" },
+                        procedure_notes = { type = "string" },
+                        general_notes = { type = "string" },
+                        follow_up_required = { type = "boolean" },
+                        follow_up_date = { type = "string", format = "date" },
+                        created_at = { type = "string", format = "date-time" },
+                        updated_at = { type = "string", format = "date-time" }
+                    }
+                },
+                HealthRecordInput = {
+                    type = "object",
+                    required = { "record_type", "record_date" },
+                    properties = {
+                        record_type = { type = "string", enum = { "vital_signs", "medication", "meal", "activity", "note", "procedure" } },
+                        record_date = { type = "string", format = "date" },
+                        record_time = { type = "string", format = "time" },
+                        recorded_by = { type = "string" },
+                        temperature = { type = "number" },
+                        blood_pressure_systolic = { type = "integer" },
+                        blood_pressure_diastolic = { type = "integer" },
+                        heart_rate = { type = "integer" },
+                        respiratory_rate = { type = "integer" },
+                        oxygen_saturation = { type = "number" },
+                        weight = { type = "number" },
+                        height = { type = "number" },
+                        pain_level = { type = "integer", minimum = 1, maximum = 10 },
+                        medication_name = { type = "string" },
+                        medication_dose = { type = "string" },
+                        medication_time = { type = "string", format = "time" },
+                        medication_notes = { type = "string" },
+                        meal_type = { type = "string", enum = { "breakfast", "lunch", "dinner", "snack" } },
+                        meal_intake = { type = "string", enum = { "full", "partial", "refused" } },
+                        meal_notes = { type = "string" },
+                        activity_type = { type = "string" },
+                        activity_duration = { type = "integer" },
+                        activity_notes = { type = "string" },
+                        procedure_name = { type = "string" },
+                        procedure_notes = { type = "string" },
+                        general_notes = { type = "string" },
+                        follow_up_required = { type = "boolean" },
+                        follow_up_date = { type = "string", format = "date" }
+                    }
                 }
             }
         },
@@ -215,7 +413,9 @@ function _M.generate()
             { name = "Payments", description = "Payment processing" },
             { name = "Addresses", description = "User address management" },
             { name = "Tenants", description = "Multi-tenant management" },
-            { name = "Permissions", description = "Permission management" }
+            { name = "Permissions", description = "Permission management" },
+            { name = "Hospitals", description = "Hospital and care home management" },
+            { name = "Patients", description = "Patient management and health tracking" }
         },
         paths = {
             -- Public endpoints
@@ -934,6 +1134,482 @@ function _M.generate()
                     },
                     responses = {
                         ["201"] = { description = "Permission created" }
+                    }
+                }
+            },
+            
+            -- Hospitals
+            ["/hospitals"] = {
+                get = {
+                    summary = "Get all hospitals",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "page", ["in"] = "query", schema = { type = "integer", default = 1 } },
+                        { name = "per_page", ["in"] = "query", schema = { type = "integer", default = 20 } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            hospitals = { type = "array", items = { ["$ref"] = "#/components/schemas/Hospital" } },
+                                            pagination = { ["$ref"] = "#/components/schemas/PaginatedResponse" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                post = {
+                    summary = "Create new hospital",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = { ["$ref"] = "#/components/schemas/HospitalInput" }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["201"] = { 
+                            description = "Hospital created successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" },
+                                            hospital = { ["$ref"] = "#/components/schemas/Hospital" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            ["/hospitals/{id}"] = {
+                get = {
+                    summary = "Get hospital by ID",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            hospital = { ["$ref"] = "#/components/schemas/Hospital" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Hospital not found" }
+                    }
+                },
+                put = {
+                    summary = "Update hospital",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = { ["$ref"] = "#/components/schemas/HospitalInput" }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Hospital updated successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" },
+                                            hospital = { ["$ref"] = "#/components/schemas/Hospital" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Hospital not found" }
+                    }
+                },
+                delete = {
+                    summary = "Delete hospital",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Hospital deleted successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Hospital not found" }
+                    }
+                }
+            },
+            ["/hospitals/search"] = {
+                get = {
+                    summary = "Search hospitals",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "name", ["in"] = "query", schema = { type = "string" } },
+                        { name = "type", ["in"] = "query", schema = { type = "string" } },
+                        { name = "city", ["in"] = "query", schema = { type = "string" } },
+                        { name = "state", ["in"] = "query", schema = { type = "string" } },
+                        { name = "emergency_services", ["in"] = "query", schema = { type = "boolean" } },
+                        { name = "status", ["in"] = "query", schema = { type = "string" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            hospitals = { type = "array", items = { ["$ref"] = "#/components/schemas/Hospital" } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            ["/hospitals/{id}/statistics"] = {
+                get = {
+                    summary = "Get hospital statistics",
+                    tags = { "Hospitals" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            statistics = {
+                                                type = "object",
+                                                properties = {
+                                                    total_patients = { type = "integer" },
+                                                    active_patients = { type = "integer" },
+                                                    total_staff = { type = "integer" },
+                                                    active_staff = { type = "integer" },
+                                                    recent_admissions = { type = "integer" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Hospital not found" }
+                    }
+                }
+            },
+            
+            -- Patients
+            ["/patients"] = {
+                get = {
+                    summary = "Get all patients",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "page", ["in"] = "query", schema = { type = "integer", default = 1 } },
+                        { name = "per_page", ["in"] = "query", schema = { type = "integer", default = 20 } },
+                        { name = "hospital_id", ["in"] = "query", schema = { type = "integer" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            patients = { type = "array", items = { ["$ref"] = "#/components/schemas/Patient" } },
+                                            pagination = { ["$ref"] = "#/components/schemas/PaginatedResponse" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                post = {
+                    summary = "Create new patient",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = { ["$ref"] = "#/components/schemas/PatientInput" }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["201"] = { 
+                            description = "Patient created successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" },
+                                            patient = { ["$ref"] = "#/components/schemas/Patient" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            ["/patients/{id}"] = {
+                get = {
+                    summary = "Get patient by ID",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            patient = { ["$ref"] = "#/components/schemas/Patient" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Patient not found" }
+                    }
+                },
+                put = {
+                    summary = "Update patient",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = { ["$ref"] = "#/components/schemas/PatientInput" }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Patient updated successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" },
+                                            patient = { ["$ref"] = "#/components/schemas/Patient" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Patient not found" }
+                    }
+                },
+                delete = {
+                    summary = "Delete patient",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Patient deleted successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Patient not found" }
+                    }
+                }
+            },
+            ["/patients/{id}/health-records"] = {
+                get = {
+                    summary = "Get patient health records",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } },
+                        { name = "limit", ["in"] = "query", schema = { type = "integer", default = 50 } },
+                        { name = "offset", ["in"] = "query", schema = { type = "integer", default = 0 } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            health_records = { type = "array", items = { ["$ref"] = "#/components/schemas/HealthRecord" } }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Patient not found" }
+                    }
+                },
+                post = {
+                    summary = "Create health record",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } }
+                    },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = { ["$ref"] = "#/components/schemas/HealthRecordInput" }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["201"] = { 
+                            description = "Health record created successfully",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            message = { type = "string" },
+                                            health_record = { ["$ref"] = "#/components/schemas/HealthRecord" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            ["/patients/{id}/daily-summary/{date}"] = {
+                get = {
+                    summary = "Get daily summary for patient",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "id", ["in"] = "path", required = true, schema = { type = "integer" } },
+                        { name = "date", ["in"] = "path", required = true, schema = { type = "string", format = "date" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            daily_summary = {
+                                                type = "object",
+                                                properties = {
+                                                    vitals = { type = "array", items = { ["$ref"] = "#/components/schemas/HealthRecord" } },
+                                                    medications = { type = "array", items = { ["$ref"] = "#/components/schemas/HealthRecord" } },
+                                                    meals = { type = "array", items = { ["$ref"] = "#/components/schemas/HealthRecord" } },
+                                                    activities = { type = "array", items = { ["$ref"] = "#/components/schemas/HealthRecord" } },
+                                                    notes = { type = "array", items = { ["$ref"] = "#/components/schemas/HealthRecord" } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["404"] = { description = "Patient not found" }
+                    }
+                }
+            },
+            ["/patients/search"] = {
+                get = {
+                    summary = "Search patients",
+                    tags = { "Patients" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "hospital_id", ["in"] = "query", schema = { type = "integer" } },
+                        { name = "patient_id", ["in"] = "query", schema = { type = "string" } },
+                        { name = "first_name", ["in"] = "query", schema = { type = "string" } },
+                        { name = "last_name", ["in"] = "query", schema = { type = "string" } },
+                        { name = "room_number", ["in"] = "query", schema = { type = "string" } },
+                        { name = "status", ["in"] = "query", schema = { type = "string" } },
+                        { name = "admission_date_from", ["in"] = "query", schema = { type = "string", format = "date" } },
+                        { name = "admission_date_to", ["in"] = "query", schema = { type = "string", format = "date" } }
+                    },
+                    responses = {
+                        ["200"] = { 
+                            description = "Success",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            patients = { type = "array", items = { ["$ref"] = "#/components/schemas/Patient" } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

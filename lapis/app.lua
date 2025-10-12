@@ -128,6 +128,8 @@ safe_load_routes("routes.payments")
 safe_load_routes("routes.addresses")
 safe_load_routes("routes.tenants")
 safe_load_routes("routes.permissions")
+safe_load_routes("routes.hospitals")
+safe_load_routes("routes.patients")
 
 ngx.log(ngx.NOTICE, "All routes loaded")
 

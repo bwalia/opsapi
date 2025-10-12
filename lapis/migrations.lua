@@ -5,6 +5,7 @@ local Global = require "helper.global"
 local ecommerce_migrations = require("ecommerce-migrations")
 local production_schema_upgrade = require("production-schema-upgrade")
 local order_management_migrations = require("migrations.order-management-enhancement")
+local hospital_crm_migrations = require("migrations.hospital-crm")
 
 return {
     ['01_create_users'] = function()
@@ -334,4 +335,13 @@ return {
     ['44_create_seller_note_templates'] = order_management_migrations[6],
     ['45_create_order_tags_table'] = order_management_migrations[7],
     ['46_add_seller_order_indexes'] = order_management_migrations[8],
+
+    -- Hospital CRM Migrations
+    ['47_create_hospitals_table'] = hospital_crm_migrations[1],
+    ['48_create_patients_table'] = hospital_crm_migrations[2],
+    ['49_create_patient_health_records_table'] = hospital_crm_migrations[3],
+    ['50_create_hospital_staff_table'] = hospital_crm_migrations[4],
+    ['51_create_patient_assignments_table'] = hospital_crm_migrations[5],
+    ['52_create_patient_appointments_table'] = hospital_crm_migrations[6],
+    ['53_create_patient_documents_table'] = hospital_crm_migrations[7],
 }
