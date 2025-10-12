@@ -10,6 +10,7 @@ local notification_migrations = require("migrations.notifications")
 local review_migrations = require("migrations.reviews")
 local customer_user_link_migrations = require("migrations.customer-user-link")
 local stripe_integration_migrations = require("migrations.stripe-integration")
+local delivery_partner_migrations = require("migrations.delivery-partner-system")
 
 return {
     ['01_create_users'] = function()
@@ -73,6 +74,14 @@ return {
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
       ]], Global.generateStaticUUID(), "buyer", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+        end
+
+        local deliveryPartnerRoleExists = db.select("id from roles where role_name = ?", "delivery_partner")
+        if not deliveryPartnerRoleExists or #deliveryPartnerRoleExists == 0 then
+            db.query([[
+        INSERT INTO roles (uuid, role_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+      ]], Global.generateStaticUUID(), "delivery_partner", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
         end
     end,
     ['02create_user__roles'] = function()
@@ -371,4 +380,21 @@ return {
     -- Stripe Integration
     ['67_add_stripe_customer_id_to_customers'] = stripe_integration_migrations[1],
     ['68_add_stripe_customer_id_index'] = stripe_integration_migrations[2],
+
+    -- Delivery Partner System
+    ['69_create_delivery_partners_table'] = delivery_partner_migrations[1],
+    ['70_add_delivery_partners_indexes'] = delivery_partner_migrations[2],
+    ['71_create_delivery_partner_areas_table'] = delivery_partner_migrations[3],
+    ['72_add_delivery_partner_areas_indexes'] = delivery_partner_migrations[4],
+    ['73_create_store_delivery_partners_table'] = delivery_partner_migrations[5],
+    ['74_add_store_delivery_partners_indexes'] = delivery_partner_migrations[6],
+    ['75_create_order_delivery_assignments_table'] = delivery_partner_migrations[7],
+    ['76_add_order_delivery_assignments_indexes'] = delivery_partner_migrations[8],
+    ['77_create_delivery_requests_table'] = delivery_partner_migrations[9],
+    ['78_add_delivery_requests_indexes'] = delivery_partner_migrations[10],
+    ['79_create_delivery_partner_reviews_table'] = delivery_partner_migrations[11],
+    ['80_add_delivery_partner_reviews_indexes'] = delivery_partner_migrations[12],
+    ['81_add_delivery_partner_constraints'] = delivery_partner_migrations[13],
+    ['82_add_can_self_ship_to_stores'] = delivery_partner_migrations[14],
+    ['83_add_delivery_partner_id_to_orders'] = delivery_partner_migrations[15],
 }

@@ -50,4 +50,9 @@ require("routes.order-status")(app)  -- Order status workflow management
 require("routes.buyer-orders")(app)  -- Buyer order management
 require("routes.notifications")(app)  -- Notifications system
 require("routes.public-store")(app)  -- Public store profiles
+require("routes.delivery-partners")(app)  -- Delivery partner registration & profile
+require("routes.delivery-assignments")(app)  -- Delivery assignment management
+require("routes.delivery-requests")(app)  -- Delivery request system
+require("routes.delivery-partner-dashboard")(app)  -- Delivery partner dashboard & earnings
+require("routes.store-delivery-partners")(app)  -- Store-partner relationship management
 return app
