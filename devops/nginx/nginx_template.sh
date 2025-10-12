@@ -23,13 +23,13 @@ export NUM_WORKERS=1
 export PORT=80
 export CODE_CACHE=on
 
-NGINX_VALUES_INPUT_PATH="lapis/nginx-values.conf"
+# NGINX_VALUES_INPUT_PATH="lapis/nginx-values.conf"
 
-cp $NGINX_VALUES_INPUT_PATH "lapis/nginx-values-template.conf"
-
+# cp $NGINX_VALUES_INPUT_PATH "lapis/nginx-values-template.conf"
+NGINX_VALUES_INPUT_PATH="lapis/nginx-values-template.conf"
 NGINX_VALUES_OUTPUT_PATH="lapis/nginx-values-output.conf"
 
-python3 devops/nginx/render_config.py "lapis/nginx-values-template.conf" $NGINX_VALUES_OUTPUT_PATH
+python3 devops/nginx/render_config.py $NGINX_VALUES_INPUT_PATH $NGINX_VALUES_OUTPUT_PATH
 
 if [ "$RENDER_NGINX_MAKE_LIVE" = "true" ]; then
   mv "lapis/nginx.conf" "lapis/nginx.conf.bak"

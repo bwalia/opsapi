@@ -1,6 +1,17 @@
 # OPSAPI
 
-Opsapi built on the top of Lua with ecommerce frontend built in Next.js.
+Opsapi API is built on the top of Opneresty Nginx / Lua for increased performance and reliability
+
+## Opneresty Nginx / Lua / Postgres - or you may refer it as `OLP Stack`
+## Avoids Nginx to CGI resource consumption as lua is compiled to work directly with Nginx Workers
+## OpsAPI is Simple and allows Developers to create Database API right from the begining (Batteries included)
+## Nginx is highly scalable and reliable and idea of OPSAPI is to make OLP stack nginx/lua/postgres to work together think Unix sockets to have very high performance
+## Native applications can just run on a single instance linux OS recommended using Unix sockets (highly recommended for production and securing database api)
+## If run as containerised stack the Dockerfile is highly optimised for performance
+
+## Status by Gatus
+
+### Check `http://localhost:8888/`
 
 ## Components
 

@@ -1,4 +1,4 @@
-name: OPSAPI Build/Push Docker Image and Deploy to K3S
+name: OPSAPI Kisaan Build/Push Docker Image and Deploy to K3S
 
 on:
   push:
@@ -31,14 +31,14 @@ on:
       PROJECT_NAME:
         type: choice
         description: "Please select the project name"
-        default: "opsapi"
+        default: "opsapi-kisaan"
         required: true
         options:
           - opsapi
           - opsapi-kisaan
 
 env:
-  PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}
+  PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi-kisaan' }}
   IMAGE_REGISTRY: bwalia
   TARGET_STACK: openresty_lua
   IMAGE_NAME: opsapi

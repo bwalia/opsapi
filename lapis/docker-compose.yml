@@ -59,19 +59,19 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-  mariadb:
-    container_name: opsapi-dev-db
-    image: mariadb
-    ports:
-      - "3319:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: msroot
-      MYSQL_DATABASE: opsapi
-      MYSQL_USER: msuser
-      MYSQL_PASSWORD: mspassword
-    networks:
-      opsapi-network:
-        ipv4_address: 172.71.0.11
+  # mariadb:
+  #   container_name: opsapi-dev-db
+  #   image: mariadb
+  #   ports:
+  #     - "3319:3306"
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: msroot
+  #     MYSQL_DATABASE: opsapi
+  #     MYSQL_USER: msuser
+  #     MYSQL_PASSWORD: mspassword
+  #   networks:
+  #     opsapi-network:
+  #       ipv4_address: 172.71.0.11
 
   adminer:
     image: adminer:latest

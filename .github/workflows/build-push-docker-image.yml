@@ -1,4 +1,4 @@
-name: Docker OPSAPI Image build and Push
+name: OPSAPI Docker Image build and Push
 
 on:
   push:
