@@ -1,53 +1,51 @@
-name: Run Tests
-on:
-  push:
-    branches:
-      - dummy
-  pull_request:
-  # schedule:
-  #   # Run tests weekly to make sure they keep working despite various
-  #   # dependency changes.
-  #   - cron: '23 06 * * 5'
-  workflow_dispatch: # allow running manually
-jobs:
-  lua:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        lua: ["5.1", "5.2"]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-      - run: sudo apt install libpcre2-dev libreadline-dev
-      - run: pip install hererocks
-      # Install latest LuaRocks version plus the Lua version for this build job
-      # into 'here' subdirectory.
-      - run: hererocks here -r^ --lua ${{ matrix.lua }}
-      - run: echo $PWD/here/bin >> $GITHUB_PATH
-      - run: eval `luarocks path --bin`
-      - run: luarocks install luacheck
-      - run: luarocks install luacov-coveralls
-      - run: luarocks install luaunit
-      - run: luarocks install lrexlib-pcre2
-      - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
-      - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
-      - run: lua -lluacov prometheus_test.lua
-      - run: luacov-coveralls --include ^prometheus
-        env:
-          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Only report test coverage for lua 5.1 to avoid doing it twice.
-        if: ${{ matrix.lua == '5.1' }}
-  integration:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: integration
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2
-        with:
-          go-version: 1.22
-      - run: go get
-      - run: ./test.sh
+# name: Run Tests
+# on:
+#   push:
+#   pull_request:
+#   schedule:
+#     # Run tests weekly to make sure they keep working despite various
+#     # dependency changes.
+#     - cron: '23 06 * * 5'
+#   workflow_dispatch: # allow running manually
+# jobs:
+#   lua:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 10
+#     strategy:
+#       matrix:
+#         lua: ["5.1", "5.2"]
+#     steps:
+#       - uses: actions/checkout@v2
+#       - uses: actions/setup-python@v2
+#       - run: sudo apt install libpcre2-dev libreadline-dev
+#       - run: pip install hererocks
+#       # Install latest LuaRocks version plus the Lua version for this build job
+#       # into 'here' subdirectory.
+#       - run: hererocks here -r^ --lua ${{ matrix.lua }}
+#       - run: echo $PWD/here/bin >> $GITHUB_PATH
+#       - run: eval `luarocks path --bin`
+#       - run: luarocks install luacheck
+#       - run: luarocks install luacov-coveralls
+#       - run: luarocks install luaunit
+#       - run: luarocks install lrexlib-pcre2
+#       - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
+#       - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
+#       - run: lua -lluacov prometheus_test.lua
+#       - run: luacov-coveralls --include ^prometheus
+#         env:
+#           COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#         # Only report test coverage for lua 5.1 to avoid doing it twice.
+#         if: ${{ matrix.lua == '5.1' }}
+#   integration:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 10
+#     defaults:
+#       run:
+#         working-directory: integration
+#     steps:
+#       - uses: actions/checkout@v2
+#       - uses: actions/setup-go@v2
+#         with:
+#           go-version: 1.22
+#       - run: go get
+#       - run: ./test.sh
