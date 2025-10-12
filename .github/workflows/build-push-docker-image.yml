@@ -1,5 +1,4 @@
-name: OPSAPI Docker Image build and Push
-
+name: OPSAPI build and Push Docker Image
 on:
   push:
     branches:

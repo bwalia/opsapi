@@ -1,4 +1,4 @@
-name: Sreejit Docker OPSAPI Image build
+name: [Legacy] Sreejit Docker OPSAPI Image build
 
 on:
   push:
