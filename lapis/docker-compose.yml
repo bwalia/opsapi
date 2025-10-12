@@ -1,6 +1,22 @@
 # version: '3.9'
 
 services:
+
+  gatus:
+      image: twinproduction/gatus:latest
+      container_name: opsapi-gatus
+      ports:
+        - "8888:8080"
+      depends_on:
+      - minio
+      - adminer
+      - lapis
+      volumes:
+        - ./gatus/config:/config
+      networks:
+        opsapi-network:
+          ipv4_address: 172.71.0.18
+
   lapis:
     container_name: opsapi
     build: .
@@ -11,12 +27,19 @@ services:
       - .:/app
       - ./logs:/var/log/nginx
     env_file: ".env"
+    depends_on:
+      - postgres
+      - minio
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.12
-
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
   postgres:
-    container_name: opsapi-postgres
+    container_name: opsapi-postgres-dev-db
     image: postgres:14-alpine
     ports:
       - "5439:5432"
@@ -31,9 +54,13 @@ services:
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.10
-
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pguser"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
   mariadb:
-    container_name: webimpetus-mariadb
+    container_name: opsapi-dev-db
     image: mariadb
     ports:
       - "3319:3306"
@@ -55,6 +82,11 @@ services:
       - 7779:8080
     networks:
       opsapi-network:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
 
   redis:
@@ -68,27 +100,50 @@ services:
     volumes:
       - ./session-data:/data
     command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
-# Add Keycloak service
-  keycloak:
-    container_name: ops_keycloak
-    build:
-      context: .
-      dockerfile: Dockerfile.keycloak
-    environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      # KEYCLOAK_IMPORT: /opt/keycloak/import/realm-config.json
+  minio:
+    image: minio/minio:latest
     ports:
-      - "1010:8080"
-    depends_on:
-      - postgres
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
     volumes:
-      - ./keycloak_data:/opt/keycloak/data
+      - minio_data:/data
+    command: server /data --console-address ":9001"
     networks:
       opsapi-network:
+        ipv4_address: 172.71.0.17
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
-
+# Add Keycloak service
+  # keycloak:
+  #   container_name: ops_keycloak
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.keycloak
+  #   environment:
+  #     KEYCLOAK_ADMIN: admin
+  #     KEYCLOAK_ADMIN_PASSWORD: admin
+  #     # KEYCLOAK_IMPORT: /opt/keycloak/import/realm-config.json
+  #   ports:
+  #     - "1010:8080"
+  #   depends_on:
+  #     - postgres
+  #   volumes:
+  #     - ./keycloak_data:/opt/keycloak/data
+  #   networks:
+  #     opsapi-network:
 
   # nodeapp:
   #   container_name: opsapi-node
@@ -143,7 +198,7 @@ services:
     image: grafana/grafana:latest
     container_name: opsapi-grafana
     ports:
-      - "3000:3000"
+      - "3011:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ../devops/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
@@ -153,7 +208,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_ROOT_URL=http://localhost:3011
       - GF_INSTALL_PLUGINS=
     networks:
       opsapi-network:
@@ -174,3 +229,4 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  minio_data:

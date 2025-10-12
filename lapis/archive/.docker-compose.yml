@@ -16,7 +16,7 @@ services:
       opsapi-network:
 
   postgres:
-    container_name: opsapi-postgres
+    container_name: opsapi-postgres-dev-db
     image: postgres
     ports:
       - "5433:5432"
@@ -29,7 +29,7 @@ services:
         ipv4_address: 172.19.0.10
 
   mariadb:
-    container_name: webimpetus-mariadb
+    container_name: opsapi-dev-db
     image: mariadb
     ports:
       - "3307:3306"
