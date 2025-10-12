@@ -5,6 +5,7 @@ local Global = require "helper.global"
 local ecommerce_migrations = require("ecommerce-migrations")
 local production_schema_upgrade = require("production-schema-upgrade")
 local order_management_migrations = require("migrations.order-management-enhancement")
+local hospital_crm_migrations = require("migrations.hospital-crm")
 local payment_tracking_migrations = require("migrations.payment-tracking")
 local notification_migrations = require("migrations.notifications")
 local review_migrations = require("migrations.reviews")
@@ -349,52 +350,61 @@ return {
     ['45_create_order_tags_table'] = order_management_migrations[7],
     ['46_add_seller_order_indexes'] = order_management_migrations[8],
 
+    -- Hospital CRM Migrations
+    ['47_create_hospitals_table'] = hospital_crm_migrations[1],
+    ['48_create_patients_table'] = hospital_crm_migrations[2],
+    ['49_create_patient_health_records_table'] = hospital_crm_migrations[3],
+    ['50_create_hospital_staff_table'] = hospital_crm_migrations[4],
+    ['51_create_patient_assignments_table'] = hospital_crm_migrations[5],
+    ['52_create_patient_appointments_table'] = hospital_crm_migrations[6],
+    ['53_create_patient_documents_table'] = hospital_crm_migrations[7],
     -- Payment Tracking & Webhook Support
-    ['47_create_payments_table'] = payment_tracking_migrations[1],
-    ['48_add_payment_indexes'] = payment_tracking_migrations[2],
-    ['49_add_payment_id_to_orders'] = payment_tracking_migrations[3],
-    ['50_update_order_status_enum'] = payment_tracking_migrations[4],
-    ['51_create_order_status_history'] = payment_tracking_migrations[5],
-    ['52_add_status_history_indexes'] = payment_tracking_migrations[6],
-    ['53_add_tracking_to_orders'] = payment_tracking_migrations[7],
-    ['54_create_refunds_table'] = payment_tracking_migrations[8],
-    ['55_add_refund_indexes'] = payment_tracking_migrations[9],
-    ['56_fix_order_status_constraint'] = payment_tracking_migrations[10],
+    ['54_create_payments_table'] = payment_tracking_migrations[1],
+    ['55_add_payment_indexes'] = payment_tracking_migrations[2],
+    ['56_add_payment_id_to_orders'] = payment_tracking_migrations[3],
+    ['57_update_order_status_enum'] = payment_tracking_migrations[4],
+    ['58_create_order_status_history'] = payment_tracking_migrations[5],
+    ['59_add_status_history_indexes'] = payment_tracking_migrations[6],
+    ['60_add_tracking_to_orders'] = payment_tracking_migrations[7],
+    ['61_create_refunds_table'] = payment_tracking_migrations[8],
+    ['62_add_refund_indexes'] = payment_tracking_migrations[9],
+    ['63_fix_order_status_constraint'] = payment_tracking_migrations[10],
 
     -- Notifications System
-    ['57_create_notifications_table'] = notification_migrations[1],
-    ['58_add_notification_indexes'] = notification_migrations[2],
-    ['59_create_notification_preferences'] = notification_migrations[3],
+    ['64_create_notifications_table'] = notification_migrations[1],
+    ['65_add_notification_indexes'] = notification_migrations[2],
+    ['66_create_notification_preferences'] = notification_migrations[3],
 
     -- Reviews System
-    ['60_create_store_reviews_table'] = review_migrations[1],
-    ['61_add_store_review_indexes'] = review_migrations[2],
-    ['62_create_product_reviews_table'] = review_migrations[3],
-    ['63_add_product_review_indexes'] = review_migrations[4],
+    ['67_create_store_reviews_table'] = review_migrations[1],
+    ['68_add_store_review_indexes'] = review_migrations[2],
+    ['69_create_product_reviews_table'] = review_migrations[3],
+    ['70_add_product_review_indexes'] = review_migrations[4],
 
     -- Customer-User Link
-    ['64_add_user_id_to_customers'] = customer_user_link_migrations[1],
-    ['65_add_customer_user_id_index'] = customer_user_link_migrations[2],
-    ['66_migrate_customer_user_data'] = customer_user_link_migrations[3],
+    ['71_add_user_id_to_customers'] = customer_user_link_migrations[1],
+    ['72_add_customer_user_id_index'] = customer_user_link_migrations[2],
+    ['73_migrate_customer_user_data'] = customer_user_link_migrations[3],
 
     -- Stripe Integration
-    ['67_add_stripe_customer_id_to_customers'] = stripe_integration_migrations[1],
-    ['68_add_stripe_customer_id_index'] = stripe_integration_migrations[2],
+    ['74_add_stripe_customer_id_to_customers'] = stripe_integration_migrations[1],
+    ['75_add_stripe_customer_id_index'] = stripe_integration_migrations[2],
 
     -- Delivery Partner System
-    ['69_create_delivery_partners_table'] = delivery_partner_migrations[1],
-    ['70_add_delivery_partners_indexes'] = delivery_partner_migrations[2],
-    ['71_create_delivery_partner_areas_table'] = delivery_partner_migrations[3],
-    ['72_add_delivery_partner_areas_indexes'] = delivery_partner_migrations[4],
-    ['73_create_store_delivery_partners_table'] = delivery_partner_migrations[5],
-    ['74_add_store_delivery_partners_indexes'] = delivery_partner_migrations[6],
-    ['75_create_order_delivery_assignments_table'] = delivery_partner_migrations[7],
-    ['76_add_order_delivery_assignments_indexes'] = delivery_partner_migrations[8],
-    ['77_create_delivery_requests_table'] = delivery_partner_migrations[9],
-    ['78_add_delivery_requests_indexes'] = delivery_partner_migrations[10],
-    ['79_create_delivery_partner_reviews_table'] = delivery_partner_migrations[11],
-    ['80_add_delivery_partner_reviews_indexes'] = delivery_partner_migrations[12],
-    ['81_add_delivery_partner_constraints'] = delivery_partner_migrations[13],
-    ['82_add_can_self_ship_to_stores'] = delivery_partner_migrations[14],
-    ['83_add_delivery_partner_id_to_orders'] = delivery_partner_migrations[15],
+    ['76_create_delivery_partners_table'] = delivery_partner_migrations[1],
+    ['77_add_delivery_partners_indexes'] = delivery_partner_migrations[2],
+    ['78_create_delivery_partner_areas_table'] = delivery_partner_migrations[3],
+    ['79_add_delivery_partner_areas_indexes'] = delivery_partner_migrations[4],
+    ['80_create_store_delivery_partners_table'] = delivery_partner_migrations[5],
+    ['81_add_store_delivery_partners_indexes'] = delivery_partner_migrations[6],
+    ['82_create_order_delivery_assignments_table'] = delivery_partner_migrations[7],
+    ['83_add_order_delivery_assignments_indexes'] = delivery_partner_migrations[8],
+    ['84_create_delivery_requests_table'] = delivery_partner_migrations[9],
+    ['85_add_delivery_requests_indexes'] = delivery_partner_migrations[10],
+    ['86_create_delivery_partner_reviews_table'] = delivery_partner_migrations[11],
+    ['87_add_delivery_partner_reviews_indexes'] = delivery_partner_migrations[12],
+    ['88_add_delivery_partner_constraints'] = delivery_partner_migrations[13],
+    ['89_add_can_self_ship_to_stores'] = delivery_partner_migrations[14],
+    ['90_add_delivery_partner_id_to_orders'] = delivery_partner_migrations[15],
+
 }

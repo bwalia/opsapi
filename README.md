@@ -246,6 +246,32 @@ To deploy OPSAPI UI on kubernates, please follow the instructions.
 
 ## Troubleshooting dev env
 
+
+# Restart
+docker-compose restart lapis
+
+# Wait for startup
+sleep 5
+
+# Check if routes are loaded
+docker exec -i opsapi tail -50 /var/log/nginx/error.log | grep "routes"
+
+# Test each endpoint
+TOKEN=$(docker exec -i opsapi curl -s -X POST 'http://localhost/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"administrative@admin.com","password":"Admin@123"}' | jq -r '.token')
+
+# Test roles
+docker exec -i opsapi curl -s "http://localhost/api/v2/roles" -H "Authorization: Bearer $TOKEN"
+
+# Test groups  
+docker exec -i opsapi curl -s "http://localhost/api/v2/groups" -H "Authorization: Bearer $TOKEN"
+
+# Test users
+docker exec -i opsapi curl -s "http://localhost/api/v2/users" -H "Authorization: Bearer $TOKEN"
+
+
+
 # Test database connectivity
 docker exec -i opsapi psql -h 172.71.0.10 -U pguser -d opsapi -c "\dt"
 
