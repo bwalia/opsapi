@@ -30,27 +30,15 @@ spec:
           ports:
             - containerPort: 80
           livenessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - "curl -f -s http://localhost:80/health || [ $(curl -s -o /dev/null -w '%{http_code}' http://localhost:80/health) -eq 401 ]"
-            initialDelaySeconds: 30
+            httpGet:
+              path: /health
+              port: 80
+            failureThreshold: 1
             periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-            successThreshold: 1
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - "curl -f -s http://localhost:80/ready || [ $(curl -s -o /dev/null -w '%{http_code}' http://localhost:80/ready) -eq 401 ]"
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
-            successThreshold: 1
+            httpGet:
+              path: /health
+              port: 80
           env:
             - name: KEYCLOAK_AUTH_URL
               valueFrom:
