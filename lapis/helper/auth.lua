@@ -10,10 +10,12 @@ local PUBLIC_ROUTES = {
     ["^/swagger$"] = true,
     ["^/api%-docs$"] = true,
     ["^/openapi%.json$"] = true,
+    ["^/swagger/swagger%.json$"] = true,
     ["^/metrics$"] = true,
     ["^/auth/login$"] = true,
     ["^/auth/register$"] = true,
-}
+    -- ["^/auth/forgot_password$"] = true,
+    -- ["^/auth/reset_password$"] = true}
 
 function _M.is_public_route(uri)
     for pattern, _ in pairs(PUBLIC_ROUTES) do
