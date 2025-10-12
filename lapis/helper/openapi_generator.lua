@@ -1612,6 +1612,27 @@ function _M.generate()
                         }
                     }
                 }
+            },
+            ["/swagger/swagger.json"] = {
+                get = {
+                    summary = "OpenAPI Specification (Alternative Path)",
+                    description = "Alternative endpoint for OpenAPI 3.0 specification in JSON format",
+                    tags = { "Public" },
+                    security = {},
+                    responses = {
+                        ["200"] = {
+                            description = "OpenAPI 3.0 specification",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        description = "Complete OpenAPI 3.0 specification"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
