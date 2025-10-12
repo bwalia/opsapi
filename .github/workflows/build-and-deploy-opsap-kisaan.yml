@@ -22,7 +22,7 @@ on:
       DEPLOYMENT_TYPE:
         type: choice
         description: "Please select the build only, deploy only or build and deploy"
-        default: "deploy"
+        default: "build-and-deploy"
         required: true
         options:
           - build
@@ -44,7 +44,7 @@ env:
   IMAGE_NAME: opsapi
   TARGET_IMAGE_TAG: latest
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
-  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'deploy' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
   NODE_IMAGE_NAME: opsapi-node
 
 jobs:
