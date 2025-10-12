@@ -1,4 +1,4 @@
-name: OPSAPI Build/Push Docker Image and Deploy to K3S
+name: ->OPSAPI Build/Push Docker Image and Deploy to K3S
 
 on:
   push:
