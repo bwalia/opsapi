@@ -326,3 +326,132 @@ To enable Google OAuth authentication:
         GOOGLE_CLIENT_SECRET=your-client-secret
         GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
         FRONTEND_URL=http://localhost:3000
+
+
+# Add public route 
+
+## 1. Update app.lua to add the route:
+
+// Add after the /openapi.json route
+
+-- Alternative OpenAPI spec path (PUBLIC)
+app:get("/swagger/swagger.json", function(self)
+    ngx.log(ngx.NOTICE, "=== Serving /swagger/swagger.json - NO AUTH REQUIRED ===")
+    ngx.header["Access-Control-Allow-Origin"] = "*"
+    ngx.header["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    ngx.header["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    
+    local ok, openapi_gen = pcall(require, "helper.openapi_generator")
+    if not ok then
+        ngx.log(ngx.ERR, "Failed to load openapi_generator: ", tostring(openapi_gen))
+        return { status = 500, json = { error = "Generator not found" } }
+    end
+    
+    local spec = openapi_gen.generate()
+    return { status = 200, json = spec }
+end)
+
+2. Update the before_filter to include the new route:
+
+// Update the before_filter section
+
+app:before_filter(function(self)
+    local uri = ngx.var.uri
+    
+    -- Double-check: Skip auth for public routes
+    if uri == "/" or uri == "/health" or uri == "/swagger" or 
+       uri == "/api-docs" or uri == "/openapi.json" or uri == "/metrics" or
+       uri == "/swagger/swagger.json" or
+       uri:match("^/auth/") then
+        ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
+        return
+    end
+    
+    ngx.log(ngx.NOTICE, "Applying auth to: ", uri)
+    local ok, auth = pcall(require, "helper.auth")
+    if ok then
+        auth.authenticate()
+    end
+end)
+
+3. Update auth.lua to include the new pattern:
+
+// Update the PUBLIC_ROUTES table in helper/auth.lua
+
+local PUBLIC_ROUTES = {
+    ["^/$"] = true,
+    ["^/health$"] = true,
+    ["^/swagger$"] = true,
+    ["^/api%-docs$"] = true,
+    ["^/openapi%.json$"] = true,
+    ["^/swagger/swagger%.json$"] = true,
+    ["^/metrics$"] = true,
+    ["^/auth/login$"] = true,
+    ["^/auth/register$"] = true,
+}
+
+4. Add it to the OpenAPI spec:
+
+// Add to the paths section in openapi_generator.lua
+
+["/swagger/swagger.json"] = {
+    get = {
+        summary = "OpenAPI Specification (Alternative Path)",
+        description = "Alternative endpoint for OpenAPI 3.0 specification in JSON format",
+        tags = { "Public" },
+        security = {},
+        responses = {
+            ["200"] = {
+                description = "OpenAPI 3.0 specification",
+                content = {
+                    ["application/json"] = {
+                        schema = {
+                            type = "object",
+                            description = "Complete OpenAPI 3.0 specification"
+                        }
+                    }
+                }
+            }
+        }
+    }
+},
+
+
+5. Apply the changes:
+
+# Apply all the changes using the terminal commands
+docker exec -i opsapi sh -c 'cat > /tmp/update_auth.lua << '\''EOF'\''
+-- Update auth.lua with new public route
+local content = io.open("/app/helper/auth.lua", "r"):read("*all")
+content = string.gsub(content, 
+    '\''%["^/openapi%%%.json$"%] = true,'\'', 
+    '\''["^/openapi%%%.json$"] = true,\n    ["^/swagger/swagger%%%.json$"] = true,'\'')
+io.open("/app/helper/auth.lua", "w"):write(content)
+EOF'
+
+docker exec -i opsapi /usr/local/openresty/bin/resty /tmp/update_auth.lua
+
+# Restart
+docker-compose restart lapis
+sleep 3
+
+# Test the new endpoint
+echo "Testing /swagger/swagger.json..."
+curl -s http://localhost:4010/swagger/swagger.json | jq '.info.title'
+
+# Test that it returns the same as /openapi.json
+echo -e "\nComparing both endpoints..."
+curl -s http://localhost:4010/openapi.json | jq '.info' > /tmp/openapi1.json
+curl -s http://localhost:4010/swagger/swagger.json | jq '.info' > /tmp/openapi2.json
+diff /tmp/openapi1.json /tmp/openapi2.json && echo "✅ Both endpoints return identical content"
+
+# Test all public endpoints
+echo -e "\nTesting all public endpoints..."
+curl -s -o /dev/null -w "/ -> %{http_code}\n" http://localhost:4010/
+curl -s -o /dev/null -w "/health -> %{http_code}\n" http://localhost:4010/health
+curl -s -o /dev/null -w "/swagger -> %{http_code}\n" http://localhost:4010/swagger
+curl -s -o /dev/null -w "/openapi.json -> %{http_code}\n" http://localhost:4010/openapi.json
+curl -s -o /dev/null -w "/swagger/swagger.json -> %{http_code}\n" http://localhost:4010/swagger/swagger.json
+curl -s -o /dev/null -w "/metrics -> %{http_code}\n" http://localhost:4010/metrics
+
+echo -e "\n✅ All public routes working!"
