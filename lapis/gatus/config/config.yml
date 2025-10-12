@@ -3,19 +3,57 @@
   #      webhook_url: "YOUR_DISCORD_WEBHOOK"
   #      default_alert: 3
     endpoints:
-      - name: "Lapis [Dev]"
-        group: "Private Services"
+      - name: "OpsAPI Lapis Health"
+        group: "Dev Services"
         url: "http://172.71.0.12/health"
         interval: 30s
         conditions:
           - "[STATUS] == 200"
-          - "[RESPONSE_TIME] < 10000"
+          - "[RESPONSE_TIME] < 1000"
+          - "[BODY].status == healthy"
           - "len([BODY]) > 10"
-      # - name: "Postgres [Dev]"
-      #   group: "Prirvate Services"
-      #   url: "http://opsapi-postgres-dev-db:5432/"
-      #   interval: 30s
-      #   conditions:
-      #     - "[STATUS] == 200"
-      #     - "[RESPONSE_TIME] < 1000"
-      #     - "len([BODY]) > 10"
+      - name: "OpsAPI Lapis Nginx Status"
+        group: "Dev Services"
+        url: "http://172.71.0.12/nginx_status"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 1000"
+      - name: "OpsAPI Metrics"
+        group: "Dev Services"
+        url: "http://172.71.0.12/metrics"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 1000"
+      - name: "MinIO API"
+        group: "Dev Services"
+        url: "http://172.71.0.17:9000/minio/health/live"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 1000"
+      - name: "MinIO Console"
+        group: "Dev Services"
+        url: "http://172.71.0.17:9001/minio/health/live"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 1000"
+          - "len([BODY]) > 10"
+      - name: "Prometheus Server"
+        group: "Dev Services"
+        url: "http://172.71.0.15:9090"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 1000"
+          - "len([BODY]) > 10"
+      - name: "Grafana"
+        group: "Dev Services"
+        url: "http://172.71.0.16:3000/login"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 1000"
+          - "len([BODY]) > 10"
