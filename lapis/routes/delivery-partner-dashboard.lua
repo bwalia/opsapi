@@ -151,8 +151,7 @@ return function(app)
                 LEFT JOIN delivery_requests dr ON o.id = dr.order_id
                     AND dr.delivery_partner_id = %d
                     AND dr.status = 'pending'
-                WHERE o.status IN ('confirmed', 'packing', 'ready_for_pickup')
-                AND o.delivery_partner_id IS NULL
+                WHERE o.status IN ('pending', 'confirmed', 'accepted', 'preparing', 'packing', 'processing')
                 AND oda.id IS NULL
                 AND dr.id IS NULL
                 AND (%s)
