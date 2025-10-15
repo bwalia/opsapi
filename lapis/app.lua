@@ -1,5 +1,9 @@
 local lapis = require("lapis")
 local app = lapis.Application()
+local CorsMiddleware = require("middleware.cors")
+
+-- Enable CORS
+CorsMiddleware.enable(app)
 
 -- Enable etlua
 app:enable("etlua")
@@ -59,13 +63,13 @@ end)
 app:get("/openapi.json", function(self)
     ngx.log(ngx.NOTICE, "=== Serving /openapi.json - NO AUTH REQUIRED ===")
     ngx.header["Access-Control-Allow-Origin"] = "*"
-    
+
     local ok, openapi_gen = pcall(require, "helper.openapi_generator")
     if not ok then
         ngx.log(ngx.ERR, "Failed to load openapi_generator: ", tostring(openapi_gen))
         return { status = 500, json = { error = "Generator not found" } }
     end
-    
+
     local spec = openapi_gen.generate()
     return { status = 200, json = spec }
 end)
@@ -74,13 +78,13 @@ end)
 app:get("/swagger/swagger.json", function(self)
     ngx.log(ngx.NOTICE, "=== Serving /swagger/swagger.json - NO AUTH REQUIRED ===")
     ngx.header["Access-Control-Allow-Origin"] = "*"
-    
+
     local ok, openapi_gen = pcall(require, "helper.openapi_generator")
     if not ok then
         ngx.log(ngx.ERR, "Failed to load openapi_generator: ", tostring(openapi_gen))
         return { status = 500, json = { error = "Generator not found" } }
     end
-    
+
     local spec = openapi_gen.generate()
     return { status = 200, json = spec }
 end)
@@ -90,7 +94,7 @@ app:get("/metrics", function(self)
     ngx.log(ngx.NOTICE, "=== Serving /metrics ===")
     ngx.header["Content-Type"] = "text/plain; version=0.0.4"
     ngx.header["Access-Control-Allow-Origin"] = "*"
-    
+
     return {
         layout = false,
         [[# HELP opsapi_up API is running
@@ -120,15 +124,15 @@ end)
 
 app:before_filter(function(self)
     local uri = ngx.var.uri
-    
+
     -- Skip auth for public routes
-    if uri == "/" or uri == "/health" or uri == "/swagger" or 
-       uri == "/api-docs" or uri == "/openapi.json" or uri == "/swagger/swagger.json" or
-       uri == "/metrics" or uri:match("^/auth/") then
+    if uri == "/" or uri == "/health" or uri == "/swagger" or
+        uri == "/api-docs" or uri == "/openapi.json" or uri == "/swagger/swagger.json" or
+        uri == "/metrics" or uri:match("^/auth/") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
     end
-    
+
     ngx.log(ngx.NOTICE, "Applying auth to: ", uri)
     local ok, auth = pcall(require, "helper.auth")
     if ok then
@@ -146,13 +150,13 @@ local function safe_load_routes(route_name)
         ngx.log(ngx.ERR, "Failed to load: ", route_name)
         return false
     end
-    
+
     local ok_init, err = pcall(route_module, app)
     if not ok_init then
         ngx.log(ngx.ERR, "Failed to init: ", route_name, " - ", tostring(err))
         return false
     end
-    
+
     ngx.log(ngx.NOTICE, "Loaded: ", route_name)
     return true
 end
@@ -171,6 +175,37 @@ safe_load_routes("routes.payments")
 safe_load_routes("routes.addresses")
 safe_load_routes("routes.tenants")
 safe_load_routes("routes.permissions")
+
+
+
+
+
+
+safe_load_routes("routes.module")
+
+safe_load_routes("routes.documents")
+safe_load_routes("routes.secrets")
+safe_load_routes("routes.tags")
+safe_load_routes("routes.templates")
+safe_load_routes("routes.projects")
+safe_load_routes("routes.enquiries")
+safe_load_routes("routes.stores")
+safe_load_routes("routes.storeproducts")
+safe_load_routes("routes.customers")
+safe_load_routes("routes.orderitems")
+safe_load_routes("routes.register")
+
+safe_load_routes("routes.checkout")
+safe_load_routes("routes.variants")
+
+
+safe_load_routes("routes.stripe-webhook")   -- Stripe webhook ha
+
+safe_load_routes("routes.order_management") -- Enhanced seller order manag
+safe_load_routes("routes.order-status")     -- Order status workflow manag
+safe_load_routes("routes.buyer-orders")     -- Buyer order manag
+safe_load_routes("routes.notifications")    -- Notifications s
+safe_load_routes("routes.public-store")     -- Public store pro
 
 ngx.log(ngx.NOTICE, "All routes loaded")
 

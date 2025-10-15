@@ -187,8 +187,8 @@ return function(app)
 
             -- Update order status based on delivery status
             local order_status_map = {
-                picked_up = "in_transit",
-                in_transit = "in_transit",
+                picked_up = "shipping",
+                in_transit = "shipping",
                 delivered = "delivered",
                 failed = "cancelled"
             }

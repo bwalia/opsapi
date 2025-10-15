@@ -56,14 +56,15 @@ function CorsMiddleware.enable(app)
         local is_allowed, allowed_origin = isOriginAllowed(origin)
 
         -- Set CORS headers for all requests
-        self.res.headers["Access-Control-Allow-Origin"] = allowed_origin or "localhost:5173,http://localhost:4010,http://localhost:3000,http://localhost:80"
-        self.res.headers["Access-Control-Allow-Credentials"] = "true"
-        self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Email, X-Public-Browse"
+        self.res.headers["Access-Control-Allow-Origin"] = allowed_origin
+        self.res.headers["Access-Control-Allow-Credentials"] = CORS_CONFIG.headers.credentials
+        self.res.headers["Access-Control-Allow-Methods"] = CORS_CONFIG.headers.methods
+        self.res.headers["Access-Control-Allow-Headers"] = CORS_CONFIG.headers.headers
+        self.res.headers["Access-Control-Max-Age"] = CORS_CONFIG.headers.max_age
 
         -- Handle preflight OPTIONS requests
         if self.req.method == "OPTIONS" then
-            return { status = 200 }
+            ngx.exit(204)
         end
     end)
 end
