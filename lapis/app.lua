@@ -41,15 +41,63 @@ app:get("/", function(self)
     }
 end)
 
+-- Professional Health Check Endpoint
 app:get("/health", function(self)
-    return {
-        json = {
-            status = "healthy",
-            timestamp = ngx.time(),
-            version = "1.0.0"
+    local ok, HealthCheck = pcall(require, "helper.health-check")
+    if not ok then
+        ngx.log(ngx.ERR, "Failed to load health-check module: ", tostring(HealthCheck))
+        return {
+            status = 503,
+            json = {
+                status = "unhealthy",
+                error = "Health check module not available",
+                timestamp = ngx.time()
+            }
         }
+    end
+
+    -- Check if detailed parameter is provided
+    local detailed = self.params.detailed == "true" or self.params.detailed == "1"
+
+    local health_status
+    if detailed then
+        -- Full comprehensive health check
+        health_status = HealthCheck.getFullStatus()
+    else
+        -- Quick health check (just database)
+        health_status = HealthCheck.getQuickStatus()
+    end
+
+    -- Set HTTP status code based on health
+    local http_status = 200
+    if health_status.status == "unhealthy" then
+        http_status = 503 -- Service Unavailable
+    elseif health_status.status == "degraded" then
+        http_status = 200 -- OK but with warnings
+    end
+
+    return {
+        status = http_status,
+        json = health_status
     }
 end)
+
+-- Readiness probe (for Kubernetes)
+app:get("/ready", function(self)
+    local ok, HealthCheck = pcall(require, "helper.health-check")
+    if not ok then
+        return { status = 503, json = { ready = false, error = "Health check unavailable" } }
+    end
+
+    local db_check = HealthCheck.checkDatabase()
+
+    if db_check.status == "healthy" then
+        return { status = 200, json = { ready = true, timestamp = ngx.time() } }
+    else
+        return { status = 503, json = { ready = false, reason = db_check.error or "Database unhealthy" } }
+    end
+end)
+
 
 app:get("/swagger", function(self)
     return { render = "swagger" }
@@ -126,9 +174,9 @@ app:before_filter(function(self)
     local uri = ngx.var.uri
 
     -- Skip auth for public routes
-    if uri == "/" or uri == "/health" or uri == "/swagger" or
-        uri == "/api-docs" or uri == "/openapi.json" or uri == "/swagger/swagger.json" or
-        uri == "/metrics" or uri:match("^/auth/") then
+    if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
+        uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
+        uri == "/swagger/swagger.json" or uri == "/metrics" or uri:match("^/auth/") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
     end
@@ -208,12 +256,12 @@ safe_load_routes("routes.notifications")    -- Notifications system
 safe_load_routes("routes.public-store")     -- Public store products
 
 -- Delivery Partner System (Legacy)
-safe_load_routes("routes.delivery-partners")         -- Delivery partner registration & profile
-safe_load_routes("routes.delivery-assignments")      -- Delivery assignments management
-safe_load_routes("routes.delivery-requests")         -- Delivery requests management
-safe_load_routes("routes.delivery-partner-dashboard")-- Delivery partner dashboard
-safe_load_routes("routes.delivery-management")       -- Professional delivery management (accept, update status)
-safe_load_routes("routes.store-delivery-partners")   -- Store delivery partner associations
+safe_load_routes("routes.delivery-partners")          -- Delivery partner registration & profile
+safe_load_routes("routes.delivery-assignments")       -- Delivery assignments management
+safe_load_routes("routes.delivery-requests")          -- Delivery requests management
+safe_load_routes("routes.delivery-partner-dashboard") -- Delivery partner dashboard
+safe_load_routes("routes.delivery-management")        -- Professional delivery management (accept, update status)
+safe_load_routes("routes.store-delivery-partners")    -- Store delivery partner associations
 
 -- Enhanced Delivery Partner System (Geolocation-Based)
 safe_load_routes("routes.delivery-partners-enhanced")    -- Geolocation registration & profile
