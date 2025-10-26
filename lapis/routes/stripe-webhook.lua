@@ -1,6 +1,7 @@
 local respond_to = require("lapis.application").respond_to
 local cjson = require("cjson")
 local Global = require("helper.global")
+local Geocoding = require("lib.Geocoding")
 local db = require("lapis.db")
 local NotificationHelper = require("helper.notification-helper")
 
@@ -186,10 +187,63 @@ local function handle_checkout_session_completed(self, event)
             return { json = { received = true }, status = 200 }
         end
 
-        -- Parse addresses from metadata
-        local billing_address = metadata.billing_address or "{}"
-        local shipping_address = metadata.shipping_address or billing_address
+        -- Extract addresses from Stripe customer_details (actual billing address collected by Stripe)
+        local billing_address = "{}"
+        local shipping_address_str = "{}"
         local customer_notes = metadata.customer_notes or ""
+
+        if session.customer_details and session.customer_details.address then
+            local stripe_address = session.customer_details.address
+            -- Convert Stripe address format to our format
+            local address_obj = {
+                name = session.customer_details.name or "",
+                address1 = (stripe_address.line1 or "") .. (stripe_address.line2 and (" " .. stripe_address.line2) or ""),
+                city = stripe_address.city or "",
+                state = stripe_address.state or "",
+                zip = stripe_address.postal_code or "",
+                country = stripe_address.country or ""
+            }
+            billing_address = cjson.encode(address_obj)
+            shipping_address_str = billing_address
+
+            ngx.log(ngx.INFO, "Extracted address from webhook customer_details: " .. billing_address)
+        else
+            -- Fallback to metadata
+            billing_address = metadata.billing_address or "{}"
+            shipping_address_str = metadata.shipping_address or billing_address
+            ngx.log(ngx.WARN, "No customer_details.address in webhook event, using metadata")
+        end
+
+        -- Parse shipping address and geocode to extract delivery coordinates
+        local delivery_latitude = nil
+        local delivery_longitude = nil
+
+        -- Try to parse shipping address JSON
+        local shipping_addr_success, shipping_addr_obj = pcall(cjson.decode, shipping_address_str)
+        if shipping_addr_success and type(shipping_addr_obj) == "table" then
+            -- Initialize geocoding service
+            local geocoder = Geocoding.new()
+            geocoder:ensureCacheTable()
+
+            -- Attempt to geocode the address
+            local geocode_result, geocode_err = geocoder:geocode(shipping_addr_obj)
+            if geocode_result and geocode_result.lat and geocode_result.lng then
+                delivery_latitude = geocode_result.lat
+                delivery_longitude = geocode_result.lng
+                ngx.log(ngx.INFO, string.format("Webhook: Geocoded delivery address to: %f, %f (source: %s)",
+                    delivery_latitude, delivery_longitude, geocode_result.source or "unknown"))
+            else
+                ngx.log(ngx.WARN, "Webhook: Geocoding failed: " .. (geocode_err or "unknown error") ..
+                    " - Using default coordinates for testing")
+                -- Fallback to default coordinates (Ludhiana, Punjab, India) for testing
+                delivery_latitude = 30.9010
+                delivery_longitude = 75.8573
+            end
+        else
+            ngx.log(ngx.WARN, "Webhook: Could not parse shipping address for geocoding - Using default coordinates")
+            delivery_latitude = 30.9010
+            delivery_longitude = 75.8573
+        end
 
         -- Group cart items by store
         local StoreproductQueries = require("queries.StoreproductQueries")
@@ -251,7 +305,9 @@ local function handle_checkout_session_completed(self, event)
                 total_amount = store_total,
                 currency = currency,
                 billing_address = billing_address,
-                shipping_address = shipping_address,
+                shipping_address = shipping_address_str,
+                delivery_latitude = delivery_latitude,
+                delivery_longitude = delivery_longitude,
                 customer_notes = customer_notes ~= "" and customer_notes or nil,
                 payment_id = payment.id,
                 stripe_customer_id = null_to_nil(session.customer),

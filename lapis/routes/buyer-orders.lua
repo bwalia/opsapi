@@ -82,7 +82,13 @@ return function(app)
                         WHERE osh.order_id = ?
                         ORDER BY osh.created_at ASC
                     ]], order.id)
-                    order.status_history = status_history
+
+                    -- Ensure status_history is always an array (even if empty)
+                    if not status_history or #status_history == 0 then
+                        order.status_history = cjson.empty_array
+                    else
+                        order.status_history = status_history
+                    end
 
                     -- Parse JSON fields
                     if order.billing_address then
@@ -176,7 +182,13 @@ return function(app)
                     WHERE osh.order_id = ?
                     ORDER BY osh.created_at ASC
                 ]], order.id)
-                order.status_history = status_history
+
+                -- Ensure status_history is always an array (even if empty)
+                if not status_history or #status_history == 0 then
+                    order.status_history = cjson.empty_array
+                else
+                    order.status_history = status_history
+                end
 
                 -- Parse JSON fields
                 if order.billing_address then

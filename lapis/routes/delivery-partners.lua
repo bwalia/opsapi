@@ -77,6 +77,62 @@ return function(app)
                     return { json = { error = "Already registered as delivery partner" }, status = 400 }
                 end
 
+                -- Build business address from structured fields
+                local business_address = params.business_address
+                if not business_address or business_address == "" then
+                    -- Build from structured address fields
+                    local address_parts = {}
+                    if params.address_line1 and params.address_line1 ~= "" then
+                        table.insert(address_parts, params.address_line1)
+                    end
+                    if params.address_line2 and params.address_line2 ~= "" then
+                        table.insert(address_parts, params.address_line2)
+                    end
+                    if params.city and params.city ~= "" then
+                        table.insert(address_parts, params.city)
+                    end
+                    if params.state and params.state ~= "" then
+                        table.insert(address_parts, params.state)
+                    end
+                    if params.postal_code and params.postal_code ~= "" then
+                        table.insert(address_parts, params.postal_code)
+                    end
+                    if params.country and params.country ~= "" then
+                        table.insert(address_parts, params.country)
+                    end
+                    business_address = table.concat(address_parts, ", ")
+                end
+
+                -- Geocode the business address to get coordinates
+                local Geocoding = require("lib.Geocoding")
+                local geocoder = Geocoding.new()
+                geocoder:ensureCacheTable()
+
+                local latitude = nil
+                local longitude = nil
+
+                -- Try geocoding with structured address
+                if params.address_line1 or params.city then
+                    local address_obj = {
+                        address1 = params.address_line1 or "",
+                        address2 = params.address_line2 or "",
+                        city = params.city or "",
+                        state = params.state or "",
+                        zip = params.postal_code or "",
+                        country = params.country or "India"
+                    }
+
+                    local geocode_result, geocode_err = geocoder:geocode(address_obj)
+                    if geocode_result and geocode_result.lat and geocode_result.lng then
+                        latitude = geocode_result.lat
+                        longitude = geocode_result.lng
+                        ngx.log(ngx.INFO, string.format("Geocoded delivery partner address to: %f, %f (source: %s)",
+                            latitude, longitude, geocode_result.source or "unknown"))
+                    else
+                        ngx.log(ngx.WARN, "Geocoding failed for delivery partner address: " .. (geocode_err or "unknown error"))
+                    end
+                end
+
                 -- Create delivery partner profile
                 local delivery_partner = DeliveryPartnerQueries.create({
                     user_id = user_id,
@@ -85,7 +141,15 @@ return function(app)
                     contact_person_name = params.contact_person_name,
                     contact_person_phone = params.contact_person_phone,
                     contact_person_email = params.contact_person_email or user_email,
-                    business_address = params.business_address,
+                    business_address = business_address,
+                    address_line1 = params.address_line1,
+                    address_line2 = params.address_line2,
+                    city = params.city,
+                    state = params.state,
+                    postal_code = params.postal_code,
+                    country = params.country or "India",
+                    latitude = latitude,
+                    longitude = longitude,
                     service_type = params.service_type,
                     vehicle_types = cjson.encode(params.vehicle_types or {}),
                     max_daily_capacity = params.max_daily_capacity,
@@ -163,12 +227,27 @@ return function(app)
                 -- Get statistics
                 local stats = DeliveryPartnerQueries.getStatistics(delivery_partner.id)
 
-                -- Parse JSON fields
-                if delivery_partner.vehicle_types then
-                    delivery_partner.vehicle_types = cjson.decode(delivery_partner.vehicle_types)
+                -- Parse JSON fields safely
+                if delivery_partner.vehicle_types and delivery_partner.vehicle_types ~= "" and delivery_partner.vehicle_types ~= ngx.null then
+                    local success, result = pcall(cjson.decode, delivery_partner.vehicle_types)
+                    if success then
+                        delivery_partner.vehicle_types = result
+                    else
+                        delivery_partner.vehicle_types = {}
+                    end
+                else
+                    delivery_partner.vehicle_types = {}
                 end
-                if delivery_partner.verification_documents then
-                    delivery_partner.verification_documents = cjson.decode(delivery_partner.verification_documents)
+
+                if delivery_partner.verification_documents and delivery_partner.verification_documents ~= "" and delivery_partner.verification_documents ~= ngx.null then
+                    local success, result = pcall(cjson.decode, delivery_partner.verification_documents)
+                    if success then
+                        delivery_partner.verification_documents = result
+                    else
+                        delivery_partner.verification_documents = {}
+                    end
+                else
+                    delivery_partner.verification_documents = {}
                 end
 
                 -- Parse areas postal codes
@@ -178,10 +257,22 @@ return function(app)
                     end
                 end
 
+                -- Add verification status information
+                local verification_status = {
+                    is_verified = delivery_partner.is_verified or false,
+                    verification_required = not delivery_partner.is_verified,
+                    verification_url = "/api/v2/delivery-partners/verification/status",
+                    can_accept_orders = delivery_partner.is_verified and delivery_partner.is_active,
+                    message = not delivery_partner.is_verified
+                        and "Your account needs to be verified to accept orders. Please upload required documents."
+                        or nil
+                }
+
                 return { json = {
                     delivery_partner = delivery_partner,
                     service_areas = areas,
-                    statistics = stats
+                    statistics = stats,
+                    verification_status = verification_status
                 }, status = 200 }
             end)
 

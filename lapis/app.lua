@@ -201,11 +201,24 @@ safe_load_routes("routes.variants")
 
 safe_load_routes("routes.stripe-webhook")   -- Stripe webhook ha
 
-safe_load_routes("routes.order_management") -- Enhanced seller order manag
-safe_load_routes("routes.order-status")     -- Order status workflow manag
-safe_load_routes("routes.buyer-orders")     -- Buyer order manag
-safe_load_routes("routes.notifications")    -- Notifications s
-safe_load_routes("routes.public-store")     -- Public store pro
+safe_load_routes("routes.order_management") -- Enhanced seller order management
+safe_load_routes("routes.order-status")     -- Order status workflow management
+safe_load_routes("routes.buyer-orders")     -- Buyer order management
+safe_load_routes("routes.notifications")    -- Notifications system
+safe_load_routes("routes.public-store")     -- Public store products
+
+-- Delivery Partner System (Legacy)
+safe_load_routes("routes.delivery-partners")         -- Delivery partner registration & profile
+safe_load_routes("routes.delivery-assignments")      -- Delivery assignments management
+safe_load_routes("routes.delivery-requests")         -- Delivery requests management
+safe_load_routes("routes.delivery-partner-dashboard")-- Delivery partner dashboard
+safe_load_routes("routes.delivery-management")       -- Professional delivery management (accept, update status)
+safe_load_routes("routes.store-delivery-partners")   -- Store delivery partner associations
+
+-- Enhanced Delivery Partner System (Geolocation-Based)
+safe_load_routes("routes.delivery-partners-enhanced")    -- Geolocation registration & profile
+safe_load_routes("routes.delivery-dashboard-enhanced")   -- Geo-based dashboard with nearby orders
+safe_load_routes("routes.delivery-partner-verification") -- Verification system with document upload
 
 ngx.log(ngx.NOTICE, "All routes loaded")
 

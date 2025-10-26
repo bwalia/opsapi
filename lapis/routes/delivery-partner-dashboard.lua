@@ -104,64 +104,235 @@ return function(app)
 
             -- Check if partner has capacity
             if delivery_partner.current_active_orders >= delivery_partner.max_daily_capacity then
-                return { json = { orders = {}, message = "You are at full capacity" } }
+                return { json = { orders = {}, message = "You have reached maximum capacity for today" } }
             end
 
-            -- Get partner's service areas
-            local areas = db.query([[
-                SELECT DISTINCT city, state, country
-                FROM delivery_partner_areas
-                WHERE delivery_partner_id = ? AND is_active = true
-            ]], delivery_partner.id)
-
-            if not areas or #areas == 0 then
-                return { json = { orders = {}, message = "Please add service areas to your profile" } }
-            end
-
-            -- Build query to find orders in service areas
-            -- Note: shipping_address is stored as JSON, so we need to extract city and state
-            local area_conditions = {}
-            for _, area in ipairs(areas) do
-                table.insert(area_conditions, string.format(
-                    "(shipping_address::json->>'city' = %s AND shipping_address::json->>'state' = %s)",
-                    db.escape_literal(area.city),
-                    db.escape_literal(area.state)
+            -- Check if partner has location set up for geolocation-based matching
+            if not delivery_partner.latitude or not delivery_partner.longitude then
+                -- Fallback to area-based matching if geolocation not set up
+                ngx.log(ngx.WARN, string.format(
+                    "[AREA-BASED] Delivery partner ID=%d has no geolocation data (lat=%s, lng=%s), using area-based matching",
+                    delivery_partner.id,
+                    tostring(delivery_partner.latitude),
+                    tostring(delivery_partner.longitude)
                 ))
+
+                local areas = db.query([[
+                    SELECT DISTINCT city, state, country
+                    FROM delivery_partner_areas
+                    WHERE delivery_partner_id = ? AND is_active = true
+                ]], delivery_partner.id)
+
+                if not areas or #areas == 0 then
+                    ngx.log(ngx.WARN, "[AREA-BASED] No service areas configured for delivery partner ID=" .. delivery_partner.id)
+                    return { json = {
+                        orders = {},
+                        message = "Please set up your service location or add service areas to your profile",
+                        matching_mode = "area_based",
+                        total_matches = 0
+                    } }
+                end
+
+                ngx.log(ngx.INFO, string.format("[AREA-BASED] Found %d service areas configured", #areas))
+
+                -- Build query to find orders in service areas (case-insensitive city matching)
+                local area_conditions = {}
+                for i, area in ipairs(areas) do
+                    ngx.log(ngx.INFO, string.format(
+                        "[AREA-BASED] Service area #%d: city='%s', state='%s', country='%s'",
+                        i, area.city or "N/A", area.state or "N/A", area.country or "N/A"
+                    ))
+                    table.insert(area_conditions, string.format(
+                        "(LOWER(shipping_address::json->>'city') = LOWER(%s))",
+                        db.escape_literal(area.city)
+                    ))
+                end
+
+                local query = string.format([[
+                    SELECT
+                        o.id,
+                        o.uuid,
+                        o.order_number,
+                        o.total_amount,
+                        o.status,
+                        o.shipping_address,
+                        o.billing_address,
+                        o.delivery_latitude,
+                        o.delivery_longitude,
+                        shipping_address::json->>'city' as delivery_city,
+                        shipping_address::json->>'state' as delivery_state,
+                        shipping_address::json->>'zip' as delivery_postal_code,
+                        shipping_address::json->>'address1' as delivery_address,
+                        shipping_address::json->>'name' as customer_name,
+                        o.created_at,
+                        s.name as store_name,
+                        s.slug as store_slug,
+                        s.contact_phone as store_phone,
+                        NULL::numeric as distance_km
+                    FROM orders o
+                    INNER JOIN stores s ON o.store_id = s.id
+                    LEFT JOIN order_delivery_assignments oda ON o.id = oda.order_id
+                    LEFT JOIN delivery_requests dr ON o.id = dr.order_id
+                        AND dr.delivery_partner_id = %d
+                        AND dr.status = 'pending'
+                    WHERE o.status IN ('pending', 'confirmed', 'accepted', 'preparing', 'packing', 'processing')
+                    AND oda.id IS NULL
+                    AND dr.id IS NULL
+                    AND o.shipping_address IS NOT NULL
+                    AND o.shipping_address != '{}'
+                    AND (%s)
+                    ORDER BY o.created_at DESC
+                    LIMIT 50
+                ]], delivery_partner.id, table.concat(area_conditions, " OR "))
+
+                ngx.log(ngx.INFO, "[AREA-BASED] Executing query: " .. query)
+
+                local success, orders = pcall(function()
+                    return db.query(query)
+                end)
+
+                if not success then
+                    ngx.log(ngx.ERR, "[AREA-BASED ERROR] Failed to execute area query: " .. tostring(orders))
+                    return {
+                        status = 500,
+                        json = {
+                            error = "Failed to find orders in service areas",
+                            details = tostring(orders)
+                        }
+                    }
+                end
+
+                ngx.log(ngx.INFO, string.format("[AREA-BASED] Found %d orders in service areas", orders and #orders or 0))
+
+                -- Log each matched order
+                if orders and #orders > 0 then
+                    for i, order in ipairs(orders) do
+                        ngx.log(ngx.INFO, string.format(
+                            "[AREA-BASED] Match #%d: Order %s (ID=%d) - City: %s, State: %s",
+                            i, order.order_number or "N/A", order.id, order.delivery_city or "N/A", order.delivery_state or "N/A"
+                        ))
+                    end
+                else
+                    ngx.log(ngx.WARN, "[AREA-BASED] No orders matched the configured service areas")
+                end
+
+                return { json = {
+                    orders = orders or {},
+                    matching_mode = "area_based",
+                    total_matches = orders and #orders or 0,
+                    service_areas = areas
+                } }
             end
 
-            local query = string.format([[
-                SELECT
-                    o.id,
-                    o.uuid,
-                    o.order_number,
-                    o.total_amount,
-                    o.status,
-                    o.shipping_address,
-                    shipping_address::json->>'city' as delivery_city,
-                    shipping_address::json->>'state' as delivery_state,
-                    shipping_address::json->>'postal_code' as delivery_postal_code,
-                    shipping_address::json->>'address' as delivery_address,
-                    o.created_at,
-                    s.name as store_name,
-                    s.slug as store_slug,
-                    s.contact_phone as store_phone
-                FROM orders o
-                INNER JOIN stores s ON o.store_id = s.id
-                LEFT JOIN order_delivery_assignments oda ON o.id = oda.order_id
-                LEFT JOIN delivery_requests dr ON o.id = dr.order_id
-                    AND dr.delivery_partner_id = %d
-                    AND dr.status = 'pending'
-                WHERE o.status IN ('pending', 'confirmed', 'accepted', 'preparing', 'packing', 'processing')
-                AND oda.id IS NULL
-                AND dr.id IS NULL
-                AND (%s)
-                ORDER BY o.created_at DESC
+            -- Use geolocation-based matching with Haversine formula (works without PostGIS)
+            local service_radius = delivery_partner.service_radius_km or 10
+
+            ngx.log(ngx.INFO, string.format(
+                "[GEOLOCATION] Finding orders within %f km radius for delivery partner ID=%d at location: lat=%f, lng=%f",
+                service_radius, delivery_partner.id, delivery_partner.latitude, delivery_partner.longitude
+            ))
+
+            -- Haversine formula to calculate great-circle distance between two points
+            -- Formula: distance = R * 2 * asin(sqrt(sin²(Δlat/2) + cos(lat1) * cos(lat2) * sin²(Δlon/2)))
+            -- Where R = Earth's radius in km (6371)
+            local query = [[
+                SELECT * FROM (
+                    SELECT
+                        o.id,
+                        o.uuid,
+                        o.order_number,
+                        o.total_amount,
+                        o.status,
+                        o.shipping_address,
+                        o.billing_address,
+                        o.delivery_latitude,
+                        o.delivery_longitude,
+                        shipping_address::json->>'city' as delivery_city,
+                        shipping_address::json->>'state' as delivery_state,
+                        shipping_address::json->>'zip' as delivery_postal_code,
+                        shipping_address::json->>'address1' as delivery_address,
+                        shipping_address::json->>'name' as customer_name,
+                        o.created_at,
+                        s.name as store_name,
+                        s.slug as store_slug,
+                        s.contact_phone as store_phone,
+                        ROUND(
+                            CAST(
+                                6371 * 2 * ASIN(
+                                    SQRT(
+                                        POWER(SIN(RADIANS(o.delivery_latitude - ?::numeric) / 2), 2) +
+                                        COS(RADIANS(?::numeric)) * COS(RADIANS(o.delivery_latitude)) *
+                                        POWER(SIN(RADIANS(o.delivery_longitude - ?::numeric) / 2), 2)
+                                    )
+                                ) AS numeric
+                            ), 2
+                        ) as distance_km
+                    FROM orders o
+                    INNER JOIN stores s ON o.store_id = s.id
+                    LEFT JOIN order_delivery_assignments oda ON o.id = oda.order_id
+                    LEFT JOIN delivery_requests dr ON o.id = dr.order_id
+                        AND dr.delivery_partner_id = ?
+                        AND dr.status = 'pending'
+                    WHERE o.status IN ('pending', 'confirmed', 'accepted', 'preparing', 'packing', 'processing')
+                    AND oda.id IS NULL
+                    AND dr.id IS NULL
+                    AND o.delivery_latitude IS NOT NULL
+                    AND o.delivery_longitude IS NOT NULL
+                ) subquery
+                WHERE distance_km <= ?
+                ORDER BY distance_km ASC, created_at DESC
                 LIMIT 50
-            ]], delivery_partner.id, table.concat(area_conditions, " OR "))
+            ]]
 
-            local orders = db.query(query)
+            local success, orders = pcall(function()
+                return db.query(query,
+                    delivery_partner.latitude,  -- For lat difference calculation
+                    delivery_partner.latitude,  -- For COS calculation
+                    delivery_partner.longitude, -- For lng difference calculation
+                    delivery_partner.id,        -- For delivery_requests check
+                    service_radius              -- Maximum distance in km
+                )
+            end)
 
-            return { json = { orders = orders or {} } }
+            if not success then
+                ngx.log(ngx.ERR, "[GEOLOCATION ERROR] Failed to execute distance query: " .. tostring(orders))
+                return {
+                    status = 500,
+                    json = {
+                        error = "Failed to find nearby orders",
+                        details = tostring(orders)
+                    }
+                }
+            end
+
+            ngx.log(ngx.INFO, string.format(
+                "[GEOLOCATION] Found %d orders within %f km radius",
+                orders and #orders or 0,
+                service_radius
+            ))
+
+            -- Log each matched order with distance details
+            if orders and #orders > 0 then
+                for i, order in ipairs(orders) do
+                    ngx.log(ngx.INFO, string.format(
+                        "[GEOLOCATION] Match #%d: Order %s (ID=%d) - Distance: %f km - City: %s",
+                        i, order.order_number or "N/A", order.id, order.distance_km or 0, order.delivery_city or "N/A"
+                    ))
+                end
+            else
+                ngx.log(ngx.WARN, "[GEOLOCATION] No orders found within service radius. Check if there are orders with geolocation data in the system.")
+            end
+
+            return { json = {
+                orders = orders or {},
+                partner_location = {
+                    latitude = delivery_partner.latitude,
+                    longitude = delivery_partner.longitude,
+                    service_radius_km = service_radius
+                },
+                matching_mode = "geolocation_based",
+                total_matches = orders and #orders or 0
+            } }
         end)
     }))
 
@@ -325,24 +496,45 @@ return function(app)
             end
 
             -- Create delivery request
-            local request = db.insert("delivery_requests", {
-                uuid = require("utils.global").generateUUID(),
-                order_id = params.order_id,
-                delivery_partner_id = delivery_partner.id,
-                request_type = "partner_to_seller",
-                status = "pending",
-                proposed_fee = proposed_fee,
-                message = params.message,
-                expires_at = db.format_date(os.time() + 86400),  -- 24 hours
-                created_at = db.format_date(),
-                updated_at = db.format_date()
-            }, "id")
+            local success, result = pcall(function()
+                local request_id = db.insert("delivery_requests", {
+                    uuid = db.raw("gen_random_uuid()"),
+                    order_id = params.order_id,
+                    delivery_partner_id = delivery_partner.id,
+                    request_type = "partner_to_seller",
+                    status = "pending",
+                    proposed_fee = proposed_fee,
+                    message = params.message or "",
+                    expires_at = db.raw("NOW() + INTERVAL '24 hours'"),
+                    created_at = db.raw("NOW()"),
+                    updated_at = db.raw("NOW()")
+                }, "id")
 
-            local created_request = db.query("SELECT * FROM delivery_requests WHERE id = ?", request.id)[1]
+                -- The insert returns the ID value directly when specifying return column
+                local request_id_value = type(request_id) == "table" and request_id.id or request_id
+
+                -- Fetch the created request
+                local created_request = db.query("SELECT * FROM delivery_requests WHERE id = ?", request_id_value)[1]
+
+                if not created_request then
+                    error("Failed to retrieve created delivery request")
+                end
+
+                ngx.log(ngx.INFO, string.format("Delivery request created: ID=%d for order=%d by partner=%d",
+                    request_id_value, params.order_id, delivery_partner.id))
+
+                return created_request
+            end)
+
+            if not success then
+                ngx.log(ngx.ERR, "Error creating delivery request: " .. tostring(result))
+                return { status = 500, json = { error = "Failed to create delivery request: " .. tostring(result) } }
+            end
 
             return { json = {
+                success = true,
                 message = "Delivery request created successfully",
-                request = created_request
+                request = result
             }}
         end)
     }))
