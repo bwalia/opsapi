@@ -474,21 +474,47 @@ return function(app)
                     session_metadata = session.metadata or {}
 
                     -- Extract addresses from Stripe's customer_details (actual billing address collected by Stripe)
+                    -- Professional error handling for optional address fields
                     if session.customer_details and session.customer_details.address then
                         local stripe_address = session.customer_details.address
-                        -- Convert Stripe address format to our format
-                        local address_obj = {
-                            name = session.customer_details.name or "",
-                            address1 = (stripe_address.line1 or "") .. (stripe_address.line2 and (" " .. stripe_address.line2) or ""),
-                            city = stripe_address.city or "",
-                            state = stripe_address.state or "",
-                            zip = stripe_address.postal_code or "",
-                            country = stripe_address.country or ""
-                        }
-                        billing_address_from_session = cjson.encode(address_obj)
-                        shipping_address_from_session = billing_address_from_session -- Use billing as shipping for now
 
-                        ngx.log(ngx.INFO, "Extracted address from Stripe customer_details: " .. billing_address_from_session)
+                        -- Safe string conversion with null checks
+                        local function safe_string(value)
+                            if value == nil or value == ngx.null then
+                                return ""
+                            end
+                            return tostring(value)
+                        end
+
+                        -- Build address line 1 safely
+                        local line1 = safe_string(stripe_address.line1)
+                        local line2 = safe_string(stripe_address.line2)
+                        local address1_combined = line1
+                        if line2 ~= "" then
+                            address1_combined = line1 .. " " .. line2
+                        end
+
+                        -- Convert Stripe address format to our format with safe defaults
+                        local address_obj = {
+                            name = safe_string(session.customer_details.name),
+                            address1 = address1_combined,
+                            city = safe_string(stripe_address.city),
+                            state = safe_string(stripe_address.state),
+                            zip = safe_string(stripe_address.postal_code),
+                            country = safe_string(stripe_address.country)
+                        }
+
+                        local success, encoded = pcall(function()
+                            return cjson.encode(address_obj)
+                        end)
+
+                        if success then
+                            billing_address_from_session = encoded
+                            shipping_address_from_session = encoded -- Use billing as shipping for now
+                            ngx.log(ngx.INFO, "[PAYMENT] Extracted address from Stripe customer_details")
+                        else
+                            ngx.log(ngx.ERR, "[PAYMENT ERROR] Failed to encode address JSON: " .. tostring(encoded))
+                        end
                     else
                         -- Fallback to metadata (if we stored it there)
                         if session_metadata.billing_address then
@@ -497,7 +523,7 @@ return function(app)
                         if session_metadata.shipping_address then
                             shipping_address_from_session = session_metadata.shipping_address
                         end
-                        ngx.log(ngx.WARN, "No customer_details.address found in session, falling back to metadata")
+                        ngx.log(ngx.WARN, "[PAYMENT] No customer_details.address found in session, falling back to metadata")
                     end
 
                     ngx.log(ngx.INFO, "Retrieved session with customer address")
@@ -667,29 +693,52 @@ return function(app)
                     end
                 end
 
-                -- Geocode the shipping address to get coordinates
+                -- Geocode the shipping address to get coordinates (Professional error handling)
                 local shipping_addr_success, shipping_addr_obj = pcall(cjson.decode, shipping_address_str)
                 if shipping_addr_success and type(shipping_addr_obj) == "table" then
-                    -- Initialize geocoding service
-                    local geocoder = Geocoding.new()
-                    geocoder:ensureCacheTable()
+                    -- Check if address has enough information for geocoding
+                    local has_address_info = false
+                    if shipping_addr_obj.address1 and shipping_addr_obj.address1 ~= "" then
+                        has_address_info = true
+                    elseif shipping_addr_obj.city and shipping_addr_obj.city ~= "" then
+                        has_address_info = true
+                    end
 
-                    -- Attempt to geocode the address
-                    local geocode_result, geocode_err = geocoder:geocode(shipping_addr_obj)
-                    if geocode_result and geocode_result.lat and geocode_result.lng then
-                        delivery_latitude = geocode_result.lat
-                        delivery_longitude = geocode_result.lng
-                        ngx.log(ngx.INFO, string.format("Geocoded delivery address to: %f, %f (source: %s)",
-                            delivery_latitude, delivery_longitude, geocode_result.source or "unknown"))
+                    if has_address_info then
+                        -- Initialize geocoding service
+                        local geocode_success, geocode_error = pcall(function()
+                            local geocoder = Geocoding.new()
+                            geocoder:ensureCacheTable()
+
+                            -- Attempt to geocode the address
+                            local geocode_result, geocode_err = geocoder:geocode(shipping_addr_obj)
+                            if geocode_result and geocode_result.lat and geocode_result.lng then
+                                delivery_latitude = geocode_result.lat
+                                delivery_longitude = geocode_result.lng
+                                ngx.log(ngx.INFO, string.format("[GEOCODING SUCCESS] Delivery address: %f, %f (source: %s)",
+                                    delivery_latitude, delivery_longitude, geocode_result.source or "unknown"))
+                            else
+                                ngx.log(ngx.WARN, "[GEOCODING] Failed: " .. (geocode_err or "unknown error") ..
+                                    " - Will use default coordinates")
+                                -- Fallback to default coordinates (Ludhiana, Punjab, India)
+                                delivery_latitude = 30.9010
+                                delivery_longitude = 75.8573
+                            end
+                        end)
+
+                        if not geocode_success then
+                            ngx.log(ngx.ERR, "[GEOCODING ERROR] Exception during geocoding: " .. tostring(geocode_error))
+                            -- Use default coordinates on error
+                            delivery_latitude = 30.9010
+                            delivery_longitude = 75.8573
+                        end
                     else
-                        ngx.log(ngx.WARN, "Geocoding failed: " .. (geocode_err or "unknown error") ..
-                            " - Using default coordinates for testing")
-                        -- Fallback to default coordinates (Ludhiana, Punjab, India) for testing
+                        ngx.log(ngx.WARN, "[GEOCODING] Insufficient address information - Using default coordinates")
                         delivery_latitude = 30.9010
                         delivery_longitude = 75.8573
                     end
                 else
-                    ngx.log(ngx.WARN, "Could not parse shipping address for geocoding - Using default coordinates")
+                    ngx.log(ngx.WARN, "[GEOCODING] Could not parse shipping address - Using default coordinates")
                     delivery_latitude = 30.9010
                     delivery_longitude = 75.8573
                 end

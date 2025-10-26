@@ -57,6 +57,25 @@ return function(app)
                 end
             end
 
+            -- Professional validation: Check order status
+            -- Delivery partner should only be assigned when order is being prepared/packed
+            local valid_statuses_for_assignment = {
+                confirmed = true,
+                processing = true,
+                packing = true
+            }
+
+            if not valid_statuses_for_assignment[order.status] then
+                return {
+                    status = 400,
+                    json = {
+                        error = "Delivery partner can only be assigned when order is confirmed, processing, or packing",
+                        current_status = order.status,
+                        order_number = order.order_number
+                    }
+                }
+            end
+
             -- Check if order already has an assignment
             local existing_assignment = db.query("SELECT * FROM order_delivery_assignments WHERE order_id = ?", params.order_id)[1]
             if existing_assignment then
@@ -248,59 +267,110 @@ return function(app)
                 return { status = 400, json = { error = "Delivery partner is at full capacity" } }
             end
 
-            -- Accept request
-            local success, updated_request = pcall(function()
-                return DeliveryRequestQueries.accept(request.id, self.params.response_message)
-            end)
+            -- Use transaction for atomicity
+            local transaction_success, transaction_result = pcall(function()
+                -- Start transaction
+                db.query("BEGIN")
 
-            if not success then
-                ngx.log(ngx.ERR, "Failed to accept request: " .. tostring(updated_request))
-                return { status = 500, json = { error = "Failed to accept request" } }
-            end
+                -- Accept request
+                local updated_request = DeliveryRequestQueries.accept(request.id, self.params.response_message)
+                if not updated_request then
+                    error("Failed to accept delivery request")
+                end
 
-            -- Create delivery assignment
-            local assignment_success, assignment = pcall(function()
-                return OrderDeliveryAssignmentQueries.create({
+                -- Create delivery assignment with "accepted" status
+                local assignment = OrderDeliveryAssignmentQueries.create({
                     order_id = request.order_id,
                     delivery_partner_id = request.delivery_partner_id,
                     assignment_type = request.request_type,
                     delivery_fee = request.proposed_fee,
                     pickup_address = order.shipping_address or "",
                     delivery_address = order.shipping_address or "",
-                    status = "pending"
+                    status = "accepted"  -- Assignment is already accepted by seller
                 })
+                if not assignment then
+                    error("Failed to create delivery assignment")
+                end
+
+                -- Update order with delivery partner
+                -- IMPORTANT: Only update delivery partner assignment, do NOT change order status
+                -- The seller must complete their workflow (confirmed → processing → packing) first
+                -- Order status should only change to "shipping" when delivery partner picks up
+                db.update("orders", {
+                    delivery_partner_id = request.delivery_partner_id,
+                    updated_at = db.format_date()
+                }, "id = ?", request.order_id)
+
+                ngx.log(ngx.INFO, string.format(
+                    "[ORDER LIFECYCLE] Delivery partner assigned to order #%d (status: %s, partner #%d)",
+                    request.order_id, order.status, request.delivery_partner_id
+                ))
+
+                -- Increment partner's active orders
+                db.update("delivery_partners", {
+                    current_active_orders = db.raw("current_active_orders + 1")
+                }, "id = ?", request.delivery_partner_id)
+
+                -- Reject all other pending requests for this order
+                db.query([[
+                    UPDATE delivery_requests
+                    SET status = 'rejected',
+                        response_message = 'Order already assigned to another partner',
+                        responded_at = ?,
+                        updated_at = ?
+                    WHERE order_id = ? AND id != ? AND status = 'pending'
+                ]], db.format_date(), db.format_date(), request.order_id, request.id)
+
+                ngx.log(ngx.INFO, string.format(
+                    "[ORDER LIFECYCLE] Other pending delivery requests for order #%d rejected automatically",
+                    request.order_id
+                ))
+
+                -- Create order status history entry (for delivery partner assignment, not status change)
+                db.insert("order_status_history", {
+                    order_id = request.order_id,
+                    old_status = order.status,
+                    new_status = order.status,  -- Status remains the same
+                    changed_by_user_id = user_id,
+                    notes = string.format(
+                        "Delivery partner '%s' assigned to order.",
+                        delivery_partner.company_name or "Unknown"
+                    ),
+                    created_at = db.format_date()
+                })
+
+                -- Commit transaction
+                db.query("COMMIT")
+
+                return {
+                    request = updated_request,
+                    assignment = assignment,
+                    order_status = order.status  -- Return current status, not changed
+                }
             end)
 
-            if not assignment_success then
-                ngx.log(ngx.ERR, "Failed to create assignment: " .. tostring(assignment))
-                return { status = 500, json = { error = "Failed to create delivery assignment" } }
+            if not transaction_success then
+                -- Rollback on error
+                pcall(function() db.query("ROLLBACK") end)
+                ngx.log(ngx.ERR, "[ORDER LIFECYCLE] Failed to accept delivery request: " .. tostring(transaction_result))
+                return { status = 500, json = { error = "Failed to accept delivery request", details = tostring(transaction_result) } }
             end
 
-            -- Update order with delivery partner
-            db.update("orders", {
-                delivery_partner_id = request.delivery_partner_id,
-                updated_at = db.format_date()
-            }, "id = ?", request.order_id)
-
-            -- Increment partner's active orders
-            db.update("delivery_partners", {
-                current_active_orders = db.raw("current_active_orders + 1")
-            }, "id = ?", request.delivery_partner_id)
-
-            -- Reject all other pending requests for this order
-            db.query([[
-                UPDATE delivery_requests
-                SET status = 'rejected',
-                    response_message = 'Order already assigned to another partner',
-                    responded_at = ?,
-                    updated_at = ?
-                WHERE order_id = ? AND id != ? AND status = 'pending'
-            ]], db.format_date(), db.format_date(), request.order_id, request.id)
+            ngx.log(ngx.INFO, string.format(
+                "[ORDER LIFECYCLE] Delivery request accepted successfully. Order #%d assigned to partner #%d. Status: packing",
+                request.order_id, request.delivery_partner_id
+            ))
 
             return { json = {
-                message = "Request accepted successfully",
-                request = updated_request,
-                assignment = assignment
+                success = true,
+                message = "Delivery request accepted successfully. Order is being packed for delivery.",
+                request = transaction_result.request,
+                assignment = transaction_result.assignment,
+                order = {
+                    id = request.order_id,
+                    status = transaction_result.order_status,
+                    delivery_partner_id = request.delivery_partner_id
+                }
             }}
         end)
     }))
@@ -369,6 +439,63 @@ return function(app)
 
             return { json = {
                 message = "Request rejected successfully",
+                request = updated_request
+            }}
+        end)
+    }))
+
+    -- Cancel delivery request (delivery partner cancels their own request)
+    app:match("/api/v2/delivery-requests/:uuid/cancel", respond_to({
+        PUT = AuthMiddleware.requireAuth(function(self)
+            local uuid = self.params.uuid
+            -- Get user ID from current_user
+            local user = db.query("SELECT id FROM users WHERE uuid = ?", self.current_user.uuid)[1]
+            if not user then
+                return { status = 404, json = { error = "User not found" } }
+            end
+            local user_id = user.id
+
+            -- Get request
+            local request = db.query("SELECT * FROM delivery_requests WHERE uuid = ?", uuid)[1]
+            if not request then
+                return { status = 404, json = { error = "Request not found" } }
+            end
+
+            if request.status ~= "pending" then
+                return { status = 400, json = { error = "Only pending requests can be cancelled" } }
+            end
+
+            -- Get delivery partner info
+            local delivery_partner = db.query("SELECT * FROM delivery_partners WHERE id = ?", request.delivery_partner_id)[1]
+            if not delivery_partner then
+                return { status = 404, json = { error = "Delivery partner not found" } }
+            end
+
+            -- Verify that the delivery partner is cancelling their own request
+            if delivery_partner.user_id ~= user_id then
+                return { status = 403, json = { error = "You can only cancel your own requests" } }
+            end
+
+            -- Only allow cancelling partner_to_seller requests
+            if request.request_type ~= "partner_to_seller" then
+                return { status = 400, json = { error = "You can only cancel requests that you initiated" } }
+            end
+
+            -- Cancel the request
+            local success, updated_request = pcall(function()
+                return DeliveryRequestQueries.updateStatus(request.id, "cancelled", "Cancelled by delivery partner")
+            end)
+
+            if not success then
+                ngx.log(ngx.ERR, "Failed to cancel request: " .. tostring(updated_request))
+                return { status = 500, json = { error = "Failed to cancel request" } }
+            end
+
+            ngx.log(ngx.INFO, string.format("[DELIVERY REQUEST] Cancelled by partner: request_id=%d, partner_id=%d",
+                request.id, delivery_partner.id))
+
+            return { json = {
+                message = "Request cancelled successfully",
                 request = updated_request
             }}
         end)

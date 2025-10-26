@@ -123,7 +123,7 @@ return function(app)
         end)
     }))
 
-    -- Update delivery assignment status
+    -- Update delivery assignment status (Professional with state machine validation)
     app:match("/api/v2/delivery-assignments/:uuid/status", respond_to({
         PUT = AuthMiddleware.requireAuth(function(self)
             local uuid = self.params.uuid
@@ -145,79 +145,147 @@ return function(app)
             end)
 
             if not success or not assignment then
+                ngx.log(ngx.ERR, "Assignment not found: " .. uuid)
                 return { status = 404, json = { error = "Assignment not found" } }
             end
 
-            -- Verify user is the delivery partner
-            if assignment.delivery_partner_user_id ~= user_id then
-                return { status = 403, json = { error = "Only the assigned delivery partner can update status" } }
+            -- Verify user is the delivery partner OR store owner (for handover)
+            local is_delivery_partner = assignment.delivery_partner_user_id == user_id
+            local is_store_owner = assignment.store_owner_id == user_id
+
+            if not is_delivery_partner and not is_store_owner then
+                return { status = 403, json = { error = "You don't have permission to update this assignment" } }
             end
 
-            -- Validate status transitions
-            local valid_statuses = {"pending", "accepted", "rejected", "picked_up", "in_transit", "delivered", "failed"}
-            local is_valid = false
-            for _, status in ipairs(valid_statuses) do
-                if status == params.status then
-                    is_valid = true
-                    break
-                end
-            end
-
-            if not is_valid then
-                return { status = 400, json = { error = "Invalid status" } }
-            end
-
-            -- Update assignment status
-            local additional_data = {}
-            if params.proof_of_delivery then
-                additional_data.proof_of_delivery = params.proof_of_delivery
-            end
-            if params.notes then
-                additional_data.notes = params.notes
-            end
-
-            local success, updated_assignment = pcall(function()
-                return OrderDeliveryAssignmentQueries.updateStatus(assignment.id, params.status, additional_data)
-            end)
-
-            if not success then
-                ngx.log(ngx.ERR, "Failed to update assignment status: " .. tostring(updated_assignment))
-                return { status = 500, json = { error = "Failed to update assignment status" } }
-            end
-
-            -- Update order status based on delivery status
-            local order_status_map = {
-                picked_up = "shipping",
-                in_transit = "shipping",
-                delivered = "delivered",
-                failed = "cancelled"
+            -- Professional state machine for status transitions
+            local valid_transitions = {
+                pending = { accepted = true, rejected = true },
+                accepted = { picked_up = true, cancelled = true },
+                picked_up = { in_transit = true, cancelled = true },
+                in_transit = { delivered = true, failed = true },
+                -- Terminal states
+                delivered = {},
+                failed = {},
+                rejected = {},
+                cancelled = {}
             }
 
-            if order_status_map[params.status] then
-                db.update("orders", {
-                    status = order_status_map[params.status],
-                    updated_at = db.format_date()
-                }, "id = ?", assignment.order_id)
+            local current_status = assignment.status
+            local new_status = params.status
+
+            -- Validate transition
+            if not valid_transitions[current_status] then
+                return { status = 400, json = { error = "Invalid current status: " .. current_status } }
             end
 
-            -- If delivered or failed, decrement partner's active orders
-            if params.status == "delivered" or params.status == "failed" then
-                db.update("delivery_partners", {
-                    current_active_orders = db.raw("GREATEST(current_active_orders - 1, 0)")
-                }, "id = ?", assignment.delivery_partner_id)
+            if not valid_transitions[current_status][new_status] then
+                return { status = 400, json = {
+                    error = string.format("Invalid status transition from '%s' to '%s'", current_status, new_status),
+                    current_status = current_status,
+                    allowed_transitions = valid_transitions[current_status]
+                }}
+            end
 
-                -- If delivered, increment successful deliveries
-                if params.status == "delivered" then
-                    db.update("delivery_partners", {
-                        total_deliveries = db.raw("total_deliveries + 1"),
-                        successful_deliveries = db.raw("successful_deliveries + 1")
-                    }, "id = ?", assignment.delivery_partner_id)
+            -- Special authorization rules
+            if new_status == "picked_up" and not is_delivery_partner then
+                return { status = 403, json = { error = "Only delivery partner can mark order as picked up" } }
+            end
+
+            if new_status == "delivered" and not is_delivery_partner then
+                return { status = 403, json = { error = "Only delivery partner can mark order as delivered" } }
+            end
+
+            -- Use transaction for atomicity
+            local transaction_success, transaction_result = pcall(function()
+                db.query("BEGIN")
+
+                -- Update assignment status
+                local additional_data = {}
+                if params.proof_of_delivery then
+                    additional_data.proof_of_delivery = params.proof_of_delivery
                 end
+                if params.notes then
+                    additional_data.notes = params.notes
+                end
+
+                local updated_assignment = OrderDeliveryAssignmentQueries.updateStatus(assignment.id, new_status, additional_data)
+                if not updated_assignment then
+                    error("Failed to update assignment status")
+                end
+
+                -- Update order status based on delivery status
+                local order_status_map = {
+                    picked_up = "shipping",
+                    in_transit = "shipping",
+                    delivered = "delivered",
+                    failed = "cancelled",
+                    cancelled = "cancelled"
+                }
+
+                local new_order_status = order_status_map[new_status]
+                if new_order_status then
+                    db.update("orders", {
+                        status = new_order_status,
+                        updated_at = db.format_date()
+                    }, "id = ?", assignment.order_id)
+
+                    -- Record order status history
+                    db.insert("order_status_history", {
+                        order_id = assignment.order_id,
+                        old_status = assignment.order_status,
+                        new_status = new_order_status,
+                        changed_by_user_id = user_id,
+                        notes = params.notes or string.format("Delivery status updated to '%s'", new_status),
+                        created_at = db.format_date()
+                    })
+
+                    ngx.log(ngx.INFO, string.format(
+                        "[DELIVERY STATUS] Order #%d status updated: %s → %s (Assignment status: %s → %s)",
+                        assignment.order_id, assignment.order_status, new_order_status, current_status, new_status
+                    ))
+                end
+
+                -- If delivered or failed, decrement partner's active orders
+                if new_status == "delivered" or new_status == "failed" or new_status == "cancelled" then
+                    db.update("delivery_partners", {
+                        current_active_orders = db.raw("GREATEST(current_active_orders - 1, 0)")
+                    }, "id = ?", assignment.delivery_partner_id)
+
+                    -- If delivered, increment successful deliveries
+                    if new_status == "delivered" then
+                        db.update("delivery_partners", {
+                            total_deliveries = db.raw("total_deliveries + 1"),
+                            successful_deliveries = db.raw("successful_deliveries + 1")
+                        }, "id = ?", assignment.delivery_partner_id)
+
+                        ngx.log(ngx.INFO, string.format(
+                            "[DELIVERY SUCCESS] Partner #%d completed delivery for Order #%d. Total deliveries: +1",
+                            assignment.delivery_partner_id, assignment.order_id
+                        ))
+                    end
+                end
+
+                db.query("COMMIT")
+
+                return {
+                    assignment = updated_assignment,
+                    order_status = new_order_status,
+                    previous_status = current_status
+                }
+            end)
+
+            if not transaction_success then
+                pcall(function() db.query("ROLLBACK") end)
+                ngx.log(ngx.ERR, "[DELIVERY STATUS ERROR] Failed to update: " .. tostring(transaction_result))
+                return { status = 500, json = { error = "Failed to update assignment status", details = tostring(transaction_result) } }
             end
 
             return { json = {
-                message = "Assignment status updated successfully",
-                assignment = updated_assignment
+                success = true,
+                message = string.format("Assignment status updated from '%s' to '%s'", current_status, new_status),
+                assignment = transaction_result.assignment,
+                order_status = transaction_result.order_status,
+                previous_status = transaction_result.previous_status
             }}
         end)
     }))

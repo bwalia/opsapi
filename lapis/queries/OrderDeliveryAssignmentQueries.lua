@@ -55,10 +55,44 @@ function OrderDeliveryAssignmentQueries.findByPartnerId(delivery_partner_id, sta
     offset = offset or 0
 
     local query
-    if status then
+
+    -- Handle special status filters
+    if status == "active" then
+        -- "active" means any assignment that is not completed or failed
         query = [[
-            SELECT oda.*, o.order_number, o.total_amount, o.customer_id,
-                   s.name as store_name, s.slug as store_slug
+            SELECT oda.*, o.order_number, o.total_amount, o.customer_id, o.status as order_status,
+                   o.shipping_address, o.delivery_latitude, o.delivery_longitude,
+                   s.name as store_name, s.slug as store_slug, s.contact_phone as store_phone
+            FROM order_delivery_assignments oda
+            INNER JOIN orders o ON oda.order_id = o.id
+            INNER JOIN stores s ON o.store_id = s.id
+            WHERE oda.delivery_partner_id = ?
+            AND oda.status IN ('pending', 'accepted', 'picked_up', 'in_transit')
+            ORDER BY oda.created_at DESC
+            LIMIT ? OFFSET ?
+        ]]
+        return db.query(query, delivery_partner_id, limit, offset)
+    elseif status == "completed" then
+        -- "completed" means delivered or failed
+        query = [[
+            SELECT oda.*, o.order_number, o.total_amount, o.customer_id, o.status as order_status,
+                   o.shipping_address, o.delivery_latitude, o.delivery_longitude,
+                   s.name as store_name, s.slug as store_slug, s.contact_phone as store_phone
+            FROM order_delivery_assignments oda
+            INNER JOIN orders o ON oda.order_id = o.id
+            INNER JOIN stores s ON o.store_id = s.id
+            WHERE oda.delivery_partner_id = ?
+            AND oda.status IN ('delivered', 'failed', 'cancelled')
+            ORDER BY oda.actual_delivery_time DESC, oda.created_at DESC
+            LIMIT ? OFFSET ?
+        ]]
+        return db.query(query, delivery_partner_id, limit, offset)
+    elseif status then
+        -- Specific status filter
+        query = [[
+            SELECT oda.*, o.order_number, o.total_amount, o.customer_id, o.status as order_status,
+                   o.shipping_address, o.delivery_latitude, o.delivery_longitude,
+                   s.name as store_name, s.slug as store_slug, s.contact_phone as store_phone
             FROM order_delivery_assignments oda
             INNER JOIN orders o ON oda.order_id = o.id
             INNER JOIN stores s ON o.store_id = s.id
@@ -69,9 +103,11 @@ function OrderDeliveryAssignmentQueries.findByPartnerId(delivery_partner_id, sta
         ]]
         return db.query(query, delivery_partner_id, status, limit, offset)
     else
+        -- No status filter, return all
         query = [[
-            SELECT oda.*, o.order_number, o.total_amount, o.customer_id,
-                   s.name as store_name, s.slug as store_slug
+            SELECT oda.*, o.order_number, o.total_amount, o.customer_id, o.status as order_status,
+                   o.shipping_address, o.delivery_latitude, o.delivery_longitude,
+                   s.name as store_name, s.slug as store_slug, s.contact_phone as store_phone
             FROM order_delivery_assignments oda
             INNER JOIN orders o ON oda.order_id = o.id
             INNER JOIN stores s ON o.store_id = s.id
@@ -157,26 +193,90 @@ function OrderDeliveryAssignmentQueries.getActiveCount(delivery_partner_id)
     return result and result[1] and result[1].count or 0
 end
 
--- Get assignment with full details
-function OrderDeliveryAssignmentQueries.getWithDetails(assignment_id)
+-- Get assignment with full details by UUID
+function OrderDeliveryAssignmentQueries.getWithDetails(assignment_uuid)
     local query = [[
         SELECT oda.*,
-               o.order_number, o.total_amount, o.subtotal, o.status as order_status,
-               o.billing_address, o.shipping_address, o.customer_notes,
-               s.name as store_name, s.slug as store_slug, s.contact_phone as store_phone,
-               dp.company_name as delivery_company, dp.contact_person_name, dp.contact_person_phone,
-               c.email as customer_email, c.phone as customer_phone,
-               c.first_name as customer_first_name, c.last_name as customer_last_name
+               o.id as order_id_fk,
+               o.uuid as order_uuid,
+               o.order_number,
+               o.total_amount,
+               o.subtotal,
+               o.status as order_status,
+               o.billing_address,
+               o.shipping_address,
+               o.customer_notes,
+               o.delivery_latitude,
+               o.delivery_longitude,
+               s.id as store_id,
+               s.uuid as store_uuid,
+               s.name as store_name,
+               s.slug as store_slug,
+               s.contact_phone as store_phone,
+               s.user_id as store_owner_id,
+               dp.id as delivery_partner_id_fk,
+               dp.uuid as delivery_partner_uuid,
+               dp.company_name as delivery_company,
+               dp.contact_person_name,
+               dp.contact_person_phone,
+               dp.user_id as delivery_partner_user_id,
+               dp.vehicle_types,
+               dp.rating as partner_rating,
+               dp.total_deliveries as partner_total_deliveries,
+               c.id as customer_id,
+               c.email as customer_email,
+               c.phone as customer_phone,
+               c.first_name as customer_first_name,
+               c.last_name as customer_last_name
         FROM order_delivery_assignments oda
         INNER JOIN orders o ON oda.order_id = o.id
         INNER JOIN stores s ON o.store_id = s.id
         INNER JOIN delivery_partners dp ON oda.delivery_partner_id = dp.id
         LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE oda.id = ?
+        WHERE oda.uuid = ?
     ]]
 
-    local result = db.query(query, assignment_id)
-    return result and result[1] or nil
+    local result = db.query(query, assignment_uuid)
+    if not result or #result == 0 then
+        return nil
+    end
+
+    local assignment = result[1]
+
+    -- Parse JSON fields
+    if assignment.shipping_address and assignment.shipping_address ~= "" then
+        local ok, parsed = pcall(function()
+            return require("cjson").decode(assignment.shipping_address)
+        end)
+        if ok and parsed then
+            assignment.delivery_address = parsed.address1 or ""
+            assignment.delivery_city = parsed.city or ""
+            assignment.delivery_state = parsed.state or ""
+            assignment.delivery_postal_code = parsed.zip or ""
+            assignment.customer_name = parsed.name or ""
+        end
+    end
+
+    if assignment.billing_address and assignment.billing_address ~= "" then
+        local ok, parsed = pcall(function()
+            return require("cjson").decode(assignment.billing_address)
+        end)
+        if ok and parsed then
+            assignment.billing_address_parsed = parsed
+        end
+    end
+
+    -- Parse vehicle types
+    if assignment.vehicle_types and assignment.vehicle_types ~= "" then
+        local ok, parsed = pcall(function()
+            return require("cjson").decode(assignment.vehicle_types)
+        end)
+        if ok and type(parsed) == "table" then
+            assignment.vehicle_types_array = parsed
+        end
+    end
+
+    return assignment
 end
 
 -- Get assignment statistics for partner
@@ -201,7 +301,25 @@ end
 
 -- Alias methods for compatibility with routes
 function OrderDeliveryAssignmentQueries.getByDeliveryPartner(delivery_partner_id, status)
-    return OrderDeliveryAssignmentQueries.findByPartnerId(delivery_partner_id, status)
+    local assignments = OrderDeliveryAssignmentQueries.findByPartnerId(delivery_partner_id, status)
+
+    -- Transform to include parsed shipping address
+    for _, assignment in ipairs(assignments) do
+        if assignment.shipping_address and assignment.shipping_address ~= "" then
+            local ok, parsed = pcall(function()
+                return require("cjson").decode(assignment.shipping_address)
+            end)
+            if ok and parsed then
+                assignment.delivery_address = parsed.address1 or ""
+                assignment.delivery_city = parsed.city or ""
+                assignment.delivery_state = parsed.state or ""
+                assignment.delivery_postal_code = parsed.zip or ""
+                assignment.customer_name = parsed.name or ""
+            end
+        end
+    end
+
+    return assignments
 end
 
 return OrderDeliveryAssignmentQueries

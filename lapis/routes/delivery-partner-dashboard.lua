@@ -175,9 +175,10 @@ return function(app)
                     LEFT JOIN delivery_requests dr ON o.id = dr.order_id
                         AND dr.delivery_partner_id = %d
                         AND dr.status = 'pending'
-                    WHERE o.status IN ('pending', 'confirmed', 'accepted', 'preparing', 'packing', 'processing')
+                    WHERE o.status IN ('pending', 'confirmed', 'processing')
                     AND oda.id IS NULL
                     AND dr.id IS NULL
+                    AND o.delivery_partner_id IS NULL
                     AND o.shipping_address IS NOT NULL
                     AND o.shipping_address != '{}'
                     AND (%s)
@@ -273,9 +274,10 @@ return function(app)
                     LEFT JOIN delivery_requests dr ON o.id = dr.order_id
                         AND dr.delivery_partner_id = ?
                         AND dr.status = 'pending'
-                    WHERE o.status IN ('pending', 'confirmed', 'accepted', 'preparing', 'packing', 'processing')
+                    WHERE o.status IN ('pending', 'confirmed', 'processing')
                     AND oda.id IS NULL
                     AND dr.id IS NULL
+                    AND o.delivery_partner_id IS NULL
                     AND o.delivery_latitude IS NOT NULL
                     AND o.delivery_longitude IS NOT NULL
                 ) subquery
@@ -491,20 +493,37 @@ return function(app)
             end
 
             -- Allow override if provided
-            if params.proposed_fee then
+            if params.proposed_fee and type(params.proposed_fee) == "number" then
                 proposed_fee = params.proposed_fee
+            elseif params.proposed_fee and type(params.proposed_fee) == "string" then
+                proposed_fee = tonumber(params.proposed_fee) or proposed_fee
             end
 
-            -- Create delivery request
+            -- Safe string conversion for message field (handles null, undefined, tables, etc.)
+            local function safe_string(value)
+                if value == nil or value == ngx.null then
+                    return ""
+                end
+                if type(value) == "string" then
+                    return value
+                end
+                if type(value) == "table" then
+                    -- If it's a table (shouldn't be), convert to empty string
+                    return ""
+                end
+                return tostring(value)
+            end
+
+            -- Create delivery request with professional error handling
             local success, result = pcall(function()
                 local request_id = db.insert("delivery_requests", {
                     uuid = db.raw("gen_random_uuid()"),
-                    order_id = params.order_id,
-                    delivery_partner_id = delivery_partner.id,
+                    order_id = tonumber(params.order_id),
+                    delivery_partner_id = tonumber(delivery_partner.id),
                     request_type = "partner_to_seller",
                     status = "pending",
-                    proposed_fee = proposed_fee,
-                    message = params.message or "",
+                    proposed_fee = tonumber(proposed_fee) or 0,
+                    message = safe_string(params.message),
                     expires_at = db.raw("NOW() + INTERVAL '24 hours'"),
                     created_at = db.raw("NOW()"),
                     updated_at = db.raw("NOW()")

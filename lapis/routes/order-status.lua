@@ -16,10 +16,16 @@ return function(app)
             local carrier = self.params.carrier
             local estimated_delivery = self.params.estimated_delivery_date
 
-            -- Valid order statuses
+            -- Valid order statuses (Professional order lifecycle)
             local valid_statuses = {
-                "pending", "accepted", "preparing", "packing",
-                "shipping", "shipped", "delivered", "cancelled", "refunded"
+                "pending",      -- Payment pending
+                "confirmed",    -- Payment confirmed, order accepted
+                "processing",   -- Order being processed by seller
+                "packing",      -- Order packed, ready for pickup
+                "shipping",     -- Out for delivery (delivery partner picked up)
+                "delivered",    -- Successfully delivered
+                "cancelled",    -- Order cancelled
+                "refunded"      -- Order refunded
             }
 
             -- Validate status
@@ -60,18 +66,17 @@ return function(app)
                 return { json = { error = "Access denied - not your store" }, status = 403 }
             end
 
-            -- Status transition validation
+            -- Professional status transition validation
             local old_status = order.status
             local valid_transitions = {
-                pending = {"accepted", "cancelled"},
-                accepted = {"preparing", "cancelled"},
-                preparing = {"packing", "cancelled"},
-                packing = {"shipping", "cancelled"},
-                shipping = {"shipped", "cancelled"},
-                shipped = {"delivered"},
-                delivered = {"refunded"},
-                cancelled = {},
-                refunded = {}
+                pending = {"confirmed", "cancelled"},       -- Payment confirmed OR cancelled
+                confirmed = {"processing", "cancelled"},    -- Start processing OR cancel
+                processing = {"packing", "cancelled"},      -- Mark as packed OR cancel
+                packing = {"shipping", "cancelled"},        -- Delivery partner picks up (becomes shipping) OR cancel
+                shipping = {"delivered", "cancelled"},      -- Delivered OR cancelled (failed delivery)
+                delivered = {"refunded"},                   -- Can only refund delivered orders
+                cancelled = {},                             -- Terminal state
+                refunded = {}                               -- Terminal state
             }
 
             if old_status ~= new_status then
@@ -102,9 +107,9 @@ return function(app)
             }
 
             -- Update fulfillment status based on order status
-            if new_status == "preparing" or new_status == "packing" then
+            if new_status == "processing" or new_status == "packing" then
                 update_data.fulfillment_status = "partial"
-            elseif new_status == "shipped" or new_status == "delivered" then
+            elseif new_status == "shipping" or new_status == "delivered" then
                 update_data.fulfillment_status = "fulfilled"
             elseif new_status == "cancelled" then
                 update_data.fulfillment_status = "cancelled"
@@ -285,12 +290,11 @@ return function(app)
             local current_status = order.status
 
             local valid_transitions = {
-                pending = {"accepted", "cancelled"},
-                accepted = {"preparing", "cancelled"},
-                preparing = {"packing", "cancelled"},
+                pending = {"confirmed", "cancelled"},
+                confirmed = {"processing", "cancelled"},
+                processing = {"packing", "cancelled"},
                 packing = {"shipping", "cancelled"},
-                shipping = {"shipped", "cancelled"},
-                shipped = {"delivered"},
+                shipping = {"delivered", "cancelled"},
                 delivered = {"refunded"},
                 cancelled = {},
                 refunded = {}
