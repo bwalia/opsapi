@@ -81,12 +81,12 @@ return function(app)
         end)
     }))
 
-    -- Get single order with details
+    -- Get single order with details (includes delivery partner info)
     app:match("order_details", "/api/v2/orders/:id", respond_to({
         GET = AuthMiddleware.requireAuth(function(self)
             local order_id = self.params.id
 
-            -- Get order with store info
+            -- Get order with store and delivery partner info
             local orders = db.query([[
                 SELECT o.*,
                        c.email as customer_email,
@@ -95,10 +95,32 @@ return function(app)
                        c.phone as customer_phone,
                        s.name as store_name,
                        s.uuid as store_uuid,
-                       s.user_id as store_owner_id
+                       s.user_id as store_owner_id,
+                       -- Delivery partner fields
+                       dp.id as dp_id,
+                       dp.uuid as dp_uuid,
+                       dp.company_name as dp_company_name,
+                       dp.contact_person_name as dp_contact_person_name,
+                       dp.contact_person_phone as dp_contact_person_phone,
+                       dp.rating as dp_rating,
+                       dp.total_deliveries as dp_total_deliveries,
+                       dp.service_type as dp_service_type,
+                       dp.vehicle_types as dp_vehicle_types,
+                       -- Delivery assignment fields
+                       oda.id as assignment_id,
+                       oda.uuid as assignment_uuid,
+                       oda.status as delivery_status,
+                       oda.tracking_number as tracking_number,
+                       oda.delivery_fee as delivery_fee,
+                       oda.accepted_at,
+                       oda.actual_pickup_time,
+                       oda.estimated_delivery_time,
+                       oda.actual_delivery_time
                 FROM orders o
                 LEFT JOIN customers c ON o.customer_id = c.id
                 LEFT JOIN stores s ON o.store_id = s.id
+                LEFT JOIN delivery_partners dp ON o.delivery_partner_id = dp.id
+                LEFT JOIN order_delivery_assignments oda ON o.id = oda.order_id
                 WHERE o.uuid = ?
             ]], order_id)
 
@@ -108,14 +130,23 @@ return function(app)
 
             local order = orders[1]
 
-            -- Check if user owns the store or is admin
+            -- Check if user owns the store, is the buyer, or is admin
             local user_id_result = db.select("id from users where uuid = ?", self.current_user.uuid)
             if not user_id_result or #user_id_result == 0 then
                 return { json = { error = "User not found" }, status = 404 }
             end
             local user_id = user_id_result[1].id
 
-            if order.store_owner_id ~= user_id then
+            -- Check if user is buyer (owns customer record)
+            local is_buyer = false
+            if order.customer_email then
+                local user_result = db.query("SELECT email FROM users WHERE id = ?", user_id)
+                if user_result and user_result[1] and user_result[1].email == order.customer_email then
+                    is_buyer = true
+                end
+            end
+
+            if order.store_owner_id ~= user_id and not is_buyer then
                 -- Check admin access
                 local UserQueries = require("queries.UserQueries")
                 local user_data = UserQueries.show(self.current_user.uuid)
@@ -151,6 +182,57 @@ return function(app)
             if order.shipping_address then
                 local success, parsed = pcall(require("cjson").decode, order.shipping_address)
                 if success then order.shipping_address = parsed end
+            end
+
+            -- Structure delivery partner info if available
+            if order.dp_id then
+                -- Parse vehicle types
+                local vehicle_types = {}
+                if order.dp_vehicle_types and order.dp_vehicle_types ~= "" then
+                    local ok, parsed = pcall(require("cjson").decode, order.dp_vehicle_types)
+                    if ok and type(parsed) == "table" then
+                        vehicle_types = parsed
+                    end
+                end
+
+                order.delivery_partner = {
+                    id = order.dp_id,
+                    uuid = order.dp_uuid,
+                    company_name = order.dp_company_name,
+                    contact_person_name = order.dp_contact_person_name,
+                    contact_person_phone = order.dp_contact_person_phone,
+                    rating = tonumber(order.dp_rating) or 0,
+                    total_deliveries = tonumber(order.dp_total_deliveries) or 0,
+                    service_type = order.dp_service_type,
+                    vehicle_types = vehicle_types
+                }
+
+                -- Add delivery assignment details
+                if order.assignment_id then
+                    order.delivery_assignment = {
+                        id = order.assignment_id,
+                        uuid = order.assignment_uuid,
+                        status = order.delivery_status,
+                        tracking_number = order.tracking_number,
+                        delivery_fee = tonumber(order.delivery_fee) or 0,
+                        accepted_at = order.accepted_at,
+                        actual_pickup_time = order.actual_pickup_time,
+                        estimated_delivery_time = order.estimated_delivery_time,
+                        actual_delivery_time = order.actual_delivery_time
+                    }
+                end
+
+                -- Remove prefixed fields from main order object
+                local fields_to_remove = {
+                    "dp_id", "dp_uuid", "dp_company_name", "dp_contact_person_name",
+                    "dp_contact_person_phone", "dp_rating", "dp_total_deliveries",
+                    "dp_service_type", "dp_vehicle_types", "assignment_id", "assignment_uuid",
+                    "delivery_status", "tracking_number", "delivery_fee", "accepted_at",
+                    "actual_pickup_time", "estimated_delivery_time", "actual_delivery_time"
+                }
+                for _, field in ipairs(fields_to_remove) do
+                    order[field] = nil
+                end
             end
 
             return { json = order }

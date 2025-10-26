@@ -208,7 +208,9 @@ end
 
 -- Retrieve a Checkout Session
 function Stripe:retrieve_checkout_session(session_id)
-    return self:_request("GET", "/checkout/sessions/" .. session_id, nil)
+    -- Always expand customer_details to get the billing address
+    local url = "/checkout/sessions/" .. session_id .. "?expand[]=customer_details"
+    return self:_request("GET", url, nil)
 end
 
 -- Create a Customer

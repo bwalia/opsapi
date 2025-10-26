@@ -12,6 +12,8 @@ local review_migrations = require("migrations.reviews")
 local customer_user_link_migrations = require("migrations.customer-user-link")
 local stripe_integration_migrations = require("migrations.stripe-integration")
 local delivery_partner_migrations = require("migrations.delivery-partner-system")
+local geolocation_delivery_migrations = require("migrations.geolocation-delivery-system")
+local multi_currency_migrations = require("migrations.multi-currency-support")
 
 return {
     ['01_create_users'] = function()
@@ -406,5 +408,35 @@ return {
     ['88_add_delivery_partner_constraints'] = delivery_partner_migrations[13],
     ['89_add_can_self_ship_to_stores'] = delivery_partner_migrations[14],
     ['90_add_delivery_partner_id_to_orders'] = delivery_partner_migrations[15],
+
+    -- Geolocation-Based Delivery Partner System (PostGIS)
+    ['91_enable_postgis_extension'] = geolocation_delivery_migrations[1],
+    ['92_add_geolocation_to_delivery_partners'] = geolocation_delivery_migrations[2],
+    ['93_create_delivery_partners_location_index'] = geolocation_delivery_migrations[3],
+    ['94_create_delivery_partner_location_trigger'] = geolocation_delivery_migrations[4],
+    ['95_add_geolocation_to_orders'] = geolocation_delivery_migrations[5],
+    ['96_create_orders_location_indexes'] = geolocation_delivery_migrations[6],
+    ['97_create_order_locations_trigger'] = geolocation_delivery_migrations[7],
+    ['98_create_find_nearby_partners_function'] = geolocation_delivery_migrations[8],
+    ['99_create_can_service_location_function'] = geolocation_delivery_migrations[9],
+    ['100_create_delivery_partner_notifications_table'] = geolocation_delivery_migrations[10],
+    ['101_add_notifications_indexes'] = geolocation_delivery_migrations[11],
+    ['102_create_delivery_partner_geo_stats_view'] = geolocation_delivery_migrations[12],
+    ['103_add_geolocation_documentation'] = geolocation_delivery_migrations[13],
+    ['104_create_calculate_delivery_fee_function'] = geolocation_delivery_migrations[14],
+    ['105_add_coordinate_validation_constraints'] = geolocation_delivery_migrations[15],
+
+    -- Multi-Currency Support
+    ['106_add_currency_to_store_products'] = multi_currency_migrations[1],
+    ['107_add_currency_to_cart_items'] = multi_currency_migrations[2],
+    ['108_add_currency_to_order_items'] = multi_currency_migrations[3],
+    ['109_add_currency_to_delivery_requests'] = multi_currency_migrations[4],
+    ['110_add_currency_to_order_delivery_assignments'] = multi_currency_migrations[5],
+    ['111_add_currency_to_order_refunds'] = multi_currency_migrations[6],
+    ['112_add_preferred_currency_to_delivery_partners'] = multi_currency_migrations[7],
+    ['113_add_currency_preferences_to_users'] = multi_currency_migrations[8],
+    ['114_create_supported_currencies_table'] = multi_currency_migrations[9],
+    ['115_populate_supported_currencies'] = multi_currency_migrations[10],
+    ['116_add_currency_indexes'] = multi_currency_migrations[11],
 
 }

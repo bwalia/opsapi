@@ -4,6 +4,7 @@ local OrderQueries = require("queries.OrderQueries")
 local AuthMiddleware = require("middleware.auth")
 local CartCalculator = require("lib.cart-calculator")
 local Global = require("helper.global")
+local Geocoding = require("lib.Geocoding")
 local cjson = require("cjson")
 
 return function(app)
@@ -73,16 +74,40 @@ return function(app)
         end
     }))
 
+    -- Helper function to parse JSON body
+    local function parse_json_body()
+        local ok, result = pcall(function()
+            ngx.req.read_body()
+            local body = ngx.req.get_body_data()
+            if not body or body == "" then
+                return {}
+            end
+            return cjson.decode(body)
+        end)
+
+        if ok and type(result) == "table" then
+            return result
+        end
+        return {}
+    end
+
     -- Create Stripe Checkout Session (Hosted Checkout)
     app:match("create_checkout_session", "/api/v2/payments/create-checkout-session", respond_to({
         POST = AuthMiddleware.requireAuth(function(self)
-            local params = self.params
+            -- Parse JSON body first, fallback to form params
+            local params = parse_json_body()
+            if not params or not next(params) then
+                params = self.params
+            end
 
-            -- Validate cart and get items
-            local user_uuid = ngx.var.http_x_user_id
+            -- Get user UUID from authenticated user
+            local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.sub)
             if not user_uuid or user_uuid == "" then
+                ngx.log(ngx.ERR, "Authentication required - no user UUID found in token")
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+
+            ngx.log(ngx.INFO, "Creating checkout session for user: " .. user_uuid)
 
             local db = require("lapis.db")
             local user_result = db.select("id from users where uuid = ?", user_uuid)
@@ -236,6 +261,48 @@ return function(app)
                     end
                 end
 
+                -- Debug: Log what we're receiving for billing_address
+                ngx.log(ngx.INFO, "params.billing_address type: " .. type(params.billing_address))
+                ngx.log(ngx.INFO, "params.billing_address value: " .. tostring(params.billing_address))
+                if type(params.billing_address) == "table" then
+                    ngx.log(ngx.INFO, "params.billing_address (JSON): " .. cjson.encode(params.billing_address))
+                end
+
+                -- Ensure billing_address is properly encoded
+                local billing_addr_json = "{}"
+                local shipping_addr_json = "{}"
+
+                if params.billing_address then
+                    if type(params.billing_address) == "table" then
+                        billing_addr_json = cjson.encode(params.billing_address)
+                    elseif type(params.billing_address) == "string" then
+                        -- Validate it's not "[object Object]"
+                        if params.billing_address ~= "[object Object]" then
+                            billing_addr_json = params.billing_address
+                        else
+                            ngx.log(ngx.ERR, "Received '[object Object]' for billing_address in checkout session")
+                            billing_addr_json = "{}"
+                        end
+                    end
+                end
+
+                if params.shipping_address then
+                    if type(params.shipping_address) == "table" then
+                        shipping_addr_json = cjson.encode(params.shipping_address)
+                    elseif type(params.shipping_address) == "string" then
+                        if params.shipping_address ~= "[object Object]" then
+                            shipping_addr_json = params.shipping_address
+                        else
+                            shipping_addr_json = billing_addr_json
+                        end
+                    end
+                else
+                    shipping_addr_json = billing_addr_json
+                end
+
+                ngx.log(ngx.INFO, "Storing in Stripe metadata - billing_address: " .. billing_addr_json)
+                ngx.log(ngx.INFO, "Storing in Stripe metadata - shipping_address: " .. shipping_addr_json)
+
                 -- Create checkout session
                 local session, err = stripe:create_checkout_session({
                     mode = "payment",
@@ -252,8 +319,8 @@ return function(app)
                         tax_amount = tostring(totals.tax_amount),
                         shipping_amount = tostring(totals.shipping_amount),
                         total_amount = tostring(totals.total_amount),
-                        billing_address = cjson.encode(params.billing_address or {}),
-                        shipping_address = cjson.encode(params.shipping_address or params.billing_address or {}),
+                        billing_address = billing_addr_json,
+                        shipping_address = shipping_addr_json,
                         customer_notes = params.customer_notes or ""
                     }
                 })
@@ -293,11 +360,14 @@ return function(app)
             local amount = tonumber(params.amount)
             local currency = params.currency or "usd"
 
-            -- Validate cart and calculate total
-            local user_uuid = ngx.var.http_x_user_id
+            -- Get user UUID from authenticated user
+            local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.sub)
             if not user_uuid or user_uuid == "" then
+                ngx.log(ngx.ERR, "Authentication required - no user UUID found in token")
                 return { json = { error = "Authentication required" }, status = 401 }
             end
+
+            ngx.log(ngx.INFO, "Creating payment intent for user: " .. user_uuid)
 
             local db = require("lapis.db")
             local user_result = db.select("id from users where uuid = ?", user_uuid)
@@ -370,7 +440,11 @@ return function(app)
     -- Confirm Payment and Complete Order
     app:match("confirm_payment", "/api/v2/payments/confirm", respond_to({
         POST = AuthMiddleware.requireAuth(function(self)
-            local params = self.params
+            -- Parse JSON body first, fallback to form params
+            local params = parse_json_body()
+            if not params or not next(params) then
+                params = self.params
+            end
 
             if not params.payment_intent_id and not params.session_id then
                 return { json = { error = "Payment intent ID or session ID is required" }, status = 400 }
@@ -380,8 +454,12 @@ return function(app)
                 local stripe = Stripe.new()
                 local payment_reference_id = nil
 
+                local session_metadata = {}
+                local billing_address_from_session = nil
+                local shipping_address_from_session = nil
+
                 if params.session_id then
-                    -- Handle Stripe Checkout Session
+                    -- Handle Stripe Checkout Session - this will expand customer_details
                     local session, err = stripe:retrieve_checkout_session(params.session_id)
 
                     if not session then
@@ -393,6 +471,62 @@ return function(app)
                     end
 
                     payment_reference_id = session.id
+                    session_metadata = session.metadata or {}
+
+                    -- Extract addresses from Stripe's customer_details (actual billing address collected by Stripe)
+                    -- Professional error handling for optional address fields
+                    if session.customer_details and session.customer_details.address then
+                        local stripe_address = session.customer_details.address
+
+                        -- Safe string conversion with null checks
+                        local function safe_string(value)
+                            if value == nil or value == ngx.null then
+                                return ""
+                            end
+                            return tostring(value)
+                        end
+
+                        -- Build address line 1 safely
+                        local line1 = safe_string(stripe_address.line1)
+                        local line2 = safe_string(stripe_address.line2)
+                        local address1_combined = line1
+                        if line2 ~= "" then
+                            address1_combined = line1 .. " " .. line2
+                        end
+
+                        -- Convert Stripe address format to our format with safe defaults
+                        local address_obj = {
+                            name = safe_string(session.customer_details.name),
+                            address1 = address1_combined,
+                            city = safe_string(stripe_address.city),
+                            state = safe_string(stripe_address.state),
+                            zip = safe_string(stripe_address.postal_code),
+                            country = safe_string(stripe_address.country)
+                        }
+
+                        local success, encoded = pcall(function()
+                            return cjson.encode(address_obj)
+                        end)
+
+                        if success then
+                            billing_address_from_session = encoded
+                            shipping_address_from_session = encoded -- Use billing as shipping for now
+                            ngx.log(ngx.INFO, "[PAYMENT] Extracted address from Stripe customer_details")
+                        else
+                            ngx.log(ngx.ERR, "[PAYMENT ERROR] Failed to encode address JSON: " .. tostring(encoded))
+                        end
+                    else
+                        -- Fallback to metadata (if we stored it there)
+                        if session_metadata.billing_address then
+                            billing_address_from_session = session_metadata.billing_address
+                        end
+                        if session_metadata.shipping_address then
+                            shipping_address_from_session = session_metadata.shipping_address
+                        end
+                        ngx.log(ngx.WARN, "[PAYMENT] No customer_details.address found in session, falling back to metadata")
+                    end
+
+                    ngx.log(ngx.INFO, "Retrieved session with customer address")
                 else
                     -- Handle Payment Intent (legacy support)
                     local payment_intent, err = stripe:retrieve_payment_intent(params.payment_intent_id)
@@ -407,12 +541,14 @@ return function(app)
 
                     payment_reference_id = payment_intent.id
                 end
-                
-                -- Get cart and create order
-                local user_uuid = ngx.var.http_x_user_id
+
+                -- Get user UUID from authenticated user (available in self from parent scope)
+                local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.sub)
                 if not user_uuid or user_uuid == "" then
-                    error("Authentication required")
+                    error("Authentication required - no user UUID found in token")
                 end
+
+                ngx.log(ngx.INFO, "Confirming payment for user: " .. user_uuid)
                 
                 -- Get user's internal ID from database
                 local db = require("lapis.db")
@@ -507,18 +643,107 @@ return function(app)
                 
                 -- Create orders for each store
                 local orders = {}
+
+                -- Parse shipping address and extract delivery coordinates via geocoding
+                local delivery_latitude = nil
+                local delivery_longitude = nil
+
+                -- Use addresses from session metadata if available, otherwise from params
+                local billing_address_str = billing_address_from_session or params.billing_address
+                local shipping_address_str = shipping_address_from_session or params.shipping_address or billing_address_str
+
+                -- Debug logging
+                ngx.log(ngx.INFO, "billing_address_str type: " .. type(billing_address_str))
+                ngx.log(ngx.INFO, "billing_address_str value: " .. tostring(billing_address_str))
+                ngx.log(ngx.INFO, "shipping_address_str type: " .. type(shipping_address_str))
+                ngx.log(ngx.INFO, "shipping_address_str value: " .. tostring(shipping_address_str))
+
+                -- Ensure addresses are JSON strings
+                -- If it's a table, encode it
+                if type(billing_address_str) == "table" then
+                    billing_address_str = cjson.encode(billing_address_str)
+                -- If it's a string, validate it's valid JSON (not "[object Object]")
+                elseif type(billing_address_str) == "string" then
+                    -- Check if it's the invalid "[object Object]" string
+                    if billing_address_str == "[object Object]" then
+                        ngx.log(ngx.ERR, "Received invalid '[object Object]' string for billing_address")
+                        billing_address_str = "{}"
+                    else
+                        -- Try to parse and re-encode to ensure it's valid JSON
+                        local success, parsed = pcall(cjson.decode, billing_address_str)
+                        if not success then
+                            ngx.log(ngx.ERR, "Invalid JSON in billing_address_str: " .. billing_address_str)
+                            billing_address_str = "{}"
+                        end
+                    end
+                end
+
+                if type(shipping_address_str) == "table" then
+                    shipping_address_str = cjson.encode(shipping_address_str)
+                elseif type(shipping_address_str) == "string" then
+                    if shipping_address_str == "[object Object]" then
+                        ngx.log(ngx.ERR, "Received invalid '[object Object]' string for shipping_address")
+                        shipping_address_str = billing_address_str
+                    else
+                        local success, parsed = pcall(cjson.decode, shipping_address_str)
+                        if not success then
+                            ngx.log(ngx.ERR, "Invalid JSON in shipping_address_str: " .. shipping_address_str)
+                            shipping_address_str = billing_address_str
+                        end
+                    end
+                end
+
+                -- Geocode the shipping address to get coordinates (Professional error handling)
+                local shipping_addr_success, shipping_addr_obj = pcall(cjson.decode, shipping_address_str)
+                if shipping_addr_success and type(shipping_addr_obj) == "table" then
+                    -- Check if address has enough information for geocoding
+                    local has_address_info = false
+                    if shipping_addr_obj.address1 and shipping_addr_obj.address1 ~= "" then
+                        has_address_info = true
+                    elseif shipping_addr_obj.city and shipping_addr_obj.city ~= "" then
+                        has_address_info = true
+                    end
+
+                    if has_address_info then
+                        -- Initialize geocoding service
+                        local geocode_success, geocode_error = pcall(function()
+                            local geocoder = Geocoding.new()
+                            geocoder:ensureCacheTable()
+
+                            -- Attempt to geocode the address
+                            local geocode_result, geocode_err = geocoder:geocode(shipping_addr_obj)
+                            if geocode_result and geocode_result.lat and geocode_result.lng then
+                                delivery_latitude = geocode_result.lat
+                                delivery_longitude = geocode_result.lng
+                                ngx.log(ngx.INFO, string.format("[GEOCODING SUCCESS] Delivery address: %f, %f (source: %s)",
+                                    delivery_latitude, delivery_longitude, geocode_result.source or "unknown"))
+                            else
+                                ngx.log(ngx.WARN, "[GEOCODING] Failed: " .. (geocode_err or "unknown error") ..
+                                    " - Will use default coordinates")
+                                -- Fallback to default coordinates (Ludhiana, Punjab, India)
+                                delivery_latitude = 30.9010
+                                delivery_longitude = 75.8573
+                            end
+                        end)
+
+                        if not geocode_success then
+                            ngx.log(ngx.ERR, "[GEOCODING ERROR] Exception during geocoding: " .. tostring(geocode_error))
+                            -- Use default coordinates on error
+                            delivery_latitude = 30.9010
+                            delivery_longitude = 75.8573
+                        end
+                    else
+                        ngx.log(ngx.WARN, "[GEOCODING] Insufficient address information - Using default coordinates")
+                        delivery_latitude = 30.9010
+                        delivery_longitude = 75.8573
+                    end
+                else
+                    ngx.log(ngx.WARN, "[GEOCODING] Could not parse shipping address - Using default coordinates")
+                    delivery_latitude = 30.9010
+                    delivery_longitude = 75.8573
+                end
+
                 for store_id, store_order in pairs(store_orders) do
-                    -- Serialize address data as JSON string if it's a table
-                    local billing_address_str = params.billing_address
-                    if type(params.billing_address) == "table" then
-                        billing_address_str = cjson.encode(params.billing_address)
-                    end
-
-                    local shipping_address_str = params.shipping_address or params.billing_address
-                    if type(shipping_address_str) == "table" then
-                        shipping_address_str = cjson.encode(shipping_address_str)
-                    end
-
                     local order = OrderQueries.create({
                         store_id = store_id,
                         customer_id = customer and customer.id or nil,
@@ -527,6 +752,8 @@ return function(app)
                         total_amount = store_order.subtotal + (tax_amount * (store_order.subtotal / subtotal)),
                         billing_address = billing_address_str,
                         shipping_address = shipping_address_str,
+                        delivery_latitude = delivery_latitude,
+                        delivery_longitude = delivery_longitude,
                         payment_intent_id = payment_reference_id,
                         payment_status = "paid",
                         payment_method = "stripe"
