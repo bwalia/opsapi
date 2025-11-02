@@ -98,6 +98,18 @@ app:get("/ready", function(self)
     end
 end)
 
+-- Liveness probe (for Kubernetes)
+app:get("/live", function(self)
+    -- Basic liveness check - just verify the app is running
+    return {
+        status = 200,
+        json = {
+            alive = true,
+            timestamp = ngx.time(),
+            uptime_seconds = ngx.now()
+        }
+    }
+end)
 
 app:get("/swagger", function(self)
     return { render = "swagger" }
@@ -176,7 +188,8 @@ app:before_filter(function(self)
     -- Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
-        uri == "/swagger/swagger.json" or uri == "/metrics" or uri:match("^/auth/") then
+        uri == "/swagger/swagger.json" or uri == "/metrics" or uri:match("^/auth/") or
+        uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
     end
@@ -267,6 +280,9 @@ safe_load_routes("routes.store-delivery-partners")    -- Store delivery partner 
 safe_load_routes("routes.delivery-partners-enhanced")    -- Geolocation registration & profile
 safe_load_routes("routes.delivery-dashboard-enhanced")   -- Geo-based dashboard with nearby orders
 safe_load_routes("routes.delivery-partner-verification") -- Verification system with document upload
+
+-- Delivery Pricing System
+safe_load_routes("routes.delivery-pricing")              -- Professional delivery fee calculation & validation
 
 ngx.log(ngx.NOTICE, "All routes loaded")
 

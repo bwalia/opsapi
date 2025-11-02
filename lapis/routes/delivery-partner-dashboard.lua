@@ -466,37 +466,97 @@ return function(app)
                 return { status = 400, json = { error = "Order already has a delivery assignment" } }
             end
 
-            -- Check if request already exists
-            local existing_request = db.query([[
+            -- Check if active request already exists (professional validation)
+            local existing_active_request = db.query([[
                 SELECT * FROM delivery_requests
-                WHERE order_id = ? AND delivery_partner_id = ? AND status = 'pending'
+                WHERE order_id = ?
+                AND delivery_partner_id = ?
+                AND status IN ('pending', 'accepted')
             ]], params.order_id, delivery_partner.id)[1]
 
-            if existing_request then
-                return { status = 400, json = { error = "You already have a pending request for this order" } }
+            if existing_active_request then
+                return {
+                    status = 400,
+                    json = {
+                        error = "You already have an active request for this order",
+                        request_status = existing_active_request.status,
+                        request_uuid = existing_active_request.uuid
+                    }
+                }
             end
 
-            -- Calculate proposed fee based on pricing model
-            local proposed_fee = 0
-            if delivery_partner.pricing_model == "flat" then
-                proposed_fee = delivery_partner.base_charge or 0
-            elseif delivery_partner.pricing_model == "per_km" then
-                local distance = params.distance_km or 0
-                proposed_fee = (delivery_partner.per_km_charge or 0) * distance
-            elseif delivery_partner.pricing_model == "percentage" then
-                proposed_fee = (tonumber(order.total_amount) or 0) * ((delivery_partner.percentage_charge or 0) / 100)
-            elseif delivery_partner.pricing_model == "hybrid" then
-                local distance = params.distance_km or 0
-                local distance_fee = (delivery_partner.per_km_charge or 0) * distance
-                local percentage_fee = (tonumber(order.total_amount) or 0) * ((delivery_partner.percentage_charge or 0) / 100)
-                proposed_fee = (delivery_partner.base_charge or 0) + distance_fee + percentage_fee
+            -- Check for previous cancelled/rejected requests (for logging purposes)
+            local previous_request = db.query([[
+                SELECT * FROM delivery_requests
+                WHERE order_id = ?
+                AND delivery_partner_id = ?
+                AND status IN ('cancelled', 'rejected', 'expired')
+                ORDER BY created_at DESC
+                LIMIT 1
+            ]], params.order_id, delivery_partner.id)[1]
+
+            if previous_request then
+                ngx.log(ngx.INFO, string.format(
+                    "[DELIVERY REQUEST] Partner %d recreating request for order %d (previous status: %s)",
+                    delivery_partner.id,
+                    params.order_id,
+                    previous_request.status
+                ))
             end
 
-            -- Allow override if provided
-            if params.proposed_fee and type(params.proposed_fee) == "number" then
-                proposed_fee = params.proposed_fee
-            elseif params.proposed_fee and type(params.proposed_fee) == "string" then
-                proposed_fee = tonumber(params.proposed_fee) or proposed_fee
+            -- Professional delivery fee calculation with validation
+            local DeliveryPricing = require("helper.delivery-pricing")
+
+            -- Calculate the platform-recommended delivery fee
+            local pricing_breakdown = DeliveryPricing.calculateDeliveryFee({
+                distance_km = params.distance_km or 0,
+                order_value = tonumber(order.total_amount) or 0,
+                delivery_partner_id = delivery_partner.id,
+                store_id = order.store_id
+            })
+
+            local calculated_fee = pricing_breakdown.total_fee
+            local proposed_fee = calculated_fee
+
+            -- If partner proposes a different fee, validate it
+            if params.proposed_fee then
+                local partner_proposed = tonumber(params.proposed_fee)
+                if partner_proposed then
+                    -- Validate the partner's proposed fee
+                    local is_valid, error_msg = DeliveryPricing.validatePartnerFee(partner_proposed, calculated_fee)
+
+                    if not is_valid then
+                        return {
+                            status = 400,
+                            json = {
+                                error = error_msg,
+                                calculated_fee = calculated_fee,
+                                proposed_fee = partner_proposed,
+                                pricing_breakdown = pricing_breakdown
+                            }
+                        }
+                    end
+
+                    -- Use validated proposed fee
+                    proposed_fee = partner_proposed
+
+                    ngx.log(ngx.INFO, string.format(
+                        "[DELIVERY PRICING] Partner %d proposed fee ₹%d (calculated: ₹%d, deviation: %.1f%%)",
+                        delivery_partner.id,
+                        partner_proposed,
+                        calculated_fee,
+                        math.abs(((partner_proposed - calculated_fee) / calculated_fee) * 100)
+                    ))
+                end
+            else
+                -- No proposed fee, use calculated fee
+                ngx.log(ngx.INFO, string.format(
+                    "[DELIVERY PRICING] Using calculated fee ₹%d for partner %d (distance: %.2f km, order value: ₹%.2f)",
+                    calculated_fee,
+                    delivery_partner.id,
+                    params.distance_km or 0,
+                    tonumber(order.total_amount) or 0
+                ))
             end
 
             -- Safe string conversion for message field (handles null, undefined, tables, etc.)
@@ -514,6 +574,29 @@ return function(app)
                 return tostring(value)
             end
 
+            -- Safe currency conversion (handles both 'USD' and USD formats)
+            local function safe_currency(value)
+                if not value or value == ngx.null then
+                    return "USD"
+                end
+                if type(value) == "table" then
+                    return "USD"
+                end
+                -- Remove quotes if present ('USD' -> USD)
+                local currency_str = tostring(value):gsub("^'(.+)'$", "%1")
+                return currency_str
+            end
+
+            -- Log all values before insert for debugging
+            ngx.log(ngx.INFO, string.format(
+                "[DEBUG] Inserting delivery request - order_id: %s (%s), partner_id: %s (%s), proposed_fee: %s (%s), currency: %s (%s), message: %s (%s)",
+                tostring(params.order_id), type(params.order_id),
+                tostring(delivery_partner.id), type(delivery_partner.id),
+                tostring(proposed_fee), type(proposed_fee),
+                tostring(order.currency), type(order.currency),
+                tostring(params.message), type(params.message)
+            ))
+
             -- Create delivery request with professional error handling
             local success, result = pcall(function()
                 local request_id = db.insert("delivery_requests", {
@@ -523,17 +606,57 @@ return function(app)
                     request_type = "partner_to_seller",
                     status = "pending",
                     proposed_fee = tonumber(proposed_fee) or 0,
+                    currency = safe_currency(order.currency),  -- Safe currency conversion
                     message = safe_string(params.message),
                     expires_at = db.raw("NOW() + INTERVAL '24 hours'"),
                     created_at = db.raw("NOW()"),
                     updated_at = db.raw("NOW()")
                 }, "id")
 
-                -- The insert returns the ID value directly when specifying return column
-                local request_id_value = type(request_id) == "table" and request_id.id or request_id
+                ngx.log(ngx.INFO, string.format("[DEBUG] request_id type: %s, value: %s",
+                    type(request_id), tostring(request_id)))
 
-                -- Fetch the created request
-                local created_request = db.query("SELECT * FROM delivery_requests WHERE id = ?", request_id_value)[1]
+                -- Debug: if it's a table, log all keys and values
+                if type(request_id) == "table" then
+                    local keys = {}
+                    for k, v in pairs(request_id) do
+                        table.insert(keys, string.format("%s=%s", tostring(k), tostring(v)))
+                    end
+                    ngx.log(ngx.INFO, "[DEBUG] request_id table contents: " .. table.concat(keys, ", "))
+                end
+
+                -- The insert returns the ID value directly when specifying return column
+                -- Lapis db.insert() with RETURNING returns: { [1] = {id = 123}, affected_rows = 1 }
+                local request_id_value
+                if type(request_id) == "table" then
+                    -- Lapis returns { [1] = {id = value}, affected_rows = n }
+                    if type(request_id[1]) == "table" then
+                        request_id_value = request_id[1].id
+                        ngx.log(ngx.INFO, string.format("[DEBUG] extracted from nested table: %s", tostring(request_id_value)))
+                    else
+                        -- Fallback: try direct access
+                        request_id_value = request_id.id or request_id[1]
+                        ngx.log(ngx.INFO, string.format("[DEBUG] extracted from direct table: %s", tostring(request_id_value)))
+                    end
+                else
+                    request_id_value = request_id
+                    ngx.log(ngx.INFO, string.format("[DEBUG] used direct value: %s", tostring(request_id_value)))
+                end
+
+                -- Convert to number if it's a string
+                if request_id_value then
+                    request_id_value = tonumber(request_id_value)
+                end
+
+                ngx.log(ngx.INFO, string.format("[DEBUG] final request_id_value: %s (type: %s)",
+                    tostring(request_id_value), type(request_id_value)))
+
+                if not request_id_value then
+                    error("Failed to extract request ID from insert result. Raw value: " .. tostring(request_id))
+                end
+
+                -- Fetch the created request - use tonumber to ensure it's not a table
+                local created_request = db.query("SELECT * FROM delivery_requests WHERE id = " .. tonumber(request_id_value))[1]
 
                 if not created_request then
                     error("Failed to retrieve created delivery request")
