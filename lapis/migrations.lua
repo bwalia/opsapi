@@ -14,6 +14,7 @@ local stripe_integration_migrations = require("migrations.stripe-integration")
 local delivery_partner_migrations = require("migrations.delivery-partner-system")
 local geolocation_delivery_migrations = require("migrations.geolocation-delivery-system")
 local multi_currency_migrations = require("migrations.multi-currency-support")
+local fix_delivery_request_constraint = require("migrations.fix-delivery-request-constraint")
 
 return {
     ['01_create_users'] = function()
@@ -438,5 +439,8 @@ return {
     ['114_create_supported_currencies_table'] = multi_currency_migrations[9],
     ['115_populate_supported_currencies'] = multi_currency_migrations[10],
     ['116_add_currency_indexes'] = multi_currency_migrations[11],
+
+    -- Fix Delivery Request Constraint
+    ['117_fix_delivery_request_unique_constraint'] = fix_delivery_request_constraint[1],
 
 }
