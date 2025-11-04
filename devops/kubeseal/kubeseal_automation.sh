@@ -161,6 +161,7 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     exit 1
 fi
 
+echo "Replacing placeholders in secret template file..."
 # Use Python for reliable string replacement
 python3 << EOF
 import sys
@@ -370,6 +371,7 @@ fi
 cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
+
 # Clean up temporary files
 
 if [ -f $SECRET_OUTPUT_PATH ]; then
