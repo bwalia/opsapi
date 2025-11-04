@@ -33,14 +33,14 @@ spec:
             httpGet:
               path: /health
               port: 80
-            failureThreshold: 1
-            periodSeconds: 10
+            failureThreshold: 3
+            periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
               port: 80
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 120
+            periodSeconds: 30
           env:
             - name: KEYCLOAK_AUTH_URL
               valueFrom:
