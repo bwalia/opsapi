@@ -189,6 +189,12 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     exit 1
 fi
 
+if [ ! -s $SECRET_OUTPUT_PATH ]; then
+   echo "Error: Secret template file '$SECRET_OUTPUT_PATH', sealed secret file is empty!"
+   exit 1
+fi
+
+
 echo "Sealing the secret using kubeseal..."
 
 # KUBESEAL_PUBLIC_KEY_PATH="/tmp/kubeseal-pub-cert.pem"
@@ -210,12 +216,17 @@ kubeseal \
 --controller-name=sealed-secrets-controller \
 --controller-namespace=kube-system < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
 
-echo "Sealed the secret using kubeseal...'$SEALED_SECRET_OUTPUT_PATH'"
-
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret template file '$SEALED_SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
+
+if [ ! -s $SEALED_SECRET_OUTPUT_PATH ]; then
+   echo "Error: Sealing the secret failed, sealed secret file is empty!"
+   exit 1
+fi
+
+echo "Sealed the secret using kubeseal...'$SEALED_SECRET_OUTPUT_PATH'"
 
 if base64 --help 2>&1 | grep -q -- '--wrap'; then
     # GNU base64 (Linux)
