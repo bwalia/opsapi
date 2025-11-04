@@ -190,7 +190,26 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
 fi
 
 echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+
+# KUBESEAL_PUBLIC_KEY_PATH="/tmp/kubeseal-pub-cert.pem"
+# kubeseal --fetch-cert \
+#   --controller-name=sealed-secrets-controller \
+#   --controller-namespace=kube-system \
+#   > $KUBESEAL_PUBLIC_KEY_PATH
+
+# if [ ! -f "$KUBESEAL_PUBLIC_KEY_PATH" ]; then
+#     echo "Error: kubeseal public key file '$KUBESEAL_PUBLIC_KEY_PATH' not found!"
+#     exit 1
+# fi
+
+# cat "KUBESEAL_PUBLIC_KEY_PATH: "
+# cat $KUBESEAL_PUBLIC_KEY_PATH
+# --cert=$KUBESEAL_PUBLIC_KEY_PATH \
+kubeseal \
+--format=yaml \
+--controller-name=sealed-secrets-controller \
+--controller-namespace=kube-system < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+
 echo "Sealed the secret using kubeseal...'$SEALED_SECRET_OUTPUT_PATH'"
 
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
