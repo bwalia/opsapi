@@ -45,7 +45,7 @@ echo "OSTYPE variable: $OSTYPE"
 if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "✓ Running on macOS"
     OS_TYPE="macos"
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+elif [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "linux"* ]]; then
     echo "✓ Running on Linux"
     OS_TYPE="linux"
 
