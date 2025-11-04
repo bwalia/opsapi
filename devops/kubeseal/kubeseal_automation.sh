@@ -45,7 +45,7 @@ echo "OSTYPE variable: $OSTYPE"
 if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "✓ Running on macOS"
     OS_TYPE="macos"
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+elif [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "linux"* ]]; then
     echo "✓ Running on Linux"
     OS_TYPE="linux"
 
@@ -161,6 +161,7 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     exit 1
 fi
 
+echo "Replacing placeholders in secret template file..."
 # Use Python for reliable string replacement
 python3 << EOF
 import sys
@@ -189,14 +190,44 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     exit 1
 fi
 
+if [ ! -s $SECRET_OUTPUT_PATH ]; then
+   echo "Error: Secret template file '$SECRET_OUTPUT_PATH', sealed secret file is empty!"
+   exit 1
+fi
+
+
 echo "Sealing the secret using kubeseal..."
-kubeseal --format yaml < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
-echo "Sealed the secret using kubeseal...'$SEALED_SECRET_OUTPUT_PATH'"
+
+# KUBESEAL_PUBLIC_KEY_PATH="/tmp/kubeseal-pub-cert.pem"
+# kubeseal --fetch-cert \
+#   --controller-name=sealed-secrets-controller \
+#   --controller-namespace=kube-system \
+#   > $KUBESEAL_PUBLIC_KEY_PATH
+
+# if [ ! -f "$KUBESEAL_PUBLIC_KEY_PATH" ]; then
+#     echo "Error: kubeseal public key file '$KUBESEAL_PUBLIC_KEY_PATH' not found!"
+#     exit 1
+# fi
+
+# cat "KUBESEAL_PUBLIC_KEY_PATH: "
+# cat $KUBESEAL_PUBLIC_KEY_PATH
+# --cert=$KUBESEAL_PUBLIC_KEY_PATH \
+kubeseal \
+--format=yaml \
+--controller-name=sealed-secrets-controller \
+--controller-namespace=kube-system < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
 
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret template file '$SEALED_SECRET_OUTPUT_PATH' not found!"
     exit 1
 fi
+
+if [ ! -s $SEALED_SECRET_OUTPUT_PATH ]; then
+   echo "Error: Sealing the secret failed, sealed secret file is empty!"
+   exit 1
+fi
+
+echo "Sealed the secret using kubeseal...'$SEALED_SECRET_OUTPUT_PATH'"
 
 if base64 --help 2>&1 | grep -q -- '--wrap'; then
     # GNU base64 (Linux)
@@ -340,6 +371,7 @@ fi
 cat $HELM_VALUES_OUTPUT_PATH
 
 echo "Helm values file created at '$HELM_VALUES_OUTPUT_PATH'"
+
 # Clean up temporary files
 
 if [ -f $SECRET_OUTPUT_PATH ]; then
