@@ -114,15 +114,15 @@ jobs:
         run: |
             export KUBECONFIG=$(pwd)/kubeconfig
             if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
+                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_TEST }}" "test" "test" ${{ env.PROJECT_NAME }}
+                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_TEST }}" "test" "test" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_ACC }}" "acc" "acc" ${{ env.PROJECT_NAME }}
+                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_ACC }}" "acc" "acc" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_PROD }}" "prod" "prod" ${{ env.PROJECT_NAME }}
+                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_PROD }}" "prod" "prod" ${{ env.PROJECT_NAME }}
             else
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_INT }}" "int" "int" ${{ env.PROJECT_NAME }}
+                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_INT }}" "int" "int" ${{ env.PROJECT_NAME }}
             fi
         shell: bash
 
@@ -170,15 +170,15 @@ jobs:
         run: |
             export KUBECONFIG=$(pwd)/kubeconfig
             if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_DEV }} "dev"
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_KISAAN_NODE_ENV_CREDS_DEV }} "dev"
             elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_TEST }} "test"
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_KISAAN_NODE_ENV_CREDS_TEST }} "test"
             elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_ACC }} "acc"
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_KISAAN_NODE_ENV_CREDS_ACC }} "acc"
             elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_PROD }} "prod"
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_KISAAN_NODE_ENV_CREDS_PROD }} "prod"
             else
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_INT }} "int"
+                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_KISAAN_NODE_ENV_CREDS_INT }} "int"
             fi
         shell: bash            
 
