@@ -93,7 +93,7 @@ jobs:
               curl -I http://localhost:80
         shell: bash
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build]
     steps:
       - name: Checkout code
