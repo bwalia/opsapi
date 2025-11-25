@@ -189,6 +189,7 @@ app:before_filter(function(self)
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
         uri == "/swagger/swagger.json" or uri == "/metrics" or uri:match("^/auth/") or
+        uri:match("^/api/v2/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
@@ -283,6 +284,12 @@ safe_load_routes("routes.delivery-partner-verification") -- Verification system 
 
 -- Delivery Pricing System
 safe_load_routes("routes.delivery-pricing")              -- Professional delivery fee calculation & validation
+
+-- Chat System (Slack-like messaging)
+safe_load_routes("routes.chat-channels")                 -- Channel management (create, update, members)
+safe_load_routes("routes.chat-messages")                 -- Message operations (send, edit, delete, threads)
+safe_load_routes("routes.chat-reactions")                -- Message reactions (add, remove, toggle)
+safe_load_routes("routes.chat-extras")                   -- Bookmarks, drafts, mentions, presence, invites, files
 
 ngx.log(ngx.NOTICE, "All routes loaded")
 
