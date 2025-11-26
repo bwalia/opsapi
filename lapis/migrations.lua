@@ -15,6 +15,7 @@ local delivery_partner_migrations = require("migrations.delivery-partner-system"
 local geolocation_delivery_migrations = require("migrations.geolocation-delivery-system")
 local multi_currency_migrations = require("migrations.multi-currency-support")
 local fix_delivery_request_constraint = require("migrations.fix-delivery-request-constraint")
+local chat_system_migrations = require("migrations.chat-system")
 
 return {
     ['01_create_users'] = function()
@@ -442,5 +443,37 @@ return {
 
     -- Fix Delivery Request Constraint
     ['117_fix_delivery_request_unique_constraint'] = fix_delivery_request_constraint[1],
+
+    -- Chat System (Slack-like messaging)
+    ['118_create_chat_channels_table'] = chat_system_migrations[1],
+    ['119_add_chat_channels_indexes'] = chat_system_migrations[2],
+    ['120_create_chat_channel_members_table'] = chat_system_migrations[3],
+    ['121_add_chat_channel_members_indexes'] = chat_system_migrations[4],
+    ['122_create_chat_messages_table'] = chat_system_migrations[5],
+    ['123_add_chat_messages_indexes'] = chat_system_migrations[6],
+    ['124_create_chat_message_reactions_table'] = chat_system_migrations[7],
+    ['125_add_chat_message_reactions_indexes'] = chat_system_migrations[8],
+    ['126_create_chat_read_receipts_table'] = chat_system_migrations[9],
+    ['127_add_chat_read_receipts_indexes'] = chat_system_migrations[10],
+    ['128_create_chat_typing_indicators_table'] = chat_system_migrations[11],
+    ['129_add_chat_typing_indicators_indexes'] = chat_system_migrations[12],
+    ['130_add_chat_constraints'] = chat_system_migrations[13],
+    ['131_add_chat_foreign_keys'] = chat_system_migrations[14],
+    ['132_create_chat_file_attachments_table'] = chat_system_migrations[15],
+    ['133_add_chat_file_attachments_indexes'] = chat_system_migrations[16],
+    ['134_create_chat_user_presence_table'] = chat_system_migrations[17],
+    ['135_add_chat_user_presence_indexes'] = chat_system_migrations[18],
+    ['136_create_chat_bookmarks_table'] = chat_system_migrations[19],
+    ['137_add_chat_bookmarks_indexes'] = chat_system_migrations[20],
+    ['138_create_chat_drafts_table'] = chat_system_migrations[21],
+    ['139_add_chat_drafts_indexes'] = chat_system_migrations[22],
+    ['140_create_chat_mentions_table'] = chat_system_migrations[23],
+    ['141_add_chat_mentions_indexes'] = chat_system_migrations[24],
+    ['142_create_chat_channel_invites_table'] = chat_system_migrations[25],
+    ['143_add_chat_channel_invites_indexes'] = chat_system_migrations[26],
+    ['144_add_chat_presence_constraints'] = chat_system_migrations[27],
+    ['145_create_chat_channel_last_message_trigger'] = chat_system_migrations[28],
+    ['146_create_chat_reply_count_trigger'] = chat_system_migrations[29],
+    ['147_create_chat_unread_counts_view'] = chat_system_migrations[30],
 
 }
