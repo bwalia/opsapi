@@ -27,12 +27,14 @@ function ChatChannelMemberQueries.addMember(channel_uuid, user_uuid, role)
         return existing
     end
 
-    -- Create new membership
+    -- Create new membership with explicit defaults
     return ChatChannelMemberModel:create({
         uuid = Global.generateUUID(),
         channel_uuid = channel_uuid,
         user_uuid = user_uuid,
         role = role,
+        is_muted = false,
+        notification_preference = "all",
         joined_at = db.raw("NOW()")
     }, { returning = "*" })
 end

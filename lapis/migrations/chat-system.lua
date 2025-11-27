@@ -476,5 +476,66 @@ return {
                 GROUP BY cm.user_uuid, cm.channel_uuid, c.name;
             ]])
         end)
+    end,
+
+    -- Fix default values that had extra quotes
+    [31] = function()
+        -- Fix notification_preference default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_channel_members
+                ALTER COLUMN notification_preference SET DEFAULT 'all'
+            ]])
+        end)
+        -- Fix any existing records with quoted values
+        pcall(function()
+            db.query([[
+                UPDATE chat_channel_members
+                SET notification_preference = 'all'
+                WHERE notification_preference = '''all''' OR notification_preference IS NULL
+            ]])
+        end)
+        -- Fix type default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_channels
+                ALTER COLUMN type SET DEFAULT 'public'
+            ]])
+        end)
+        -- Fix role default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_channel_members
+                ALTER COLUMN role SET DEFAULT 'member'
+            ]])
+        end)
+        -- Fix status default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_user_presence
+                ALTER COLUMN status SET DEFAULT 'offline'
+            ]])
+        end)
+        -- Fix content_type default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_messages
+                ALTER COLUMN content_type SET DEFAULT 'text'
+            ]])
+        end)
+        -- Fix invite status default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_channel_invites
+                ALTER COLUMN status SET DEFAULT 'pending'
+            ]])
+        end)
+        -- Fix mention_type default
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_mentions
+                ALTER COLUMN mention_type SET DEFAULT 'user'
+            ]])
+        end)
     end
 }
