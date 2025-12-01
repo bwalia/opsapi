@@ -283,13 +283,13 @@ safe_load_routes("routes.delivery-dashboard-enhanced")   -- Geo-based dashboard 
 safe_load_routes("routes.delivery-partner-verification") -- Verification system with document upload
 
 -- Delivery Pricing System
-safe_load_routes("routes.delivery-pricing")              -- Professional delivery fee calculation & validation
+safe_load_routes("routes.delivery-pricing") -- Professional delivery fee calculation & validation
 
 -- Chat System (Slack-like messaging)
-safe_load_routes("routes.chat-channels")                 -- Channel management (create, update, members)
-safe_load_routes("routes.chat-messages")                 -- Message operations (send, edit, delete, threads)
-safe_load_routes("routes.chat-reactions")                -- Message reactions (add, remove, toggle)
-safe_load_routes("routes.chat-extras")                   -- Bookmarks, drafts, mentions, presence, invites, files
+safe_load_routes("routes.chat-channels")  -- Channel management (create, update, members)
+safe_load_routes("routes.chat-messages")  -- Message operations (send, edit, delete, threads)
+safe_load_routes("routes.chat-reactions") -- Message reactions (add, remove, toggle)
+safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, mentions, presence, invites, files
 
 ngx.log(ngx.NOTICE, "All routes loaded")
 

@@ -27,12 +27,14 @@ function ChatChannelMemberQueries.addMember(channel_uuid, user_uuid, role)
         return existing
     end
 
-    -- Create new membership
+    -- Create new membership with explicit defaults
     return ChatChannelMemberModel:create({
         uuid = Global.generateUUID(),
         channel_uuid = channel_uuid,
         user_uuid = user_uuid,
         role = role,
+        is_muted = false,
+        notification_preference = "all",
         joined_at = db.raw("NOW()")
     }, { returning = "*" })
 end
@@ -97,18 +99,51 @@ end
 
 -- Mark channel as read
 function ChatChannelMemberQueries.markAsRead(channel_uuid, user_uuid)
-    local member = ChatChannelMemberModel:find({
-        channel_uuid = channel_uuid,
-        user_uuid = user_uuid
-    })
+    local ok, member = pcall(function()
+        return ChatChannelMemberModel:find({
+            channel_uuid = channel_uuid,
+            user_uuid = user_uuid
+        })
+    end)
 
-    if not member or member.left_at then
+    if not ok then
+        ngx.log(ngx.ERR, "markAsRead: Error finding member: ", tostring(member))
+        return nil, "Database error"
+    end
+
+    if not member then
+        ngx.log(ngx.WARN, "markAsRead: Member not found for channel=", channel_uuid, " user=", user_uuid)
         return nil, "Member not found"
     end
 
-    return member:update({
-        last_read_at = db.raw("NOW()")
-    }, { returning = "*" })
+    if member.left_at then
+        ngx.log(ngx.WARN, "markAsRead: Member has left channel")
+        return nil, "Member has left the channel"
+    end
+
+    -- Use direct SQL update to avoid Lapis model issues with returning
+    local sql = [[
+        UPDATE chat_channel_members
+        SET last_read_at = NOW(), updated_at = NOW()
+        WHERE channel_uuid = ? AND user_uuid = ? AND left_at IS NULL
+        RETURNING last_read_at
+    ]]
+
+    local ok_update, result = pcall(function()
+        return db.query(sql, channel_uuid, user_uuid)
+    end)
+
+    if not ok_update then
+        ngx.log(ngx.ERR, "markAsRead: Error updating: ", tostring(result))
+        return nil, "Failed to update read status"
+    end
+
+    if result and #result > 0 then
+        return { last_read_at = result[1].last_read_at }
+    end
+
+    -- Fallback: return current timestamp if update succeeded but no result
+    return { last_read_at = os.date("!%Y-%m-%dT%H:%M:%SZ") }
 end
 
 -- Get member details

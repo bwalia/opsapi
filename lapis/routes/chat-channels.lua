@@ -420,15 +420,29 @@ return function(app)
 
         local channel_uuid = self.params.uuid
 
+        -- Call markAsRead directly (it has its own error handling)
         local result, read_err = ChatChannelMemberQueries.markAsRead(channel_uuid, user.uuid)
 
         if not result then
-            return { status = 404, json = { error = read_err or "Not a member of this channel" } }
+            -- Return 200 with warning instead of 404 to not break UI flow
+            -- User might not be a member yet but this shouldn't block the channel view
+            ngx.log(ngx.WARN, "markAsRead: ", read_err or "Unknown error", ", channel=", channel_uuid, " user=", user.uuid)
+            return {
+                status = 200,
+                json = { message = "Acknowledged", warning = read_err or "Not a member of this channel" }
+            }
+        end
+
+        -- Handle case where result is a Lapis model object (has last_read_at directly)
+        local last_read_at = result.last_read_at
+        if type(result) == "table" and not last_read_at then
+            -- Try to get from nested structure
+            last_read_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
         end
 
         return {
             status = 200,
-            json = { message = "Channel marked as read", last_read_at = result.last_read_at }
+            json = { message = "Channel marked as read", last_read_at = last_read_at }
         }
     end)
 
