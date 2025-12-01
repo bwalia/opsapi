@@ -22,7 +22,7 @@ services:
     build: .
     ports:
       - "4010:80"
-      - "8081:8081"
+      - "8039:8039"
     volumes:
       - .:/app
       - ./logs:/var/log/nginx

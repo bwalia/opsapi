@@ -475,6 +475,7 @@ return {
     ['145_create_chat_channel_last_message_trigger'] = chat_system_migrations[28],
     ['146_create_chat_reply_count_trigger'] = chat_system_migrations[29],
     ['147_create_chat_unread_counts_view'] = chat_system_migrations[30],
-    ['148_fix_chat_default_values'] = chat_system_migrations[31],
+    ['148_ensure_last_read_at_column'] = chat_system_migrations[31],
+    ['149_fix_chat_default_values'] = chat_system_migrations[32],
 
 }

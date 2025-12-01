@@ -478,8 +478,18 @@ return {
         end)
     end,
 
-    -- Fix default values that had extra quotes
+    -- Ensure last_read_at column exists (for databases created before this column was added)
     [31] = function()
+        pcall(function()
+            db.query([[
+                ALTER TABLE chat_channel_members
+                ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP
+            ]])
+        end)
+    end,
+
+    -- Fix default values that had extra quotes
+    [32] = function()
         -- Fix notification_preference default
         pcall(function()
             db.query([[

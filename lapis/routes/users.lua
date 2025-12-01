@@ -5,7 +5,6 @@ local Global = require "helper.global"
 local cjson = require "cjson"
 
 return function(app)
-    
     local function error_response(status, message, details)
         ngx.log(ngx.ERR, "Users API error: ", message, " | Details: ", tostring(details))
         return {
@@ -20,24 +19,24 @@ return function(app)
     -- LIST users
     app:get("/api/v2/users", function(self)
         local params = self.params or {}
-        
+
         local limit = tonumber(params.limit) or 10
         local offset = tonumber(params.offset) or 0
-        
+
         local ok, users = pcall(UserQueries.list, {
             limit = limit,
             offset = offset
         })
-        
+
         if not ok then
             return error_response(500, "Failed to list users", tostring(users))
         end
-        
+
         local count_ok, total = pcall(UserQueries.count)
         if not count_ok then
             total = 0
         end
-        
+
         return {
             status = 200,
             json = {
@@ -46,105 +45,105 @@ return function(app)
             }
         }
     end)
-    
+
     -- GET single user
     app:get("/api/v2/users/:id", function(self)
         local user_id = self.params.id
-        
+
         local ok, user = pcall(UserQueries.show, user_id)
-        
+
         if not ok then
             return error_response(500, "Failed to fetch user", tostring(user))
         end
-        
+
         if not user then
             return error_response(404, "User not found")
         end
-        
+
         return {
             status = 200,
             json = user
         }
     end)
-    
+
     -- CREATE user
     app:post("/api/v2/users", function(self)
         local params, files = RequestParser.parse_request(self)
-        
-        local valid, missing = RequestParser.require_params(params, {"email", "password"})
+
+        local valid, missing = RequestParser.require_params(params, { "email", "password" })
         if not valid then
             return error_response(400, "Missing required fields", table.concat(missing, ", "))
         end
-        
+
         local user_data = {
             email = params.email,
             password = params.password,
             first_name = params.first_name or params.firstName,
             last_name = params.last_name or params.lastName
         }
-        
+
         ngx.log(ngx.NOTICE, "Creating user: ", params.email)
-        
+
         local ok, user = pcall(UserQueries.create, user_data)
-        
+
         if not ok then
             return error_response(500, "Failed to create user", tostring(user))
         end
-        
+
         return {
             status = 201,
             json = user
         }
     end)
-    
+
     -- UPDATE user
     app:put("/api/v2/users/:id", function(self)
         local user_id = self.params.id
         local params, files = RequestParser.parse_request(self)
-        
+
         local update_data = {}
         if params.email then update_data.email = params.email end
-        if params.first_name or params.firstName then 
-            update_data.first_name = params.first_name or params.firstName 
+        if params.first_name or params.firstName then
+            update_data.first_name = params.first_name or params.firstName
         end
-        if params.last_name or params.lastName then 
-            update_data.last_name = params.last_name or params.lastName 
+        if params.last_name or params.lastName then
+            update_data.last_name = params.last_name or params.lastName
         end
-        
+
         if next(update_data) == nil then
             return error_response(400, "No data provided for update")
         end
-        
+
         local ok, user = pcall(UserQueries.update, user_id, update_data)
-        
+
         if not ok then
             return error_response(500, "Failed to update user", tostring(user))
         end
-        
+
         if not user then
             return error_response(404, "User not found")
         end
-        
+
         return {
             status = 200,
             json = user
         }
     end)
-    
+
     -- DELETE user
     app:delete("/api/v2/users/:id", function(self)
         local user_id = self.params.id
-        
+
         local ok, result = pcall(UserQueries.delete, user_id)
-        
+
         if not ok then
             return error_response(500, "Failed to delete user", tostring(result))
         end
-        
+
         if not result then
             return error_response(404, "User not found")
         end
-        
+
         return {
             status = 200,
             json = {
@@ -153,7 +152,7 @@ return function(app)
             }
         }
     end)
-    
+
     ----------------- SCIM User Routes --------------------
     app:match("scim_users", "/scim/v2/Users", respond_to({
         GET = function(self)
