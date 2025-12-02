@@ -209,7 +209,7 @@ end)
 local function safe_load_routes(route_name)
     local ok, route_module = pcall(require, route_name)
     if not ok then
-        ngx.log(ngx.ERR, "Failed to load: ", route_name)
+        ngx.log(ngx.ERR, "Failed to load: ", route_name, " - Error: ", tostring(route_module))
         return false
     end
 

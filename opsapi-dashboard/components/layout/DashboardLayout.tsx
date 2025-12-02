@@ -1,79 +1,140 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { useAuthStore } from '@/store/auth.store';
+import { PermissionsProvider } from '@/contexts/PermissionsContext';
 import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
-const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+// Loading component - memoized
+const LoadingScreen = memo(function LoadingScreen({ message }: { message: string }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-secondary-50">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25">
+          <Loader2 className="w-6 h-6 text-white animate-spin" />
+        </div>
+        <p className="text-secondary-500 font-medium">{message}</p>
+      </div>
+    </div>
+  );
+});
+
+const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardLayout({
+  children,
+}) {
   const router = useRouter();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { isAuthenticated, token, _hasHydrated } = useAuthStore();
 
+  // Load sidebar collapsed state from localStorage
   useEffect(() => {
-    // Wait for hydration to complete before checking auth
-    if (!_hasHydrated) return;
+    const savedCollapsed = localStorage.getItem('sidebar-collapsed');
+    if (savedCollapsed === 'true') {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
 
-    // After hydration, check if we have valid auth
+  // Auth check
+  useEffect(() => {
+    if (!_hasHydrated) return;
     if (!token || !isAuthenticated) {
       router.push('/login');
     }
   }, [token, isAuthenticated, _hasHydrated, router]);
 
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, []);
+
+  // Handle escape key to close mobile sidebar
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isSidebarOpen) {
+        setIsSidebarOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isSidebarOpen]);
+
+  // Prevent body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isSidebarOpen]);
+
+  const handleSidebarOpen = useCallback(() => {
+    setIsSidebarOpen(true);
+  }, []);
+
+  const handleSidebarClose = useCallback(() => {
+    setIsSidebarOpen(false);
+  }, []);
+
+  const handleSidebarToggleCollapse = useCallback(() => {
+    setIsSidebarCollapsed((prev) => {
+      const newValue = !prev;
+      localStorage.setItem('sidebar-collapsed', String(newValue));
+      return newValue;
+    });
+  }, []);
+
   // Show loading while hydrating
   if (!_hasHydrated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-secondary-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25">
-            <Loader2 className="w-6 h-6 text-white animate-spin" />
-          </div>
-          <p className="text-secondary-500 font-medium">Loading...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Loading..." />;
   }
 
   // After hydration, if not authenticated, show redirect message
   if (!isAuthenticated || !token) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-secondary-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25">
-            <Loader2 className="w-6 h-6 text-white animate-spin" />
-          </div>
-          <p className="text-secondary-500 font-medium">Redirecting to login...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Redirecting to login..." />;
   }
 
   return (
-    <div className="min-h-screen bg-secondary-50">
-      {/* Sidebar */}
-      <Sidebar />
-
-      {/* Mobile sidebar overlay */}
-      {isMobileMenuOpen && (
-        <div
-          className="fixed inset-0 bg-secondary-900/50 backdrop-blur-sm z-30 lg:hidden"
-          onClick={() => setIsMobileMenuOpen(false)}
+    <PermissionsProvider>
+      <div className="min-h-screen bg-secondary-50">
+        {/* Sidebar */}
+        <Sidebar
+          isOpen={isSidebarOpen}
+          isCollapsed={isSidebarCollapsed}
+          onClose={handleSidebarClose}
+          onToggleCollapse={handleSidebarToggleCollapse}
         />
-      )}
 
-      {/* Main content */}
-      <div className="lg:ml-64">
-        <Header onMenuClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} />
-        <main className="p-6">{children}</main>
+        {/* Main content wrapper */}
+        <div
+          className={cn(
+            'transition-all duration-300',
+            // Desktop: adjust margin based on sidebar state
+            isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64',
+            // Mobile: no margin (sidebar overlays)
+            'ml-0'
+          )}
+        >
+          {/* Header */}
+          <Header onMenuClick={handleSidebarOpen} />
+
+          {/* Main content */}
+          <main className="p-4 sm:p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </PermissionsProvider>
   );
-};
+});
 
 export default DashboardLayout;

@@ -11,7 +11,7 @@ export interface ModalProps {
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showClose?: boolean;
 }
 
@@ -45,27 +45,28 @@ const Modal: React.FC<ModalProps> = ({
     sm: 'max-w-sm',
     md: 'max-w-md',
     lg: 'max-w-lg',
-    xl: 'max-w-xl',
+    xl: 'max-w-2xl',
+    '2xl': 'max-w-3xl',
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-secondary-900/50 backdrop-blur-sm"
+        className="fixed inset-0 bg-secondary-900/50 backdrop-blur-sm"
         onClick={onClose}
       />
 
       {/* Modal Content */}
       <div
         className={cn(
-          'relative w-full bg-white rounded-2xl shadow-2xl',
+          'relative w-full bg-white rounded-2xl shadow-2xl my-8 max-h-[90vh] flex flex-col',
           sizes[size]
         )}
       >
         {/* Header */}
         {(title || showClose) && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-secondary-200">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-secondary-200 flex-shrink-0">
             {title && (
               <h3 className="text-lg font-semibold text-secondary-900">{title}</h3>
             )}
@@ -80,8 +81,8 @@ const Modal: React.FC<ModalProps> = ({
           </div>
         )}
 
-        {/* Body */}
-        <div className="p-6">{children}</div>
+        {/* Body - Scrollable */}
+        <div className="p-6 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>
   );

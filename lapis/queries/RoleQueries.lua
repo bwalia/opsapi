@@ -32,7 +32,12 @@ function RoleQueries.all(params)
 end
 
 function RoleQueries.show(id)
-    return Roles:find({ id = id }) or Roles:find({ uuid = id })
+    -- Try UUID first (string format), then try numeric ID
+    local role = Roles:find({ uuid = tostring(id) })
+    if not role and tonumber(id) then
+        role = Roles:find({ id = tonumber(id) })
+    end
+    return role
 end
 
 function RoleQueries.update(id, params)
@@ -58,6 +63,26 @@ function RoleQueries.roleByName(name)
     return Roles:find({
         role_name = tostring(name)
     })
+end
+
+-- Alias for list (used by routes/roles.lua)
+function RoleQueries.list(params)
+    return RoleQueries.all(params).data
+end
+
+-- Count all roles
+function RoleQueries.count()
+    local result = db.query("SELECT COUNT(*) as count FROM roles")
+    return result[1] and result[1].count or 0
+end
+
+-- Delete role by ID or UUID
+function RoleQueries.delete(id)
+    local role = RoleQueries.show(id)
+    if not role then
+        return nil
+    end
+    return role:delete()
 end
 
 return RoleQueries

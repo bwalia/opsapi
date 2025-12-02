@@ -5,3 +5,6 @@ export { storesService } from './stores.service';
 export { productsService } from './products.service';
 export { customersService } from './customers.service';
 export { dashboardService } from './dashboard.service';
+export { rolesService, formatRoleName, getRoleColor } from './roles.service';
+export { permissionsService, DASHBOARD_MODULES, PERMISSION_ACTIONS } from './permissions.service';
+export { modulesService } from './modules.service';

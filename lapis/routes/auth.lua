@@ -75,14 +75,33 @@ return function(app)
             }
         })
 
+        -- Build roles array with proper structure for frontend
+        local rolesArray = {}
+        if userWithRoles.roles then
+            for _, role in ipairs(userWithRoles.roles) do
+                table.insert(rolesArray, {
+                    id = role.id,
+                    role_id = role.role_id,
+                    role_name = role.name or role.role_name,
+                    name = role.name or role.role_name
+                })
+            end
+        end
+
         return {
             status = 200,
             json = {
                 user = {
-                    id = userWithRoles.uuid,
+                    id = userWithRoles.internal_id,
+                    uuid = userWithRoles.uuid or userWithRoles.id,
                     email = userWithRoles.email,
-                    name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
-                    role = userWithRoles.roles and userWithRoles.roles[1] and userWithRoles.roles[1].name or "buyer"
+                    username = userWithRoles.username,
+                    first_name = userWithRoles.first_name or "",
+                    last_name = userWithRoles.last_name or "",
+                    active = userWithRoles.active,
+                    created_at = userWithRoles.created_at,
+                    updated_at = userWithRoles.updated_at,
+                    roles = rolesArray
                 },
                 token = token
             }

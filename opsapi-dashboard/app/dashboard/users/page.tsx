@@ -1,25 +1,38 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, Trash2, Edit, Mail, Shield } from 'lucide-react';
-import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
-import { usersService } from '@/services';
-import { formatDate, getInitials, getFullName } from '@/lib/utils';
-import type { User, TableColumn, PaginatedResponse } from '@/types';
-import toast from 'react-hot-toast';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Plus, Search, Trash2, Edit, Mail } from "lucide-react";
+import {
+  Button,
+  Input,
+  Table,
+  Badge,
+  Pagination,
+  Card,
+  ConfirmDialog,
+} from "@/components/ui";
+import { AddUserModal } from "@/components/users";
+import { RoleBadge } from "@/components/permissions";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { usersService } from "@/services";
+import { formatDate, getInitials, getFullName } from "@/lib/utils";
+import type { User, TableColumn, PaginatedResponse } from "@/types";
+import toast from "react-hot-toast";
 
 export default function UsersPage() {
+  const { canCreate, canUpdate, canDelete } = usePermissions();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
-  const [sortColumn, setSortColumn] = useState('created_at');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [sortColumn, setSortColumn] = useState("created_at");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [addUserModalOpen, setAddUserModalOpen] = useState(false);
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -43,8 +56,8 @@ export default function UsersPage() {
       }
     } catch (error) {
       if (fetchId === fetchIdRef.current) {
-        console.error('Failed to fetch users:', error);
-        toast.error('Failed to load users');
+        console.error("Failed to fetch users:", error);
+        toast.error("Failed to load users");
       }
     } finally {
       if (fetchId === fetchIdRef.current) {
@@ -59,10 +72,10 @@ export default function UsersPage() {
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
       setSortColumn(column);
-      setSortDirection('asc');
+      setSortDirection("asc");
     }
     setCurrentPage(1);
   };
@@ -78,10 +91,10 @@ export default function UsersPage() {
     setIsDeleting(true);
     try {
       await usersService.deleteUser(userToDelete.uuid);
-      toast.success('User deleted successfully');
+      toast.success("User deleted successfully");
       fetchUsers();
     } catch (error) {
-      toast.error('Failed to delete user');
+      toast.error("Failed to delete user");
     } finally {
       setIsDeleting(false);
       setDeleteDialogOpen(false);
@@ -91,8 +104,8 @@ export default function UsersPage() {
 
   const columns: TableColumn<User>[] = [
     {
-      key: 'name',
-      header: 'User',
+      key: "name",
+      header: "User",
       sortable: true,
       render: (user) => (
         <div className="flex items-center gap-3">
@@ -109,8 +122,8 @@ export default function UsersPage() {
       ),
     },
     {
-      key: 'email',
-      header: 'Email',
+      key: "email",
+      header: "Email",
       sortable: true,
       render: (user) => (
         <div className="flex items-center gap-2 text-secondary-600">
@@ -120,56 +133,60 @@ export default function UsersPage() {
       ),
     },
     {
-      key: 'roles',
-      header: 'Role',
+      key: "roles",
+      header: "Role",
       render: (user) => (
-        <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-secondary-400" />
-          <span className="text-sm text-secondary-600">
-            {user.roles?.[0]?.role_name || 'User'}
-          </span>
-        </div>
+        <RoleBadge
+          roleName={user.roles?.[0]?.role_name || user.roles?.[0]?.name || "user"}
+          size="sm"
+        />
       ),
     },
     {
-      key: 'active',
-      header: 'Status',
+      key: "active",
+      header: "Status",
       render: (user) => (
-        <Badge size="sm" status={user.active ? 'active' : 'inactive'} />
+        <Badge size="sm" status={user.active ? "active" : "inactive"} />
       ),
     },
     {
-      key: 'created_at',
-      header: 'Joined',
+      key: "created_at",
+      header: "Joined",
       sortable: true,
       render: (user) => (
-        <span className="text-sm text-secondary-600">{formatDate(user.created_at)}</span>
+        <span className="text-sm text-secondary-600">
+          {formatDate(user.created_at)}
+        </span>
       ),
     },
     {
-      key: 'actions',
-      header: '',
-      width: 'w-20',
+      key: "actions",
+      header: "",
+      width: "w-20",
       render: (user) => (
         <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              window.location.href = `/dashboard/users/${user.uuid}`;
-            }}
-            className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDeleteClick(user);
-            }}
-            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {canUpdate("users") && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.location.href = `/dashboard/users/${user.uuid}`;
+              }}
+              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+          )}
+          {canDelete("users") && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteClick(user);
+              }}
+              className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ),
     },
@@ -193,7 +210,11 @@ export default function UsersPage() {
           <h1 className="text-2xl font-bold text-secondary-900">Users</h1>
           <p className="text-secondary-500 mt-1">Manage your user accounts</p>
         </div>
-        <Button leftIcon={<Plus className="w-4 h-4" />}>Add User</Button>
+        {canCreate("users") && (
+          <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setAddUserModalOpen(true)}>
+            Add User
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
@@ -241,10 +262,20 @@ export default function UsersPage() {
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={handleDeleteConfirm}
         title="Delete User"
-        message={`Are you sure you want to delete "${getFullName(userToDelete?.first_name, userToDelete?.last_name)}"? This action cannot be undone.`}
+        message={`Are you sure you want to delete "${getFullName(
+          userToDelete?.first_name,
+          userToDelete?.last_name
+        )}"? This action cannot be undone.`}
         confirmText="Delete"
         variant="danger"
         isLoading={isDeleting}
+      />
+
+      {/* Add User Modal */}
+      <AddUserModal
+        isOpen={addUserModalOpen}
+        onClose={() => setAddUserModalOpen(false)}
+        onSuccess={fetchUsers}
       />
     </div>
   );

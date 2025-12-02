@@ -82,7 +82,7 @@ return function(app)
         end
         
         local role_data = {
-            name = params.name,
+            role_name = params.name,
             description = params.description,
             permissions = params.permissions
         }
@@ -107,7 +107,7 @@ return function(app)
         local params, files = RequestParser.parse_request(self)
         
         local update_data = {}
-        if params.name then update_data.name = params.name end
+        if params.name then update_data.role_name = params.name end
         if params.description then update_data.description = params.description end
         if params.permissions then update_data.permissions = params.permissions end
         

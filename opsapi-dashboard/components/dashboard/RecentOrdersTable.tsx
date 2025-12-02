@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import { Badge, Card } from '@/components/ui';
 import { formatDate, formatCurrency, getFullName } from '@/lib/utils';
 import type { Order } from '@/types';
@@ -11,7 +11,47 @@ interface RecentOrdersTableProps {
   isLoading?: boolean;
 }
 
-const RecentOrdersTable: React.FC<RecentOrdersTableProps> = ({ orders, isLoading }) => {
+// Memoized order row component
+const OrderRow = memo(function OrderRow({ order }: { order: Order }) {
+  return (
+    <tr className="hover:bg-secondary-50 transition-colors cursor-pointer">
+      <td className="px-6 py-4">
+        <div>
+          <p className="text-sm font-medium text-secondary-900">
+            #{order.order_number || order.uuid.slice(0, 8)}
+          </p>
+          <p className="text-xs text-secondary-500">{formatDate(order.created_at)}</p>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        <p className="text-sm text-secondary-900">
+          {order.customer
+            ? getFullName(order.customer.first_name, order.customer.last_name)
+            : 'Guest'}
+        </p>
+      </td>
+      <td className="px-6 py-4">
+        <Badge size="sm" status={order.status} />
+      </td>
+      <td className="px-6 py-4">
+        <Badge size="sm" status={order.payment_status} />
+      </td>
+      <td className="px-6 py-4 text-right">
+        <p className="text-sm font-semibold text-secondary-900">
+          {formatCurrency(order.total)}
+        </p>
+      </td>
+    </tr>
+  );
+});
+
+const RecentOrdersTable: React.FC<RecentOrdersTableProps> = memo(function RecentOrdersTable({
+  orders,
+  isLoading,
+}) {
+  // Memoize the sliced orders
+  const displayOrders = useMemo(() => orders.slice(0, 5), [orders]);
+
   if (isLoading) {
     return (
       <Card padding="none" className="overflow-hidden">
@@ -67,54 +107,20 @@ const RecentOrdersTable: React.FC<RecentOrdersTableProps> = ({ orders, isLoading
             </tr>
           </thead>
           <tbody className="divide-y divide-secondary-100">
-            {orders.length === 0 ? (
+            {displayOrders.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-6 py-8 text-center text-secondary-500">
                   No recent orders
                 </td>
               </tr>
             ) : (
-              orders.slice(0, 5).map((order) => (
-                <tr
-                  key={order.uuid}
-                  className="hover:bg-secondary-50 transition-colors cursor-pointer"
-                >
-                  <td className="px-6 py-4">
-                    <div>
-                      <p className="text-sm font-medium text-secondary-900">
-                        #{order.order_number || order.uuid.slice(0, 8)}
-                      </p>
-                      <p className="text-xs text-secondary-500">
-                        {formatDate(order.created_at)}
-                      </p>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-secondary-900">
-                      {order.customer
-                        ? getFullName(order.customer.first_name, order.customer.last_name)
-                        : 'Guest'}
-                    </p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <Badge size="sm" status={order.status} />
-                  </td>
-                  <td className="px-6 py-4">
-                    <Badge size="sm" status={order.payment_status} />
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <p className="text-sm font-semibold text-secondary-900">
-                      {formatCurrency(order.total)}
-                    </p>
-                  </td>
-                </tr>
-              ))
+              displayOrders.map((order) => <OrderRow key={order.uuid} order={order} />)
             )}
           </tbody>
         </table>
       </div>
     </Card>
   );
-};
+});
 
 export default RecentOrdersTable;

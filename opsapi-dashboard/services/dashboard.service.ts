@@ -1,24 +1,34 @@
 import apiClient from '@/lib/api-client';
-import type { DashboardStats, HealthStatus, Order } from '@/types';
+import type { DashboardStats, HealthStatus, Order, HealthCheck } from '@/types';
 
 export const dashboardService = {
   /**
    * Get dashboard statistics
+   * Uses health endpoint for counts and orders endpoint for recent orders
    */
   async getDashboardStats(): Promise<DashboardStats> {
     try {
-      const [usersRes, ordersRes, productsRes, storesRes] = await Promise.all([
-        apiClient.get('/api/v2/users', { params: { limit: 1 } }),
+      const [healthRes, ordersRes, productsRes] = await Promise.all([
+        apiClient.get('/health', { params: { detailed: 'true' } }),
         apiClient.get('/api/v2/orders', { params: { limit: 10 } }),
         apiClient.get('/api/v2/products', { params: { limit: 1 } }),
-        apiClient.get('/api/v2/stores', { params: { limit: 1 } }),
       ]);
+
+      // Extract database stats from health check
+      const healthData = healthRes.data as HealthStatus;
+      const databaseCheck = healthData.checks?.find(
+        (c: HealthCheck) => c.name === 'database'
+      );
+      const dbDetails = databaseCheck?.details;
 
       // Handle different response structures from API
       const recentOrders: Order[] = Array.isArray(ordersRes.data)
         ? ordersRes.data
         : ordersRes.data?.data || [];
-      const totalRevenue = recentOrders.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+      const totalRevenue = recentOrders.reduce(
+        (sum, order) => sum + (Number(order.total) || 0),
+        0
+      );
 
       // Generate mock revenue by month data (until API provides this)
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
@@ -28,10 +38,10 @@ export const dashboardService = {
       }));
 
       return {
-        totalUsers: usersRes.data?.total || usersRes.data?.length || 0,
-        totalOrders: ordersRes.data?.total || ordersRes.data?.length || 0,
+        totalUsers: dbDetails?.total_users || 0,
+        totalOrders: dbDetails?.total_orders || ordersRes.data?.total || 0,
         totalProducts: productsRes.data?.total || productsRes.data?.length || 0,
-        totalStores: storesRes.data?.total || storesRes.data?.length || 0,
+        totalStores: dbDetails?.total_stores || 0,
         totalRevenue,
         recentOrders,
         ordersByStatus: [],
