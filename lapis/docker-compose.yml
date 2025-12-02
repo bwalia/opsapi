@@ -22,7 +22,6 @@ services:
     build: .
     ports:
       - "4010:80"
-      - "8039:8039"
     volumes:
       - .:/app
       - ./logs:/var/log/nginx
@@ -38,6 +37,31 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+
+  # Next.js Dashboard
+  dashboard:
+    container_name: opsapi-dashboard
+    build:
+      context: ../opsapi-dashboard
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:4010
+    ports:
+      - "8039:8039"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - lapis
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.19
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8039"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
   postgres:
     container_name: opsapi-postgres-dev-db
     image: postgres:14-alpine

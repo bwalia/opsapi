@@ -42,6 +42,9 @@ export interface User {
   created_at: string;
   updated_at: string;
   roles?: Role[];
+  // For creation only (not returned from API)
+  password?: string;
+  role?: string;
 }
 
 export interface AuthState {
@@ -67,22 +70,72 @@ export interface LoginResponse {
 // ============================================
 
 export interface Role {
-  id: number;
+  id: number | string;
+  internal_id?: number;
   uuid: string;
   role_name: string;
+  name?: string;
+  role_id?: number;
+  description?: string;
   created_at: string;
   updated_at: string;
 }
+
+export interface UserRole {
+  id: number;
+  user_id: number;
+  role_id: number;
+  role_name?: string;
+  name?: string;
+}
+
+// Module represents a dashboard section/feature
+export interface Module {
+  id: number;
+  uuid: string;
+  name: string;
+  machine_name: string;
+  description?: string;
+  icon?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Permission actions for each module
+export type PermissionAction = 'create' | 'read' | 'update' | 'delete' | 'manage';
 
 export interface Permission {
   id: number;
   uuid: string;
   role: string;
+  role_id?: number;
+  module_id?: number;
   module_machine_name: string;
-  permissions: string;
+  module?: Module;
+  permissions: string; // Comma-separated actions: "create,read,update,delete"
   created_at: string;
   updated_at: string;
 }
+
+// Dashboard modules for permission management
+export type DashboardModule =
+  | 'dashboard'
+  | 'users'
+  | 'roles'
+  | 'stores'
+  | 'products'
+  | 'orders'
+  | 'customers'
+  | 'settings';
+
+// Permission config for checking access
+export interface PermissionConfig {
+  module: DashboardModule;
+  actions: PermissionAction[];
+}
+
+// User permissions map for quick lookups
+export type UserPermissions = Record<DashboardModule, PermissionAction[]>;
 
 // ============================================
 // Store Types
@@ -263,15 +316,45 @@ export interface DashboardStats {
 // Health Check Types
 // ============================================
 
+export interface HealthCheckDetails {
+  connected?: boolean;
+  server_time?: string;
+  test_query?: string;
+  total_stores?: number;
+  total_orders?: number;
+  total_users?: number;
+  database_size_bytes?: number;
+  memory_usage_kb?: number;
+  memory_usage_mb?: number;
+  uptime_seconds?: number;
+  worker_pid?: number;
+  worker_count?: number;
+  migrations_applied?: number;
+  migrations_table_exists?: boolean;
+  writable?: boolean;
+  readable?: boolean;
+  test_passed?: boolean;
+}
+
+export interface HealthCheck {
+  name: string;
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  response_time_ms?: number;
+  details?: HealthCheckDetails;
+  error?: string;
+}
+
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
   timestamp: number;
-  uptime?: number;
-  checks?: {
-    database?: { status: string; latency_ms?: number };
-    redis?: { status: string; latency_ms?: number };
-    minio?: { status: string };
-  };
+  timestamp_iso?: string;
+  version?: string;
+  environment?: string;
+  total_checks?: number;
+  unhealthy_checks?: number;
+  degraded_checks?: number;
+  total_response_time_ms?: number;
+  checks?: HealthCheck[];
 }
 
 // ============================================

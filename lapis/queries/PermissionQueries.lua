@@ -3,7 +3,6 @@ local Validation = require "helper.validations"
 local Global = require "helper.global"
 local ModuleModel = require "models.ModuleModel"
 local RoleQueries = require "queries.RoleQueries"
-local Json = require("cjson")
 
 local PermissionQueries = {}
 
@@ -42,20 +41,46 @@ function PermissionQueries.all(params)
     local page, perPage, orderField, orderDir =
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
 
-    local paginated = PermissionModel:paginated("order by " .. orderField .. " " .. orderDir, {
+    -- Build WHERE clause for filtering
+    local whereClause = ""
+    local roleFilter = params.role
+
+    if roleFilter then
+        -- Get role ID by name
+        local role = RoleQueries.roleByName(roleFilter)
+        if role then
+            whereClause = "where role_id = " .. role.id .. " "
+        else
+            -- Role not found, return empty
+            return {
+                data = {},
+                total = 0
+            }
+        end
+    end
+
+    local paginated = PermissionModel:paginated(whereClause .. "order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
-    -- Append the module into permissions object
-    local permissions, permissionModules = paginated:get_page(page), {}
-    for i, permission in ipairs(permissions) do
+
+    -- Append the module info into permissions object
+    local permissions = paginated:get_page(page)
+    local permissionsList = {}
+
+    for _, permission in ipairs(permissions) do
         permission:get_module()
         permission:get_role()
+        -- Add module_machine_name from the module relation
+        if permission.module then
+            permission.module_machine_name = permission.module.machine_name
+        end
         permission.module_id = nil
         permission.role_id = nil
-        table.insert(permissionModules, permission)
+        table.insert(permissionsList, permission)
     end
+
     return {
-        data = permissions,
+        data = permissionsList,
         total = paginated:total_items()
     }
 end

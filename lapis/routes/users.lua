@@ -20,28 +20,31 @@ return function(app)
     app:get("/api/v2/users", function(self)
         local params = self.params or {}
 
-        local limit = tonumber(params.limit) or 10
-        local offset = tonumber(params.offset) or 0
+        local page = tonumber(params.page) or 1
+        local perPage = tonumber(params.limit) or tonumber(params.per_page) or 10
 
-        local ok, users = pcall(UserQueries.list, {
-            limit = limit,
-            offset = offset
+        -- Handle offset-based pagination
+        local offset = tonumber(params.offset) or 0
+        if offset > 0 and page == 1 then
+            page = math.floor(offset / perPage) + 1
+        end
+
+        local ok, result = pcall(UserQueries.all, {
+            page = page,
+            perPage = perPage,
+            orderBy = params.order_by or 'id',
+            orderDir = params.order_dir or 'desc'
         })
 
         if not ok then
-            return error_response(500, "Failed to list users", tostring(users))
-        end
-
-        local count_ok, total = pcall(UserQueries.count)
-        if not count_ok then
-            total = 0
+            return error_response(500, "Failed to list users", tostring(result))
         end
 
         return {
             status = 200,
             json = {
-                data = users or {},
-                total = total
+                data = result.data or {},
+                total = result.total or 0
             }
         }
     end)
@@ -79,7 +82,9 @@ return function(app)
             email = params.email,
             password = params.password,
             first_name = params.first_name or params.firstName,
-            last_name = params.last_name or params.lastName
+            last_name = params.last_name or params.lastName,
+            username = params.username or params.email,
+            role = params.role or "buyer"
         }
 
         ngx.log(ngx.NOTICE, "Creating user: ", params.email)
@@ -114,14 +119,20 @@ return function(app)
             return error_response(400, "No data provided for update")
         end
 
-        local ok, user = pcall(UserQueries.update, user_id, update_data)
+        local ok, result = pcall(UserQueries.update, user_id, update_data)
 
         if not ok then
-            return error_response(500, "Failed to update user", tostring(user))
+            return error_response(500, "Failed to update user", tostring(result))
         end
 
-        if not user then
+        if not result then
             return error_response(404, "User not found")
+        end
+
+        -- Fetch the updated user to return
+        local ok2, user = pcall(UserQueries.show, user_id)
+        if not ok2 or not user then
+            return error_response(500, "User updated but failed to fetch")
         end
 
         return {
@@ -134,7 +145,7 @@ return function(app)
     app:delete("/api/v2/users/:id", function(self)
         local user_id = self.params.id
 
-        local ok, result = pcall(UserQueries.delete, user_id)
+        local ok, result = pcall(UserQueries.destroy, user_id)
 
         if not ok then
             return error_response(500, "Failed to delete user", tostring(result))
