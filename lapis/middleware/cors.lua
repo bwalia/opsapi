@@ -8,20 +8,26 @@ local CORS_CONFIG = {
         "http://localhost:3001",
         "http://localhost:3033",
         "http://localhost:4000",
+        "http://localhost:8039",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3033",
-        "http://127.0.0.1:4000"
+        "http://127.0.0.1:4000",
+        "http://127.0.0.1:8039"
     },
-    -- Production domain patterns
+    -- Production domain patterns (add your production domains here)
     domain_patterns = {
         "^https?://kisaan%.com$",
-        "^https?://.*%.kisaan%.com$"
+        "^https?://.*%.kisaan%.com$",
+        "^https?://wslcrm%.com$",
+        "^https?://.*%.wslcrm%.com$",
+        "^https?://opsapi%.com$",
+        "^https?://.*%.opsapi%.com$"
     },
-    -- CORS headers
+    -- CORS headers - include all custom headers used by the frontend
     headers = {
         methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        headers = "Content-Type, Authorization, X-User-Email, X-Public-Browse, X-User-Id, X-Requested-With",
+        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-User-Email, X-Public-Browse, X-User-Id, X-Namespace-Id, X-Namespace-Slug",
         max_age = "86400",
         credentials = "true"
     }
