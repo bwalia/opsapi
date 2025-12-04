@@ -4,14 +4,91 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# ============================================
+# Usage and Help
+# ============================================
+show_help() {
+    echo -e "${GREEN}OpsAPI Development Environment Setup${NC}"
+    echo ""
+    echo -e "${BLUE}Usage:${NC}"
+    echo "  ./run-development.sh [OPTIONS]"
+    echo ""
+    echo -e "${BLUE}Options:${NC}"
+    echo "  -s, --stash [y|n]     Git stash option (y=stash, n=skip)"
+    echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
+    echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
+    echo "  -n, --no-git          Skip all git operations (stash=n, pull=n)"
+    echo "  -h, --help            Show this help message"
+    echo ""
+    echo -e "${BLUE}Examples:${NC}"
+    echo "  ./run-development.sh                    # Interactive mode (prompts)"
+    echo "  ./run-development.sh -a                 # Auto mode: stash and pull"
+    echo "  ./run-development.sh -n                 # No git operations"
+    echo "  ./run-development.sh -s y -p y          # Stash yes, pull yes"
+    echo "  ./run-development.sh -s n -p y          # No stash, pull yes"
+    echo "  ./run-development.sh --stash=y --pull=n # Stash yes, no pull"
+    echo ""
+}
+
+# ============================================
+# Parse Arguments
+# ============================================
+STASH_ARG=""
+PULL_ARG=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -s|--stash)
+            STASH_ARG="$2"
+            shift 2
+            ;;
+        --stash=*)
+            STASH_ARG="${1#*=}"
+            shift
+            ;;
+        -p|--pull)
+            PULL_ARG="$2"
+            shift 2
+            ;;
+        --pull=*)
+            PULL_ARG="${1#*=}"
+            shift
+            ;;
+        -a|--auto)
+            STASH_ARG="y"
+            PULL_ARG="y"
+            shift
+            ;;
+        -n|--no-git)
+            STASH_ARG="n"
+            PULL_ARG="n"
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            show_help
+            exit 1
+            ;;
+    esac
+done
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}   OpsAPI Development Environment      ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
-# Function to prompt yes/no
+# ============================================
+# Functions
+# ============================================
+
+# Function to prompt yes/no (only used in interactive mode)
 prompt_yes_no() {
     local prompt="$1"
     local response
@@ -25,13 +102,48 @@ prompt_yes_no() {
     done
 }
 
-# Check for uncommitted changes
+# Function to check if arg is yes
+is_yes() {
+    case "$1" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Function to check if arg is no
+is_no() {
+    case "$1" in
+        [nN]|[nN][oO]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# ============================================
+# Git Stash Logic
+# ============================================
 if [[ -n $(git status --porcelain 2>/dev/null) ]]; then
     echo -e "${YELLOW}[!] You have uncommitted changes:${NC}"
     git status --short
     echo ""
 
-    if prompt_yes_no "Do you want to stash your changes before pulling?"; then
+    # Determine stash action
+    do_stash=false
+    if [[ -n "$STASH_ARG" ]]; then
+        # Argument provided - use it
+        if is_yes "$STASH_ARG"; then
+            do_stash=true
+            echo -e "${BLUE}[i] Stash option: yes (from argument)${NC}"
+        else
+            echo -e "${BLUE}[i] Stash option: no (from argument)${NC}"
+        fi
+    else
+        # Interactive mode
+        if prompt_yes_no "Do you want to stash your changes before pulling?"; then
+            do_stash=true
+        fi
+    fi
+
+    if $do_stash; then
         echo -e "${GREEN}[+] Stashing changes...${NC}"
         git stash push -m "Auto-stash before development run $(date '+%Y-%m-%d %H:%M:%S')"
         if [ $? -eq 0 ]; then
@@ -41,11 +153,32 @@ if [[ -n $(git status --porcelain 2>/dev/null) ]]; then
             exit 1
         fi
     fi
+else
+    echo -e "${GREEN}[+] Working directory clean - no stash needed${NC}"
 fi
 
-# Ask about git pull
+# ============================================
+# Git Pull Logic
+# ============================================
 echo ""
-if prompt_yes_no "Do you want to pull the latest changes from git?"; then
+
+do_pull=false
+if [[ -n "$PULL_ARG" ]]; then
+    # Argument provided - use it
+    if is_yes "$PULL_ARG"; then
+        do_pull=true
+        echo -e "${BLUE}[i] Pull option: yes (from argument)${NC}"
+    else
+        echo -e "${BLUE}[i] Pull option: no (from argument)${NC}"
+    fi
+else
+    # Interactive mode
+    if prompt_yes_no "Do you want to pull the latest changes from git?"; then
+        do_pull=true
+    fi
+fi
+
+if $do_pull; then
     echo -e "${GREEN}[+] Pulling latest changes...${NC}"
     git pull
     if [ $? -eq 0 ]; then

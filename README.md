@@ -59,11 +59,47 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    This script will:
 
+   - Optionally stash uncommitted changes
+   - Optionally pull latest changes from git
    - Create necessary directories (logs, pgdata, keycloak_data)
    - Start all Docker services with fresh volumes
    - Wait for services to be ready
    - Run database migrations
    - Configure local hostname (opsapi-dev.local)
+
+   **Command-line options for automation:**
+
+   ```bash
+   # Interactive mode (default - prompts for each option)
+   ./run-development.sh
+
+   # Auto mode - stash and pull without prompts
+   ./run-development.sh -a
+   ./run-development.sh --auto
+
+   # Skip all git operations
+   ./run-development.sh -n
+   ./run-development.sh --no-git
+
+   # Specify options individually
+   ./run-development.sh -s y -p y    # Stash: yes, Pull: yes
+   ./run-development.sh -s n -p y    # No stash, Pull: yes
+   ./run-development.sh -s y -p n    # Stash: yes, No pull
+   ./run-development.sh --stash=y --pull=n
+
+   # Show help
+   ./run-development.sh -h
+   ```
+
+   | Option | Description |
+   |--------|-------------|
+   | `-s y` / `--stash y` | Stash uncommitted changes |
+   | `-s n` / `--stash n` | Skip stashing |
+   | `-p y` / `--pull y` | Pull latest from git |
+   | `-p n` / `--pull n` | Skip pull |
+   | `-a` / `--auto` | Auto mode (stash=y, pull=y) |
+   | `-n` / `--no-git` | No git operations |
+   | `-h` / `--help` | Show help |
 
 4. **Access the application:**
    - **Backend API**: http://localhost:4010
