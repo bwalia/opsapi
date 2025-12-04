@@ -3,10 +3,15 @@
 Opsapi API is built on the top of Opneresty Nginx / Lua for increased performance and reliability
 
 ## Opneresty Nginx / Lua / Postgres - or you may refer it as `OLP Stack`
+
 ## Avoids Nginx to CGI resource consumption as lua is compiled to work directly with Nginx Workers
+
 ## OpsAPI is Simple and allows Developers to create Database API right from the begining (Batteries included)
+
 ## Nginx is highly scalable and reliable and idea of OPSAPI is to make OLP stack nginx/lua/postgres to work together think Unix sockets to have very high performance
+
 ## Native applications can just run on a single instance linux OS recommended using Unix sockets (highly recommended for production and securing database api)
+
 ## If run as containerised stack the Dockerfile is highly optimised for performance
 
 ## Status by Gatus
@@ -16,453 +21,397 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 ## Components
 
 - **OPSAPI (Backend)**: Lua-based API server with authentication and ecommerce functionality
-- **OPSAPI Node**: Node.js service for additional features
-- **OPSAPI Ecommerce**: Next.js frontend for multi-tenant ecommerce platform
+- **OPSAPI Dashboard**: Next.js admin dashboard for managing the platform
+- **OPSAPI Node**: Node.js service for file uploads and additional features
 
-## Deploy on Kubernates
+---
 
-To deploy OPSAPI on kubernates, please follow the instructions.
+## Run OPSAPI Locally (Quick Start)
 
-#### Requirements:
+### Requirements
 
-    1. kubectl
-    2. kubeseal
-    3. helm
+- Docker
+- Docker Compose
 
-#### Installation:
+### Installation
 
-    1. encode the env variables to base64
-        Here is the sample of env variables
-        DATABASE:
-        DB_HOST:
-        DB_PASSWORD:
-        DB_PORT:
-        DB_USER:
-        JWT_SECRET_KEY:
-        KEYCLOAK_AUTH_URL:
-        KEYCLOAK_CLIENT_ID:
-        KEYCLOAK_CLIENT_SECRET:
-        KEYCLOAK_REDIRECT_URI:
-        KEYCLOAK_TOKEN_URL:
-        KEYCLOAK_USERINFO_URL:
-        OPENSSL_SECRET_IV:
-        OPENSSL_SECRET_KEY:
-        LAPIS_CONFIG_LUA_FILE:
-        MINIO_ENDPOINT:
-        MINIO_ACCESS_KEY:
-        MINIO_SECRET_KEY:
-        MINIO_BUCKET:
-        MINIO_REGION:
-        NODE_API_URL:
-        GOOGLE_CLIENT_ID:
-        GOOGLE_CLIENT_SECRET:
-        GOOGLE_REDIRECT_URI:
-        FRONTEND_URL:
+1. **Clone the repository and navigate to the project root:**
 
-        NOTE: For LAPIS_CONFIG_LUA_FILE please add your variables to existing config.lua and encode the file base64, and For NODE_API_URL please add the Opsapi-Node Url.
+   ```bash
+   cd opsapi
+   ```
 
-    2. Create a secret.yaml file and add the encoded env variables in it.
-        Here is the example of secret.yaml
+2. **Configure environment variables:**
 
-        apiVersion: v1
-        data:
-            DATABASE:
-            DB_HOST:
-            DB_PASSWORD:
-            DB_PORT:
-            DB_USER:
-            JWT_SECRET_KEY:
-            KEYCLOAK_AUTH_URL:
-            KEYCLOAK_CLIENT_ID:
-            KEYCLOAK_CLIENT_SECRET:
-            KEYCLOAK_REDIRECT_URI:
-            KEYCLOAK_TOKEN_URL:
-            KEYCLOAK_USERINFO_URL:
-            LAPIS_CONFIG:
-            MINIO_ACCESS_KEY:
-            MINIO_BUCKET:
-            MINIO_ENDPOINT:
-            MINIO_SECRET_KEY:
-            MINIO_REGION:
-            NODE_API_URL:
-            OPENSSL_SECRET_IV:
-            OPENSSL_SECRET_KEY:
-            GOOGLE_CLIENT_ID:
-            GOOGLE_CLIENT_SECRET:
-            GOOGLE_REDIRECT_URI:
-            FRONTEND_URL:
-        kind: Secret
-        metadata:
-            creationTimestamp: null
-            name: opsapi-secrets
-            namespace: <namespace>
+   Copy the sample environment file and update with your values:
 
+   ```bash
+   cp lapis/.sample.env lapis/.env
+   ```
 
-    3. Run this command to generate the kubeseal:
-        kubeseal --format=yaml < secret.yaml > sealed-secret.yaml
+   Edit `lapis/.env` with your configuration. See [Environment Variables](#environment-variables) section for details.
 
-    4. You will get the sealed-secret.yaml file open the file and copy the content from key encryptedData.
+3. **Run the development script:**
 
-    5. Put the copied secret to values file under the app_secrets
+   ```bash
+   ./run-development.sh
+   ```
 
-    6. Deploy OPSAPI using helm:
-        helm upgrade --install opsapi ./devops/helm-charts/opsapi \
-        -f ./devops/helm-charts/opsapi/values-<namespace>.yaml \
-        --set image.repository=bwalia/opsapi \
-        --set image.tag=latest \
-        --namespace <namespace> --create-namespace
+   This script will:
 
-## Deploy Opsapi Node
+   - Create necessary directories (logs, pgdata, keycloak_data)
+   - Start all Docker services with fresh volumes
+   - Wait for services to be ready
+   - Run database migrations
+   - Configure local hostname (opsapi-dev.local)
 
-Ospapi Node App is built in Node js to support some feature of Opsapi
+4. **Access the application:**
+   - **Backend API**: http://localhost:4010
+   - **Dashboard**: http://localhost:8039
+   - **Adminer (DB UI)**: http://localhost:7779
+   - **Grafana**: http://localhost:3011
+   - **Prometheus**: http://localhost:9090
+   - **MinIO Console**: http://localhost:9001
+   - **Gatus (Status)**: http://localhost:8888
 
-## Deploy on Kubernates
+### Default Login Credentials
 
-To deploy OPSAPI UI on kubernates, please follow the instructions.
+```
+Email: administrative@admin.com
+Password: Admin@123
+```
 
-#### Requirements:
+---
 
-    1. kubectl
-    2. kubeseal
-    3. helm
+## Environment Variables
 
-#### Installation:
+All environment variables are configured in `lapis/.env`. Here are the key variables:
 
-    1. encode the .env file to base64
-        Here is the sample of .env
+### Database
 
-        PORT=3000
+```bash
+DB_HOST=172.71.0.10           # Docker network IP for postgres
+DB_PORT=5432
+DB_USER=pguser
+DB_PASSWORD=pgpassword
+DATABASE=opsapi
+```
 
-        # MinIO settings
-        MINIO_ENDPOINT=
-        MINIO_PORT=
-        MINIO_ACCESS_KEY=
-        MINIO_SECRET_KEY=
-        MINIO_BUCKET=
-        MINIO_REGION=
+### JWT & Encryption
 
-        # JWT
-        JWT_SECRET=
+```bash
+JWT_SECRET_KEY=your-jwt-secret-key
+OPENSSL_SECRET_KEY=your-16-char-key
+OPENSSL_SECRET_IV=your-16-char-iv
+```
 
-        NOTE: Make sure JWT_SECRET Must match with the OPSAPI JWT_SECRET_KEY, only then Opsapi Node work with Opsapi.
+### MinIO (S3-compatible Storage)
 
+```bash
+MINIO_ENDPOINT=your-minio-endpoint
+MINIO_ACCESS_KEY=your-access-key
+MINIO_SECRET_KEY=your-secret-key
+MINIO_BUCKET=your-bucket
+MINIO_REGION=your-region
+```
 
-    2. Run the kubeseal to generate sealed secrets.
-        Here is the kubeseal command:
-        cat node/opsapi-node/.env | kubectl create secret generic node-app-env --dry-run=client --from-file=.env=/dev/stdin -o json \ | kubeseal --format yaml --namespace <namespace>
+### Dashboard Configuration
 
-    (MAKE SURE YOU ARE ON ROOT DIRECTORY WHILE RUN THIS COMMAND)
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:4010
+```
 
-    4. You will get the sealed-secret.yaml file, copy the content from key encryptedData -> .env.
+**Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
 
-    5. Put the copied secret to values file under the secrets -> env_file
+```bash
+docker compose build --no-cache dashboard
+docker compose up -d dashboard
+```
 
-    6. Deploy OPSAPI Node using helm:
-        helm upgrade --install opsapi-node ./devops/helm-charts/opsapi-node \
-        -f ./devops/helm-charts/opsapi-node/values-<namespace>.yaml \
-        --set image.repository=bwalia/opsapi-node \
-        --set image.tag=latest \
-        --namespace <namespace> --create-namespace
+### Stripe (Optional)
 
-## Run Opsapi On Local
+```bash
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
 
-#### Requirements:
+### Google OAuth (Optional)
 
-    1. docker
-    2. docker-compose
+```bash
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+```
 
-#### Installation
+### Keycloak SSO (Optional)
 
-    1. Update the lapis/Dockerfile:
-        Open file: lapis/Dockerfile
-        Find line: COPY lapis/. /app
-        Replace with: COPY . /app
+```bash
+KEYCLOAK_AUTH_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/auth
+KEYCLOAK_TOKEN_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/token
+KEYCLOAK_USERINFO_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/userinfo
+KEYCLOAK_CLIENT_ID=opsapi
+KEYCLOAK_CLIENT_SECRET=your-client-secret
+KEYCLOAK_REDIRECT_URI=http://localhost:4010/auth/callback
+```
 
-    2. Update the node/opsapi-node/Dockerfile:
-        Open file: node/opsapi-node/Dockerfile
-        Find lines:
-            COPY node/opsapi-node/package*.json /app/
-            COPY node/opsapi-node/. /app/
-        Replace with:
-            COPY ./package*.json /app/
-            COPY . /app/
+### Node API
 
-    3. Setup environment variables:
+```bash
+NODE_API_URL=http://172.71.0.14/api
+```
 
-        a) Backend Environment (OPSAPI):
-        Copy lapis/.sample.env to lapis/.env and update with your values:
+---
 
-        # Database
-        DB_HOST=localhost
-        DB_PORT=5432
-        DB_USER=pguser
-        DB_PASSWORD=pgpassword
-        DATABASE=opsapi
+## Troubleshooting
 
-        # JWT
-        JWT_SECRET_KEY=your-jwt-secret-key
+### Restart the API container
 
-        # OpenSSL
-        OPENSSL_SECRET_KEY=your-openssl-key
-        OPENSSL_SECRET_IV=your-openssl-iv
+```bash
+cd lapis
+docker compose restart lapis
+```
 
-        # MinIO
-        MINIO_ENDPOINT=your-minio-endpoint
-        MINIO_ACCESS_KEY=your-access-key
-        MINIO_SECRET_KEY=your-secret-key
-        MINIO_BUCKET=your-bucket
-        MINIO_REGION=your-region
+### Check logs
 
-        # Google OAuth (Optional)
-        GOOGLE_CLIENT_ID=your-google-client-id
-        GOOGLE_CLIENT_SECRET=your-google-client-secret
-        GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+```bash
+docker exec -i opsapi tail -50 /var/log/nginx/error.log
+```
 
-        # Frontend URL
-        FRONTEND_URL=http://localhost:3000
+### Test login
 
-        # Node API
-        NODE_API_URL=http://localhost:3001/api
+```bash
+docker exec -i opsapi curl -s -X POST 'http://localhost/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"administrative@admin.com","password":"Admin@123"}'
+```
 
-        b) Frontend Environment (OPSAPI Ecommerce):
-        Create opsapi-ecommerce/opsapi-ecommerce/.env.local with:
+### Test API with token
 
-        NEXT_PUBLIC_API_URL=http://localhost:4010
-        NEXT_PUBLIC_APP_NAME=Multi-Tenant Ecommerce
-        NEXT_PUBLIC_APP_VERSION=1.0.0
-
-        c) Node Service Environment (OPSAPI Node):
-        Create node/opsapi-node/.env with:
-
-        PORT=3000
-
-        # MinIO settings
-        MINIO_ENDPOINT=your-minio-endpoint
-        MINIO_PORT=9000
-        MINIO_ACCESS_KEY=your-access-key
-        MINIO_SECRET_KEY=your-secret-key
-        MINIO_BUCKET=your-bucket
-        MINIO_REGION=your-region
-
-        # JWT (must match OPSAPI JWT_SECRET_KEY)
-        JWT_SECRET=your-jwt-secret-key
-
-    5. Run all services with Docker:
-       cd lapis && bash ./lapis-run-dev.sh
-
-    6. Access the application:
-        - Frontend (Ecommerce): http://localhost:3000
-        - Backend API (OPSAPI): http://localhost:4010
-        - Node Service (OPSAPI Node): http://localhost:3001
-
-## Troubleshooting dev env
-
-
-# Restart
-docker-compose restart lapis
-
-# Wait for startup
-sleep 5
-
-# Check if routes are loaded
-docker exec -i opsapi tail -50 /var/log/nginx/error.log | grep "routes"
-
-# Test each endpoint
+```bash
 TOKEN=$(docker exec -i opsapi curl -s -X POST 'http://localhost/auth/login' \
   -H 'Content-Type: application/json' \
   -d '{"username":"administrative@admin.com","password":"Admin@123"}' | jq -r '.token')
 
-# Test roles
-docker exec -i opsapi curl -s "http://localhost/api/v2/roles" -H "Authorization: Bearer $TOKEN"
-
-# Test groups  
-docker exec -i opsapi curl -s "http://localhost/api/v2/groups" -H "Authorization: Bearer $TOKEN"
-
-# Test users
+# Test endpoints
 docker exec -i opsapi curl -s "http://localhost/api/v2/users" -H "Authorization: Bearer $TOKEN"
+docker exec -i opsapi curl -s "http://localhost/api/v2/roles" -H "Authorization: Bearer $TOKEN"
+```
 
+### Check database connectivity
 
-
-# Test database connectivity
+```bash
 docker exec -i opsapi psql -h 172.71.0.10 -U pguser -d opsapi -c "\dt"
+# Password: pgpassword
+```
 
-Enter pgsql database password - default dev env password for pgsql is `pgpassword`
+### Dashboard not reflecting API URL changes
 
-# Check if user exists
-docker exec -i opsapi psql -h 172.71.0.10 -U pguser -d opsapi -c "SELECT email, uuid FROM users WHERE email = 'administrative@admin.com';"
+If you changed `NEXT_PUBLIC_API_URL` in `.env` but the dashboard still uses the old value:
 
-Enter pgsql database password - default dev env password for pgsql is `pgpassword`
+```bash
+cd lapis
+docker compose build --no-cache dashboard
+docker compose up -d dashboard
+```
 
-# Test the endpoint (note run this on host computer but it will run inside the opsapi dev container)
-docker exec -i opsapi curl -s 'http://localhost/auth/login' \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"administrative@admin.com","password":"Admin@123"}'
+### Re-run migrations
 
+```bash
+docker exec -it opsapi lapis migrate
+```
 
+### Full reset (fresh start)
 
-# Restart the container
-docker-compose restart lapis
+```bash
+cd lapis
+docker compose down --volumes
+docker compose up --build -d
+sleep 15
+docker exec -it opsapi lapis migrate
+```
 
-# Test 1: JSON body
-docker exec -i opsapi curl -X POST 'http://localhost/auth/login' \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"administrative@admin.com","password":"Admin@123"}'
+---
 
-# Test 2: Form-encoded
-docker exec -i opsapi curl -X POST 'http://localhost/auth/login' \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'username=administrative@admin.com&password=Admin@123'
+## Deploy on Kubernetes
 
-# Test 3: Using 'email' instead of 'username'
-docker exec -i opsapi curl -X POST 'http://localhost/auth/login' \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"administrative@admin.com","password":"Admin@123"}'
+To deploy OPSAPI on Kubernetes, please follow the instructions.
 
-# Check logs
-docker exec -i opsapi tail -30 /var/log/nginx/error.log
+### Requirements
 
+1. kubectl
+2. kubeseal
+3. helm
 
+### Installation
+
+1. Encode the env variables to base64. Sample variables:
+
+   ```
+   DATABASE:
+   DB_HOST:
+   DB_PASSWORD:
+   DB_PORT:
+   DB_USER:
+   JWT_SECRET_KEY:
+   OPENSSL_SECRET_IV:
+   OPENSSL_SECRET_KEY:
+   MINIO_ENDPOINT:
+   MINIO_ACCESS_KEY:
+   MINIO_SECRET_KEY:
+   MINIO_BUCKET:
+   MINIO_REGION:
+   NODE_API_URL:
+   GOOGLE_CLIENT_ID:
+   GOOGLE_CLIENT_SECRET:
+   GOOGLE_REDIRECT_URI:
+   FRONTEND_URL:
+   ```
+
+2. Create a secret.yaml file with encoded env variables:
+
+   ```yaml
+   apiVersion: v1
+   data:
+     DATABASE:
+     DB_HOST:
+     DB_PASSWORD:
+     # ... other variables
+   kind: Secret
+   metadata:
+     creationTimestamp: null
+     name: opsapi-secrets
+     namespace: <namespace>
+   ```
+
+3. Generate the sealed secret:
+
+   ```bash
+   kubeseal --format=yaml < secret.yaml > sealed-secret.yaml
+   ```
+
+4. Copy the content from `encryptedData` in sealed-secret.yaml to your values file under `app_secrets`
+
+5. Deploy OPSAPI using helm:
+   ```bash
+   helm upgrade --install opsapi ./devops/helm-charts/opsapi \
+     -f ./devops/helm-charts/opsapi/values-<namespace>.yaml \
+     --set image.repository=bwalia/opsapi \
+     --set image.tag=latest \
+     --namespace <namespace> --create-namespace
+   ```
+
+---
+
+## Deploy OPSAPI Node on Kubernetes
+
+### Requirements
+
+1. kubectl
+2. kubeseal
+3. helm
+
+### Installation
+
+1. Encode the .env file to base64. Sample .env:
+
+   ```
+   PORT=3000
+   MINIO_ENDPOINT=
+   MINIO_PORT=
+   MINIO_ACCESS_KEY=
+   MINIO_SECRET_KEY=
+   MINIO_BUCKET=
+   MINIO_REGION=
+   JWT_SECRET=
+   ```
+
+   **Note:** `JWT_SECRET` must match the OPSAPI `JWT_SECRET_KEY`
+
+2. Generate sealed secrets:
+
+   ```bash
+   cat node/opsapi-node/.env | kubectl create secret generic node-app-env \
+     --dry-run=client --from-file=.env=/dev/stdin -o json \
+     | kubeseal --format yaml --namespace <namespace>
+   ```
+
+3. Copy the content from `encryptedData -> .env` to your values file under `secrets -> env_file`
+
+4. Deploy OPSAPI Node:
+   ```bash
+   helm upgrade --install opsapi-node ./devops/helm-charts/opsapi-node \
+     -f ./devops/helm-charts/opsapi-node/values-<namespace>.yaml \
+     --set image.repository=bwalia/opsapi-node \
+     --set image.tag=latest \
+     --namespace <namespace> --create-namespace
+   ```
+
+---
 
 ## Google OAuth Setup
 
 To enable Google OAuth authentication:
 
-    1. Go to Google Cloud Console
-    2. Create a new project or select existing
-    3. Enable Google+ API
-    4. Create OAuth 2.0 credentials
-    5. Add authorized redirect URI: http://localhost:4010/auth/google/callback
-    6. Update environment variables in lapis/.env:
-        GOOGLE_CLIENT_ID=your-client-id
-        GOOGLE_CLIENT_SECRET=your-client-secret
-        GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
-        FRONTEND_URL=http://localhost:3000
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing
+3. Enable Google+ API
+4. Create OAuth 2.0 credentials
+5. Add authorized redirect URI: `http://localhost:4010/auth/google/callback`
+6. Update environment variables in `lapis/.env`:
+   ```bash
+   GOOGLE_CLIENT_ID=your-client-id
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+   ```
 
+---
 
-# Add public route 
+## API Documentation
 
-## 1. Update app.lua to add the route:
+Access the OpenAPI specification at:
 
-// Add after the /openapi.json route
+- Swagger UI: http://localhost:4010/swagger
+- OpenAPI JSON: http://localhost:4010/openapi.json
 
--- Alternative OpenAPI spec path (PUBLIC)
-app:get("/swagger/swagger.json", function(self)
-    ngx.log(ngx.NOTICE, "=== Serving /swagger/swagger.json - NO AUTH REQUIRED ===")
-    ngx.header["Access-Control-Allow-Origin"] = "*"
-    ngx.header["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    ngx.header["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    
-    local ok, openapi_gen = pcall(require, "helper.openapi_generator")
-    if not ok then
-        ngx.log(ngx.ERR, "Failed to load openapi_generator: ", tostring(openapi_gen))
-        return { status = 500, json = { error = "Generator not found" } }
-    end
-    
-    local spec = openapi_gen.generate()
-    return { status = 200, json = spec }
-end)
+### Public Endpoints (No Auth Required)
 
-2. Update the before_filter to include the new route:
+- `/` - Health check
+- `/health` - Health status
+- `/swagger` - API documentation
+- `/openapi.json` - OpenAPI spec
+- `/metrics` - Prometheus metrics
+- `/auth/login` - Login
+- `/auth/register` - Registration
 
-// Update the before_filter section
+---
 
-app:before_filter(function(self)
-    local uri = ngx.var.uri
-    
-    -- Double-check: Skip auth for public routes
-    if uri == "/" or uri == "/health" or uri == "/swagger" or 
-       uri == "/api-docs" or uri == "/openapi.json" or uri == "/metrics" or
-       uri == "/swagger/swagger.json" or
-       uri:match("^/auth/") then
-        ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
-        return
-    end
-    
-    ngx.log(ngx.NOTICE, "Applying auth to: ", uri)
-    local ok, auth = pcall(require, "helper.auth")
-    if ok then
-        auth.authenticate()
-    end
-end)
+## Architecture
 
-3. Update auth.lua to include the new pattern:
-
-// Update the PUBLIC_ROUTES table in helper/auth.lua
-
-local PUBLIC_ROUTES = {
-    ["^/$"] = true,
-    ["^/health$"] = true,
-    ["^/swagger$"] = true,
-    ["^/api%-docs$"] = true,
-    ["^/openapi%.json$"] = true,
-    ["^/swagger/swagger%.json$"] = true,
-    ["^/metrics$"] = true,
-    ["^/auth/login$"] = true,
-    ["^/auth/register$"] = true,
-}
-
-4. Add it to the OpenAPI spec:
-
-// Add to the paths section in openapi_generator.lua
-
-["/swagger/swagger.json"] = {
-    get = {
-        summary = "OpenAPI Specification (Alternative Path)",
-        description = "Alternative endpoint for OpenAPI 3.0 specification in JSON format",
-        tags = { "Public" },
-        security = {},
-        responses = {
-            ["200"] = {
-                description = "OpenAPI 3.0 specification",
-                content = {
-                    ["application/json"] = {
-                        schema = {
-                            type = "object",
-                            description = "Complete OpenAPI 3.0 specification"
-                        }
-                    }
-                }
-            }
-        }
-    }
-},
-
-
-5. Apply the changes:
-
-# Apply all the changes using the terminal commands
-docker exec -i opsapi sh -c 'cat > /tmp/update_auth.lua << '\''EOF'\''
--- Update auth.lua with new public route
-local content = io.open("/app/helper/auth.lua", "r"):read("*all")
-content = string.gsub(content, 
-    '\''%["^/openapi%%%.json$"%] = true,'\'', 
-    '\''["^/openapi%%%.json$"] = true,\n    ["^/swagger/swagger%%%.json$"] = true,'\'')
-io.open("/app/helper/auth.lua", "w"):write(content)
-EOF'
-
-docker exec -i opsapi /usr/local/openresty/bin/resty /tmp/update_auth.lua
-
-# Restart
-docker-compose restart lapis
-sleep 3
-
-# Test the new endpoint
-echo "Testing /swagger/swagger.json..."
-curl -s http://localhost:4010/swagger/swagger.json | jq '.info.title'
-
-# Test that it returns the same as /openapi.json
-echo -e "\nComparing both endpoints..."
-curl -s http://localhost:4010/openapi.json | jq '.info' > /tmp/openapi1.json
-curl -s http://localhost:4010/swagger/swagger.json | jq '.info' > /tmp/openapi2.json
-diff /tmp/openapi1.json /tmp/openapi2.json && echo "✅ Both endpoints return identical content"
-
-# Test all public endpoints
-echo -e "\nTesting all public endpoints..."
-curl -s -o /dev/null -w "/ -> %{http_code}\n" http://localhost:4010/
-curl -s -o /dev/null -w "/health -> %{http_code}\n" http://localhost:4010/health
-curl -s -o /dev/null -w "/swagger -> %{http_code}\n" http://localhost:4010/swagger
-curl -s -o /dev/null -w "/openapi.json -> %{http_code}\n" http://localhost:4010/openapi.json
-curl -s -o /dev/null -w "/swagger/swagger.json -> %{http_code}\n" http://localhost:4010/swagger/swagger.json
-curl -s -o /dev/null -w "/metrics -> %{http_code}\n" http://localhost:4010/metrics
-
-echo -e "\n✅ All public routes working!"
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Docker Network                        │
+│                      (172.71.0.0/16)                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
+│  │   OPSAPI    │    │  Dashboard  │    │  PostgreSQL │    │
+│  │  (Lapis)    │    │  (Next.js)  │    │             │    │
+│  │ 172.71.0.12 │    │ 172.71.0.19 │    │ 172.71.0.10 │    │
+│  │   :4010     │    │   :8039     │    │   :5439     │    │
+│  └─────────────┘    └─────────────┘    └─────────────┘    │
+│                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
+│  │    Redis    │    │    MinIO    │    │   Grafana   │    │
+│  │ 172.71.0.13 │    │ 172.71.0.17 │    │ 172.71.0.16 │    │
+│  │   :6373     │    │ :9000/:9001 │    │   :3011     │    │
+│  └─────────────┘    └─────────────┘    └─────────────┘    │
+│                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
+│  │ Prometheus  │    │   Adminer   │    │   Gatus     │    │
+│  │ 172.71.0.15 │    │             │    │ 172.71.0.18 │    │
+│  │   :9090     │    │   :7779     │    │   :8888     │    │
+│  └─────────────┘    └─────────────┘    └─────────────┘    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```

@@ -45,7 +45,7 @@ services:
       context: ../opsapi-dashboard
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:4010
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4010}
     ports:
       - "8039:8039"
     environment:
