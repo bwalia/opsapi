@@ -11,7 +11,7 @@ import React, {
 } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import { permissionsService } from '@/services';
-import type { UserPermissions, DashboardModule, PermissionAction } from '@/types';
+import type { User, UserPermissions, DashboardModule, PermissionAction } from '@/types';
 
 interface PermissionsContextValue {
   permissions: UserPermissions;
@@ -37,6 +37,7 @@ const defaultPermissions: UserPermissions = {
   orders: [],
   customers: [],
   settings: [],
+  namespaces: [],
 };
 
 const PermissionsContext = createContext<PermissionsContextValue>({
@@ -59,28 +60,69 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<UserPermissions>(defaultPermissions);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Extract primary role from user - handle both array and string formats
+  // Extract primary role from user - handle multiple formats
   const userRole = useMemo(() => {
     if (!user) return null;
 
+    // Cast user to handle various role formats from API/JWT
+    const userData = user as User & {
+      role?: string;
+      roles?: Array<{ role_name?: string; name?: string }> | string;
+    };
+
     // Handle roles as array (new format from API)
-    if (user.roles && Array.isArray(user.roles) && user.roles.length > 0) {
-      const primaryRole = user.roles[0];
+    if (userData.roles && Array.isArray(userData.roles) && userData.roles.length > 0) {
+      const primaryRole = userData.roles[0];
+      if (typeof primaryRole === 'string') {
+        return primaryRole;
+      }
       return primaryRole.role_name || primaryRole.name || null;
     }
 
-    // Handle role as string (legacy format or from JWT token)
-    if (typeof (user as unknown as { role?: string }).role === 'string') {
-      return (user as unknown as { role: string }).role;
+    // Handle roles as comma-separated string (from JWT token)
+    if (typeof userData.roles === 'string' && userData.roles.length > 0) {
+      // Could be "administrative" or "administrative,seller"
+      const firstRole = userData.roles.split(',')[0].trim();
+      return firstRole || null;
+    }
+
+    // Handle role as string (legacy format)
+    if (typeof userData.role === 'string' && userData.role.length > 0) {
+      return userData.role;
     }
 
     return null;
   }, [user]);
 
-  // Check if user is admin
+  // Check if user is admin - check userRole and also directly check user.roles
   const isAdmin = useMemo(() => {
-    return userRole?.toLowerCase() === 'administrative' || userRole?.toLowerCase() === 'admin';
-  }, [userRole]);
+    // First check derived userRole
+    if (userRole?.toLowerCase() === 'administrative' || userRole?.toLowerCase() === 'admin') {
+      return true;
+    }
+
+    // Also check user.roles directly for admin role
+    if (user?.roles) {
+      // Cast to unknown first to handle various API formats
+      const roles = user.roles as unknown;
+      if (Array.isArray(roles)) {
+        const found = roles.some((r: unknown) => {
+          const roleName = typeof r === 'string' ? r : ((r as { role_name?: string; name?: string })?.role_name || (r as { name?: string })?.name || '');
+          return roleName.toLowerCase() === 'administrative' || roleName.toLowerCase() === 'admin';
+        });
+        if (found) {
+          return true;
+        }
+      }
+      if (typeof roles === 'string') {
+        if (roles.toLowerCase().includes('administrative') || roles.toLowerCase().includes('admin')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }, [userRole, user]);
 
   // Load permissions based on user role
   const loadPermissions = useCallback(async () => {

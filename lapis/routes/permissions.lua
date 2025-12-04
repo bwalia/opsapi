@@ -154,5 +154,55 @@ return function(app)
         }
     end)
 
+    -- BATCH update/create permissions for a role
+    -- This is the efficient endpoint - single API call for all module permissions
+    app:post("/api/v2/permissions/batch", function(self)
+        local params, _ = RequestParser.parse_request(self)
+
+        -- Validate required fields
+        local valid, missing = RequestParser.require_params(params, { "role", "permissions" })
+        if not valid then
+            return error_response(400, "Missing required fields", table.concat(missing, ", "))
+        end
+
+        local roleName = params.role
+        local permissionsData = params.permissions
+
+        -- Parse permissions if it's a JSON string
+        if type(permissionsData) == "string" then
+            local ok, parsed = pcall(cjson.decode, permissionsData)
+            if not ok then
+                return error_response(400, "Invalid permissions format. Expected JSON object.")
+            end
+            permissionsData = parsed
+        end
+
+        if type(permissionsData) ~= "table" then
+            return error_response(400, "Permissions must be an object with module names as keys")
+        end
+
+        ngx.log(ngx.NOTICE, "Batch updating permissions for role: ", roleName)
+
+        local ok, result = pcall(PermissionQueries.batchUpdate, {
+            role = roleName,
+            permissions = permissionsData
+        })
+
+        if not ok then
+            return error_response(500, "Failed to batch update permissions", tostring(result))
+        end
+
+        return {
+            status = 200,
+            json = {
+                message = "Permissions updated successfully",
+                role = roleName,
+                updated = result.updated or 0,
+                created = result.created or 0,
+                deleted = result.deleted or 0
+            }
+        }
+    end)
+
     ngx.log(ngx.NOTICE, "Permissions routes initialized successfully")
 end

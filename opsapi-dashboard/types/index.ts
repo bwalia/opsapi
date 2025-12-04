@@ -126,7 +126,8 @@ export type DashboardModule =
   | 'products'
   | 'orders'
   | 'customers'
-  | 'settings';
+  | 'settings'
+  | 'namespaces';
 
 // Permission config for checking access
 export interface PermissionConfig {
@@ -235,6 +236,15 @@ export type OrderStatus =
 
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 
+// Seller information for admin view
+export interface OrderSeller {
+  uuid: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  full_name?: string;
+}
+
 export interface Order {
   id: number;
   uuid: string;
@@ -243,6 +253,7 @@ export interface Order {
   order_number?: string;
   status: OrderStatus;
   payment_status: PaymentStatus;
+  fulfillment_status?: string;
   payment_method?: string;
   subtotal: number;
   tax_amount?: number;
@@ -258,6 +269,7 @@ export interface Order {
   customer?: Customer;
   store?: Store;
   items?: OrderItem[];
+  seller?: OrderSeller; // Only populated for admin users
 }
 
 export interface OrderItem {
@@ -391,4 +403,242 @@ export interface ConfirmDialogProps {
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'info';
   isLoading?: boolean;
+}
+
+// ============================================
+// Namespace Types (Multi-tenant)
+// ============================================
+
+export type NamespaceStatus = 'active' | 'suspended' | 'pending' | 'archived';
+export type NamespacePlan = 'free' | 'starter' | 'professional' | 'enterprise';
+export type NamespaceMemberStatus = 'active' | 'invited' | 'suspended' | 'removed';
+
+export interface Namespace {
+  id: number;
+  uuid: string;
+  name: string;
+  slug: string;
+  description?: string;
+  domain?: string;
+  logo_url?: string;
+  banner_url?: string;
+  status: NamespaceStatus;
+  plan: NamespacePlan;
+  settings?: Record<string, unknown>;
+  max_users: number;
+  max_stores: number;
+  owner_user_id?: number;
+  created_at: string;
+  updated_at: string;
+  // Aggregated fields
+  member_count?: number;
+  store_count?: number;
+}
+
+export interface NamespaceWithMembership extends Namespace {
+  is_owner: boolean;
+  member_status: NamespaceMemberStatus;
+  joined_at?: string;
+  roles?: NamespaceRole[];
+}
+
+export interface NamespaceMember {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  user_id: number;
+  status: NamespaceMemberStatus;
+  is_owner: boolean;
+  joined_at?: string;
+  invited_by?: number;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  user?: {
+    uuid: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    username?: string;
+    full_name?: string;
+    active: boolean;
+  };
+  roles?: NamespaceRole[];
+  invited_by_name?: string;
+}
+
+export interface NamespaceRole {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  role_name: string;
+  display_name: string;
+  description?: string;
+  permissions: string | NamespacePermissions;
+  permissions_parsed?: NamespacePermissions;
+  is_system: boolean;
+  is_default: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+  member_count?: number;
+}
+
+// Namespace-scoped permissions
+export type NamespaceModule =
+  | 'dashboard'
+  | 'users'
+  | 'roles'
+  | 'stores'
+  | 'products'
+  | 'orders'
+  | 'customers'
+  | 'settings'
+  | 'namespace'
+  | 'chat'
+  | 'delivery'
+  | 'reports';
+
+export type NamespacePermissions = Record<NamespaceModule, PermissionAction[]>;
+
+export interface NamespaceInvitation {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  email: string;
+  role_id?: number;
+  invited_by: number;
+  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  token: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  namespace?: Namespace;
+  role?: NamespaceRole;
+  inviter?: {
+    uuid: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+  };
+}
+
+// API Response types for namespace
+export interface NamespaceLoginResponse extends LoginResponse {
+  namespaces: NamespaceWithMembership[];
+  current_namespace?: {
+    id: number;
+    uuid: string;
+    name: string;
+    slug: string;
+    is_owner: boolean;
+  };
+}
+
+export interface NamespaceSwitchResponse {
+  token: string;
+  namespace: Namespace;
+  membership: NamespaceMember;
+  permissions: NamespacePermissions;
+}
+
+export interface NamespaceStats {
+  total_members: number;
+  total_stores: number;
+  total_orders: number;
+  total_customers: number;
+  total_products: number;
+  total_revenue: number;
+}
+
+// Create/Update DTOs
+export interface CreateNamespaceDto {
+  name: string;
+  slug?: string;
+  description?: string;
+  domain?: string;
+  logo_url?: string;
+  banner_url?: string;
+  plan?: NamespacePlan;
+  settings?: Record<string, unknown>;
+  max_users?: number;
+  max_stores?: number;
+}
+
+export interface UpdateNamespaceDto extends Partial<CreateNamespaceDto> {
+  status?: NamespaceStatus;
+}
+
+export interface InviteMemberDto {
+  email: string;
+  role_id?: number;
+  message?: string;
+}
+
+export interface CreateNamespaceRoleDto {
+  role_name: string;
+  display_name?: string;
+  description?: string;
+  permissions?: NamespacePermissions;
+  is_default?: boolean;
+  priority?: number;
+}
+
+export interface UpdateNamespaceRoleDto extends Partial<CreateNamespaceRoleDto> {}
+
+// Module metadata for UI
+export interface NamespaceModuleMeta {
+  name: NamespaceModule;
+  display_name: string;
+  description: string;
+}
+
+export interface NamespaceActionMeta {
+  name: PermissionAction;
+  display_name: string;
+  description: string;
+}
+
+// ============================================
+// User Namespace Settings (User-First Architecture)
+// Users are GLOBAL, namespaces are assigned to users
+// ============================================
+
+export interface UserNamespaceSettings {
+  id: number;
+  user_id: number;
+  default_namespace_id?: number;
+  default_namespace_uuid?: string;
+  default_namespace_name?: string;
+  default_namespace_slug?: string;
+  last_active_namespace_id?: number;
+  last_active_namespace_uuid?: string;
+  last_active_namespace_name?: string;
+  last_active_namespace_slug?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserNamespacesResponse {
+  data: NamespaceWithMembership[];
+  total: number;
+  settings?: {
+    default_namespace_id?: number;
+    default_namespace_uuid?: string;
+    default_namespace_slug?: string;
+    last_active_namespace_id?: number;
+    last_active_namespace_uuid?: string;
+    last_active_namespace_slug?: string;
+  };
+}
+
+export interface UpdateUserNamespaceSettingsDto {
+  default_namespace_id?: number | string;
+}
+
+export interface CreateNamespaceResponse {
+  message: string;
+  namespace: Namespace;
+  membership: NamespaceMember;
+  token: string;
 }

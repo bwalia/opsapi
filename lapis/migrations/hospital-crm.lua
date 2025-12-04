@@ -1,7 +1,6 @@
 local schema = require("lapis.db.schema")
 local types = schema.types
 local db = require("lapis.db")
-local Global = require "helper.global"
 
 return {
     -- Hospitals table

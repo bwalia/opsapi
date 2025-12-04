@@ -291,6 +291,9 @@ safe_load_routes("routes.chat-messages")  -- Message operations (send, edit, del
 safe_load_routes("routes.chat-reactions") -- Message reactions (add, remove, toggle)
 safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, mentions, presence, invites, files
 
+-- Namespace System (Multi-tenant)
+safe_load_routes("routes.namespaces")     -- Namespace management, members, roles, switching
+
 ngx.log(ngx.NOTICE, "All routes loaded")
 
 return app

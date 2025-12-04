@@ -8,3 +8,4 @@ export { dashboardService } from './dashboard.service';
 export { rolesService, formatRoleName, getRoleColor } from './roles.service';
 export { permissionsService, DASHBOARD_MODULES, PERMISSION_ACTIONS } from './permissions.service';
 export { modulesService } from './modules.service';
+export { namespaceService } from './namespace.service';

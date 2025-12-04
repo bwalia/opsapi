@@ -14,8 +14,11 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
+// Storage keys
+export const NAMESPACE_KEY = 'current_namespace';
+
 /**
- * Request interceptor to add auth token
+ * Request interceptor to add auth token and namespace header
  */
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -23,6 +26,19 @@ apiClient.interceptors.request.use(
       const token = localStorage.getItem('auth_token');
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
+      }
+
+      // Add namespace header if available
+      const namespaceData = localStorage.getItem(NAMESPACE_KEY);
+      if (namespaceData && config.headers) {
+        try {
+          const namespace = JSON.parse(namespaceData);
+          if (namespace?.uuid) {
+            config.headers['X-Namespace-Id'] = namespace.uuid;
+          }
+        } catch {
+          // Ignore parse errors
+        }
       }
     }
     return config;

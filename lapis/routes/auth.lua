@@ -1,8 +1,10 @@
 local http = require("resty.http")
-local jwt = require("resty.jwt")
 local cJson = require("cjson")
 local UserQueries = require "queries.UserQueries"
 local Global = require "helper.global"
+local JWTHelper = require "helper.jwt-helper"
+local NamespaceQueries = require "queries.NamespaceQueries"
+local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 
 return function(app)
     ----------------- Auth Routes --------------------
@@ -59,22 +61,6 @@ return function(app)
             }
         end
 
-        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
-        local token = jwt:sign(JWT_SECRET_KEY, {
-            header = {
-                typ = "JWT",
-                alg = "HS256"
-            },
-            payload = {
-                userinfo = {
-                    uuid = userWithRoles.uuid,
-                    email = userWithRoles.email,
-                    name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
-                    roles = userWithRoles.roles and userWithRoles.roles[1] and userWithRoles.roles[1].name or "buyer"
-                },
-            }
-        })
-
         -- Build roles array with proper structure for frontend
         local rolesArray = {}
         if userWithRoles.roles then
@@ -86,6 +72,77 @@ return function(app)
                     name = role.name or role.role_name
                 })
             end
+        end
+
+        -- USER-FIRST: Get user's namespaces and their default/last active namespace
+        local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
+        local db = require("lapis.db")
+        local user_record = db.select("id FROM users WHERE uuid = ?", userWithRoles.uuid)
+        local user_id = user_record and user_record[1] and user_record[1].id
+
+        -- Get user's default/last active namespace
+        local default_namespace = nil
+        local namespace_membership = nil
+
+        if user_id then
+            -- First try to get user's configured default or last active namespace
+            default_namespace = NamespaceQueries.getUserDefaultNamespace(user_id)
+        end
+
+        -- If no default found, fall back to first available namespace
+        if not default_namespace then
+            for _, ns in ipairs(namespaces) do
+                if ns.status == "active" and ns.member_status == "active" then
+                    default_namespace = NamespaceQueries.show(ns.id)
+                    -- Also set this as the user's last active namespace
+                    if user_id then
+                        NamespaceQueries.updateLastActiveNamespace(user_id, ns.id)
+                    end
+                    break
+                end
+            end
+        else
+            -- Update last active namespace
+            if user_id then
+                NamespaceQueries.updateLastActiveNamespace(user_id, default_namespace.id)
+            end
+        end
+
+        -- If user has a namespace, get membership details
+        if default_namespace then
+            namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
+                userWithRoles.uuid,
+                default_namespace.id
+            )
+        end
+
+        -- Generate token with namespace context if available
+        local token
+        if default_namespace and namespace_membership then
+            local namespace_permissions = NamespaceMemberQueries.getPermissions(namespace_membership.id)
+            token = JWTHelper.generateNamespaceToken(userWithRoles, default_namespace, namespace_membership, {
+                user_roles = rolesArray,
+                namespace_permissions = namespace_permissions
+            })
+        else
+            token = JWTHelper.generateToken(userWithRoles, {
+                roles = rolesArray
+            })
+        end
+
+        -- Build namespaces array for response
+        local namespacesArray = {}
+        for _, ns in ipairs(namespaces) do
+            table.insert(namespacesArray, {
+                id = ns.id,
+                uuid = ns.uuid,
+                name = ns.name,
+                slug = ns.slug,
+                logo_url = ns.logo_url,
+                is_owner = ns.is_owner,
+                status = ns.status,
+                member_status = ns.member_status
+            })
         end
 
         return {
@@ -103,7 +160,15 @@ return function(app)
                     updated_at = userWithRoles.updated_at,
                     roles = rolesArray
                 },
-                token = token
+                token = token,
+                namespaces = namespacesArray,
+                current_namespace = default_namespace and {
+                    id = default_namespace.id,
+                    uuid = default_namespace.uuid,
+                    name = default_namespace.name,
+                    slug = default_namespace.slug,
+                    is_owner = default_namespace.is_owner
+                } or nil
             }
         }
     end)
@@ -250,22 +315,53 @@ return function(app)
             }
         end
 
-        -- Generate JWT token
-        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
-        local token = jwt:sign(JWT_SECRET_KEY, {
-            header = {
-                typ = "JWT",
-                alg = "HS256"
-            },
-            payload = {
-                userinfo = {
-                    uuid = userWithRoles.uuid,
-                    email = userWithRoles.email,
-                    name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
-                    roles = userWithRoles.roles and userWithRoles.roles[1] and userWithRoles.roles[1].name or "buyer"
-                },
-            }
-        })
+        -- Build roles array
+        local rolesArray = {}
+        if userWithRoles.roles then
+            for _, role in ipairs(userWithRoles.roles) do
+                table.insert(rolesArray, {
+                    id = role.id,
+                    role_id = role.role_id,
+                    role_name = role.name or role.role_name,
+                    name = role.name or role.role_name
+                })
+            end
+        end
+
+        -- Get user's namespaces
+        local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
+        local default_namespace = nil
+        local namespace_membership = nil
+
+        -- Find first active namespace
+        for _, ns in ipairs(namespaces) do
+            if ns.status == "active" and ns.member_status == "active" then
+                default_namespace = ns
+                break
+            end
+        end
+
+        -- Get namespace membership if available
+        if default_namespace then
+            namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
+                userWithRoles.uuid,
+                default_namespace.id
+            )
+        end
+
+        -- Generate JWT token with namespace context
+        local token
+        if default_namespace and namespace_membership then
+            local namespace_permissions = NamespaceMemberQueries.getPermissions(namespace_membership.id)
+            token = JWTHelper.generateNamespaceToken(userWithRoles, default_namespace, namespace_membership, {
+                user_roles = rolesArray,
+                namespace_permissions = namespace_permissions
+            })
+        else
+            token = JWTHelper.generateToken(userWithRoles, {
+                roles = rolesArray
+            })
+        end
 
         -- Redirect to frontend with token
         local frontend_url = Global.getEnvVar("FRONTEND_URL") or "http://localhost:3033"
@@ -316,10 +412,9 @@ return function(app)
             }
         end
 
-        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
-        local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
+        local result = JWTHelper.verifyToken(token)
 
-        if not jwt_obj.valid then
+        if not result.valid then
             return {
                 status = 401,
                 json = {
@@ -328,7 +423,7 @@ return function(app)
             }
         end
 
-        local userinfo = jwt_obj.payload.userinfo
+        local userinfo = result.payload.userinfo
         return {
             status = 200,
             json = {
@@ -336,9 +431,116 @@ return function(app)
                     id = userinfo.uuid,
                     email = userinfo.email,
                     name = userinfo.name,
-                    role = userinfo.roles
+                    role = userinfo.roles,
+                    namespace = userinfo.namespace
                 },
                 token = token
+            }
+        }
+    end)
+
+    -- Token refresh endpoint with namespace support
+    app:post("/auth/refresh", function(self)
+        local auth_header = self.req.headers["authorization"]
+        if not auth_header then
+            return {
+                status = 401,
+                json = { error = "Authorization header required" }
+            }
+        end
+
+        local token = auth_header:match("Bearer%s+(.+)")
+        if not token then
+            return {
+                status = 401,
+                json = { error = "Invalid Authorization format" }
+            }
+        end
+
+        local new_token = JWTHelper.refreshToken(token)
+        if not new_token then
+            return {
+                status = 401,
+                json = { error = "Invalid or expired token" }
+            }
+        end
+
+        return {
+            status = 200,
+            json = {
+                token = new_token,
+                message = "Token refreshed successfully"
+            }
+        }
+    end)
+
+    -- Get current user info (includes namespace)
+    app:get("/auth/me", function(self)
+        if not self.current_user then
+            return {
+                status = 401,
+                json = { error = "Not authenticated" }
+            }
+        end
+
+        -- Get full user data
+        local user = UserQueries.show(self.current_user.uuid)
+        if not user then
+            return {
+                status = 404,
+                json = { error = "User not found" }
+            }
+        end
+
+        -- Build roles array
+        local rolesArray = {}
+        if user.roles then
+            for _, role in ipairs(user.roles) do
+                table.insert(rolesArray, {
+                    id = role.id,
+                    role_id = role.role_id,
+                    role_name = role.name or role.role_name,
+                    name = role.name or role.role_name
+                })
+            end
+        end
+
+        -- Get user's namespaces
+        local namespaces = NamespaceQueries.getForUser(user.uuid) or {}
+        local namespacesArray = {}
+        for _, ns in ipairs(namespaces) do
+            table.insert(namespacesArray, {
+                id = ns.id,
+                uuid = ns.uuid,
+                name = ns.name,
+                slug = ns.slug,
+                logo_url = ns.logo_url,
+                is_owner = ns.is_owner,
+                status = ns.status,
+                member_status = ns.member_status
+            })
+        end
+
+        -- Get current namespace from token
+        local current_namespace = self.current_user.namespace
+
+        return {
+            status = 200,
+            json = {
+                user = {
+                    id = user.internal_id,
+                    uuid = user.uuid,
+                    email = user.email,
+                    username = user.username,
+                    first_name = user.first_name or "",
+                    last_name = user.last_name or "",
+                    active = user.active,
+                    created_at = user.created_at,
+                    updated_at = user.updated_at,
+                    roles = rolesArray
+                },
+                namespaces = namespacesArray,
+                current_namespace = current_namespace
             }
         }
     end)
