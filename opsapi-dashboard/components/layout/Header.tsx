@@ -4,6 +4,7 @@ import React, { useState, useCallback, memo } from 'react';
 import { Menu, Search, Bell, ChevronDown, Settings, LogOut, User, X } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
+import { NamespaceSwitcher } from '@/components/namespace/NamespaceSwitcher';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -166,6 +167,11 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
 
           {/* Right Section */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Namespace Switcher */}
+            <div className="hidden sm:block">
+              <NamespaceSwitcher variant="header" />
+            </div>
+
             {/* Notifications */}
             <button
               className="relative p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg"

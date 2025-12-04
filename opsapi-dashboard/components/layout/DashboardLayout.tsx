@@ -6,6 +6,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
+import { NamespaceProvider } from '@/contexts/NamespaceContext';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -106,34 +107,36 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
   }
 
   return (
-    <PermissionsProvider>
-      <div className="min-h-screen bg-secondary-50">
-        {/* Sidebar */}
-        <Sidebar
-          isOpen={isSidebarOpen}
-          isCollapsed={isSidebarCollapsed}
-          onClose={handleSidebarClose}
-          onToggleCollapse={handleSidebarToggleCollapse}
-        />
+    <NamespaceProvider>
+      <PermissionsProvider>
+        <div className="min-h-screen bg-secondary-50">
+          {/* Sidebar */}
+          <Sidebar
+            isOpen={isSidebarOpen}
+            isCollapsed={isSidebarCollapsed}
+            onClose={handleSidebarClose}
+            onToggleCollapse={handleSidebarToggleCollapse}
+          />
 
-        {/* Main content wrapper */}
-        <div
-          className={cn(
-            'transition-all duration-300',
-            // Desktop: adjust margin based on sidebar state
-            isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64',
-            // Mobile: no margin (sidebar overlays)
-            'ml-0'
-          )}
-        >
-          {/* Header */}
-          <Header onMenuClick={handleSidebarOpen} />
+          {/* Main content wrapper */}
+          <div
+            className={cn(
+              'transition-all duration-300',
+              // Desktop: adjust margin based on sidebar state
+              isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64',
+              // Mobile: no margin (sidebar overlays)
+              'ml-0'
+            )}
+          >
+            {/* Header */}
+            <Header onMenuClick={handleSidebarOpen} />
 
-          {/* Main content */}
-          <main className="p-4 sm:p-6">{children}</main>
+            {/* Main content */}
+            <main className="p-4 sm:p-6">{children}</main>
+          </div>
         </div>
-      </div>
-    </PermissionsProvider>
+      </PermissionsProvider>
+    </NamespaceProvider>
   );
 });
 

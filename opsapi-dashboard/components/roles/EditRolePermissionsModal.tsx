@@ -24,7 +24,7 @@ import {
 } from '@/services';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import type { Role, DashboardModule, PermissionAction, UserPermissions, Permission } from '@/types';
+import type { Role, DashboardModule, PermissionAction, UserPermissions } from '@/types';
 
 export interface EditRolePermissionsModalProps {
   isOpen: boolean;
@@ -56,8 +56,8 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
       orders: [],
       customers: [],
       settings: [],
+      namespaces: [],
     });
-    const [originalPermissions, setOriginalPermissions] = useState<Permission[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -82,8 +82,6 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
           perPage: 100,
         });
 
-        setOriginalPermissions(response.data);
-
         if (response.data.length > 0) {
           // Parse permissions from API
           const parsed: UserPermissions = {
@@ -95,6 +93,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
             orders: [],
             customers: [],
             settings: [],
+            namespaces: [],
           };
 
           for (const perm of response.data) {
@@ -171,38 +170,15 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
 
       setIsSaving(true);
       try {
-        // For each module, create or update permission
-        for (const moduleConfig of DASHBOARD_MODULES) {
-          const moduleName = moduleConfig.value;
-          const modulePerms = permissions[moduleName] || [];
-          const permString = modulePerms.join(',');
+        // Use batch API for efficient single-request update
+        const result = await permissionsService.batchUpdatePermissions(
+          role.role_name,
+          permissions
+        );
 
-          // Find existing permission for this role + module
-          const existingPerm = originalPermissions.find(
-            (p) => p.module_machine_name === moduleName
-          );
-
-          if (existingPerm) {
-            // Update existing permission
-            if (permString) {
-              await permissionsService.updatePermission(existingPerm.uuid, {
-                permissions: permString,
-              });
-            } else {
-              // Delete if no permissions
-              await permissionsService.deletePermission(existingPerm.uuid);
-            }
-          } else if (permString) {
-            // Create new permission
-            await permissionsService.createPermission({
-              role: role.role_name,
-              module_machine_name: moduleName,
-              permissions: permString,
-            });
-          }
-        }
-
-        toast.success('Permissions updated successfully');
+        toast.success(
+          `Permissions updated: ${result.created} created, ${result.updated} updated, ${result.deleted} removed`
+        );
         onClose();
         onSuccess?.();
       } catch (error: unknown) {
@@ -212,7 +188,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
       } finally {
         setIsSaving(false);
       }
-    }, [permissions, originalPermissions, role, isAdminRole, onClose, onSuccess]);
+    }, [permissions, role, isAdminRole, onClose, onSuccess]);
 
     const handleClose = useCallback(() => {
       if (!isSaving) {

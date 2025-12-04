@@ -12,6 +12,11 @@ function RoleQueries.create(roleData)
     if roleData.uuid == nil then
         roleData.uuid = Global.generateUUID()
     end
+    -- Set timestamps
+    local timestamp = Global.getCurrentTimestamp()
+    roleData.created_at = timestamp
+    roleData.updated_at = timestamp
+
     return Roles:create(roleData, {
         returning = "*"
     })
@@ -45,7 +50,10 @@ function RoleQueries.update(id, params)
     if not role then
         return nil
     end
-    
+
+    -- Set updated_at timestamp
+    params.updated_at = Global.getCurrentTimestamp()
+
     role:update(params)
     return role
 end

@@ -1,7 +1,11 @@
 local schema = require("lapis.db.schema")
 local types = schema.types
 local db = require("lapis.db")
-local Global = require "helper.global"
+-- Use migration-utils for CLI-compatible utilities (UUID, timestamp, password hashing)
+local MigrationUtils = require "helper.migration-utils"
+
+-- Default admin password - CHANGE THIS AFTER FIRST LOGIN
+local DEFAULT_ADMIN_PASSWORD = "Admin@123"
 local ecommerce_migrations = require("ecommerce-migrations")
 local production_schema_upgrade = require("production-schema-upgrade")
 local order_management_migrations = require("migrations.order-management-enhancement")
@@ -16,6 +20,8 @@ local geolocation_delivery_migrations = require("migrations.geolocation-delivery
 local multi_currency_migrations = require("migrations.multi-currency-support")
 local fix_delivery_request_constraint = require("migrations.fix-delivery-request-constraint")
 local chat_system_migrations = require("migrations.chat-system")
+local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
+local namespace_system_migrations = require("migrations.namespace-system")
 
 return {
     ['01_create_users'] = function()
@@ -40,11 +46,13 @@ return {
         }) }, "PRIMARY KEY (id)" })
         local adminExists = db.select("id from users where username = ?", "administrative")
         if not adminExists or #adminExists == 0 then
+            -- Hash the default admin password using pgcrypto (dynamic, not static)
+            local hashedPassword = MigrationUtils.hashPassword(DEFAULT_ADMIN_PASSWORD)
             db.query([[
         INSERT INTO users (uuid, first_name, last_name, username, password, email, active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), "Super", "User", "administrative", Global.hashPassword("Admin@123"),
-                "administrative@admin.com", true, Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "Super", "User", "administrative", hashedPassword,
+                "administrative@admin.com", true, MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
         end
     end,
     ['02_create_roles'] = function()
@@ -62,7 +70,7 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), "administrative", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "administrative", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
         end
 
         local sellerRoleExists = db.select("id from roles where role_name = ?", "seller")
@@ -70,7 +78,7 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), "seller", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "seller", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
         end
 
         local buyerRoleExists = db.select("id from roles where role_name = ?", "buyer")
@@ -78,7 +86,7 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), "buyer", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "buyer", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
         end
 
         local deliveryPartnerRoleExists = db.select("id from roles where role_name = ?", "delivery_partner")
@@ -86,7 +94,7 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), "delivery_partner", Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "delivery_partner", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
         end
     end,
     ['02create_user__roles'] = function()
@@ -103,7 +111,7 @@ return {
             db.query([[
         INSERT INTO user__roles (uuid, role_id, user_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
-      ]], Global.generateStaticUUID(), 1, 1, Global.getCurrentTimestamp(), Global.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), 1, 1, MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
         end
     end,
     ['03create_modules'] = function()
@@ -477,5 +485,40 @@ return {
     ['147_create_chat_unread_counts_view'] = chat_system_migrations[30],
     ['148_ensure_last_read_at_column'] = chat_system_migrations[31],
     ['149_fix_chat_default_values'] = chat_system_migrations[32],
+
+    -- RBAC Enhancements (Dashboard Role-Based Access Control)
+    ['150_add_description_to_roles'] = rbac_enhancements_migrations[1],
+    ['151_seed_dashboard_modules'] = rbac_enhancements_migrations[2],
+
+    -- Multi-Tenant Namespace System (User-First Architecture)
+    -- Users are GLOBAL, then join/create namespaces
+    ['152_create_namespaces_table'] = namespace_system_migrations[1],
+    ['153_add_namespaces_indexes'] = namespace_system_migrations[2],
+    ['154_create_namespace_members_table'] = namespace_system_migrations[3],
+    ['155_add_namespace_members_indexes'] = namespace_system_migrations[4],
+    ['156_create_namespace_roles_table'] = namespace_system_migrations[5],
+    ['157_add_namespace_roles_indexes'] = namespace_system_migrations[6],
+    ['158_create_namespace_user_roles_table'] = namespace_system_migrations[7],
+    ['159_add_namespace_user_roles_indexes'] = namespace_system_migrations[8],
+    ['160_create_namespace_invitations_table'] = namespace_system_migrations[9],
+    ['161_add_namespace_invitations_indexes'] = namespace_system_migrations[10],
+    ['162_create_user_namespace_settings_table'] = namespace_system_migrations[11],
+    ['163_add_user_namespace_settings_indexes'] = namespace_system_migrations[12],
+    ['164_add_namespace_id_to_stores'] = namespace_system_migrations[13],
+    ['165_add_namespace_id_to_orders'] = namespace_system_migrations[14],
+    ['166_add_namespace_id_to_customers'] = namespace_system_migrations[15],
+    ['167_add_namespace_id_to_categories'] = namespace_system_migrations[16],
+    ['168_add_namespace_id_to_storeproducts'] = namespace_system_migrations[17],
+    ['169_add_namespace_id_to_chat_channels'] = namespace_system_migrations[18],
+    ['170_add_namespace_id_to_delivery_partners'] = namespace_system_migrations[19],
+    ['171_add_namespace_id_to_notifications'] = namespace_system_migrations[20],
+    ['172_add_namespace_id_to_enquiries'] = namespace_system_migrations[21],
+    ['173_seed_default_namespace_and_roles'] = namespace_system_migrations[22],
+    ['174_add_admin_to_system_namespace'] = namespace_system_migrations[23],
+    ['175_migrate_existing_data_to_namespace'] = namespace_system_migrations[24],
+    ['176_add_existing_users_to_namespace'] = namespace_system_migrations[25],
+    ['177_create_namespace_audit_logs_table'] = namespace_system_migrations[26],
+    ['178_add_namespace_audit_logs_indexes'] = namespace_system_migrations[27],
+    ['179_ensure_namespace_columns_on_all_tables'] = namespace_system_migrations[28],
 
 }

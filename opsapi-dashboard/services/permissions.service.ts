@@ -24,6 +24,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     orders: ['create', 'read', 'update', 'delete', 'manage'],
     customers: ['create', 'read', 'update', 'delete', 'manage'],
     settings: ['read', 'update', 'manage'],
+    namespaces: ['create', 'read', 'update', 'delete', 'manage'],
   },
   seller: {
     dashboard: ['read'],
@@ -34,6 +35,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     orders: ['read', 'update'],
     customers: ['read'],
     settings: ['read', 'update'],
+    namespaces: [],
   },
   buyer: {
     dashboard: ['read'],
@@ -44,6 +46,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     orders: ['read'],
     customers: [],
     settings: ['read', 'update'],
+    namespaces: [],
   },
   delivery_partner: {
     dashboard: ['read'],
@@ -54,6 +57,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     orders: ['read', 'update'],
     customers: [],
     settings: ['read', 'update'],
+    namespaces: [],
   },
 };
 
@@ -120,6 +124,21 @@ export const permissionsService = {
    */
   async deletePermission(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/permissions/${uuid}`);
+  },
+
+  /**
+   * Batch update permissions for a role (single API call)
+   * This is the recommended method for updating role permissions efficiently
+   */
+  async batchUpdatePermissions(
+    roleName: string,
+    permissions: UserPermissions
+  ): Promise<{ message: string; updated: number; created: number; deleted: number }> {
+    const response = await apiClient.post('/api/v2/permissions/batch', {
+      role: roleName,
+      permissions: JSON.stringify(permissions),
+    });
+    return response.data;
   },
 
   /**
@@ -198,6 +217,7 @@ function getEmptyPermissions(): UserPermissions {
     orders: [],
     customers: [],
     settings: [],
+    namespaces: [],
   };
 }
 
@@ -213,6 +233,7 @@ export const DASHBOARD_MODULES: { value: DashboardModule; label: string; icon: s
   { value: 'orders', label: 'Orders', icon: 'ShoppingCart' },
   { value: 'customers', label: 'Customers', icon: 'UserCheck' },
   { value: 'settings', label: 'Settings', icon: 'Settings' },
+  { value: 'namespaces', label: 'Namespaces', icon: 'Building2' },
 ];
 
 /**
