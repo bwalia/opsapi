@@ -442,25 +442,19 @@ function NamespaceQueries.setUserSettings(user_id, settings)
 
         db.update("user_namespace_settings", update_data, { user_id = user_id })
     else
-        -- Create new settings record
-        -- Only include fields that have valid values to avoid FK violations
-        local insert_data = {
-            user_id = user_id,
-            created_at = timestamp,
-            updated_at = timestamp
-        }
+        -- Create new settings record using raw SQL to properly handle NULL values
+        -- This avoids the ORM inserting default 0 values for foreign key columns
+        local default_ns = settings.default_namespace_id and settings.default_namespace_id > 0
+            and tostring(settings.default_namespace_id) or "NULL"
+        local last_active_ns = settings.last_active_namespace_id and settings.last_active_namespace_id > 0
+            and tostring(settings.last_active_namespace_id) or "NULL"
 
-        -- Only set default_namespace_id if it's a valid ID (not nil, not 0)
-        if settings.default_namespace_id and settings.default_namespace_id > 0 then
-            insert_data.default_namespace_id = settings.default_namespace_id
-        end
-
-        -- Only set last_active_namespace_id if it's a valid ID (not nil, not 0)
-        if settings.last_active_namespace_id and settings.last_active_namespace_id > 0 then
-            insert_data.last_active_namespace_id = settings.last_active_namespace_id
-        end
-
-        db.insert("user_namespace_settings", insert_data)
+        db.query(string.format([[
+            INSERT INTO user_namespace_settings
+            (user_id, default_namespace_id, last_active_namespace_id, created_at, updated_at)
+            VALUES (%d, %s, %s, %s, %s)
+        ]], user_id, default_ns, last_active_ns,
+            db.escape_literal(timestamp), db.escape_literal(timestamp)))
     end
 
     return NamespaceQueries.getUserSettings(user_id)
