@@ -3,6 +3,7 @@
 import React, { useMemo, useCallback } from 'react';
 import { Users, ShoppingCart, Package, Store, DollarSign } from 'lucide-react';
 import { StatsCard, RecentOrdersTable, OrdersChart, HealthStatus } from '@/components/dashboard';
+import { PendingInvitationsBanner } from '@/components/namespace/invitations';
 import { dashboardService } from '@/services';
 import { formatCurrency } from '@/lib/utils';
 import { useDataFetch } from '@/hooks';
@@ -97,6 +98,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Pending Invitations Banner */}
+      <PendingInvitationsBanner />
+
       {/* Page Header */}
       <div>
         <h1 className="text-xl sm:text-2xl font-bold text-secondary-900">Dashboard</h1>

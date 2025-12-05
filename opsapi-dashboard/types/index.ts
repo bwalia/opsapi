@@ -504,22 +504,25 @@ export type NamespacePermissions = Record<NamespaceModule, PermissionAction[]>;
 export interface NamespaceInvitation {
   id: number;
   uuid: string;
-  namespace_id: number;
+  namespace_id?: number;
   email: string;
   role_id?: number;
-  invited_by: number;
+  invited_by?: number;
   status: 'pending' | 'accepted' | 'declined' | 'expired';
   token: string;
+  message?: string;
   expires_at: string;
+  accepted_at?: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
   namespace?: Namespace;
   role?: NamespaceRole;
   inviter?: {
-    uuid: string;
-    first_name: string;
-    last_name: string;
-    email: string;
+    uuid?: string;
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    name?: string; // Combined name from some API responses
   };
 }
 

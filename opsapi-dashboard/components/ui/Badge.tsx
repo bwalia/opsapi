@@ -4,7 +4,7 @@ import React from 'react';
 import { cn, getStatusColor, snakeToTitle } from '@/lib/utils';
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
-  variant?: 'default' | 'success' | 'warning' | 'error' | 'info';
+  variant?: 'default' | 'success' | 'warning' | 'error' | 'info' | 'secondary';
   size?: 'sm' | 'md';
   status?: string;
 }
@@ -19,6 +19,7 @@ const Badge: React.FC<BadgeProps> = ({
 }) => {
   const variants = {
     default: 'bg-secondary-100 text-secondary-700',
+    secondary: 'bg-secondary-100 text-secondary-600',
     success: 'bg-success-500/10 text-success-600',
     warning: 'bg-warning-500/10 text-warning-600',
     error: 'bg-error-500/10 text-error-600',

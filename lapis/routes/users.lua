@@ -16,6 +16,40 @@ return function(app)
         }
     end
 
+    -- SEARCH users (must be before the general list endpoint)
+    app:get("/api/v2/users/search", function(self)
+        local params = self.params or {}
+        local query = params.q or params.query or ""
+
+        if query == "" then
+            return {
+                status = 200,
+                json = {
+                    data = {},
+                    total = 0
+                }
+            }
+        end
+
+        local ok, result = pcall(UserQueries.search, {
+            query = query,
+            limit = tonumber(params.limit) or 10,
+            exclude_namespace_id = params.exclude_namespace_id and tonumber(params.exclude_namespace_id)
+        })
+
+        if not ok then
+            return error_response(500, "Failed to search users", tostring(result))
+        end
+
+        return {
+            status = 200,
+            json = {
+                data = result.data or {},
+                total = result.total or 0
+            }
+        }
+    end)
+
     -- LIST users
     app:get("/api/v2/users", function(self)
         local params = self.params or {}

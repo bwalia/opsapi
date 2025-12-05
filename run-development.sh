@@ -21,6 +21,7 @@ show_help() {
     echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
     echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
     echo "  -n, --no-git          Skip all git operations (stash=n, pull=n)"
+    echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
@@ -30,6 +31,7 @@ show_help() {
     echo "  ./run-development.sh -s y -p y          # Stash yes, pull yes"
     echo "  ./run-development.sh -s n -p y          # No stash, pull yes"
     echo "  ./run-development.sh --stash=y --pull=n # Stash yes, no pull"
+    echo "  ./run-development.sh -r                 # Reset database (fresh start)"
     echo ""
 }
 
@@ -38,6 +40,7 @@ show_help() {
 # ============================================
 STASH_ARG=""
 PULL_ARG=""
+RESET_DB=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -65,6 +68,10 @@ while [[ $# -gt 0 ]]; do
         -n|--no-git)
             STASH_ARG="n"
             PULL_ARG="n"
+            shift
+            ;;
+        -r|--reset-db)
+            RESET_DB=true
             shift
             ;;
         -h|--help)
@@ -207,7 +214,15 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
-docker compose down --volumes
+# Stop existing containers - only remove volumes if --reset-db flag is set
+if $RESET_DB; then
+    echo -e "${YELLOW}[!] Resetting database - removing volumes...${NC}"
+    docker compose down --volumes
+else
+    echo -e "${GREEN}[+] Preserving database data...${NC}"
+    docker compose down
+fi
+
 docker compose up --build -d
 
 sleep 15

@@ -31,6 +31,41 @@ function Global.getCurrentTimestamp()
     return os.date("%Y-%m-%d %H:%M:%S")
 end
 
+--- Parse a timestamp string to Unix time
+-- Supports formats: "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SSZ"
+-- @param datetimeStr string The timestamp string to parse
+-- @return number|nil Unix timestamp or nil if parsing fails
+function Global.parseTimestamp(datetimeStr)
+    if not datetimeStr or datetimeStr == "" then
+        return nil
+    end
+
+    -- Try standard format: "YYYY-MM-DD HH:MM:SS"
+    local pattern = "(%d+)%-(%d+)%-(%d+) (%d+):(%d+):(%d+)"
+    local year, month, day, hour, minute, second = datetimeStr:match(pattern)
+
+    -- Try ISO 8601 format: "YYYY-MM-DDTHH:MM:SSZ"
+    if not year then
+        pattern = "(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)"
+        year, month, day, hour, minute, second = datetimeStr:match(pattern)
+    end
+
+    if not year then
+        return nil
+    end
+
+    local dt_table = {
+        year = tonumber(year),
+        month = tonumber(month),
+        day = tonumber(day),
+        hour = tonumber(hour) or 0,
+        min = tonumber(minute) or 0,
+        sec = tonumber(second) or 0
+    }
+
+    return os.time(dt_table)
+end
+
 function Global.hashPassword(password)
     local hash = bcrypt.digest(password, saltRounds)
     return hash

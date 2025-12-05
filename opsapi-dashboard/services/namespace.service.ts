@@ -7,6 +7,7 @@ import type {
   NamespacePermissions,
   NamespaceSwitchResponse,
   NamespaceStats,
+  NamespaceInvitation,
   CreateNamespaceDto,
   UpdateNamespaceDto,
   CreateNamespaceRoleDto,
@@ -250,18 +251,139 @@ export const namespaceService = {
   },
 
   // ============================================
+  // Invitation Management
+  // ============================================
+
+  /**
+   * Get all invitations for current namespace
+   */
+  async getInvitations(params?: PaginationParams & { status?: string; search?: string }): Promise<PaginatedResponse<NamespaceInvitation>> {
+    const queryString = buildQueryString((params || {}) as Record<string, unknown>);
+    const response = await apiClient.get<PaginatedResponse<NamespaceInvitation>>(
+      `/api/v2/namespace/invitations${queryString}`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get a specific invitation
+   */
+  async getInvitation(invitationId: string): Promise<NamespaceInvitation> {
+    const response = await apiClient.get<{ invitation: NamespaceInvitation }>(
+      `/api/v2/namespace/invitations/${invitationId}`
+    );
+    return response.data.invitation;
+  },
+
+  /**
+   * Create a new invitation (invite member by email)
+   * @param data Invitation data
+   * @param options.namespaceId Optional namespace ID to override the current namespace context
+   */
+  async createInvitation(
+    data: InviteMemberDto,
+    options?: { namespaceId?: string }
+  ): Promise<NamespaceInvitation> {
+    const config = options?.namespaceId
+      ? { headers: { 'X-Namespace-Id': options.namespaceId } }
+      : undefined;
+
+    const response = await apiClient.post<{ invitation: NamespaceInvitation; message: string }>(
+      '/api/v2/namespace/invitations',
+      toFormData(data as unknown as Record<string, unknown>),
+      config
+    );
+    return response.data.invitation;
+  },
+
+  /**
+   * Resend an invitation
+   */
+  async resendInvitation(invitationId: string): Promise<NamespaceInvitation> {
+    const response = await apiClient.post<{ invitation: NamespaceInvitation; message: string }>(
+      `/api/v2/namespace/invitations/${invitationId}/resend`
+    );
+    return response.data.invitation;
+  },
+
+  /**
+   * Revoke/cancel an invitation
+   */
+  async revokeInvitation(invitationId: string): Promise<void> {
+    await apiClient.delete(`/api/v2/namespace/invitations/${invitationId}`);
+  },
+
+  /**
+   * Get invitation details by token (public)
+   */
+  async getInvitationByToken(token: string): Promise<NamespaceInvitation> {
+    const response = await apiClient.get<{ invitation: NamespaceInvitation }>(
+      `/api/v2/invitations/${token}`
+    );
+    return response.data.invitation;
+  },
+
+  /**
+   * Accept an invitation by token
+   */
+  async acceptInvitation(token: string): Promise<{ member: NamespaceMember; namespace: Namespace }> {
+    const response = await apiClient.post<{
+      member: NamespaceMember;
+      namespace: Namespace;
+      message: string;
+    }>(`/api/v2/invitations/${token}/accept`);
+    return response.data;
+  },
+
+  /**
+   * Decline an invitation by token
+   */
+  async declineInvitation(token: string): Promise<void> {
+    await apiClient.post(`/api/v2/invitations/${token}/decline`);
+  },
+
+  /**
+   * Get pending invitations for the current user
+   * This returns all namespace invitations that are pending for the logged-in user
+   */
+  async getMyPendingInvitations(): Promise<NamespaceInvitation[]> {
+    const response = await apiClient.get<{ data: NamespaceInvitation[]; total: number }>(
+      '/api/v2/user/invitations'
+    );
+    return response.data?.data || [];
+  },
+
+  // ============================================
   // Role Management
   // ============================================
 
   /**
    * Get all roles in current namespace
+   * @param params Query parameters
+   * @param options.namespaceId Optional namespace ID to override the current namespace context
    */
-  async getRoles(params?: { include_member_count?: boolean }): Promise<NamespaceRole[]> {
+  async getRoles(
+    params?: { include_member_count?: boolean },
+    options?: { namespaceId?: string }
+  ): Promise<NamespaceRole[]> {
     const queryString = buildQueryString((params || {}) as Record<string, unknown>);
-    const response = await apiClient.get<{ roles: NamespaceRole[] }>(
-      `/api/v2/namespace/roles${queryString}`
+    const config = options?.namespaceId
+      ? { headers: { 'X-Namespace-Id': options.namespaceId } }
+      : undefined;
+
+    const response = await apiClient.get<{ data?: NamespaceRole[]; roles?: NamespaceRole[]; total?: number }>(
+      `/api/v2/namespace/roles${queryString}`,
+      config
     );
-    return response.data.roles;
+    // Handle both response formats: { data: [...] } and { roles: [...] }
+    const data = response.data;
+    if (data.data && Array.isArray(data.data)) {
+      return data.data;
+    }
+    if (data.roles && Array.isArray(data.roles)) {
+      return data.roles;
+    }
+    return [];
   },
 
   /**

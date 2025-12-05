@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useCallback, memo } from 'react';
-import { Menu, Search, Bell, ChevronDown, Settings, LogOut, User, X } from 'lucide-react';
+import { Menu, Search, ChevronDown, Settings, LogOut, User, X } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { NamespaceSwitcher } from '@/components/namespace/NamespaceSwitcher';
+import { InvitationNotificationBell } from '@/components/namespace/invitations';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -172,14 +173,8 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
               <NamespaceSwitcher variant="header" />
             </div>
 
-            {/* Notifications */}
-            <button
-              className="relative p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg"
-              aria-label="Notifications"
-            >
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary-500 rounded-full" />
-            </button>
+            {/* Invitation Notifications */}
+            <InvitationNotificationBell />
 
             {/* Profile Dropdown */}
             <div className="relative">

@@ -50,6 +50,32 @@ export const usersService = {
   async deleteUser(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/users/${uuid}`);
   },
+
+  /**
+   * Search users by email, name, or username
+   * @param query - Search query string
+   * @param options - Additional options like limit and exclude_namespace_id
+   */
+  async searchUsers(
+    query: string,
+    options?: { limit?: number; excludeNamespaceId?: number }
+  ): Promise<User[]> {
+    if (!query || query.trim().length < 2) {
+      return [];
+    }
+
+    const params: Record<string, string | number> = {
+      q: query.trim(),
+      limit: options?.limit || 10,
+    };
+
+    if (options?.excludeNamespaceId) {
+      params.exclude_namespace_id = options.excludeNamespaceId;
+    }
+
+    const response = await apiClient.get('/api/v2/users/search', { params });
+    return response.data?.data || [];
+  },
 };
 
 export default usersService;

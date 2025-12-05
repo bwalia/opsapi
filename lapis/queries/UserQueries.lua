@@ -203,4 +203,65 @@ function UserQueries.SCIMupdate(id, params)
     -- }), 204
 end
 
+-- Search users by email, name, or username
+function UserQueries.search(params)
+    local db = require("lapis.db")
+    local query = params.query or params.q or ""
+    local limit = tonumber(params.limit) or 10
+    local exclude_namespace_id = params.exclude_namespace_id
+
+    if query == "" then
+        return { data = {}, total = 0 }
+    end
+
+    -- Escape the query for LIKE pattern
+    local search_pattern = "%" .. query:lower() .. "%"
+
+    local sql
+    if exclude_namespace_id then
+        -- Exclude users already in the namespace
+        sql = [[
+            SELECT u.id, u.uuid, u.email, u.first_name, u.last_name, u.username
+            FROM users u
+            WHERE (
+                LOWER(u.email) LIKE ? OR
+                LOWER(u.first_name) LIKE ? OR
+                LOWER(u.last_name) LIKE ? OR
+                LOWER(u.username) LIKE ? OR
+                LOWER(CONCAT(u.first_name, ' ', u.last_name)) LIKE ?
+            )
+            AND u.id NOT IN (
+                SELECT nm.user_id FROM namespace_members nm
+                WHERE nm.namespace_id = ? AND nm.status = 'active'
+            )
+            ORDER BY u.email ASC
+            LIMIT ?
+        ]]
+        local users = db.query(sql, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, exclude_namespace_id, limit)
+        return {
+            data = users or {},
+            total = #(users or {})
+        }
+    else
+        sql = [[
+            SELECT u.id, u.uuid, u.email, u.first_name, u.last_name, u.username
+            FROM users u
+            WHERE (
+                LOWER(u.email) LIKE ? OR
+                LOWER(u.first_name) LIKE ? OR
+                LOWER(u.last_name) LIKE ? OR
+                LOWER(u.username) LIKE ? OR
+                LOWER(CONCAT(u.first_name, ' ', u.last_name)) LIKE ?
+            )
+            ORDER BY u.email ASC
+            LIMIT ?
+        ]]
+        local users = db.query(sql, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit)
+        return {
+            data = users or {},
+            total = #(users or {})
+        }
+    end
+end
+
 return UserQueries
