@@ -52,7 +52,8 @@ return {
         INSERT INTO users (uuid, first_name, last_name, username, password, email, active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ]], MigrationUtils.generateUUID(), "Super", "User", "administrative", hashedPassword,
-                "administrative@admin.com", true, MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
+                "administrative@admin.com", true, MigrationUtils.getCurrentTimestamp(),
+                MigrationUtils.getCurrentTimestamp())
         end
     end,
     ['02_create_roles'] = function()
@@ -70,7 +71,8 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], MigrationUtils.generateUUID(), "administrative", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "administrative", MigrationUtils.getCurrentTimestamp(),
+                MigrationUtils.getCurrentTimestamp())
         end
 
         local sellerRoleExists = db.select("id from roles where role_name = ?", "seller")
@@ -78,7 +80,8 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], MigrationUtils.generateUUID(), "seller", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "seller", MigrationUtils.getCurrentTimestamp(),
+                MigrationUtils.getCurrentTimestamp())
         end
 
         local buyerRoleExists = db.select("id from roles where role_name = ?", "buyer")
@@ -86,7 +89,8 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], MigrationUtils.generateUUID(), "buyer", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "buyer", MigrationUtils.getCurrentTimestamp(),
+                MigrationUtils.getCurrentTimestamp())
         end
 
         local deliveryPartnerRoleExists = db.select("id from roles where role_name = ?", "delivery_partner")
@@ -94,7 +98,8 @@ return {
             db.query([[
         INSERT INTO roles (uuid, role_name, created_at, updated_at)
         VALUES (?, ?, ?, ?)
-      ]], MigrationUtils.generateUUID(), "delivery_partner", MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), "delivery_partner", MigrationUtils.getCurrentTimestamp(),
+                MigrationUtils.getCurrentTimestamp())
         end
     end,
     ['02create_user__roles'] = function()
@@ -322,13 +327,13 @@ return {
     ['22_create_product_reviews'] = ecommerce_migrations[11],
     ['23_alter_store_table'] = ecommerce_migrations[13],
     ['38_alter_category_table'] = ecommerce_migrations[14],
-    
+
     ['24_add_oauth_fields_to_users'] = function()
         schema.add_column("users", "oauth_provider", types.varchar({ null = true }))
         schema.add_column("users", "oauth_id", types.varchar({ null = true }))
         schema.create_index("users", "oauth_provider", "oauth_id")
     end,
-    
+
     ['25_add_payment_fields_to_orders'] = function()
         schema.add_column("orders", "payment_intent_id", types.text({ null = true }))
         schema.add_column("orders", "payment_status", types.varchar({ default = "pending" }))
@@ -520,5 +525,22 @@ return {
     ['177_create_namespace_audit_logs_table'] = namespace_system_migrations[26],
     ['178_add_namespace_audit_logs_indexes'] = namespace_system_migrations[27],
     ['179_ensure_namespace_columns_on_all_tables'] = namespace_system_migrations[28],
+
+    -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
+    ['custom_migrations'] = function()
+        local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")
+        if custom_migrations_dir then
+            local lfs = require("lfs")
+            for file in lfs.dir(custom_migrations_dir) do
+                if file:match("%.lua$") then
+                    local migration_path = custom_migrations_dir .. "/" .. file
+                    local migration_func = dofile(migration_path)
+                    if type(migration_func) == "function" then
+                        migration_func(schema, db, MigrationUtils)
+                    end
+                end
+            end
+        end
+    end
 
 }

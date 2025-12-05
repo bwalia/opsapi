@@ -292,8 +292,24 @@ safe_load_routes("routes.chat-reactions") -- Message reactions (add, remove, tog
 safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, mentions, presence, invites, files
 
 -- Namespace System (Multi-tenant)
-safe_load_routes("routes.namespaces")     -- Namespace management, members, roles, switching
+safe_load_routes("routes.namespaces") -- Namespace management, members, roles, switching
 
+-- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
+local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
+if custom_routes_dir then
+    ngx.log(ngx.NOTICE, "Loading custom routes from: ", custom_routes_dir)
+    local custom_route_files = io.popen("ls " .. custom_routes_dir .. "/*.lua")
+    for file in custom_route_files:lines() do
+        local route_name = file:match(".*/(.*)%.lua$")
+        if route_name then
+            local full_route_path = custom_routes_dir .. "." .. route_name
+            safe_load_routes(full_route_path)
+        end
+    end
+    custom_route_files:close()
+else
+    ngx.log(ngx.NOTICE, "No custom routes directory specified.")
+end
 ngx.log(ngx.NOTICE, "All routes loaded")
 
 return app
