@@ -18,3 +18,12 @@ export type {
   NamespaceActivityCardProps,
   ActivityItem,
 } from './details';
+
+// Namespace Members Components
+export {
+  MembersTable,
+  MemberActions,
+  InviteMemberModal,
+  InvitationsTable,
+} from './members';
+export type { MemberActionType } from './members';

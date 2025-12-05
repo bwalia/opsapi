@@ -13,6 +13,7 @@ local respond_to = require("lapis.application").respond_to
 local NamespaceQueries = require("queries.NamespaceQueries")
 local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
 local NamespaceRoleQueries = require("queries.NamespaceRoleQueries")
+local NamespaceInvitationQueries = require("queries.NamespaceInvitationQueries")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local RequestParser = require("helper.request_parser")
@@ -326,6 +327,50 @@ return function(app)
         end)
     }))
 
+    -- Get pending invitations for current user
+    app:get("/api/v2/user/invitations", AuthMiddleware.requireAuth(function(self)
+        local user = db.select("id, email FROM users WHERE uuid = ?", self.current_user.uuid)
+        if not user or #user == 0 then
+            return error_response(404, "User not found")
+        end
+
+        local invitations = NamespaceInvitationQueries.getPendingForEmail(user[1].email)
+
+        -- Structure the response
+        local structured_invitations = {}
+        for _, inv in ipairs(invitations or {}) do
+            table.insert(structured_invitations, {
+                id = inv.id,
+                uuid = inv.uuid,
+                token = inv.token,
+                email = inv.email,
+                status = inv.status,
+                message = inv.message,
+                expires_at = inv.expires_at,
+                created_at = inv.created_at,
+                namespace = {
+                    uuid = inv.namespace_uuid,
+                    name = inv.namespace_name,
+                    slug = inv.namespace_slug,
+                    logo_url = inv.namespace_logo
+                },
+                role = inv.role_id and {
+                    id = inv.role_id,
+                    role_name = inv.role_name,
+                    display_name = inv.role_display_name
+                } or nil,
+                inviter = {
+                    name = inv.invited_by_name
+                }
+            })
+        end
+
+        return success_response({
+            data = structured_invitations,
+            total = #structured_invitations
+        })
+    end))
+
     -- ============================================================
     -- NAMESPACE CONTEXT ROUTES (Requires active namespace)
     -- ============================================================
@@ -613,6 +658,241 @@ return function(app)
             })
         end)
     ))
+
+    -- ============================================================
+    -- NAMESPACE INVITATIONS ROUTES
+    -- ============================================================
+
+    -- List namespace invitations
+    app:get("/api/v2/namespace/invitations", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("users", "read", function(self)
+            local result = NamespaceInvitationQueries.all(self.namespace.id, {
+                page = self.params.page,
+                perPage = self.params.per_page or self.params.limit,
+                status = self.params.status,
+                search = self.params.search
+            })
+
+            return success_response(result)
+        end)
+    ))
+
+    -- Get single invitation
+    app:get("/api/v2/namespace/invitations/:id", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("users", "read", function(self)
+            local invitation = NamespaceInvitationQueries.show(self.params.id)
+
+            if not invitation then
+                return error_response(404, "Invitation not found")
+            end
+
+            -- Verify invitation belongs to this namespace
+            if invitation.namespace_id ~= self.namespace.id then
+                return error_response(404, "Invitation not found in this namespace")
+            end
+
+            return success_response({ invitation = invitation })
+        end)
+    ))
+
+    -- Create invitation (invite member by email)
+    app:post("/api/v2/namespace/invitations", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("users", "create", function(self)
+            local params = RequestParser.parse_request(self)
+
+            if not params.email or params.email == "" then
+                return error_response(400, "Email is required")
+            end
+
+            -- Validate email format
+            if not params.email:match("^[%w%._%+-]+@[%w%.%-]+%.[%w]+$") then
+                return error_response(400, "Invalid email format")
+            end
+
+            -- Check namespace member limit
+            local member_count = NamespaceMemberQueries.count(self.namespace.id, "active")
+            local pending_count = NamespaceInvitationQueries.count(self.namespace.id, "pending")
+            if (member_count + pending_count) >= (self.namespace.max_users or 10) then
+                return error_response(400, "Namespace has reached maximum member limit")
+            end
+
+            -- Get inviter's user id
+            local inviter = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
+            if not inviter or #inviter == 0 then
+                return error_response(400, "Could not identify inviter")
+            end
+
+            local ok, invitation = pcall(NamespaceInvitationQueries.create, {
+                namespace_id = self.namespace.id,
+                email = params.email,
+                role_id = params.role_id and tonumber(params.role_id),
+                message = params.message,
+                invited_by = inviter[1].id,
+                expires_in_days = params.expires_in_days and tonumber(params.expires_in_days)
+            })
+
+            if not ok then
+                local err_msg = tostring(invitation)
+                if err_msg:match("already a member") then
+                    return error_response(400, "User is already a member of this namespace")
+                elseif err_msg:match("already pending") then
+                    return error_response(400, "An invitation is already pending for this email")
+                end
+                return error_response(500, "Failed to create invitation", invitation)
+            end
+
+            -- TODO: Send invitation email here
+            -- EmailService.sendInvitation(invitation)
+
+            return success_response({
+                message = "Invitation sent successfully",
+                invitation = invitation
+            }, 201)
+        end)
+    ))
+
+    -- Resend invitation
+    app:post("/api/v2/namespace/invitations/:id/resend", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("users", "create", function(self)
+            local invitation = NamespaceInvitationQueries.show(self.params.id)
+
+            if not invitation then
+                return error_response(404, "Invitation not found")
+            end
+
+            if invitation.namespace_id ~= self.namespace.id then
+                return error_response(404, "Invitation not found in this namespace")
+            end
+
+            local ok, updated = pcall(NamespaceInvitationQueries.resend, invitation.id)
+
+            if not ok then
+                return error_response(500, "Failed to resend invitation", updated)
+            end
+
+            -- TODO: Resend invitation email here
+            -- EmailService.sendInvitation(updated)
+
+            return success_response({
+                message = "Invitation resent successfully",
+                invitation = updated
+            })
+        end)
+    ))
+
+    -- Revoke invitation
+    app:match("revoke_namespace_invitation", "/api/v2/namespace/invitations/:id", respond_to({
+        DELETE = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requirePermission("users", "delete", function(self)
+                local invitation = NamespaceInvitationQueries.show(self.params.id)
+
+                if not invitation then
+                    return error_response(404, "Invitation not found")
+                end
+
+                if invitation.namespace_id ~= self.namespace.id then
+                    return error_response(404, "Invitation not found in this namespace")
+                end
+
+                if invitation.status ~= "pending" then
+                    return error_response(400, "Can only revoke pending invitations")
+                end
+
+                local ok, result = pcall(NamespaceInvitationQueries.revoke, invitation.id)
+
+                if not ok then
+                    return error_response(500, "Failed to revoke invitation", result)
+                end
+
+                return success_response({
+                    message = "Invitation revoked successfully"
+                })
+            end)
+        )
+    }))
+
+    -- ============================================================
+    -- PUBLIC INVITATION ROUTES (Token-based, no namespace context required)
+    -- ============================================================
+
+    -- Get invitation details by token (public - for invitation landing page)
+    app:get("/api/v2/invitations/:token", function(self)
+        local invitation = NamespaceInvitationQueries.findByToken(self.params.token)
+
+        if not invitation then
+            return error_response(404, "Invitation not found or expired")
+        end
+
+        -- Don't expose sensitive data for non-pending invitations
+        if invitation.status ~= "pending" then
+            return success_response({
+                invitation = {
+                    status = invitation.status,
+                    namespace = invitation.namespace
+                }
+            })
+        end
+
+        -- Check if expired
+        local expires_time = Global.parseTimestamp and Global.parseTimestamp(invitation.expires_at)
+        if expires_time and os.time() > expires_time then
+            return success_response({
+                invitation = {
+                    status = "expired",
+                    namespace = invitation.namespace
+                }
+            })
+        end
+
+        return success_response({
+            invitation = {
+                uuid = invitation.uuid,
+                email = invitation.email,
+                status = invitation.status,
+                message = invitation.message,
+                expires_at = invitation.expires_at,
+                namespace = invitation.namespace,
+                role = invitation.role,
+                inviter = invitation.inviter
+            }
+        })
+    end)
+
+    -- Accept invitation (requires authentication)
+    app:post("/api/v2/invitations/:token/accept", AuthMiddleware.requireAuth(function(self)
+        local result = NamespaceInvitationQueries.accept(self.params.token, self.current_user.uuid)
+
+        if not result.success then
+            return error_response(400, result.error)
+        end
+
+        -- Get namespace details for response
+        local invitation = NamespaceInvitationQueries.findByToken(self.params.token)
+        local namespace = invitation and NamespaceQueries.show(invitation.namespace_id)
+
+        return success_response({
+            message = "Invitation accepted successfully",
+            member = result.member,
+            namespace = namespace and {
+                uuid = namespace.uuid,
+                name = namespace.name,
+                slug = namespace.slug
+            }
+        })
+    end))
+
+    -- Decline invitation (can be done without auth if token is valid)
+    app:post("/api/v2/invitations/:token/decline", function(self)
+        local result = NamespaceInvitationQueries.decline(self.params.token)
+
+        if not result.success then
+            return error_response(400, result.error)
+        end
+
+        return success_response({
+            message = "Invitation declined"
+        })
+    end)
 
     -- ============================================================
     -- NAMESPACE ROLES ROUTES

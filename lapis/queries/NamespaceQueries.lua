@@ -431,7 +431,7 @@ function NamespaceQueries.setUserSettings(user_id, settings)
     local existing = db.query("SELECT id FROM user_namespace_settings WHERE user_id = ?", user_id)
 
     if existing and #existing > 0 then
-        -- Update
+        -- Update existing settings
         local update_data = { updated_at = timestamp }
         if settings.default_namespace_id ~= nil then
             update_data.default_namespace_id = settings.default_namespace_id
@@ -442,14 +442,25 @@ function NamespaceQueries.setUserSettings(user_id, settings)
 
         db.update("user_namespace_settings", update_data, { user_id = user_id })
     else
-        -- Create
-        db.insert("user_namespace_settings", {
+        -- Create new settings record
+        -- Only include fields that have valid values to avoid FK violations
+        local insert_data = {
             user_id = user_id,
-            default_namespace_id = settings.default_namespace_id,
-            last_active_namespace_id = settings.last_active_namespace_id,
             created_at = timestamp,
             updated_at = timestamp
-        })
+        }
+
+        -- Only set default_namespace_id if it's a valid ID (not nil, not 0)
+        if settings.default_namespace_id and settings.default_namespace_id > 0 then
+            insert_data.default_namespace_id = settings.default_namespace_id
+        end
+
+        -- Only set last_active_namespace_id if it's a valid ID (not nil, not 0)
+        if settings.last_active_namespace_id and settings.last_active_namespace_id > 0 then
+            insert_data.last_active_namespace_id = settings.last_active_namespace_id
+        end
+
+        db.insert("user_namespace_settings", insert_data)
     end
 
     return NamespaceQueries.getUserSettings(user_id)
