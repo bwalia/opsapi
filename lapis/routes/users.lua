@@ -83,11 +83,19 @@ return function(app)
         }
     end)
 
-    -- GET single user
+    -- GET single user (with optional detailed info)
     app:get("/api/v2/users/:id", function(self)
         local user_id = self.params.id
+        local include_details = self.params.include_details == "true" or
+                                self.params.include_details == "1" or
+                                self.params.detailed == "true"
 
-        local ok, user = pcall(UserQueries.show, user_id)
+        local ok, user
+        if include_details then
+            ok, user = pcall(UserQueries.showDetailed, user_id)
+        else
+            ok, user = pcall(UserQueries.show, user_id)
+        end
 
         if not ok then
             return error_response(500, "Failed to fetch user", tostring(user))
@@ -147,6 +155,12 @@ return function(app)
         end
         if params.last_name or params.lastName then
             update_data.last_name = params.last_name or params.lastName
+        end
+        if params.username then update_data.username = params.username end
+        if params.phone_no then update_data.phone_no = params.phone_no end
+        if params.address then update_data.address = params.address end
+        if params.active ~= nil then
+            update_data.active = params.active == "true" or params.active == true or params.active == "1"
         end
 
         if next(update_data) == nil then

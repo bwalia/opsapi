@@ -26,8 +26,9 @@ export const usersService = {
     };
   },
 
-  async getUser(uuid: string): Promise<User> {
-    const response = await apiClient.get(`/api/v2/users/${uuid}`);
+  async getUser(uuid: string, options?: { detailed?: boolean }): Promise<User> {
+    const params = options?.detailed ? { detailed: 'true' } : undefined;
+    const response = await apiClient.get(`/api/v2/users/${uuid}`, { params });
     return response.data;
   },
 

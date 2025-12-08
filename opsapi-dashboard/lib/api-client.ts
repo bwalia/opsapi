@@ -28,7 +28,7 @@ apiClient.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
 
-      // Add namespace header if available
+      // Add namespace header from localStorage (user's current namespace context)
       const namespaceData = localStorage.getItem(NAMESPACE_KEY);
       if (namespaceData && config.headers) {
         try {

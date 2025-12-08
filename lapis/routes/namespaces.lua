@@ -1298,6 +1298,113 @@ return function(app)
         return success_response({ stats = stats })
     end))
 
+    -- ============================================================
+    -- ADMIN INVITATION ROUTES (Platform admin - operates on any namespace)
+    -- ============================================================
+
+    -- Create invitation for a specific namespace (admin context)
+    -- This endpoint takes namespace_id from URL, not from header
+    app:post("/api/v2/admin/namespaces/:id/invitations", AuthMiddleware.requireAuth(function(self)
+        if not check_platform_admin(self.current_user) then
+            return error_response(403, "Platform admin access required")
+        end
+
+        local namespace = NamespaceQueries.show(self.params.id)
+        if not namespace then
+            return error_response(404, "Namespace not found")
+        end
+
+        local params = RequestParser.parse_request(self)
+
+        if not params.email or params.email == "" then
+            return error_response(400, "Email is required")
+        end
+
+        -- Validate email format
+        if not params.email:match("^[%w%._%+-]+@[%w%.%-]+%.[%w]+$") then
+            return error_response(400, "Invalid email format")
+        end
+
+        -- Check namespace member limit
+        local member_count = NamespaceMemberQueries.count(namespace.id, "active")
+        local pending_count = NamespaceInvitationQueries.count(namespace.id, "pending")
+        if (member_count + pending_count) >= (namespace.max_users or 10) then
+            return error_response(400, "Namespace has reached maximum member limit")
+        end
+
+        -- Get inviter's user id
+        local inviter = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
+        if not inviter or #inviter == 0 then
+            return error_response(400, "Could not identify inviter")
+        end
+
+        local ok, invitation = pcall(NamespaceInvitationQueries.create, {
+            namespace_id = namespace.id,
+            email = params.email,
+            role_id = params.role_id and tonumber(params.role_id),
+            message = params.message,
+            invited_by = inviter[1].id,
+            expires_in_days = params.expires_in_days and tonumber(params.expires_in_days)
+        })
+
+        if not ok then
+            local err_msg = tostring(invitation)
+            if err_msg:match("already a member") then
+                return error_response(400, "User is already a member of this namespace")
+            elseif err_msg:match("already pending") then
+                return error_response(400, "An invitation is already pending for this email")
+            end
+            return error_response(500, "Failed to create invitation", invitation)
+        end
+
+        return success_response({
+            message = "Invitation sent successfully",
+            invitation = invitation
+        }, 201)
+    end))
+
+    -- List invitations for a specific namespace (admin context)
+    app:get("/api/v2/admin/namespaces/:id/invitations", AuthMiddleware.requireAuth(function(self)
+        if not check_platform_admin(self.current_user) then
+            return error_response(403, "Platform admin access required")
+        end
+
+        local namespace = NamespaceQueries.show(self.params.id)
+        if not namespace then
+            return error_response(404, "Namespace not found")
+        end
+
+        local result = NamespaceInvitationQueries.all(namespace.id, {
+            page = self.params.page,
+            perPage = self.params.per_page or self.params.limit,
+            status = self.params.status,
+            search = self.params.search
+        })
+
+        return success_response(result)
+    end))
+
+    -- Get roles for a specific namespace (admin context)
+    app:get("/api/v2/admin/namespaces/:id/roles", AuthMiddleware.requireAuth(function(self)
+        if not check_platform_admin(self.current_user) then
+            return error_response(403, "Platform admin access required")
+        end
+
+        local namespace = NamespaceQueries.show(self.params.id)
+        if not namespace then
+            return error_response(404, "Namespace not found")
+        end
+
+        local roles = NamespaceRoleQueries.all(namespace.id, {
+            include_member_count = true
+        })
+
+        return success_response({
+            data = roles,
+            total = #roles
+        })
+    end))
+
     -- Transfer namespace ownership (platform admin)
     app:post("/api/v2/admin/namespaces/:id/transfer-ownership", AuthMiddleware.requireAuth(function(self)
         if not check_platform_admin(self.current_user) then
