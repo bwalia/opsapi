@@ -127,7 +127,8 @@ export type DashboardModule =
   | 'orders'
   | 'customers'
   | 'settings'
-  | 'namespaces';
+  | 'namespaces'
+  | 'services';
 
 // Permission config for checking access
 export interface PermissionConfig {
@@ -497,7 +498,8 @@ export type NamespaceModule =
   | 'namespace'
   | 'chat'
   | 'delivery'
-  | 'reports';
+  | 'reports'
+  | 'services';
 
 export type NamespacePermissions = Record<NamespaceModule, PermissionAction[]>;
 
@@ -644,4 +646,197 @@ export interface CreateNamespaceResponse {
   namespace: Namespace;
   membership: NamespaceMember;
   token: string;
+}
+
+// ============================================
+// Services Module Types (GitHub Workflow Integration)
+// ============================================
+
+export interface NamespaceService {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  github_owner: string;
+  github_repo: string;
+  github_workflow_file: string;
+  github_branch: string;
+  github_integration_id?: number;
+  status: 'active' | 'inactive' | 'archived';
+  last_deployment_at?: string;
+  last_deployment_status?: string;
+  deployment_count: number;
+  success_count: number;
+  failure_count: number;
+  created_by?: number;
+  updated_by?: number;
+  created_at: string;
+  updated_at: string;
+  // Populated fields
+  secrets_count?: number;
+  variables_count?: number;
+  github_integration_name?: string;
+  secrets?: ServiceSecret[];
+  variables?: ServiceVariable[];
+  deployments?: ServiceDeployment[];
+  github_integration?: GithubIntegration;
+}
+
+export interface ServiceSecret {
+  id: number;
+  uuid: string;
+  service_id: number;
+  key: string;
+  value: string; // Always "********" from API
+  description?: string;
+  is_required: boolean;
+  created_by?: number;
+  updated_by?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceVariable {
+  id: number;
+  uuid: string;
+  service_id: number;
+  key: string;
+  value: string;
+  description?: string;
+  is_required: boolean;
+  default_value?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceDeployment {
+  id: number;
+  uuid: string;
+  service_id: number;
+  triggered_by?: number;
+  github_run_id?: number;
+  github_run_url?: string;
+  github_run_number?: number;
+  status: 'pending' | 'triggered' | 'running' | 'success' | 'failure' | 'cancelled' | 'error';
+  inputs?: string; // JSON string of non-secret inputs
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  error_details?: string;
+  created_at: string;
+  updated_at: string;
+  // Populated fields
+  first_name?: string;
+  last_name?: string;
+  triggered_by_email?: string;
+  service_name?: string;
+  github_owner?: string;
+  github_repo?: string;
+  github_workflow_file?: string;
+}
+
+export interface GithubIntegration {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  name: string;
+  github_token: string; // Always "********" from API
+  github_username?: string;
+  status: 'active' | 'inactive';
+  last_validated_at?: string;
+  created_by?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceStats {
+  total_services: number;
+  total_all_services: number;
+  total_deployments: number;
+  total_successes: number;
+  total_failures: number;
+  active_integrations: number;
+}
+
+// DTOs
+export interface CreateServiceDto {
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  github_owner: string;
+  github_repo: string;
+  github_workflow_file: string;
+  github_branch?: string;
+  github_integration_id?: number;
+  status?: 'active' | 'inactive';
+}
+
+export interface UpdateServiceDto {
+  name?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  github_owner?: string;
+  github_repo?: string;
+  github_workflow_file?: string;
+  github_branch?: string;
+  github_integration_id?: number;
+  status?: 'active' | 'inactive' | 'archived';
+}
+
+export interface CreateSecretDto {
+  key: string;
+  value: string;
+  description?: string;
+  is_required?: boolean;
+}
+
+export interface UpdateSecretDto {
+  key?: string;
+  value?: string; // Send actual value to update, or "********" to keep existing
+  description?: string;
+  is_required?: boolean;
+}
+
+export interface CreateVariableDto {
+  key: string;
+  value: string;
+  description?: string;
+  is_required?: boolean;
+  default_value?: string;
+}
+
+export interface UpdateVariableDto {
+  key?: string;
+  value?: string;
+  description?: string;
+  is_required?: boolean;
+  default_value?: string;
+}
+
+export interface CreateGithubIntegrationDto {
+  name?: string;
+  github_token: string;
+  github_username?: string;
+}
+
+export interface UpdateGithubIntegrationDto {
+  name?: string;
+  github_token?: string; // Send actual value to update, or "********" to keep existing
+  github_username?: string;
+  status?: 'active' | 'inactive';
+}
+
+export interface TriggerDeploymentDto {
+  inputs?: Record<string, string>; // Custom inputs to override defaults
+}
+
+export interface DeploymentResponse {
+  data: ServiceDeployment;
+  message: string;
+  error?: string;
 }

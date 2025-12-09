@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   Shield,
   Building2,
+  Rocket,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
@@ -40,6 +41,7 @@ const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
   { name: 'My Workspace', href: '/dashboard/namespace', icon: Building2 },
   { name: 'All Namespaces', href: '/dashboard/namespaces', icon: Building2, module: 'namespaces', adminOnly: true },
+  { name: 'Services', href: '/dashboard/services', icon: Rocket },
   { name: 'Users', href: '/dashboard/users', icon: Users, module: 'users' },
   { name: 'Roles', href: '/dashboard/roles', icon: Shield, module: 'roles', adminOnly: true },
   { name: 'Orders', href: '/dashboard/orders', icon: ShoppingCart, module: 'orders' },

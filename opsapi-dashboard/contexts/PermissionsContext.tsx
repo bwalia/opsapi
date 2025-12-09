@@ -38,6 +38,7 @@ const defaultPermissions: UserPermissions = {
   customers: [],
   settings: [],
   namespaces: [],
+  services: [],
 };
 
 const PermissionsContext = createContext<PermissionsContextValue>({

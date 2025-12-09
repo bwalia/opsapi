@@ -25,6 +25,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     customers: ['create', 'read', 'update', 'delete', 'manage'],
     settings: ['read', 'update', 'manage'],
     namespaces: ['create', 'read', 'update', 'delete', 'manage'],
+    services: ['create', 'read', 'update', 'delete', 'manage'],
   },
   seller: {
     dashboard: ['read'],
@@ -36,6 +37,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     customers: ['read'],
     settings: ['read', 'update'],
     namespaces: [],
+    services: ['read'],
   },
   buyer: {
     dashboard: ['read'],
@@ -47,6 +49,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     customers: [],
     settings: ['read', 'update'],
     namespaces: [],
+    services: [],
   },
   delivery_partner: {
     dashboard: ['read'],
@@ -58,6 +61,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
     customers: [],
     settings: ['read', 'update'],
     namespaces: [],
+    services: [],
   },
 };
 
@@ -218,6 +222,7 @@ function getEmptyPermissions(): UserPermissions {
     customers: [],
     settings: [],
     namespaces: [],
+    services: [],
   };
 }
 
@@ -234,6 +239,7 @@ export const DASHBOARD_MODULES: { value: DashboardModule; label: string; icon: s
   { value: 'customers', label: 'Customers', icon: 'UserCheck' },
   { value: 'settings', label: 'Settings', icon: 'Settings' },
   { value: 'namespaces', label: 'Namespaces', icon: 'Building2' },
+  { value: 'services', label: 'Services', icon: 'Rocket' },
 ];
 
 /**

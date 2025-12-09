@@ -62,14 +62,14 @@ function StoreproductQueries.create(params)
     if not params.slug or params.slug == "" then
         params.slug = string.lower(params.name):gsub("[^a-z0-9-]", "-"):gsub("-+", "-")
     end
-    
+
     -- Validate and convert store_id
     local store = StoreModel:find({ uuid = params.store_id })
     if not store then
         error("Store not found")
     end
     params.store_id = store.id
-    
+
     -- Validate category if provided
     if params.category_id and params.category_id ~= "" then
         local CategoryModel = require "models.CategoryModel"
@@ -82,7 +82,7 @@ function StoreproductQueries.create(params)
     else
         params.category_id = nil
     end
-    
+
     return StoreproductModel:create(params, { returning = "*" })
 end
 
@@ -116,7 +116,7 @@ function StoreproductQueries.checkInventory(product_uuid, required_quantity, var
         if not variant then
             return false, "Variant not found"
         end
-        
+
         if variant.inventory_quantity < required_quantity then
             return false, "Insufficient variant inventory. Available: " .. variant.inventory_quantity
         end
@@ -265,10 +265,10 @@ function StoreproductQueries.searchProducts(params)
     local is_featured = params.is_featured
     local orderBy = params.orderBy or 'created_at'
     local orderDir = params.orderDir or 'desc'
-    
-    local where_conditions = {"is_active = true"}
+
+    local where_conditions = { "is_active = true" }
     local where_params = {}
-    
+
     if search and search ~= "" then
         table.insert(where_conditions, "(name ILIKE ? OR description ILIKE ? OR tags ILIKE ?)")
         local search_term = "%" .. search .. "%"
@@ -276,7 +276,7 @@ function StoreproductQueries.searchProducts(params)
         table.insert(where_params, search_term)
         table.insert(where_params, search_term)
     end
-    
+
     if store_id and store_id ~= "" then
         local store = StoreModel:find({ uuid = store_id })
         if store then
@@ -284,56 +284,56 @@ function StoreproductQueries.searchProducts(params)
             table.insert(where_params, store.id)
         end
     end
-    
+
     if category_id and category_id ~= "" then
         table.insert(where_conditions, "category_id = ?")
         table.insert(where_params, category_id)
     end
-    
+
     if min_price and tonumber(min_price) > 0 then
         table.insert(where_conditions, "price >= ?")
         table.insert(where_params, tonumber(min_price))
     end
-    
+
     if max_price and tonumber(max_price) > 0 then
         table.insert(where_conditions, "price <= ?")
         table.insert(where_params, tonumber(max_price))
     end
-    
+
     if is_featured == "true" then
         table.insert(where_conditions, "is_featured = true")
     end
-    
+
     local where_clause = table.concat(where_conditions, " AND ")
     local order_clause = "ORDER BY " .. orderBy .. " " .. orderDir
-    
+
     local where_clause_full = "WHERE " .. where_clause .. " " .. order_clause
 
     -- Use the correct Lapis pagination syntax from official docs
     local paginated
     if #where_params > 0 then
         -- Build arguments table: query, param1, param2, ..., options
-        local args = {where_clause_full}
+        local args = { where_clause_full }
         for i, param in ipairs(where_params) do
             table.insert(args, param)
         end
-        table.insert(args, {per_page = perPage})
+        table.insert(args, { per_page = perPage })
 
         -- Call paginated with explicit arguments
-        paginated = StoreproductModel:paginated(unpack(args))
+        paginated = StoreproductModel:paginated(table.unpack(args))
     else
         -- For queries without parameters: Model:paginated("WHERE clause", {options})
         paginated = StoreproductModel:paginated(where_clause_full, {
             per_page = perPage
         })
     end
-    
+
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
         product:get_store()
         product:get_category()
     end
-    
+
     return {
         data = products,
         total = paginated:total_items(),
@@ -348,12 +348,12 @@ function StoreproductQueries.getLowStockProducts(store_uuid)
     if not store then
         return { data = {}, total = 0 }
     end
-    
+
     local products = StoreproductModel:select(
         "WHERE store_id = ? AND track_inventory = true AND inventory_quantity <= low_stock_threshold AND is_active = true ORDER BY inventory_quantity ASC",
         store.id
     )
-    
+
     return {
         data = products,
         total = #products
@@ -364,18 +364,18 @@ end
 function StoreproductQueries.getFeaturedProducts(params)
     local page = params.page or 1
     local perPage = params.perPage or 12
-    
+
     local paginated = StoreproductModel:paginated(
         "WHERE is_active = true AND is_featured = true ORDER BY sort_order ASC, created_at DESC",
         { per_page = perPage }
     )
-    
+
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
         product:get_store()
         product:get_category()
     end
-    
+
     return {
         data = products,
         total = paginated:total_items()

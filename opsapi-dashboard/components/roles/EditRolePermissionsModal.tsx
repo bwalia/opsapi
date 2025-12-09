@@ -16,6 +16,8 @@ import {
   UserCheck,
   Settings,
   Loader2,
+  Rocket,
+  Building2,
 } from 'lucide-react';
 import {
   permissionsService,
@@ -43,6 +45,8 @@ const MODULE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   orders: ShoppingCart,
   customers: UserCheck,
   settings: Settings,
+  namespaces: Building2,
+  services: Rocket,
 };
 
 const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
@@ -57,6 +61,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
       customers: [],
       settings: [],
       namespaces: [],
+      services: [],
     });
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -94,6 +99,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
             customers: [],
             settings: [],
             namespaces: [],
+            services: [],
           };
 
           for (const perm of response.data) {

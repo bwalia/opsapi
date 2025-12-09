@@ -92,7 +92,8 @@ function Global.encryptSecret(secret)
     if not encrypted then
         error("Encryption failed")
     end
-    return base64.encode(encrypted)
+    -- Use OpenResty's native base64 encoding for consistency
+    return ngx.encode_base64(encrypted)
 end
 
 -- Function to decrypt data
@@ -103,11 +104,30 @@ function Global.decryptSecret(encodedSecret)
     local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
         iv = secretIV
     }))
-    local encrypted = base64.decode(encodedSecret)
+
+    -- Try OpenResty's native base64 decoding first
+    local encrypted = ngx.decode_base64(encodedSecret)
+    local decode_method = "ngx"
+
+    if not encrypted then
+        -- Fallback to the lua-base64 library for backwards compatibility
+        -- with tokens encrypted before this change
+        encrypted = base64.decode(encodedSecret)
+        decode_method = "lua-base64"
+    end
+
+    if not encrypted then
+        ngx.log(ngx.ERR, "Base64 decode failed for both methods")
+        error("Base64 decoding failed")
+    end
+
     local decrypted = aesInstance:decrypt(encrypted)
     if not decrypted then
+        ngx.log(ngx.ERR, "AES decryption failed using ", decode_method, " base64 decode")
         error("Decryption failed")
     end
+
+    ngx.log(ngx.DEBUG, "Decryption successful using ", decode_method, " method")
     return decrypted
 end
 

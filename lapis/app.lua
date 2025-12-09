@@ -294,6 +294,9 @@ safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, mentions, presen
 -- Namespace System (Multi-tenant)
 safe_load_routes("routes.namespaces") -- Namespace management, members, roles, switching
 
+-- Services Module (GitHub Workflow Integration)
+safe_load_routes("routes.services") -- Service management, secrets, deployments, GitHub workflows
+
 -- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
 if custom_routes_dir then
