@@ -1,0 +1,281 @@
+name: ->OPSAPI Build/Push Docker Image and Deploy to K3S (Dynamic Secrets)
+
+# This workflow accepts ALL secrets as inputs from external systems (like OpsAPI Dashboard)
+# NO GitHub repository secrets are used - everything comes from workflow inputs
+#
+# SECURITY NOTES:
+# - All secrets passed as inputs are masked in logs using `::add-mask::`
+# - Secrets are required - workflow will fail if not provided
+# - Never echo or print secret values directly
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: "Please choose the Target environment"
+        default: "test"
+        required: true
+        options:
+          - dev
+          - int
+          - test
+          - acc
+          - prod
+
+      DEPLOYMENT_TYPE:
+        type: choice
+        description: "Please select the build only, deploy only or build and deploy"
+        default: "build-and-deploy"
+        required: true
+        options:
+          - build
+          - deploy
+          - build-and-deploy
+
+      PROJECT_NAME:
+        type: choice
+        description: "Please select the project name"
+        default: "opsapi"
+        required: true
+        options:
+          - opsapi
+          - opsapi-kisaan
+
+      # Docker credentials - REQUIRED
+      DOCKER_USERNAME:
+        type: string
+        description: "Docker Hub username (REQUIRED)"
+        required: true
+
+      DOCKER_PASSWD:
+        type: string
+        description: "Docker Hub password (REQUIRED)"
+        required: true
+
+      # Kubernetes config - REQUIRED for deploy
+      KUBE_CONFIG_DATA:
+        type: string
+        description: "Base64 encoded kubeconfig (REQUIRED for deploy)"
+        required: false
+
+      # Environment-specific credentials - REQUIRED for deploy
+      # These are the .env file contents for kubeseal encryption
+      DOT_OPSAPI_ENV_CREDS:
+        type: string
+        description: "Environment credentials for kubeseal (REQUIRED for deploy)"
+        required: false
+
+      # Slack notification - optional
+      SLACK_WEBHOOK_URL:
+        type: string
+        description: "Slack webhook URL for notifications (optional)"
+        required: false
+
+env:
+  PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}
+  IMAGE_REGISTRY: bwalia
+  TARGET_STACK: openresty_lua
+  IMAGE_NAME: opsapi
+  TARGET_IMAGE_TAG: latest
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+  NODE_IMAGE_NAME: opsapi-node
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mask sensitive inputs
+        run: |
+          # Mask ALL secrets passed as inputs to prevent exposure in logs
+          echo "::add-mask::${{ github.event.inputs.DOCKER_USERNAME }}"
+          echo "::add-mask::${{ github.event.inputs.DOCKER_PASSWD }}"
+          if [ -n "${{ github.event.inputs.KUBE_CONFIG_DATA }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.KUBE_CONFIG_DATA }}"
+          fi
+          if [ -n "${{ github.event.inputs.DOT_OPSAPI_ENV_CREDS }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.DOT_OPSAPI_ENV_CREDS }}"
+          fi
+          if [ -n "${{ github.event.inputs.SLACK_WEBHOOK_URL }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.SLACK_WEBHOOK_URL }}"
+          fi
+          echo "All sensitive inputs masked successfully"
+        shell: bash
+
+      - name: Validate required inputs for build
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if [ -z "${{ github.event.inputs.DOCKER_USERNAME }}" ]; then
+            echo "Error: DOCKER_USERNAME is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.DOCKER_PASSWD }}" ]; then
+            echo "Error: DOCKER_PASSWD is required"
+            exit 1
+          fi
+          echo "All required build inputs validated"
+        shell: bash
+
+      - name: Checkout OPSAPI code
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        uses: actions/checkout@v3
+
+      - name: Build OPSAPI Docker image and push to Docker Hub
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          echo "OPSAPI Docker image builder!"
+          echo "Target Environment: $TARGET_ENV"
+          echo "Nginx template render per environment..."
+          devops/nginx/nginx_template.sh ${{ env.TARGET_ENV }} "true"
+          echo "Building Docker image for $TARGET_ENV environment..."
+          echo "Build, tag, and push image to the given Docker Registry."
+
+          # Use secrets from workflow inputs (no fallback to repo secrets)
+          DOCKER_USER="${{ github.event.inputs.DOCKER_USERNAME }}"
+          DOCKER_PASS="${{ github.event.inputs.DOCKER_PASSWD }}"
+
+          docker login -u "$DOCKER_USER" -p "$DOCKER_PASS"
+          cd lapis/
+          docker build -f Dockerfile --build-arg TAG=latest -t test-${{ env.TARGET_STACK }} . --no-cache
+          docker tag test-${{ env.TARGET_STACK }} ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
+          docker push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
+        shell: bash
+
+      - name: Build OPSAPI-NODE Helper Docker image and push to Docker Hub
+        if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
+        run: |
+          echo "Building Node.js app Docker image..."
+
+          # Use secrets from workflow inputs (no fallback to repo secrets)
+          DOCKER_USER="${{ github.event.inputs.DOCKER_USERNAME }}"
+          DOCKER_PASS="${{ github.event.inputs.DOCKER_PASSWD }}"
+
+          docker login -u "$DOCKER_USER" -p "$DOCKER_PASS"
+          docker build -f node/opsapi-node/Dockerfile -t ${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }} .
+          docker push ${{ env.IMAGE_REGISTRY }}/${{ env.NODE_IMAGE_NAME }}:${{ env.TARGET_IMAGE_TAG }}
+        shell: bash
+
+      - name: Run OpenResty Docker container
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          docker run -d -p 80:80 bwalia/opsapi:latest openresty -g "daemon off;"
+        shell: bash
+
+      - name: Verify OpenResty is running
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          sleep 10 # Give 10s for OpenResty to start
+          curl -I http://localhost:80
+        shell: bash
+
+  deploy:
+    runs-on: self-hosted
+    needs: [build]
+    steps:
+      - name: Mask sensitive inputs
+        run: |
+          # Mask ALL secrets passed as inputs
+          echo "::add-mask::${{ github.event.inputs.DOCKER_USERNAME }}"
+          echo "::add-mask::${{ github.event.inputs.DOCKER_PASSWD }}"
+          if [ -n "${{ github.event.inputs.KUBE_CONFIG_DATA }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.KUBE_CONFIG_DATA }}"
+          fi
+          if [ -n "${{ github.event.inputs.DOT_OPSAPI_ENV_CREDS }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.DOT_OPSAPI_ENV_CREDS }}"
+          fi
+          if [ -n "${{ github.event.inputs.SLACK_WEBHOOK_URL }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.SLACK_WEBHOOK_URL }}"
+          fi
+          echo "Sensitive inputs masked"
+        shell: bash
+
+      - name: Validate required inputs for deploy
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if [ -z "${{ github.event.inputs.KUBE_CONFIG_DATA }}" ]; then
+            echo "Error: KUBE_CONFIG_DATA is required for deployment"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.DOT_OPSAPI_ENV_CREDS }}" ]; then
+            echo "Error: DOT_OPSAPI_ENV_CREDS is required for deployment"
+            exit 1
+          fi
+          echo "All required deploy inputs validated"
+        shell: bash
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Decode and Export Kubeconfig
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          # Use kubeconfig from workflow input (no fallback to repo secrets)
+          KUBECONFIG_BASE64="${{ github.event.inputs.KUBE_CONFIG_DATA }}"
+
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "Kubeconfig decoded and exported successfully."
+        shell: bash
+
+      - name: Kubeseal encrypt the env secrets file
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          # Use environment credentials from workflow input (no fallback to repo secrets)
+          ENV_CREDS="${{ github.event.inputs.DOT_OPSAPI_ENV_CREDS }}"
+          ./devops/kubeseal/kubeseal_automation.sh "$ENV_CREDS" "${{ env.TARGET_ENV }}" "${{ env.TARGET_ENV }}" ${{ env.PROJECT_NAME }}
+        shell: bash
+
+      - name: Check and Install kubectl
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            echo "kubectl not found. Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+          else
+            echo "kubectl is already installed."
+          fi
+        shell: bash
+
+      - name: Check and Install Helm
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if ! command -v helm &> /dev/null; then
+            echo "Helm not found. Installing Helm..."
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          else
+            echo "Helm is already installed."
+          fi
+        shell: bash
+
+      - name: Deploy Helm Chart ${{ env.PROJECT_NAME }} app
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "Deploying Helm chart - ${{ env.PROJECT_NAME }} ${{ env.TARGET_ENV }} environment..."
+          echo "Helm deleting existing release if it exists..."
+          helm delete ${{ env.PROJECT_NAME }} --namespace ${{ env.TARGET_ENV }} || true
+          echo "Helm upgrading or installing the release..."
+          helm list -n ${{ env.TARGET_ENV }} | grep -q "${{ env.PROJECT_NAME }}" && helm delete ${{ env.PROJECT_NAME }} -n ${{ env.TARGET_ENV }} || echo "Release ${{ env.PROJECT_NAME }} not found in namespace ${{ env.TARGET_ENV }}, skipping deletion"
+          helm upgrade --install ${{ env.PROJECT_NAME }} ./devops/helm-charts/opsapi \
+            -f ./devops/helm-charts/opsapi/values-${{ env.PROJECT_NAME }}-${{ env.TARGET_ENV }}.yaml \
+            --set image.repository=bwalia/opsapi \
+            --set image.tag=latest \
+            --namespace ${{ env.TARGET_ENV }} --create-namespace
+        shell: bash
+
+      - name: Slack Notification for OPSAPI ${{ env.PROJECT_NAME }} release
+        if: ${{ (env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy') && github.event.inputs.SLACK_WEBHOOK_URL != '' }}
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: general
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_MESSAGE: "${{ env.PROJECT_NAME }} deployed to https://${{ env.TARGET_ENV }}.opsapi.io/ (${{ env.TARGET_ENV }}) env :rocket:"
+          SLACK_TITLE: "${{ env.PROJECT_NAME }} deployment status"
+          SLACK_USERNAME: rtCamp
+          SLACK_WEBHOOK: ${{ github.event.inputs.SLACK_WEBHOOK_URL }}

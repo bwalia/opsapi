@@ -56,11 +56,11 @@ export const InviteMemberModal = memo(function InviteMemberModal({
   const fetchRoles = async () => {
     setIsLoadingRoles(true);
     try {
-      // Pass namespaceId to fetch roles for the specific namespace (admin context)
-      const availableRoles = await namespaceService.getRoles(
-        undefined,
-        namespaceId ? { namespaceId } : undefined
-      );
+      // Use admin endpoint when namespaceId is provided (admin context)
+      // Otherwise use regular endpoint (user's current namespace)
+      const availableRoles = namespaceId
+        ? await namespaceService.getRolesAdmin(namespaceId)
+        : await namespaceService.getRoles();
       setRoles(Array.isArray(availableRoles) ? availableRoles : []);
 
       // Set default role if exists
@@ -122,11 +122,13 @@ export const InviteMemberModal = memo(function InviteMemberModal({
           message: message.trim() || undefined,
         };
 
-        // Pass namespaceId to target the specific namespace (admin context)
-        await namespaceService.createInvitation(
-          inviteData,
-          namespaceId ? { namespaceId } : undefined
-        );
+        // Use admin endpoint when namespaceId is provided (admin context)
+        // Otherwise use regular endpoint (user's current namespace)
+        if (namespaceId) {
+          await namespaceService.createInvitationAdmin(namespaceId, inviteData);
+        } else {
+          await namespaceService.createInvitation(inviteData);
+        }
 
         toast.success(`Invitation sent to ${inviteEmail}`);
         onSuccess?.();

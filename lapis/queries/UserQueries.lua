@@ -64,12 +64,69 @@ function UserQueries.show(id)
         for index, role in ipairs(user.roles) do
             local roleData = RoleModel:find(role.role_id)
             user.roles[index]["name"] = roleData.role_name
+            user.roles[index]["role_name"] = roleData.role_name
         end
         user.password = nil
         user.internal_id = user.id
         user.id = user.uuid
         return user, ngx.HTTP_OK
     end
+end
+
+-- Get detailed user info including namespace memberships
+function UserQueries.showDetailed(id)
+    local db = require("lapis.db")
+    local user = Users:find({
+        uuid = id
+    })
+    if not user then
+        return nil
+    end
+
+    -- Get roles
+    user:get_roles()
+    for index, role in ipairs(user.roles) do
+        local roleData = RoleModel:find(role.role_id)
+        user.roles[index]["name"] = roleData.role_name
+        user.roles[index]["role_name"] = roleData.role_name
+    end
+    user.password = nil
+
+    -- Get namespace memberships
+    local memberships = db.query([[
+        SELECT
+            nm.id as membership_id,
+            nm.status as membership_status,
+            nm.is_owner,
+            nm.created_at as joined_at,
+            n.id as namespace_id,
+            n.uuid as namespace_uuid,
+            n.name as namespace_name,
+            n.slug as namespace_slug,
+            n.logo_url as namespace_logo,
+            n.status as namespace_status
+        FROM namespace_members nm
+        JOIN namespaces n ON nm.namespace_id = n.id
+        WHERE nm.user_id = ?
+        ORDER BY nm.created_at DESC
+    ]], user.id)
+
+    -- Get namespace roles for each membership
+    for _, membership in ipairs(memberships or {}) do
+        local roles = db.query([[
+            SELECT nr.id, nr.role_name, nr.display_name
+            FROM namespace_member_roles nmr
+            JOIN namespace_roles nr ON nmr.namespace_role_id = nr.id
+            WHERE nmr.namespace_member_id = ?
+        ]], membership.membership_id)
+        membership.roles = roles or {}
+    end
+
+    user.namespaces = memberships or {}
+    user.internal_id = user.id
+    user.id = user.uuid
+
+    return user, ngx.HTTP_OK
 end
 
 function UserQueries.update(id, params)

@@ -36,10 +36,10 @@ end
 function CategoryQueries.all(params)
     local page, perPage, orderField, orderDir =
         params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
+
     local where_clause = ""
     local where_params = {}
-    
+
     if params.store_id and params.store_id ~= "" then
         local store = StoreQueries.showByUUID(params.store_id)
         if store then
@@ -50,13 +50,13 @@ function CategoryQueries.all(params)
             return { data = {}, total = 0 }
         end
     end
-    
+
     local paginated = CategoryModel:paginated(
         where_clause .. " order by " .. orderField .. " " .. orderDir,
-         unpack(where_params),{
-        per_page = perPage
-    })
-    
+        table.unpack(where_params), {
+            per_page = perPage
+        })
+
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()
@@ -112,7 +112,7 @@ function CategoryQueries.search(params)
     where_clause = where_clause .. " ORDER BY name ASC LIMIT ?"
     table.insert(where_params, limit)
 
-    local results = db.select("* FROM categories " .. where_clause, unpack(where_params))
+    local results = db.select("* FROM categories " .. where_clause, table.unpack(where_params))
 
     return { data = results or {} }
 end

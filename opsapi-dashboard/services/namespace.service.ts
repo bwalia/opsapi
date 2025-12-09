@@ -277,21 +277,29 @@ export const namespaceService = {
 
   /**
    * Create a new invitation (invite member by email)
-   * @param data Invitation data
-   * @param options.namespaceId Optional namespace ID to override the current namespace context
+   * Uses current namespace context from localStorage
    */
-  async createInvitation(
-    data: InviteMemberDto,
-    options?: { namespaceId?: string }
-  ): Promise<NamespaceInvitation> {
-    const config = options?.namespaceId
-      ? { headers: { 'X-Namespace-Id': options.namespaceId } }
-      : undefined;
-
+  async createInvitation(data: InviteMemberDto): Promise<NamespaceInvitation> {
     const response = await apiClient.post<{ invitation: NamespaceInvitation; message: string }>(
       '/api/v2/namespace/invitations',
-      toFormData(data as unknown as Record<string, unknown>),
-      config
+      toFormData(data as unknown as Record<string, unknown>)
+    );
+    return response.data.invitation;
+  },
+
+  /**
+   * Create invitation for a specific namespace (admin context)
+   * Uses namespace ID from URL parameter, not from header
+   * @param namespaceId The namespace UUID or ID to invite to
+   * @param data Invitation data
+   */
+  async createInvitationAdmin(
+    namespaceId: string,
+    data: InviteMemberDto
+  ): Promise<NamespaceInvitation> {
+    const response = await apiClient.post<{ invitation: NamespaceInvitation; message: string }>(
+      `/api/v2/admin/namespaces/${namespaceId}/invitations`,
+      toFormData(data as unknown as Record<string, unknown>)
     );
     return response.data.invitation;
   },
@@ -359,23 +367,33 @@ export const namespaceService = {
 
   /**
    * Get all roles in current namespace
-   * @param params Query parameters
-   * @param options.namespaceId Optional namespace ID to override the current namespace context
+   * Uses current namespace context from localStorage
    */
-  async getRoles(
-    params?: { include_member_count?: boolean },
-    options?: { namespaceId?: string }
-  ): Promise<NamespaceRole[]> {
+  async getRoles(params?: { include_member_count?: boolean }): Promise<NamespaceRole[]> {
     const queryString = buildQueryString((params || {}) as Record<string, unknown>);
-    const config = options?.namespaceId
-      ? { headers: { 'X-Namespace-Id': options.namespaceId } }
-      : undefined;
-
     const response = await apiClient.get<{ data?: NamespaceRole[]; roles?: NamespaceRole[]; total?: number }>(
-      `/api/v2/namespace/roles${queryString}`,
-      config
+      `/api/v2/namespace/roles${queryString}`
     );
     // Handle both response formats: { data: [...] } and { roles: [...] }
+    const data = response.data;
+    if (data.data && Array.isArray(data.data)) {
+      return data.data;
+    }
+    if (data.roles && Array.isArray(data.roles)) {
+      return data.roles;
+    }
+    return [];
+  },
+
+  /**
+   * Get all roles for a specific namespace (admin context)
+   * Uses namespace ID from URL parameter
+   * @param namespaceId The namespace UUID or ID
+   */
+  async getRolesAdmin(namespaceId: string): Promise<NamespaceRole[]> {
+    const response = await apiClient.get<{ data?: NamespaceRole[]; roles?: NamespaceRole[]; total?: number }>(
+      `/api/v2/admin/namespaces/${namespaceId}/roles`
+    );
     const data = response.data;
     if (data.data && Array.isArray(data.data)) {
       return data.data;

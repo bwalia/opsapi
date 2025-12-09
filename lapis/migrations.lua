@@ -22,6 +22,7 @@ local fix_delivery_request_constraint = require("migrations.fix-delivery-request
 local chat_system_migrations = require("migrations.chat-system")
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
+local services_module_migrations = require("migrations.services-module")
 
 return {
     ['01_create_users'] = function()
@@ -525,6 +526,20 @@ return {
     ['177_create_namespace_audit_logs_table'] = namespace_system_migrations[26],
     ['178_add_namespace_audit_logs_indexes'] = namespace_system_migrations[27],
     ['179_ensure_namespace_columns_on_all_tables'] = namespace_system_migrations[28],
+
+    -- Services Module (GitHub Workflow Integration with Secure Secrets)
+    ['180_create_namespace_services_table'] = services_module_migrations[1],
+    ['181_add_namespace_services_indexes'] = services_module_migrations[2],
+    ['182_create_namespace_service_secrets_table'] = services_module_migrations[3],
+    ['183_add_namespace_service_secrets_indexes'] = services_module_migrations[4],
+    ['184_create_namespace_service_deployments_table'] = services_module_migrations[5],
+    ['185_add_namespace_service_deployments_indexes'] = services_module_migrations[6],
+    ['186_create_namespace_service_variables_table'] = services_module_migrations[7],
+    ['187_add_namespace_service_variables_indexes'] = services_module_migrations[8],
+    ['188_add_services_permission_to_roles'] = services_module_migrations[9],
+    ['189_create_namespace_github_integrations_table'] = services_module_migrations[10],
+    ['190_add_namespace_github_integrations_indexes'] = services_module_migrations[11],
+    ['191_add_github_integration_id_to_services'] = services_module_migrations[12],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()
