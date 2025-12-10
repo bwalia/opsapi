@@ -875,20 +875,25 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
 
         ngx.log(ngx.INFO, "Resolved ", #ips, " IP(s) for api.github.com")
 
+        -- Collect all errors for debugging
+        local all_errors = {}
+
         -- Try each IP until one works
         for _, ip in ipairs(ips) do
-            ngx.log(ngx.INFO, "Trying GitHub API via IP: ", ip)
+            ngx.log(ngx.NOTICE, "Trying GitHub API via IP: ", ip)
 
             local httpc = http.new()
-            httpc:set_timeouts(5000, 15000, 15000) -- 5s connect, 15s send/read
+            httpc:set_timeouts(10000, 30000, 30000) -- 10s connect, 30s send/read (increased)
 
             -- Connect directly to the IP
             local ok, conn_err = httpc:connect(ip, 443)
             if ok then
+                ngx.log(ngx.NOTICE, "TCP connection successful to IP: ", ip)
+
                 -- Perform SSL handshake with correct SNI
                 local session, ssl_err = httpc:ssl_handshake(nil, "api.github.com", ssl_verify)
                 if session then
-                    ngx.log(ngx.INFO, "SSL handshake successful with IP: ", ip)
+                    ngx.log(ngx.NOTICE, "SSL handshake successful with IP: ", ip)
 
                     -- Send the request
                     local res, req_err = httpc:request({
@@ -903,25 +908,35 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
                         local response_body = res:read_body()
                         httpc:close()
 
+                        ngx.log(ngx.NOTICE, "GitHub API request successful via IP: ", ip)
+
                         return {
                             status = res.status,
                             headers = res.headers,
                             body = response_body
                         }, nil
                     else
-                        ngx.log(ngx.WARN, "Request failed via IP ", ip, ": ", req_err or "unknown")
+                        local err_msg = "Request failed: " .. (req_err or "unknown")
+                        ngx.log(ngx.ERR, "IP ", ip, " - ", err_msg)
+                        table.insert(all_errors, ip .. ": " .. err_msg)
                         httpc:close()
                     end
                 else
-                    ngx.log(ngx.WARN, "SSL handshake failed via IP ", ip, ": ", ssl_err or "unknown")
+                    local err_msg = "SSL handshake failed: " .. (ssl_err or "unknown")
+                    ngx.log(ngx.ERR, "IP ", ip, " - ", err_msg)
+                    table.insert(all_errors, ip .. ": " .. err_msg)
                     httpc:close()
                 end
             else
-                ngx.log(ngx.WARN, "Connection failed to IP ", ip, ": ", conn_err or "unknown")
+                local err_msg = "TCP connection failed: " .. (conn_err or "unknown")
+                ngx.log(ngx.ERR, "IP ", ip, " - ", err_msg)
+                table.insert(all_errors, ip .. ": " .. err_msg)
             end
         end
 
-        return nil, "All GitHub API IPs failed to connect"
+        local error_details = table.concat(all_errors, "; ")
+        ngx.log(ngx.ERR, "All GitHub IPs failed. Details: ", error_details)
+        return nil, "All GitHub API IPs failed: " .. error_details
     end
 
     -- Trim whitespace from token (encryption/decryption may add whitespace)
@@ -1474,6 +1489,169 @@ function ServiceQueries.handleWorkflowRunWebhook(payload)
     end
 
     return true, nil
+end
+
+--- Test GitHub API connectivity
+-- This diagnostic function tests DNS resolution, TCP connection, and SSL handshake
+-- @return table Detailed diagnostic results
+function ServiceQueries.testGitHubConnectivity()
+    local http = require("resty.http")
+    local resolver = require("resty.dns.resolver")
+
+    local results = {
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        dns_tests = {},
+        connection_tests = {},
+        working_ips = {},
+        summary = {
+            dns_success = 0,
+            dns_failed = 0,
+            tcp_success = 0,
+            tcp_failed = 0,
+            ssl_success = 0,
+            ssl_failed = 0,
+            request_success = 0,
+            request_failed = 0
+        }
+    }
+
+    -- Test multiple DNS servers
+    local dns_servers = {
+        {"8.8.8.8", "Google DNS"},
+        {"1.1.1.1", "Cloudflare DNS"},
+        {"208.67.222.222", "OpenDNS"},
+    }
+
+    local all_ips = {}
+
+    for _, dns in ipairs(dns_servers) do
+        local dns_result = {
+            server = dns[1],
+            name = dns[2],
+            success = false,
+            ips = {},
+            error = nil
+        }
+
+        local r, r_err = resolver:new({
+            nameservers = {dns[1]},
+            retrans = 2,
+            timeout = 5000,
+        })
+
+        if r then
+            local answers, dns_err = r:query("api.github.com", { qtype = r.TYPE_A })
+            if answers and not answers.errcode then
+                dns_result.success = true
+                results.summary.dns_success = results.summary.dns_success + 1
+                for _, ans in ipairs(answers) do
+                    if ans.address then
+                        table.insert(dns_result.ips, ans.address)
+                        -- Add to all_ips if not already present
+                        local found = false
+                        for _, existing in ipairs(all_ips) do
+                            if existing == ans.address then found = true; break end
+                        end
+                        if not found then
+                            table.insert(all_ips, ans.address)
+                        end
+                    end
+                end
+            else
+                dns_result.error = answers and answers.errcode and ("DNS error: " .. answers.errcode) or (dns_err or "Unknown DNS error")
+                results.summary.dns_failed = results.summary.dns_failed + 1
+            end
+        else
+            dns_result.error = "Resolver creation failed: " .. (r_err or "unknown")
+            results.summary.dns_failed = results.summary.dns_failed + 1
+        end
+
+        table.insert(results.dns_tests, dns_result)
+    end
+
+    results.total_unique_ips = #all_ips
+
+    -- Test connection to each IP
+    for _, ip in ipairs(all_ips) do
+        local conn_result = {
+            ip = ip,
+            tcp_connect = false,
+            tcp_error = nil,
+            ssl_handshake = false,
+            ssl_error = nil,
+            http_request = false,
+            http_error = nil,
+            http_status = nil,
+            response_snippet = nil
+        }
+
+        local httpc = http.new()
+        httpc:set_timeouts(10000, 15000, 15000) -- 10s connect, 15s send/read
+
+        -- Test TCP connection
+        local ok, conn_err = httpc:connect(ip, 443)
+        if ok then
+            conn_result.tcp_connect = true
+            results.summary.tcp_success = results.summary.tcp_success + 1
+
+            -- Test SSL handshake
+            local session, ssl_err = httpc:ssl_handshake(nil, "api.github.com", false)
+            if session then
+                conn_result.ssl_handshake = true
+                results.summary.ssl_success = results.summary.ssl_success + 1
+
+                -- Test a simple HTTP request (rate_limit endpoint doesn't need auth)
+                local res, req_err = httpc:request({
+                    method = "GET",
+                    path = "/rate_limit",
+                    headers = {
+                        ["Host"] = "api.github.com",
+                        ["User-Agent"] = "OPSAPI-Connectivity-Test/1.0",
+                        ["Accept"] = "application/vnd.github+json",
+                    },
+                })
+
+                if res then
+                    conn_result.http_request = true
+                    conn_result.http_status = res.status
+                    results.summary.request_success = results.summary.request_success + 1
+
+                    local body = res:read_body()
+                    if body then
+                        conn_result.response_snippet = string.sub(body, 1, 100) .. (string.len(body) > 100 and "..." or "")
+                    end
+
+                    table.insert(results.working_ips, ip)
+                else
+                    conn_result.http_error = req_err or "Unknown request error"
+                    results.summary.request_failed = results.summary.request_failed + 1
+                end
+            else
+                conn_result.ssl_error = ssl_err or "Unknown SSL error"
+                results.summary.ssl_failed = results.summary.ssl_failed + 1
+            end
+        else
+            conn_result.tcp_error = conn_err or "Unknown TCP error"
+            results.summary.tcp_failed = results.summary.tcp_failed + 1
+        end
+
+        httpc:close()
+        table.insert(results.connection_tests, conn_result)
+    end
+
+    -- Determine overall status
+    if #results.working_ips > 0 then
+        results.overall_status = "OK"
+        results.message = "GitHub API is reachable via " .. #results.working_ips .. " IP(s)"
+    elseif #all_ips > 0 then
+        results.overall_status = "FAILED"
+        results.message = "DNS resolved " .. #all_ips .. " IP(s) but all connections failed"
+    else
+        results.overall_status = "DNS_FAILED"
+        results.message = "Could not resolve any IP addresses for api.github.com"
+    end
+
+    return results
 end
 
 return ServiceQueries
