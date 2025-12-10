@@ -948,5 +948,32 @@ return function(app)
         return success_response({ message = "Webhook processed successfully" })
     end)
 
+    -- ============================================================
+    -- DIAGNOSTICS
+    -- ============================================================
+
+    -- Test GitHub API connectivity (useful for debugging connection issues)
+    app:get("/api/v2/namespace/services/test-github-connectivity", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local permissions = self.namespace_permissions or {}
+
+            if not check_permission(permissions, "services", "read") then
+                return error_response(403, "You don't have permission to run diagnostics")
+            end
+
+            ngx.log(ngx.NOTICE, "Running GitHub connectivity test for namespace: ", self.namespace.id)
+
+            local ok, results = pcall(ServiceQueries.testGitHubConnectivity)
+            if not ok then
+                return error_response(500, "Failed to run connectivity test", tostring(results))
+            end
+
+            return success_response({
+                data = results,
+                message = results.message
+            })
+        end)
+    ))
+
     ngx.log(ngx.NOTICE, "Services routes initialized successfully")
 end
