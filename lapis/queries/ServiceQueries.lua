@@ -815,7 +815,9 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
 
     -- Make request to GitHub API
     local httpc = http.new()
-    httpc:set_timeout(30000) -- 30 second timeout
+
+    -- Set timeouts: connect, send, read (in milliseconds)
+    httpc:set_timeouts(10000, 30000, 30000) -- 10s connect, 30s send, 30s read
 
     -- SSL verification: disable in development/Docker environments where CA certs may not be available
     -- Set OPSAPI_SSL_VERIFY=true in production with proper CA certificates installed
@@ -902,31 +904,7 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
         end
     end
 
-    -- First, let's try a GET request to verify authentication works
-    -- This helps us distinguish between auth issues vs endpoint issues
-    local test_url = string.format("https://api.github.com/repos/%s/%s", service.github_owner, service.github_repo)
-    ngx.log(ngx.NOTICE, "Testing auth with GET to: ", test_url)
-
-    local test_res, test_err = httpc:request_uri(test_url, {
-        method = "GET",
-        headers = headers,
-        ssl_verify = ssl_verify
-    })
-
-    if test_res then
-        ngx.log(ngx.NOTICE, "Test GET status: ", test_res.status)
-        if test_res.status == 200 then
-            ngx.log(ngx.NOTICE, "Auth test PASSED - token works for read access")
-        else
-            ngx.log(ngx.WARN, "Auth test status: ", test_res.status, " Body: ", string.sub(test_res.body or "", 1, 200))
-        end
-    else
-        ngx.log(ngx.ERR, "Auth test failed: ", tostring(test_err))
-    end
-
-    -- Create new HTTP client for the actual request
-    httpc = http.new()
-    httpc:set_timeout(30000)
+    ngx.log(ngx.NOTICE, "Sending workflow dispatch request...")
 
     local res, err = httpc:request_uri(api_url, {
         method = "POST",
