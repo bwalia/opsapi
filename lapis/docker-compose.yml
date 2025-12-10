@@ -34,10 +34,6 @@ services:
       - 8.8.8.8
       - 8.8.4.4
       - 1.1.1.1
-    # Force GitHub API to use a working IP (bypasses geo-DNS routing issues)
-    extra_hosts:
-      - "api.github.com:140.82.121.6"
-      - "github.com:140.82.121.4"
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.12

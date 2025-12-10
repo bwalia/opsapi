@@ -813,16 +813,116 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
 
     ngx.log(ngx.NOTICE, "Request Body: ", body)
 
-    -- Make request to GitHub API
-    local httpc = http.new()
-
-    -- Set timeouts: connect, send, read (in milliseconds)
-    httpc:set_timeouts(10000, 30000, 30000) -- 10s connect, 30s send, 30s read
-
     -- SSL verification: disable in development/Docker environments where CA certs may not be available
     -- Set OPSAPI_SSL_VERIFY=true in production with proper CA certificates installed
     local ssl_verify = os.getenv("OPSAPI_SSL_VERIFY") == "true"
     ngx.log(ngx.NOTICE, "SSL Verify: ", tostring(ssl_verify))
+
+    -- Resolve GitHub API IP addresses using multiple DNS servers
+    -- This handles geo-routing issues where some IPs may be blocked
+    local function resolve_github_ips()
+        local resolver = require("resty.dns.resolver")
+        local ips = {}
+
+        -- Try multiple DNS servers to get different GitHub IPs
+        local dns_servers = {
+            {"8.8.8.8", "Google DNS"},
+            {"1.1.1.1", "Cloudflare DNS"},
+            {"208.67.222.222", "OpenDNS"},
+        }
+
+        for _, dns in ipairs(dns_servers) do
+            local r, _ = resolver:new({
+                nameservers = {dns[1]},
+                retrans = 2,
+                timeout = 3000,
+            })
+
+            if r then
+                local answers, _ = r:query("api.github.com", { qtype = r.TYPE_A })
+                if answers and not answers.errcode then
+                    for _, ans in ipairs(answers) do
+                        if ans.address then
+                            -- Add unique IPs only
+                            local found = false
+                            for _, existing in ipairs(ips) do
+                                if existing == ans.address then
+                                    found = true
+                                    break
+                                end
+                            end
+                            if not found then
+                                table.insert(ips, ans.address)
+                                ngx.log(ngx.INFO, "DNS (", dns[2], "): api.github.com -> ", ans.address)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        return ips
+    end
+
+    -- Try connecting to GitHub using multiple resolved IPs
+    local function make_github_request(api_path, request_body, request_headers)
+        local ips = resolve_github_ips()
+
+        if #ips == 0 then
+            ngx.log(ngx.ERR, "Failed to resolve any IPs for api.github.com")
+            return nil, "DNS resolution failed for api.github.com"
+        end
+
+        ngx.log(ngx.INFO, "Resolved ", #ips, " IP(s) for api.github.com")
+
+        -- Try each IP until one works
+        for _, ip in ipairs(ips) do
+            ngx.log(ngx.INFO, "Trying GitHub API via IP: ", ip)
+
+            local httpc = http.new()
+            httpc:set_timeouts(5000, 15000, 15000) -- 5s connect, 15s send/read
+
+            -- Connect directly to the IP
+            local ok, conn_err = httpc:connect(ip, 443)
+            if ok then
+                -- Perform SSL handshake with correct SNI
+                local session, ssl_err = httpc:ssl_handshake(nil, "api.github.com", ssl_verify)
+                if session then
+                    ngx.log(ngx.INFO, "SSL handshake successful with IP: ", ip)
+
+                    -- Send the request
+                    local res, req_err = httpc:request({
+                        method = "POST",
+                        path = api_path,
+                        headers = request_headers,
+                        body = request_body,
+                    })
+
+                    if res then
+                        -- Read the response body
+                        local response_body = res:read_body()
+                        httpc:close()
+
+                        return {
+                            status = res.status,
+                            headers = res.headers,
+                            body = response_body
+                        }, nil
+                    else
+                        ngx.log(ngx.WARN, "Request failed via IP ", ip, ": ", req_err or "unknown")
+                        httpc:close()
+                    end
+                else
+                    ngx.log(ngx.WARN, "SSL handshake failed via IP ", ip, ": ", ssl_err or "unknown")
+                    httpc:close()
+                end
+            else
+                ngx.log(ngx.WARN, "Connection failed to IP ", ip, ": ", conn_err or "unknown")
+            end
+        end
+
+        return nil, "All GitHub API IPs failed to connect"
+    end
 
     -- Trim whitespace from token (encryption/decryption may add whitespace)
     local original_len = #github_token
@@ -906,12 +1006,19 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
 
     ngx.log(ngx.NOTICE, "Sending workflow dispatch request...")
 
-    local res, err = httpc:request_uri(api_url, {
-        method = "POST",
-        body = body,
-        headers = headers,
-        ssl_verify = ssl_verify
-    })
+    -- Build the API path for the request
+    local api_path = string.format(
+        "/repos/%s/%s/actions/workflows/%s/dispatches",
+        service.github_owner,
+        service.github_repo,
+        service.github_workflow_file
+    )
+
+    -- Add Host header for the request (required when connecting by IP)
+    headers["Host"] = "api.github.com"
+
+    -- Use the multi-IP GitHub request function for reliability
+    local res, err = make_github_request(api_path, body, headers)
 
     ngx.log(ngx.NOTICE, "=== GitHub API Response Debug ===")
 
