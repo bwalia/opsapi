@@ -13,7 +13,11 @@ local CORS_CONFIG = {
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3033",
         "http://127.0.0.1:4000",
-        "http://127.0.0.1:8039"
+        "http://127.0.0.1:8039",
+        -- Workstation development servers
+        "http://pop0.workstation.co.uk:8039",
+        "http://pop0.workstation.co.uk:3000",
+        "http://pop0.workstation.co.uk:3001"
     },
     -- Production domain patterns (add your production domains here)
     domain_patterns = {
@@ -22,7 +26,10 @@ local CORS_CONFIG = {
         "^https?://wslcrm%.com$",
         "^https?://.*%.wslcrm%.com$",
         "^https?://opsapi%.com$",
-        "^https?://.*%.opsapi%.com$"
+        "^https?://.*%.opsapi%.com$",
+        "^https?://workstation%.co%.uk$",
+        "^https?://.*%.workstation%.co%.uk$",
+        "^https?://.*%.workstation%.co%.uk:%d+$"  -- Allow any port on workstation.co.uk subdomains
     },
     -- CORS headers - include all custom headers used by the frontend
     headers = {
