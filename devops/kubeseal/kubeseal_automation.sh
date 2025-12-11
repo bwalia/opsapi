@@ -198,24 +198,41 @@ fi
 
 echo "Sealing the secret using kubeseal..."
 
-# KUBESEAL_PUBLIC_KEY_PATH="/tmp/kubeseal-pub-cert.pem"
-# kubeseal --fetch-cert \
-#   --controller-name=sealed-secrets-controller \
-#   --controller-namespace=kube-system \
-#   > $KUBESEAL_PUBLIC_KEY_PATH
+# Fetch the public certificate from the sealed-secrets controller
+# This ensures we always use the current key from the cluster
+KUBESEAL_PUBLIC_KEY_PATH="/tmp/kubeseal-pub-cert.pem"
+echo "Fetching sealed-secrets public certificate from cluster..."
+kubeseal --fetch-cert \
+  --controller-name=sealed-secrets-controller \
+  --controller-namespace=kube-system \
+  > $KUBESEAL_PUBLIC_KEY_PATH 2>&1 || {
+    echo "Warning: Could not fetch certificate, proceeding without it..."
+    rm -f $KUBESEAL_PUBLIC_KEY_PATH
+  }
 
-# if [ ! -f "$KUBESEAL_PUBLIC_KEY_PATH" ]; then
-#     echo "Error: kubeseal public key file '$KUBESEAL_PUBLIC_KEY_PATH' not found!"
-#     exit 1
-# fi
+if [ -f "$KUBESEAL_PUBLIC_KEY_PATH" ] && [ -s "$KUBESEAL_PUBLIC_KEY_PATH" ]; then
+    echo "✓ Successfully fetched sealed-secrets public certificate"
+    cat $KUBESEAL_PUBLIC_KEY_PATH
 
-# cat "KUBESEAL_PUBLIC_KEY_PATH: "
-# cat $KUBESEAL_PUBLIC_KEY_PATH
-# --cert=$KUBESEAL_PUBLIC_KEY_PATH \
-kubeseal \
---format=yaml \
---controller-name=sealed-secrets-controller \
---controller-namespace=kube-system < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+    # Use the fetched certificate for sealing
+    kubeseal \
+      --format=yaml \
+      --cert=$KUBESEAL_PUBLIC_KEY_PATH \
+      --controller-name=sealed-secrets-controller \
+      --controller-namespace=kube-system \
+      < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+else
+    echo "Warning: Certificate file not available, using default kubeseal behavior"
+    # Fallback: let kubeseal fetch the cert automatically
+    kubeseal \
+      --format=yaml \
+      --controller-name=sealed-secrets-controller \
+      --controller-namespace=kube-system \
+      < $SECRET_OUTPUT_PATH > $SEALED_SECRET_OUTPUT_PATH
+fi
+
+# Clean up the certificate file
+rm -f $KUBESEAL_PUBLIC_KEY_PATH
 
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret template file '$SEALED_SECRET_OUTPUT_PATH' not found!"
