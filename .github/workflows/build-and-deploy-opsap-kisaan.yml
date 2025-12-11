@@ -99,6 +99,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Check and Install kubectl
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            echo "kubectl not found. Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+          else
+            echo "kubectl is already installed."
+          fi
+          kubectl version --client
+        shell: bash
+
+      - name: Check and Install Helm
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if ! command -v helm &> /dev/null; then
+            echo "Helm not found. Installing Helm..."
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          else
+            echo "Helm is already installed."
+          fi
+          helm version
+        shell: bash
+
       - name: Decode and Export Kubeconfig
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         env:
@@ -107,12 +133,18 @@ jobs:
           echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
           export KUBECONFIG=$(pwd)/kubeconfig
           echo "Kubeconfig decoded and exported successfully."
+          echo "Verifying cluster connectivity..."
+          kubectl cluster-info
         shell: bash
 
       - name: Kubeseal encrypt the env secrets file
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
             export KUBECONFIG=$(pwd)/kubeconfig
+            echo "=== Debug: Checking sealed-secrets controller ==="
+            kubectl get pods -n kube-system -l name=sealed-secrets-controller
+            kubectl get secrets -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key | head -5
+            echo "=== Running kubeseal automation ==="
             if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
                 ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
             elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
@@ -126,29 +158,6 @@ jobs:
             fi
         shell: bash
 
-      - name: Check and Install kubectl
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        run: |
-          if ! command -v kubectl &> /dev/null; then
-            echo "kubectl not found. Installing kubectl..."
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl
-            sudo mv kubectl /usr/local/bin/
-          else
-            echo "kubectl is already installed."
-          fi
-        shell: bash
-
-      - name: Check and Install Helm
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Helm not found. Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm is already installed."
-          fi
-        shell: bash
       - name: Deploy Helm Chart ${{ env.PROJECT_NAME }} app
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
