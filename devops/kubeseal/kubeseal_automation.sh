@@ -161,6 +161,35 @@ if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     exit 1
 fi
 
+echo ""
+echo "=============================================================================="
+echo "=== DEBUG: SECRET FILE CONTENT BEFORE PLACEHOLDER REPLACEMENT ==="
+echo "=============================================================================="
+echo "File: $SECRET_OUTPUT_PATH"
+echo "Target Environment: $ENV_REF"
+echo ""
+echo "--- Checking namespace value in the decoded secret ---"
+CURRENT_NAMESPACE=$(grep "namespace:" $SECRET_OUTPUT_PATH | head -1 | awk '{print $2}')
+echo "Current namespace value: '$CURRENT_NAMESPACE'"
+echo ""
+if [ "$CURRENT_NAMESPACE" == "CICD_NAMESPACE_PLACEHOLDER" ]; then
+    echo "✓ GOOD: Namespace uses placeholder - will be replaced with '$ENV_REF'"
+elif [ "$CURRENT_NAMESPACE" == "$ENV_REF" ]; then
+    echo "✓ OK: Namespace already matches target environment '$ENV_REF'"
+else
+    echo "⚠️  WARNING: Namespace is '$CURRENT_NAMESPACE' but deploying to '$ENV_REF'!"
+    echo "   This will cause SealedSecret decryption to FAIL because sealed secrets"
+    echo "   are namespace-scoped by default."
+    echo ""
+    echo "   TO FIX: Update the GitHub secret 'DOT_OPSAPI_KISAAN_ENV_CREDS_${ENV_REF^^}'"
+    echo "   to use 'namespace: CICD_NAMESPACE_PLACEHOLDER' instead of 'namespace: $CURRENT_NAMESPACE'"
+fi
+echo ""
+echo "--- First 30 lines of secret file ---"
+head -30 $SECRET_OUTPUT_PATH
+echo "=============================================================================="
+echo ""
+
 echo "Replacing placeholders in secret template file..."
 # Use Python for reliable string replacement
 python3 << EOF
@@ -180,6 +209,29 @@ with open('$SECRET_OUTPUT_PATH', 'w') as f:
 print("Successfully replaced placeholder with encrypted secret")
 EOF
 echo "Replaced placeholders in secret template file '$SECRET_OUTPUT_PATH'"
+
+echo ""
+echo "=============================================================================="
+echo "=== DEBUG: SECRET FILE CONTENT AFTER PLACEHOLDER REPLACEMENT ==="
+echo "=============================================================================="
+FINAL_NAMESPACE=$(grep "namespace:" $SECRET_OUTPUT_PATH | head -1 | awk '{print $2}')
+FINAL_NAME=$(grep "name:" $SECRET_OUTPUT_PATH | head -1 | awk '{print $2}')
+echo "Final namespace: '$FINAL_NAMESPACE'"
+echo "Final name: '$FINAL_NAME'"
+echo ""
+if [ "$FINAL_NAMESPACE" != "$ENV_REF" ]; then
+    echo "❌ ERROR: Final namespace '$FINAL_NAMESPACE' does not match target '$ENV_REF'!"
+    echo "   The placeholder replacement did NOT work."
+    echo "   This means the GitHub secret does NOT contain 'CICD_NAMESPACE_PLACEHOLDER'"
+else
+    echo "✓ SUCCESS: Namespace correctly set to '$ENV_REF'"
+fi
+echo ""
+echo "--- First 30 lines of secret file after replacement ---"
+head -30 $SECRET_OUTPUT_PATH
+echo "=============================================================================="
+echo ""
+
 if [ ! -f "$SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret output file '$SECRET_OUTPUT_PATH' not found!"
     exit 1
@@ -382,15 +434,41 @@ DATABASE_PORT=$(yq .spec.encryptedData.DATABASE_PORT $SEALED_SECRET_OUTPUT_PATH)
 DATABASE_NAME=$(yq .spec.encryptedData.DATABASE_NAME $SEALED_SECRET_OUTPUT_PATH)
 DATABASE_USER=$(yq .spec.encryptedData.DATABASE_USER $SEALED_SECRET_OUTPUT_PATH)
 DATABASE_PASSWORD=$(yq .spec.encryptedData.DATABASE_PASSWORD $SEALED_SECRET_OUTPUT_PATH)
+GOOGLE_CLIENT_ID=$(yq .spec.encryptedData.GOOGLE_CLIENT_ID $SEALED_SECRET_OUTPUT_PATH)
+GOOGLE_CLIENT_SECRET=$(yq .spec.encryptedData.GOOGLE_CLIENT_SECRET $SEALED_SECRET_OUTPUT_PATH)
+GOOGLE_REDIRECT_URI=$(yq .spec.encryptedData.GOOGLE_REDIRECT_URI $SEALED_SECRET_OUTPUT_PATH)
+STRIPE_SECRET_KEY=$(yq .spec.encryptedData.STRIPE_SECRET_KEY $SEALED_SECRET_OUTPUT_PATH)
+STRIPE_PUBLISHABLE_KEY=$(yq .spec.encryptedData.STRIPE_PUBLISHABLE_KEY $SEALED_SECRET_OUTPUT_PATH)
+STRIPE_WEBHOOK_SECRET=$(yq .spec.encryptedData.STRIPE_WEBHOOK_SECRET $SEALED_SECRET_OUTPUT_PATH)
+NEXT_PUBLIC_API_URL=$(yq .spec.encryptedData.NEXT_PUBLIC_API_URL $SEALED_SECRET_OUTPUT_PATH)
 echo "Extracted encrypted values from sealed secret."
 
 # echo "LAPIS_CONFIG_LUA_FILE: "
 # echo $LAPIS_CONFIG_LUA_FILE
 
-if [ -z "$JWT_SECRET_KEY" ] || [ -z "$KEYCLOAK_AUTH_URL" ] || [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_PORT" ] || [ -z "$DATABASE_NAME" ] || [ -z "$DATABASE_USER" ] || [ -z "$DATABASE_PASSWORD" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ] || [ -z "$KEYCLOAK_REDIRECT_URI" ] || [ -z "$KEYCLOAK_TOKEN_URL" ] || [ -z "$KEYCLOAK_USERINFO_URL" ] || [ -z "$LAPIS_CONFIG_LUA_FILE" ] || [ -z "$MINIO_ACCESS_KEY" ] || [ -z "$MINIO_BUCKET" ] || [ -z "$MINIO_ENDPOINT" ] || [ -z "$MINIO_REGION" ] || [ -z "$MINIO_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_KEY" ] || [ -z "$OPENSSL_SECRET_IV" ] || [ -z "$NODE_API_URL" ]; then
-    echo "Error: One or more extracted encrypted values are empty!"
+# Validate required variables
+REQUIRED_VARS_MISSING=false
+for var in JWT_SECRET_KEY KEYCLOAK_AUTH_URL KEYCLOAK_CLIENT_ID KEYCLOAK_CLIENT_SECRET KEYCLOAK_REDIRECT_URI KEYCLOAK_TOKEN_URL KEYCLOAK_USERINFO_URL LAPIS_CONFIG_LUA_FILE MINIO_ACCESS_KEY MINIO_BUCKET MINIO_ENDPOINT MINIO_REGION MINIO_SECRET_KEY OPENSSL_SECRET_KEY OPENSSL_SECRET_IV NODE_API_URL DATABASE_HOST DATABASE_PORT DATABASE_NAME DATABASE_USER DATABASE_PASSWORD; do
+    eval "val=\$$var"
+    if [ -z "$val" ] || [ "$val" == "null" ]; then
+        echo "Error: Required variable '$var' is empty or null!"
+        REQUIRED_VARS_MISSING=true
+    fi
+done
+
+if [ "$REQUIRED_VARS_MISSING" = true ]; then
+    echo "Error: One or more required encrypted values are missing!"
     exit 1
 fi
+
+# Check optional variables (Google, Stripe, Next.js API URL) - warn if missing but don't fail
+echo "Checking optional variables..."
+for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY STRIPE_WEBHOOK_SECRET NEXT_PUBLIC_API_URL; do
+    eval "val=\$$var"
+    if [ -z "$val" ] || [ "$val" == "null" ]; then
+        echo "Warning: Optional variable '$var' is empty or null - Google/Stripe/Dashboard features may not work"
+    fi
+done
 
 echo "Replacing placeholders in Helm values file..."
 
@@ -439,6 +517,13 @@ content = content.replace('DATABASE_PORT', '$DATABASE_PORT')
 content = content.replace('DATABASE_NAME', '$DATABASE_NAME')
 content = content.replace('DATABASE_USER', '$DATABASE_USER')
 content = content.replace('DATABASE_PASSWORD', '$DATABASE_PASSWORD')
+content = content.replace('GOOGLE_CLIENT_ID', '$GOOGLE_CLIENT_ID')
+content = content.replace('GOOGLE_CLIENT_SECRET', '$GOOGLE_CLIENT_SECRET')
+content = content.replace('GOOGLE_REDIRECT_URI', '$GOOGLE_REDIRECT_URI')
+content = content.replace('STRIPE_SECRET_KEY', '$STRIPE_SECRET_KEY')
+content = content.replace('STRIPE_PUBLISHABLE_KEY', '$STRIPE_PUBLISHABLE_KEY')
+content = content.replace('STRIPE_WEBHOOK_SECRET', '$STRIPE_WEBHOOK_SECRET')
+content = content.replace('NEXT_PUBLIC_API_URL', '$NEXT_PUBLIC_API_URL')
 content = content.replace('CICD_PROJECT_NAME', '$PROJECT_NAME')
     # Write back to file
 with open('$HELM_VALUES_OUTPUT_PATH', 'w') as f:
