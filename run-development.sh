@@ -5,7 +5,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# ============================================
+# Configuration
+# ============================================
+BASE_DOMAIN="wslcrm.com"
+ENV_FILE="lapis/.env"
 
 # ============================================
 # Usage and Help
@@ -17,20 +24,29 @@ show_help() {
     echo "  ./run-development.sh [OPTIONS]"
     echo ""
     echo -e "${BLUE}Options:${NC}"
+    echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod)"
     echo "  -s, --stash [y|n]     Git stash option (y=stash, n=skip)"
     echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
     echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
     echo "  -n, --no-git          Skip all git operations (stash=n, pull=n)"
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
+    echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -h, --help            Show this help message"
+    echo ""
+    echo -e "${BLUE}Environments:${NC}"
+    echo "  local    - http://localhost:4010 (default for local development)"
+    echo "  dev      - https://dev-api.${BASE_DOMAIN}"
+    echo "  test     - https://test-api.${BASE_DOMAIN}"
+    echo "  acc      - https://acc-api.${BASE_DOMAIN}"
+    echo "  prod     - https://api.${BASE_DOMAIN}"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
     echo "  ./run-development.sh                    # Interactive mode (prompts)"
-    echo "  ./run-development.sh -a                 # Auto mode: stash and pull"
-    echo "  ./run-development.sh -n                 # No git operations"
-    echo "  ./run-development.sh -s y -p y          # Stash yes, pull yes"
-    echo "  ./run-development.sh -s n -p y          # No stash, pull yes"
-    echo "  ./run-development.sh --stash=y --pull=n # Stash yes, no pull"
+    echo "  ./run-development.sh -e local           # Local development environment"
+    echo "  ./run-development.sh -e dev -a          # Dev environment, auto git"
+    echo "  ./run-development.sh -e test -n         # Test environment, no git ops"
+    echo "  ./run-development.sh --env=prod -a      # Prod environment, auto mode"
+    echo "  ./run-development.sh -c -e dev          # Just check/update .env for dev"
     echo "  ./run-development.sh -r                 # Reset database (fresh start)"
     echo ""
 }
@@ -41,9 +57,19 @@ show_help() {
 STASH_ARG=""
 PULL_ARG=""
 RESET_DB=false
+TARGET_ENV=""
+CHECK_ENV_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -e|--env)
+            TARGET_ENV="$2"
+            shift 2
+            ;;
+        --env=*)
+            TARGET_ENV="${1#*=}"
+            shift
+            ;;
         -s|--stash)
             STASH_ARG="$2"
             shift 2
@@ -72,6 +98,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--reset-db)
             RESET_DB=true
+            shift
+            ;;
+        -c|--check-env)
+            CHECK_ENV_ONLY=true
             shift
             ;;
         -h|--help)
@@ -124,6 +154,256 @@ is_no() {
         *) return 1 ;;
     esac
 }
+
+# Function to get API URL based on environment
+get_api_url() {
+    local env="$1"
+    case "$env" in
+        local)
+            echo "http://localhost:4010"
+            ;;
+        dev)
+            echo "https://dev-api.${BASE_DOMAIN}"
+            ;;
+        test)
+            echo "https://test-api.${BASE_DOMAIN}"
+            ;;
+        acc)
+            echo "https://acc-api.${BASE_DOMAIN}"
+            ;;
+        prod)
+            echo "https://api.${BASE_DOMAIN}"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+# Function to validate environment
+validate_environment() {
+    local env="$1"
+    case "$env" in
+        local|dev|test|acc|prod)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Function to prompt for environment selection
+prompt_environment() {
+    echo -e "${CYAN}Select target environment:${NC}"
+    echo "  1) local  - http://localhost:4010"
+    echo "  2) dev    - https://dev-api.${BASE_DOMAIN}"
+    echo "  3) test   - https://test-api.${BASE_DOMAIN}"
+    echo "  4) acc    - https://acc-api.${BASE_DOMAIN}"
+    echo "  5) prod   - https://api.${BASE_DOMAIN}"
+    echo ""
+
+    local choice
+    while true; do
+        read -p "Enter choice [1-5] or environment name: " choice
+        case "$choice" in
+            1|local)
+                echo "local"
+                return 0
+                ;;
+            2|dev)
+                echo "dev"
+                return 0
+                ;;
+            3|test)
+                echo "test"
+                return 0
+                ;;
+            4|acc)
+                echo "acc"
+                return 0
+                ;;
+            5|prod)
+                echo "prod"
+                return 0
+                ;;
+            *)
+                echo -e "${YELLOW}Invalid choice. Please enter 1-5 or environment name (local/dev/test/acc/prod).${NC}" >&2
+                ;;
+        esac
+    done
+}
+
+# Function to check and update .env file
+check_and_update_env() {
+    local target_env="$1"
+    local api_url
+    api_url=$(get_api_url "$target_env")
+
+    if [[ -z "$api_url" ]]; then
+        echo -e "${RED}[!] Error: Invalid environment '$target_env'${NC}"
+        return 1
+    fi
+
+    echo -e "${BLUE}[i] Target environment: ${CYAN}${target_env}${NC}"
+    echo -e "${BLUE}[i] API URL: ${CYAN}${api_url}${NC}"
+    echo ""
+
+    # Check if .env file exists
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo -e "${RED}[!] Error: .env file not found at '$ENV_FILE'${NC}"
+        echo -e "${YELLOW}[!] Please create the .env file first.${NC}"
+        return 1
+    fi
+
+    # Variables to check and update
+    local vars_to_check=("NEXT_PUBLIC_API_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
+    local needs_update=false
+    local updates_made=()
+
+    echo -e "${GREEN}[+] Checking .env file for environment-specific URLs...${NC}"
+    echo ""
+
+    for var in "${vars_to_check[@]}"; do
+        local current_value
+        current_value=$(grep "^${var}=" "$ENV_FILE" | cut -d'=' -f2-)
+
+        if [[ -z "$current_value" ]]; then
+            echo -e "${YELLOW}  [!] $var is not set in .env file${NC}"
+            needs_update=true
+            continue
+        fi
+
+        # Determine expected value based on variable and environment
+        local expected_value=""
+        case "$var" in
+            NEXT_PUBLIC_API_URL)
+                expected_value="$api_url"
+                ;;
+            GOOGLE_REDIRECT_URI)
+                expected_value="${api_url}/auth/google/callback"
+                ;;
+            KEYCLOAK_REDIRECT_URI)
+                expected_value="${api_url}/auth/callback"
+                ;;
+        esac
+
+        # Check if current value matches expected
+        if [[ "$current_value" != "$expected_value" ]]; then
+            echo -e "${YELLOW}  [!] $var mismatch:${NC}"
+            echo -e "      Current:  ${RED}$current_value${NC}"
+            echo -e "      Expected: ${GREEN}$expected_value${NC}"
+            needs_update=true
+            updates_made+=("$var")
+        else
+            echo -e "${GREEN}  [+] $var is correctly set${NC}"
+        fi
+    done
+
+    echo ""
+
+    if $needs_update; then
+        echo -e "${YELLOW}[!] Environment URLs need to be updated.${NC}"
+
+        local do_update=false
+        if [[ -n "$STASH_ARG" ]] || [[ "$CHECK_ENV_ONLY" == "true" ]]; then
+            # Non-interactive mode or check-only mode - ask for confirmation
+            if prompt_yes_no "Do you want to update the .env file?"; then
+                do_update=true
+            fi
+        else
+            # Interactive mode
+            if prompt_yes_no "Do you want to update the .env file with correct URLs?"; then
+                do_update=true
+            fi
+        fi
+
+        if $do_update; then
+            echo -e "${GREEN}[+] Updating .env file...${NC}"
+
+            # Backup the .env file
+            cp "$ENV_FILE" "${ENV_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
+            echo -e "${BLUE}[i] Backup created: ${ENV_FILE}.backup.$(date +%Y%m%d_%H%M%S)${NC}"
+
+            # Update NEXT_PUBLIC_API_URL
+            if grep -q "^NEXT_PUBLIC_API_URL=" "$ENV_FILE"; then
+                sed -i.tmp "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=${api_url}|" "$ENV_FILE"
+            else
+                echo "NEXT_PUBLIC_API_URL=${api_url}" >> "$ENV_FILE"
+            fi
+
+            # Update GOOGLE_REDIRECT_URI
+            if grep -q "^GOOGLE_REDIRECT_URI=" "$ENV_FILE"; then
+                sed -i.tmp "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback|" "$ENV_FILE"
+            else
+                echo "GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback" >> "$ENV_FILE"
+            fi
+
+            # Update KEYCLOAK_REDIRECT_URI
+            if grep -q "^KEYCLOAK_REDIRECT_URI=" "$ENV_FILE"; then
+                sed -i.tmp "s|^KEYCLOAK_REDIRECT_URI=.*|KEYCLOAK_REDIRECT_URI=${api_url}/auth/callback|" "$ENV_FILE"
+            else
+                echo "KEYCLOAK_REDIRECT_URI=${api_url}/auth/callback" >> "$ENV_FILE"
+            fi
+
+            # Clean up sed temp files
+            rm -f "${ENV_FILE}.tmp"
+
+            echo -e "${GREEN}[+] .env file updated successfully!${NC}"
+            echo ""
+
+            # Show updated values
+            echo -e "${CYAN}Updated values:${NC}"
+            echo -e "  NEXT_PUBLIC_API_URL=${api_url}"
+            echo -e "  GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback"
+            echo -e "  KEYCLOAK_REDIRECT_URI=${api_url}/auth/callback"
+            echo ""
+        else
+            echo -e "${YELLOW}[!] Skipping .env update. Please update manually if needed.${NC}"
+        fi
+    else
+        echo -e "${GREEN}[+] All environment URLs are correctly configured!${NC}"
+    fi
+
+    return 0
+}
+
+# ============================================
+# Environment Selection
+# ============================================
+echo -e "${GREEN}[+] Environment Configuration${NC}"
+echo ""
+
+# Determine target environment
+if [[ -n "$TARGET_ENV" ]]; then
+    # Environment provided via argument
+    if validate_environment "$TARGET_ENV"; then
+        echo -e "${BLUE}[i] Environment from argument: ${CYAN}${TARGET_ENV}${NC}"
+    else
+        echo -e "${RED}[!] Invalid environment: '$TARGET_ENV'${NC}"
+        echo -e "${YELLOW}[!] Valid options: local, dev, test, acc, prod${NC}"
+        exit 1
+    fi
+else
+    # Interactive mode - prompt for environment
+    TARGET_ENV=$(prompt_environment)
+    echo ""
+fi
+
+# Check and update .env file
+check_and_update_env "$TARGET_ENV"
+if [[ $? -ne 0 ]]; then
+    echo -e "${RED}[!] Environment check failed. Exiting.${NC}"
+    exit 1
+fi
+
+# If check-env-only mode, exit here
+if $CHECK_ENV_ONLY; then
+    echo -e "${GREEN}[+] Environment check complete. Exiting (--check-env mode).${NC}"
+    exit 0
+fi
+
+echo ""
 
 # ============================================
 # Git Stash Logic
