@@ -206,21 +206,39 @@ KUBESEAL_FETCH_ERROR="/tmp/kubeseal-fetch-error.log"
 echo "Fetching sealed-secrets public certificate from cluster..."
 echo "Using KUBECONFIG: $KUBECONFIG"
 
+# Validate KUBECONFIG is set
+if [ -z "$KUBECONFIG" ]; then
+    echo "Error: KUBECONFIG environment variable is not set!"
+    exit 1
+fi
+
+if [ ! -f "$KUBECONFIG" ]; then
+    echo "Error: KUBECONFIG file does not exist at: $KUBECONFIG"
+    exit 1
+fi
+
+echo "KUBECONFIG file exists: $(ls -la $KUBECONFIG)"
+
 # First, verify we can connect to the cluster
 echo "Verifying cluster connectivity..."
-kubectl cluster-info || {
+kubectl --kubeconfig="$KUBECONFIG" cluster-info || {
     echo "Error: Cannot connect to Kubernetes cluster!"
     exit 1
 }
 
 # Check if sealed-secrets controller is running
 echo "Checking sealed-secrets controller status..."
-kubectl get pods -n kube-system -l name=sealed-secrets-controller || {
+kubectl --kubeconfig="$KUBECONFIG" get pods -n kube-system -l name=sealed-secrets-controller || {
     echo "Warning: Could not find sealed-secrets controller pods"
 }
 
-# Fetch the certificate - stdout goes to cert file, stderr goes to error log
-kubeseal --fetch-cert \
+# Show sealed-secrets controller keys (for debugging)
+echo "Checking sealed-secrets keys..."
+kubectl --kubeconfig="$KUBECONFIG" get secrets -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key --show-labels 2>/dev/null || echo "Could not list sealed-secrets keys"
+
+# Fetch the certificate - IMPORTANT: pass kubeconfig explicitly
+echo "Fetching certificate with explicit kubeconfig..."
+kubeseal --kubeconfig="$KUBECONFIG" --fetch-cert \
   --controller-name=sealed-secrets-controller \
   --controller-namespace=kube-system \
   > $KUBESEAL_PUBLIC_KEY_PATH 2> $KUBESEAL_FETCH_ERROR
@@ -240,8 +258,11 @@ fi
 if [ -f "$KUBESEAL_PUBLIC_KEY_PATH" ] && [ -s "$KUBESEAL_PUBLIC_KEY_PATH" ]; then
     if grep -q "BEGIN CERTIFICATE" "$KUBESEAL_PUBLIC_KEY_PATH"; then
         echo "✓ Successfully fetched valid sealed-secrets public certificate"
-        echo "Certificate preview (first 5 lines):"
-        head -5 $KUBESEAL_PUBLIC_KEY_PATH
+        echo "Certificate details:"
+        openssl x509 -in $KUBESEAL_PUBLIC_KEY_PATH -noout -subject -dates 2>/dev/null || echo "Could not parse certificate details"
+        echo ""
+        echo "Certificate preview (first 3 lines):"
+        head -3 $KUBESEAL_PUBLIC_KEY_PATH
     else
         echo "Error: Fetched file does not contain a valid certificate!"
         echo "File contents:"
@@ -261,7 +282,7 @@ fi
 
 # Use the fetched certificate for sealing
 echo "Sealing secret with fetched certificate..."
-kubeseal \
+kubeseal --kubeconfig="$KUBECONFIG" \
   --format=yaml \
   --cert=$KUBESEAL_PUBLIC_KEY_PATH \
   --controller-name=sealed-secrets-controller \
@@ -271,11 +292,24 @@ kubeseal \
 SEAL_EXIT_CODE=$?
 if [ $SEAL_EXIT_CODE -ne 0 ]; then
     echo "Error: kubeseal failed with exit code $SEAL_EXIT_CODE"
+    echo "Sealed secret output:"
+    cat $SEALED_SECRET_OUTPUT_PATH
     exit 1
 fi
 
 # Clean up the certificate file
 rm -f $KUBESEAL_PUBLIC_KEY_PATH $KUBESEAL_FETCH_ERROR
+
+# Verify the sealed secret was created and contains expected data
+echo "Verifying sealed secret output..."
+if grep -q "kind: SealedSecret" "$SEALED_SECRET_OUTPUT_PATH"; then
+    echo "✓ SealedSecret created successfully"
+    echo "Sealed secret namespace: $(grep 'namespace:' $SEALED_SECRET_OUTPUT_PATH | head -1)"
+else
+    echo "Error: Output does not appear to be a valid SealedSecret"
+    cat $SEALED_SECRET_OUTPUT_PATH
+    exit 1
+fi
 
 if [ ! -f "$SEALED_SECRET_OUTPUT_PATH" ]; then
     echo "Error: Sealed secret template file '$SEALED_SECRET_OUTPUT_PATH' not found!"
