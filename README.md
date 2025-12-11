@@ -59,6 +59,8 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    This script will:
 
+   - Prompt for target environment (or use `-e` flag)
+   - Validate and update environment-specific URLs in `.env`
    - Optionally stash uncommitted changes
    - Optionally pull latest changes from git
    - Create necessary directories (logs, pgdata, keycloak_data)
@@ -67,11 +69,46 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    - Run database migrations
    - Configure local hostname (opsapi-dev.local)
 
-   **Command-line options for automation:**
+   **Environment Selection:**
+
+   The script supports multiple deployment environments with automatic URL configuration:
+
+   | Environment | API URL |
+   |-------------|---------|
+   | `local` | `http://localhost:4010` |
+   | `dev` | `https://dev-api.wslcrm.com` |
+   | `test` | `https://test-api.wslcrm.com` |
+   | `acc` | `https://acc-api.wslcrm.com` |
+   | `prod` | `https://api.wslcrm.com` |
+
+   The script automatically validates and updates these environment variables in `lapis/.env`:
+   - `NEXT_PUBLIC_API_URL` - API base URL
+   - `GOOGLE_REDIRECT_URI` - Google OAuth callback URL
+   - `KEYCLOAK_REDIRECT_URI` - Keycloak SSO callback URL
+
+   **Command-line options:**
 
    ```bash
-   # Interactive mode (default - prompts for each option)
+   # Interactive mode (default - prompts for environment and git options)
    ./run-development.sh
+
+   # Specify environment directly
+   ./run-development.sh -e local           # Local development
+   ./run-development.sh -e dev             # Dev environment
+   ./run-development.sh -e test            # Test environment
+   ./run-development.sh -e acc             # Acceptance environment
+   ./run-development.sh -e prod            # Production environment
+   ./run-development.sh --env=dev          # Alternative syntax
+
+   # Combined with git options
+   ./run-development.sh -e dev -a          # Dev env, auto git (stash + pull)
+   ./run-development.sh -e test -n         # Test env, no git operations
+
+   # Check/update .env only (don't start containers)
+   ./run-development.sh -c -e dev          # Just validate .env for dev
+
+   # Reset database (removes volumes)
+   ./run-development.sh -e local -r        # Local with fresh database
 
    # Auto mode - stash and pull without prompts
    ./run-development.sh -a
@@ -81,10 +118,9 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    ./run-development.sh -n
    ./run-development.sh --no-git
 
-   # Specify options individually
-   ./run-development.sh -s y -p y    # Stash: yes, Pull: yes
-   ./run-development.sh -s n -p y    # No stash, Pull: yes
-   ./run-development.sh -s y -p n    # Stash: yes, No pull
+   # Specify git options individually
+   ./run-development.sh -s y -p y          # Stash: yes, Pull: yes
+   ./run-development.sh -s n -p y          # No stash, Pull: yes
    ./run-development.sh --stash=y --pull=n
 
    # Show help
@@ -93,12 +129,15 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    | Option | Description |
    |--------|-------------|
+   | `-e ENV` / `--env ENV` | Target environment (local/dev/test/acc/prod) |
+   | `-c` / `--check-env` | Only check/update .env, don't start containers |
    | `-s y` / `--stash y` | Stash uncommitted changes |
    | `-s n` / `--stash n` | Skip stashing |
    | `-p y` / `--pull y` | Pull latest from git |
    | `-p n` / `--pull n` | Skip pull |
    | `-a` / `--auto` | Auto mode (stash=y, pull=y) |
    | `-n` / `--no-git` | No git operations |
+   | `-r` / `--reset-db` | Reset database (removes volumes) |
    | `-h` / `--help` | Show help |
 
 4. **Access the application:**
@@ -151,11 +190,33 @@ MINIO_BUCKET=your-bucket
 MINIO_REGION=your-region
 ```
 
-### Dashboard Configuration
+### Dashboard & Authentication URLs
+
+These URLs are environment-specific and are automatically configured by `run-development.sh`:
 
 ```bash
+# For local development
 NEXT_PUBLIC_API_URL=http://localhost:4010
+GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+KEYCLOAK_REDIRECT_URI=http://localhost:4010/auth/callback
+
+# For dev environment
+NEXT_PUBLIC_API_URL=https://dev-api.wslcrm.com
+GOOGLE_REDIRECT_URI=https://dev-api.wslcrm.com/auth/google/callback
+KEYCLOAK_REDIRECT_URI=https://dev-api.wslcrm.com/auth/callback
+
+# For test environment
+NEXT_PUBLIC_API_URL=https://test-api.wslcrm.com
+GOOGLE_REDIRECT_URI=https://test-api.wslcrm.com/auth/google/callback
+KEYCLOAK_REDIRECT_URI=https://test-api.wslcrm.com/auth/callback
+
+# For production
+NEXT_PUBLIC_API_URL=https://api.wslcrm.com
+GOOGLE_REDIRECT_URI=https://api.wslcrm.com/auth/google/callback
+KEYCLOAK_REDIRECT_URI=https://api.wslcrm.com/auth/callback
 ```
+
+**Tip:** Use `./run-development.sh -c -e <env>` to check and update these URLs without starting containers.
 
 **Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
 
