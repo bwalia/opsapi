@@ -37,6 +37,15 @@ on:
           - opsapi
           - opsapi-kisaan
 
+      SECRET_SOURCE:
+        type: choice
+        description: "Secret source: github-secrets (default) or local-file (self-hosted runner)"
+        default: "github-secrets"
+        required: false
+        options:
+          - github-secrets
+          - local-file
+
 env:
   PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi-kisaan' }}
   IMAGE_REGISTRY: bwalia
@@ -46,6 +55,7 @@ env:
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
   DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
   NODE_IMAGE_NAME: opsapi-node
+  SECRET_SOURCE: ${{ github.event.inputs.SECRET_SOURCE || 'github-secrets' }}
 
 jobs:
   build:
@@ -145,16 +155,67 @@ jobs:
             kubectl get pods -n kube-system -l name=sealed-secrets-controller
             kubectl get secrets -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key | head -5
             echo "=== Running kubeseal automation ==="
-            if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
-            elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_TEST }}" "test" "test" ${{ env.PROJECT_NAME }}
-            elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_ACC }}" "acc" "acc" ${{ env.PROJECT_NAME }}
-            elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_PROD }}" "prod" "prod" ${{ env.PROJECT_NAME }}
+            echo "Secret source: ${{ env.SECRET_SOURCE }}"
+
+            # Determine secret source and get base64-encoded secrets
+            if [ "${{ env.SECRET_SOURCE }}" == "local-file" ]; then
+                echo "Reading secrets from local file (self-hosted runner)..."
+
+                # Secrets are stored on the same server as the self-hosted runner
+                # Path: /home/bwalia/.secrets/{project}-{environment}.json
+                SECRETS_BASE_PATH="/home/bwalia/.secrets"
+                SECRETS_FILE="${SECRETS_BASE_PATH}/${{ env.PROJECT_NAME }}-${{ env.TARGET_ENV }}.json"
+
+                echo "Looking for secrets file: $SECRETS_FILE"
+
+                # Validate secrets file exists
+                if [ ! -f "$SECRETS_FILE" ]; then
+                    echo "ERROR: Secrets file not found: $SECRETS_FILE"
+                    echo "Please create the secrets file on the self-hosted runner server."
+                    echo "Expected path: $SECRETS_FILE"
+                    exit 1
+                fi
+
+                # Check file permissions (should be 600)
+                FILE_PERMS=$(stat -c "%a" "$SECRETS_FILE" 2>/dev/null || stat -f "%Lp" "$SECRETS_FILE" 2>/dev/null)
+                if [ "$FILE_PERMS" != "600" ] && [ "$FILE_PERMS" != "400" ]; then
+                    echo "WARNING: Secrets file has insecure permissions: $FILE_PERMS (recommended: 600)"
+                fi
+
+                echo "✓ Secrets file found"
+
+                # Use the secret manager script with local file
+                TEMP_SECRET_YAML=$(mktemp)
+                chmod 600 "$TEMP_SECRET_YAML"
+
+                ./devops/secret-manager/run-secret-manager.sh \
+                    "${{ env.TARGET_ENV }}" \
+                    "${{ env.PROJECT_NAME }}" \
+                    "$TEMP_SECRET_YAML" \
+                    "$SECRETS_FILE"
+
+                # Read the base64 output
+                SECRET_BASE64=$(cat "${TEMP_SECRET_YAML}.b64")
+
+                # Securely cleanup temp files
+                rm -f "$TEMP_SECRET_YAML" "${TEMP_SECRET_YAML}.b64"
+
+                # Run kubeseal with the local secrets
+                ./devops/kubeseal/kubeseal_automation.sh "$SECRET_BASE64" "${{ env.TARGET_ENV }}" "${{ env.TARGET_ENV }}" "${{ env.PROJECT_NAME }}"
             else
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_INT }}" "int" "int" ${{ env.PROJECT_NAME }}
+                echo "Using GitHub secrets..."
+                # Original GitHub secrets method
+                if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
+                    ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
+                elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
+                    ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_TEST }}" "test" "test" ${{ env.PROJECT_NAME }}
+                elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
+                    ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_ACC }}" "acc" "acc" ${{ env.PROJECT_NAME }}
+                elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
+                    ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_PROD }}" "prod" "prod" ${{ env.PROJECT_NAME }}
+                else
+                    ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_KISAAN_ENV_CREDS_INT }}" "int" "int" ${{ env.PROJECT_NAME }}
+                fi
             fi
         shell: bash
 
