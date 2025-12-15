@@ -57,10 +57,28 @@ function ChatChannelInviteQueries.accept(invite_uuid)
         end
     end
 
-    return invite:update({
+    -- Store channel_uuid before update (needed for adding member)
+    local channel_uuid = invite.channel_uuid
+
+    -- Update the invite status
+    local success = invite:update({
         status = "accepted",
         responded_at = db.raw("NOW()")
-    }, { returning = "*" })
+    })
+
+    if not success then
+        return nil, "Failed to accept invitation"
+    end
+
+    -- Refresh the invite object to get updated values
+    invite = ChatChannelInviteModel:find({ uuid = invite_uuid })
+
+    -- Ensure channel_uuid is available
+    if invite then
+        invite.channel_uuid = invite.channel_uuid or channel_uuid
+    end
+
+    return invite
 end
 
 -- Decline invitation
@@ -72,10 +90,18 @@ function ChatChannelInviteQueries.decline(invite_uuid)
         return nil, "Invitation is no longer pending"
     end
 
-    return invite:update({
+    -- Update the invite status
+    local success = invite:update({
         status = "declined",
         responded_at = db.raw("NOW()")
-    }, { returning = "*" })
+    })
+
+    if not success then
+        return nil, "Failed to decline invitation"
+    end
+
+    -- Refresh and return the updated invite
+    return ChatChannelInviteModel:find({ uuid = invite_uuid })
 end
 
 -- Get invitations sent by a user

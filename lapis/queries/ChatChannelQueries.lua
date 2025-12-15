@@ -182,7 +182,7 @@ function ChatChannelQueries.updateLastMessageAt(channel_uuid)
 end
 
 -- Create default channels for a business
-function ChatChannelQueries.createDefaults(uuid_business_id, created_by)
+function ChatChannelQueries.createDefaults(uuid_business_id, created_by, namespace_id)
     local defaults = {
         { name = "general", description = "General discussion", type = "public" },
         { name = "random", description = "Random conversations", type = "public" }
@@ -198,6 +198,7 @@ function ChatChannelQueries.createDefaults(uuid_business_id, created_by)
             type = default.type,
             created_by = created_by,
             uuid_business_id = uuid_business_id,
+            namespace_id = namespace_id,
             is_default = true
         })
 
