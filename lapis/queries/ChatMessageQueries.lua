@@ -14,18 +14,35 @@ function ChatMessageQueries.create(params)
         params.content_type = "text"
     end
 
+    ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Input params uuid: ", params.uuid)
+    ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Input attachments type: ", type(params.attachments))
+
     -- Encode mentions and attachments if they are tables
     if type(params.mentions) == "table" then
         params.mentions = cjson.encode(params.mentions)
     end
     if type(params.attachments) == "table" then
-        params.attachments = cjson.encode(params.attachments)
+        ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Encoding attachments to JSON...")
+        local encoded = cjson.encode(params.attachments)
+        ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Encoded attachments: ", encoded)
+        params.attachments = encoded
     end
     if type(params.metadata) == "table" then
         params.metadata = cjson.encode(params.metadata)
     end
 
-    return ChatMessageModel:create(params, { returning = "*" })
+    ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Final params.attachments: ", params.attachments or "nil")
+
+    local result = ChatMessageModel:create(params, { returning = "*" })
+
+    if result then
+        ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Created message id: ", result.id, " uuid: ", result.uuid)
+        ngx.log(ngx.NOTICE, "[ChatMessageQueries.create] Result attachments: ", result.attachments or "nil")
+    else
+        ngx.log(ngx.ERR, "[ChatMessageQueries.create] Failed to create message!")
+    end
+
+    return result
 end
 
 -- Get messages for a channel (paginated, newest first)
@@ -79,16 +96,21 @@ function ChatMessageQueries.getByChannel(channel_uuid, params)
 
     local messages = db.query(sql, table.unpack(query_params))
 
+    ngx.log(ngx.NOTICE, "[ChatMessageQueries.getByChannel] Query returned ", messages and #messages or 0, " messages")
+
     -- Get reactions for each message
     if messages and #messages > 0 then
-        for _, msg in ipairs(messages) do
+        for i, msg in ipairs(messages) do
             msg.reactions = ChatMessageQueries.getReactions(msg.uuid)
             -- Parse JSON fields
             if msg.mentions then
                 msg.mentions = cjson.decode(msg.mentions) or {}
             end
             if msg.attachments then
-                msg.attachments = cjson.decode(msg.attachments) or {}
+                ngx.log(ngx.NOTICE, "[ChatMessageQueries.getByChannel] Message ", i, " raw attachments: ", msg.attachments)
+                local decoded = cjson.decode(msg.attachments)
+                msg.attachments = decoded or {}
+                ngx.log(ngx.NOTICE, "[ChatMessageQueries.getByChannel] Message ", i, " decoded attachments count: ", #msg.attachments)
             end
             if msg.metadata then
                 msg.metadata = cjson.decode(msg.metadata) or {}
@@ -101,6 +123,8 @@ end
 
 -- Get single message by UUID
 function ChatMessageQueries.show(uuid)
+    ngx.log(ngx.NOTICE, "[ChatMessageQueries.show] Fetching message: ", uuid)
+
     local sql = [[
         SELECT m.*, u.email, u.first_name, u.last_name, u.username as sender_username
         FROM chat_messages m
@@ -109,20 +133,30 @@ function ChatMessageQueries.show(uuid)
     ]]
 
     local result = db.query(sql, uuid)
+    ngx.log(ngx.NOTICE, "[ChatMessageQueries.show] Query returned ", result and #result or 0, " rows")
+
     if result and #result > 0 then
         local msg = result[1]
+        ngx.log(ngx.NOTICE, "[ChatMessageQueries.show] Raw message attachments from DB: ", msg.attachments or "nil")
+
         msg.reactions = ChatMessageQueries.getReactions(msg.uuid)
         if msg.mentions then
             msg.mentions = cjson.decode(msg.mentions) or {}
         end
         if msg.attachments then
-            msg.attachments = cjson.decode(msg.attachments) or {}
+            ngx.log(ngx.NOTICE, "[ChatMessageQueries.show] Decoding attachments JSON...")
+            local decoded = cjson.decode(msg.attachments)
+            ngx.log(ngx.NOTICE, "[ChatMessageQueries.show] Decoded attachments: ", decoded and cjson.encode(decoded) or "nil")
+            msg.attachments = decoded or {}
         end
         if msg.metadata then
             msg.metadata = cjson.decode(msg.metadata) or {}
         end
+
+        ngx.log(ngx.NOTICE, "[ChatMessageQueries.show] Final message attachments count: ", msg.attachments and #msg.attachments or 0)
         return msg
     end
+    ngx.log(ngx.WARN, "[ChatMessageQueries.show] Message not found: ", uuid)
     return nil
 end
 

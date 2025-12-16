@@ -282,64 +282,79 @@ function Global.generateRandomPassword()
     return password
 end
 
-function Global.uploadToMinio(file, file_name)
-    local http = require("resty.http")
-    local cjson = require("cjson.safe")
-    local token = Global.generateJwt(1)
-    if not file or not file.filename or not file.content then
-        return nil, "Missing file or file content"
+--- Upload file to MinIO/S3 storage directly
+-- Uses the new MinIO client with AWS Signature V4 authentication
+-- @param file table File object { content, filename, content_type? }
+-- @param file_name string Optional filename override
+-- @param options table Optional upload options { prefix?, max_size?, validate_type? }
+-- @return string|nil URL of uploaded file
+-- @return string|nil Error message if failed
+-- @return table|nil Metadata of uploaded file
+function Global.uploadToMinio(file, file_name, options)
+    local MinioClient = require("helper.minio")
+
+    -- Validate input
+    if not file then
+        return nil, "No file provided"
     end
 
-    local boundary = "----LuaFormBoundary" .. tostring(math.random(1e8, 1e9))
-    local crlf = "\r\n"
-
-    local function getContentType(filename)
-        local ext = filename:match("%.(%w+)$")
-        local mime_types = {
-            jpg = "image/jpeg",
-            jpeg = "image/jpeg",
-            png = "image/png",
-            webp = "image/webp"
-        }
-        return mime_types[ext:lower()] or "application/octet-stream"
-    end
-    local content_type = file.content_type or getContentType(file_name)
-
-    local body = {
-        "--" .. boundary,
-        string.format('Content-Disposition: form-data; name="image"; filename="%s"', file_name),
-        string.format("Content-Type: %s", content_type),
-        "",
-        file.content,
-        "--" .. boundary .. "--"
+    -- Normalize file object
+    local upload_file = {
+        content = file.content,
+        filename = file_name or file.filename,
+        content_type = file.content_type
     }
-    local body_data = table.concat(body, crlf)
 
-    local httpc = http.new()
-    local nodeApiUrl = Global.getEnvVar("NODE_API_URL") or "http://localhost:3000/api"
-
-    local url = nodeApiUrl .. "/upload"
-    local res, err = httpc:request_uri(url,
-        {
-            method = "POST",
-            body = body_data,
-            headers = {
-                ["Authorization"] = "Bearer " .. token,
-                ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
-                ["Content-Length"] = tostring(#body_data)
-            },
-            ssl_verify = false
-        })
-
-    if not res then
-        return nil, "Request error: " .. tostring(err)
+    -- Validate file content exists
+    if not upload_file.content or upload_file.content == "" then
+        return nil, "File content is empty"
     end
 
-    if res.status ~= 200 then
-        return nil, "Upload failed [" .. res.status .. "]: " .. tostring(res.body)
+    -- Merge options with defaults
+    options = options or {}
+
+    -- Upload using MinIO client
+    local url, err, metadata = MinioClient.quickUpload(upload_file, options)
+
+    if not url then
+        ngx.log(ngx.ERR, "[Global.uploadToMinio] Upload failed: ", err)
+        return nil, err
     end
 
-    return cjson.decode(res.body).url, nil
+    ngx.log(ngx.INFO, "[Global.uploadToMinio] Upload successful: ", url)
+    return url, nil, metadata
+end
+
+--- Delete file from MinIO/S3 storage
+-- @param object_key string The object key or full URL
+-- @param bucket string Optional bucket name
+-- @return boolean Success status
+-- @return string|nil Error message if failed
+function Global.deleteFromMinio(object_key, bucket)
+    local MinioClient = require("helper.minio")
+
+    if not object_key or object_key == "" then
+        return false, "No object key provided"
+    end
+
+    -- Extract object key from URL if full URL provided
+    local endpoint = Global.getEnvVar("MINIO_ENDPOINT")
+    if endpoint and object_key:match("^https?://") then
+        local bucket_name = bucket or Global.getEnvVar("MINIO_BUCKET")
+        local pattern = endpoint .. "/" .. bucket_name .. "/"
+        object_key = object_key:gsub(pattern, "")
+    end
+
+    return MinioClient.quickDelete(object_key, bucket)
+end
+
+--- Get presigned URL for temporary file access
+-- @param object_key string The object key
+-- @param expires_in number Seconds until expiration (default 3600)
+-- @return string|nil Presigned URL
+function Global.getMinioPresignedUrl(object_key, expires_in)
+    local MinioClient = require("helper.minio")
+    return MinioClient.getDefault():getPresignedUrl(object_key, expires_in)
 end
 
 return Global

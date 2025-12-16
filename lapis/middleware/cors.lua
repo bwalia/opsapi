@@ -34,7 +34,7 @@ local CORS_CONFIG = {
     -- CORS headers - include all custom headers used by the frontend
     headers = {
         methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-User-Email, X-Public-Browse, X-User-Id, X-Namespace-Id, X-Namespace-Slug",
+        headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-User-Email, X-Public-Browse, X-User-Id, X-Business-Id, X-Namespace-Id, X-Namespace-Slug",
         max_age = "86400",
         credentials = "true"
     }
@@ -43,7 +43,8 @@ local CORS_CONFIG = {
 -- Check if origin is allowed
 local function isOriginAllowed(origin)
     if not origin then
-        return false, "http://localhost:5173" -- default fallback
+        -- Allow requests without origin (like Electron apps, curl, Postman, etc.)
+        return true, "*"
     end
 
     -- Check exact matches for development origins

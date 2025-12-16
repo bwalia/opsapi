@@ -90,8 +90,18 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.content or data.content == "" then
-            return { status = 400, json = { error = "Message content is required" } }
+        -- Debug logging
+        ngx.log(ngx.NOTICE, "[ChatMessages] Received message data: ", require("cjson").encode(data))
+        ngx.log(ngx.NOTICE, "[ChatMessages] Attachments: ", data.attachments and require("cjson").encode(data.attachments) or "nil")
+
+        -- Allow messages with either content or attachments (or both)
+        local has_content = data.content and data.content ~= ""
+        local has_attachments = data.attachments and type(data.attachments) == "table" and #data.attachments > 0
+
+        ngx.log(ngx.NOTICE, "[ChatMessages] has_content: ", tostring(has_content), " has_attachments: ", tostring(has_attachments))
+
+        if not has_content and not has_attachments then
+            return { status = 400, json = { error = "Message content or attachments required" } }
         end
 
         -- Validate content type
@@ -100,15 +110,23 @@ return function(app)
             return { status = 400, json = { error = "Invalid content_type" } }
         end
 
-        -- Extract mentions from content
-        local mentions = ChatMessageQueries.extractMentions(data.content)
+        -- Extract mentions from content (only if content exists)
+        local mentions = has_content and ChatMessageQueries.extractMentions(data.content) or {}
 
         -- Create message
+        local message_uuid = Global.generateUUID()
+        ngx.log(ngx.NOTICE, "[ChatMessages] Creating message with UUID: ", message_uuid)
+        ngx.log(ngx.NOTICE, "[ChatMessages] Creating message with attachments: ", data.attachments and require("cjson").encode(data.attachments) or "nil")
+        ngx.log(ngx.NOTICE, "[ChatMessages] Attachments type: ", type(data.attachments))
+        if type(data.attachments) == "table" then
+            ngx.log(ngx.NOTICE, "[ChatMessages] Attachments count: ", #data.attachments)
+        end
+
         local message = ChatMessageQueries.create({
-            uuid = Global.generateUUID(),
+            uuid = message_uuid,
             channel_uuid = channel_uuid,
             user_uuid = user.uuid,
-            content = data.content,
+            content = data.content or "",
             content_type = data.content_type or "text",
             parent_message_uuid = data.parent_message_uuid,
             mentions = #mentions > 0 and mentions or nil,
@@ -117,8 +135,12 @@ return function(app)
         })
 
         if not message then
+            ngx.log(ngx.ERR, "[ChatMessages] Failed to create message - returned nil")
             return { status = 500, json = { error = "Failed to send message" } }
         end
+
+        ngx.log(ngx.NOTICE, "[ChatMessages] Message created with id: ", message.id or "nil", " uuid: ", message.uuid or "nil")
+        ngx.log(ngx.NOTICE, "[ChatMessages] Message raw attachments from DB: ", message.attachments or "nil")
 
         -- Update channel's last_message_at
         ChatChannelQueries.updateLastMessageAt(channel_uuid)
@@ -130,6 +152,9 @@ return function(app)
 
         -- Get full message with user info
         local full_message = ChatMessageQueries.show(message.uuid)
+
+        ngx.log(ngx.NOTICE, "[ChatMessages] Full message response: ", require("cjson").encode(full_message))
+        ngx.log(ngx.NOTICE, "[ChatMessages] Full message attachments: ", full_message.attachments and require("cjson").encode(full_message.attachments) or "nil")
 
         return {
             status = 201,
