@@ -3,6 +3,7 @@ local ChatChannelQueries = require "queries.ChatChannelQueries"
 local ChatChannelMemberQueries = require "queries.ChatChannelMemberQueries"
 local ChatMessageQueries = require "queries.ChatMessageQueries"
 local Global = require "helper.global"
+local db = require("lapis.db")
 
 return function(app)
     ----------------- Chat Channel Routes --------------------
@@ -37,6 +38,23 @@ return function(app)
             uuid = user_uuid,
             uuid_business_id = user_business_id
         }
+    end
+
+    -- Get namespace_id from header or default to system namespace
+    local function get_namespace_id()
+        local namespace_id = ngx.var.http_x_namespace_id
+
+        if namespace_id and namespace_id ~= "" then
+            return tonumber(namespace_id)
+        end
+
+        -- Fallback: Get default "system" namespace
+        local result = db.query("SELECT id FROM namespaces WHERE slug = 'system' LIMIT 1")
+        if result and #result > 0 then
+            return result[1].id
+        end
+
+        return nil
     end
 
     -- GET /api/chat/channels - List user's channels
@@ -112,6 +130,12 @@ return function(app)
             return { status = 400, json = { error = "Invalid channel type. Must be: public, private, or direct" } }
         end
 
+        -- Get namespace_id (required for foreign key constraint)
+        local namespace_id = get_namespace_id()
+        if not namespace_id then
+            return { status = 400, json = { error = "Namespace context required. Please provide X-Namespace-Id header or ensure system namespace exists." } }
+        end
+
         -- Create channel
         local channel = ChatChannelQueries.create({
             uuid = Global.generateUUID(),
@@ -120,6 +144,7 @@ return function(app)
             type = data.type or "public",
             created_by = user.uuid,
             uuid_business_id = user.uuid_business_id,
+            namespace_id = namespace_id,
             linked_task_uuid = data.linked_task_uuid,
             linked_task_id = data.linked_task_id,
             avatar_url = data.avatar_url
@@ -559,13 +584,20 @@ return function(app)
             }
         end
 
+        -- Get namespace_id (required for foreign key constraint)
+        local namespace_id = get_namespace_id()
+        if not namespace_id then
+            return { status = 400, json = { error = "Namespace context required" } }
+        end
+
         -- Create new direct channel
         local channel = ChatChannelQueries.create({
             uuid = Global.generateUUID(),
             name = "Direct Message",
             type = "direct",
             created_by = user.uuid,
-            uuid_business_id = user.uuid_business_id
+            uuid_business_id = user.uuid_business_id,
+            namespace_id = namespace_id
         })
 
         if not channel then
@@ -593,7 +625,13 @@ return function(app)
             return { status = 400, json = { error = "Business ID required" } }
         end
 
-        local channels = ChatChannelQueries.createDefaults(user.uuid_business_id, user.uuid)
+        -- Get namespace_id (required for foreign key constraint)
+        local namespace_id = get_namespace_id()
+        if not namespace_id then
+            return { status = 400, json = { error = "Namespace context required" } }
+        end
+
+        local channels = ChatChannelQueries.createDefaults(user.uuid_business_id, user.uuid, namespace_id)
 
         -- Add creator to all default channels
         for _, channel in ipairs(channels) do
