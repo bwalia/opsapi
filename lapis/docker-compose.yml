@@ -137,6 +137,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    container_name: opsapi-minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -154,6 +155,24 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+
+  # MinIO initialization - creates bucket and sets public policy
+  minio-init:
+    image: minio/mc:latest
+    container_name: opsapi-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin123;
+      mc mb local/opsapi --ignore-existing;
+      mc anonymous set public local/opsapi;
+      echo 'Bucket opsapi created and set to public';
+      exit 0;
+      "
+    networks:
+      opsapi-network:
 
 # Add Keycloak service
   # keycloak:

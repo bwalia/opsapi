@@ -23,6 +23,7 @@ local chat_system_migrations = require("migrations.chat-system")
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
 local services_module_migrations = require("migrations.services-module")
+local chat_production_migrations = require("migrations.chat-system-production")
 
 return {
     ['01_create_users'] = function()
@@ -540,6 +541,26 @@ return {
     ['189_create_namespace_github_integrations_table'] = services_module_migrations[10],
     ['190_add_namespace_github_integrations_indexes'] = services_module_migrations[11],
     ['191_add_github_integration_id_to_services'] = services_module_migrations[12],
+
+    -- Chat System Production Enhancements (Scalability & Performance)
+    ['192_add_chat_fulltext_search'] = chat_production_migrations[1],
+    ['193_add_chat_brin_indexes'] = chat_production_migrations[2],
+    ['194_add_chat_composite_indexes'] = chat_production_migrations[3],
+    ['195_create_message_delivery_tracking'] = chat_production_migrations[4],
+    ['196_create_channel_stats_materialized_view'] = chat_production_migrations[5],
+    ['197_create_refresh_channel_stats_function'] = chat_production_migrations[6],
+    ['198_enhance_mention_processing'] = chat_production_migrations[7],
+    ['199_add_mention_indexes'] = chat_production_migrations[8],
+    ['200_create_message_archive_table'] = chat_production_migrations[9],
+    ['201_create_bulk_unread_counts_function'] = chat_production_migrations[10],
+    ['202_create_message_edit_history'] = chat_production_migrations[11],
+    ['203_add_chat_data_integrity_constraints'] = chat_production_migrations[12],
+    ['204_create_keyset_pagination_function'] = chat_production_migrations[13],
+    ['205_add_user_presence_functions'] = chat_production_migrations[14],
+    ['206_add_chat_data_quality_constraints'] = chat_production_migrations[15],
+    ['207_create_user_channels_view'] = chat_production_migrations[16],
+    ['208_add_channel_mention_support'] = chat_production_migrations[17],
+    ['209_add_chat_metrics_table'] = chat_production_migrations[18],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()
