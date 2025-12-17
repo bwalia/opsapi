@@ -289,7 +289,8 @@ safe_load_routes("routes.delivery-pricing") -- Professional delivery fee calcula
 safe_load_routes("routes.chat-channels")  -- Channel management (create, update, members)
 safe_load_routes("routes.chat-messages")  -- Message operations (send, edit, delete, threads)
 safe_load_routes("routes.chat-reactions") -- Message reactions (add, remove, toggle)
-safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, mentions, presence, invites, files
+safe_load_routes("routes.chat-mentions")  -- Mentions API (list, read, autocomplete)
+safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, presence, invites, files
 
 -- Namespace System (Multi-tenant)
 safe_load_routes("routes.namespaces") -- Namespace management, members, roles, switching
