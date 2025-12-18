@@ -298,6 +298,12 @@ safe_load_routes("routes.namespaces") -- Namespace management, members, roles, s
 -- Services Module (GitHub Workflow Integration)
 safe_load_routes("routes.services") -- Service management, secrets, deployments, GitHub workflows
 
+-- Kanban Project Management System (Integrated with Chat)
+safe_load_routes("routes.kanban-projects") -- Projects, members, starred
+safe_load_routes("routes.kanban-boards")   -- Boards, columns, reordering
+safe_load_routes("routes.kanban-tasks")    -- Tasks, assignments, comments, checklists, attachments
+safe_load_routes("routes.kanban-labels")   -- Project labels
+
 -- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
 if custom_routes_dir then

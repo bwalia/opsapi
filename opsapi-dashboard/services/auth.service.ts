@@ -1,8 +1,5 @@
-import { apiClient, toFormData } from '@/lib/api-client';
+import { apiClient, toFormData, AUTH_TOKEN_KEY, AUTH_USER_KEY, clearAllAuthStorage } from '@/lib/api-client';
 import type { LoginCredentials, LoginResponse, User } from '@/types';
-
-const AUTH_TOKEN_KEY = 'auth_token';
-const AUTH_USER_KEY = 'auth_user';
 
 /**
  * Authentication Service
@@ -151,9 +148,8 @@ export const authService = {
   },
 
   clearAuth(): void {
-    if (typeof window === 'undefined') return;
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    localStorage.removeItem(AUTH_USER_KEY);
+    // Use centralized function to clear all auth storage including Zustand
+    clearAllAuthStorage();
   },
 
   isAuthenticated(): boolean {

@@ -24,6 +24,7 @@ local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
 local services_module_migrations = require("migrations.services-module")
 local chat_production_migrations = require("migrations.chat-system-production")
+local kanban_project_migrations = require("migrations.kanban-project-system")
 
 return {
     ['01_create_users'] = function()
@@ -561,6 +562,48 @@ return {
     ['207_create_user_channels_view'] = chat_production_migrations[16],
     ['208_add_channel_mention_support'] = chat_production_migrations[17],
     ['209_add_chat_metrics_table'] = chat_production_migrations[18],
+
+    -- Kanban Project Management System (Integrated with Chat)
+    ['210_create_kanban_projects_table'] = kanban_project_migrations[1],
+    ['211_add_kanban_projects_indexes'] = kanban_project_migrations[2],
+    ['212_create_kanban_project_members_table'] = kanban_project_migrations[3],
+    ['213_add_kanban_project_members_indexes'] = kanban_project_migrations[4],
+    ['214_create_kanban_boards_table'] = kanban_project_migrations[5],
+    ['215_add_kanban_boards_indexes'] = kanban_project_migrations[6],
+    ['216_create_kanban_columns_table'] = kanban_project_migrations[7],
+    ['217_add_kanban_columns_indexes'] = kanban_project_migrations[8],
+    ['218_create_kanban_tasks_table'] = kanban_project_migrations[9],
+    ['219_add_kanban_tasks_indexes'] = kanban_project_migrations[10],
+    ['220_create_kanban_task_assignees_table'] = kanban_project_migrations[11],
+    ['221_add_kanban_task_assignees_indexes'] = kanban_project_migrations[12],
+    ['222_create_kanban_task_labels_table'] = kanban_project_migrations[13],
+    ['223_add_kanban_task_labels_indexes'] = kanban_project_migrations[14],
+    ['224_create_kanban_task_label_links_table'] = kanban_project_migrations[15],
+    ['225_add_kanban_task_label_links_indexes'] = kanban_project_migrations[16],
+    ['226_create_kanban_task_comments_table'] = kanban_project_migrations[17],
+    ['227_add_kanban_task_comments_indexes'] = kanban_project_migrations[18],
+    ['228_create_kanban_task_attachments_table'] = kanban_project_migrations[19],
+    ['229_add_kanban_task_attachments_indexes'] = kanban_project_migrations[20],
+    ['230_create_kanban_task_checklists_table'] = kanban_project_migrations[21],
+    ['231_add_kanban_task_checklists_indexes'] = kanban_project_migrations[22],
+    ['232_create_kanban_checklist_items_table'] = kanban_project_migrations[23],
+    ['233_add_kanban_checklist_items_indexes'] = kanban_project_migrations[24],
+    ['234_create_kanban_task_activities_table'] = kanban_project_migrations[25],
+    ['235_add_kanban_task_activities_indexes'] = kanban_project_migrations[26],
+    ['236_create_kanban_sprints_table'] = kanban_project_migrations[27],
+    ['237_add_kanban_sprints_indexes'] = kanban_project_migrations[28],
+    ['238_add_sprint_id_to_kanban_tasks'] = kanban_project_migrations[29],
+    ['239_create_kanban_count_triggers'] = kanban_project_migrations[30],
+    ['240_create_kanban_comment_count_trigger'] = kanban_project_migrations[31],
+    ['241_create_kanban_checklist_count_triggers'] = kanban_project_migrations[32],
+    ['242_create_kanban_task_search'] = kanban_project_migrations[33],
+    ['243_add_kanban_module_permissions'] = kanban_project_migrations[34],
+    ['244_create_kanban_assignee_count_trigger'] = kanban_project_migrations[35],
+    ['245_create_kanban_member_count_trigger'] = kanban_project_migrations[36],
+    ['246_create_kanban_attachment_count_trigger'] = kanban_project_migrations[37],
+    ['247_create_kanban_label_usage_trigger'] = kanban_project_migrations[38],
+    ['248_create_kanban_board_count_triggers'] = kanban_project_migrations[39],
+    ['249_create_kanban_comment_reply_trigger'] = kanban_project_migrations[40],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()

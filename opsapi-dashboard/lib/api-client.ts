@@ -16,6 +16,53 @@ export const apiClient: AxiosInstance = axios.create({
 
 // Storage keys
 export const NAMESPACE_KEY = 'current_namespace';
+export const AUTH_TOKEN_KEY = 'auth_token';
+export const AUTH_USER_KEY = 'auth_user';
+export const ZUSTAND_AUTH_KEY = 'auth-storage';
+
+// Track if we're currently redirecting to prevent loops
+let isRedirecting = false;
+
+/**
+ * Get auth token from multiple possible storage locations
+ * Priority: 1. Direct localStorage key, 2. Zustand persisted storage
+ */
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  // First try direct key
+  const directToken = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (directToken) return directToken;
+
+  // Fallback to Zustand persisted state
+  try {
+    const zustandData = localStorage.getItem(ZUSTAND_AUTH_KEY);
+    if (zustandData) {
+      const parsed = JSON.parse(zustandData);
+      if (parsed?.state?.token) {
+        // Sync to direct key for consistency
+        localStorage.setItem(AUTH_TOKEN_KEY, parsed.state.token);
+        return parsed.state.token;
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+
+  return null;
+}
+
+/**
+ * Clear all auth-related storage
+ */
+export function clearAllAuthStorage(): void {
+  if (typeof window === 'undefined') return;
+
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USER_KEY);
+  localStorage.removeItem(ZUSTAND_AUTH_KEY);
+  localStorage.removeItem(NAMESPACE_KEY);
+}
 
 /**
  * Request interceptor to add auth token and namespace header
@@ -23,7 +70,7 @@ export const NAMESPACE_KEY = 'current_namespace';
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('auth_token');
+      const token = getAuthToken();
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -54,11 +101,24 @@ apiClient.interceptors.response.use(
   (error: AxiosError) => {
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_user');
-        // Only redirect if not already on login page
-        if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
+        // Clear ALL auth storage to prevent state mismatch
+        clearAllAuthStorage();
+
+        // Prevent redirect loop - only redirect if:
+        // 1. Not already redirecting
+        // 2. Not already on login page
+        // 3. Not an auth-related endpoint (login, validate, etc.)
+        const isAuthEndpoint = error.config?.url?.includes('/auth/');
+        const isOnLoginPage = window.location.pathname.includes('/login');
+
+        if (!isRedirecting && !isOnLoginPage && !isAuthEndpoint) {
+          isRedirecting = true;
+          // Use replace instead of href to prevent browser history issues
+          window.location.replace('/login');
+          // Reset flag after a delay (in case redirect fails)
+          setTimeout(() => {
+            isRedirecting = false;
+          }, 3000);
         }
       }
     }
