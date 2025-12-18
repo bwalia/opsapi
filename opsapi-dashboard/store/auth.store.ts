@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, AuthState, LoginCredentials } from '@/types';
 import { authService } from '@/services/auth.service';
+import { AUTH_TOKEN_KEY, clearAllAuthStorage } from '@/lib/api-client';
 
 interface AuthStore extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
@@ -33,6 +34,10 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           const response = await authService.login(credentials);
+          // Sync token to direct localStorage key for API client
+          if (response.token && typeof window !== 'undefined') {
+            localStorage.setItem(AUTH_TOKEN_KEY, response.token);
+          }
           set({
             user: response.user,
             token: response.token,
@@ -42,6 +47,8 @@ export const useAuthStore = create<AuthStore>()(
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Login failed';
+          // Clear all auth storage on failed login attempt
+          clearAllAuthStorage();
           set({
             user: null,
             token: null,
@@ -58,6 +65,8 @@ export const useAuthStore = create<AuthStore>()(
         try {
           await authService.logout();
         } finally {
+          // Clear all auth storage to ensure clean state
+          clearAllAuthStorage();
           set({
             user: null,
             token: null,
@@ -76,12 +85,20 @@ export const useAuthStore = create<AuthStore>()(
         set({ token });
         if (token) {
           authService.setToken(token);
+          // Sync to direct localStorage key
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(AUTH_TOKEN_KEY, token);
+          }
+        } else {
+          // Clear all auth storage when token is explicitly set to null
+          clearAllAuthStorage();
         }
       },
 
       checkAuth: async () => {
         const { token } = get();
         if (!token) {
+          clearAllAuthStorage();
           set({ isAuthenticated: false });
           return false;
         }
@@ -89,6 +106,7 @@ export const useAuthStore = create<AuthStore>()(
         try {
           const isValid = await authService.validateToken();
           if (!isValid) {
+            clearAllAuthStorage();
             set({ user: null, token: null, isAuthenticated: false });
             return false;
           }
@@ -101,6 +119,7 @@ export const useAuthStore = create<AuthStore>()(
 
           return false;
         } catch {
+          clearAllAuthStorage();
           set({ user: null, token: null, isAuthenticated: false });
           return false;
         }

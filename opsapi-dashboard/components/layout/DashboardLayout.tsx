@@ -9,6 +9,7 @@ import { PermissionsProvider } from '@/contexts/PermissionsContext';
 import { NamespaceProvider } from '@/contexts/NamespaceContext';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AUTH_TOKEN_KEY } from '@/lib/api-client';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -34,7 +35,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const { isAuthenticated, token, _hasHydrated } = useAuthStore();
+  const { isAuthenticated, token, _hasHydrated, setToken } = useAuthStore();
 
   // Load sidebar collapsed state from localStorage
   useEffect(() => {
@@ -44,13 +45,24 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
     }
   }, []);
 
-  // Auth check
+  // Auth check - verify both Zustand state AND actual localStorage token
   useEffect(() => {
     if (!_hasHydrated) return;
-    if (!token || !isAuthenticated) {
+
+    // Check actual localStorage token to prevent state mismatch after 401 errors
+    const actualToken = localStorage.getItem(AUTH_TOKEN_KEY);
+
+    // If localStorage token was cleared (e.g., by 401 interceptor) but Zustand still thinks authenticated
+    if (isAuthenticated && !actualToken) {
+      setToken(null); // This will trigger clearAllAuthStorage and update state
+      return;
+    }
+
+    // Redirect to login if not authenticated or no token
+    if (!token || !isAuthenticated || !actualToken) {
       router.push('/login');
     }
-  }, [token, isAuthenticated, _hasHydrated, router]);
+  }, [token, isAuthenticated, _hasHydrated, router, setToken]);
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
@@ -102,7 +114,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
   }
 
   // After hydration, if not authenticated, show redirect message
-  if (!isAuthenticated || !token) {
+  // Also verify actual localStorage token exists to handle 401 race conditions
+  const actualToken = typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null;
+  if (!isAuthenticated || !token || !actualToken) {
     return <LoadingScreen message="Redirecting to login..." />;
   }
 

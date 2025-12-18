@@ -296,69 +296,136 @@ return function(app)
 
         local sql
         local query_params
+        local has_search = search and search ~= ""
 
         if channel_uuid and channel_uuid ~= "" then
             -- Get users in the specific channel
-            sql = [[
-                SELECT DISTINCT
-                    u.uuid,
-                    u.username,
-                    u.first_name,
-                    u.last_name,
-                    u.email,
-                    COALESCE(up.status, 'offline') as presence_status
-                FROM users u
-                INNER JOIN chat_channel_members cm ON cm.user_uuid = u.uuid
-                LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
-                WHERE cm.channel_uuid = ?
-                  AND cm.left_at IS NULL
-                  AND u.uuid != ?
-                  AND (
-                      u.username ILIKE ?
-                      OR u.first_name ILIKE ?
-                      OR u.last_name ILIKE ?
-                      OR u.email ILIKE ?
-                  )
-                ORDER BY
-                    CASE WHEN up.status = 'online' THEN 0
-                         WHEN up.status = 'away' THEN 1
-                         ELSE 2
-                    END,
-                    u.first_name, u.last_name
-                LIMIT ?
-            ]]
-            local search_pattern = "%" .. search .. "%"
-            query_params = { channel_uuid, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, limit }
+            if has_search then
+                sql = [[
+                    SELECT uuid, username, first_name, last_name, email, presence_status
+                    FROM (
+                        SELECT DISTINCT ON (u.uuid)
+                            u.uuid,
+                            u.username,
+                            u.first_name,
+                            u.last_name,
+                            u.email,
+                            COALESCE(up.status, 'offline') as presence_status,
+                            CASE WHEN up.status = 'online' THEN 0
+                                 WHEN up.status = 'away' THEN 1
+                                 ELSE 2
+                            END as presence_order
+                        FROM users u
+                        INNER JOIN chat_channel_members cm ON cm.user_uuid = u.uuid
+                        LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
+                        WHERE cm.channel_uuid = ?
+                          AND cm.left_at IS NULL
+                          AND u.uuid != ?
+                          AND (
+                              LOWER(u.username) LIKE LOWER(?)
+                              OR LOWER(u.first_name) LIKE LOWER(?)
+                              OR LOWER(u.last_name) LIKE LOWER(?)
+                              OR LOWER(u.email) LIKE LOWER(?)
+                              OR LOWER(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) LIKE LOWER(?)
+                          )
+                        ORDER BY u.uuid
+                    ) sub
+                    ORDER BY presence_order, first_name, last_name
+                    LIMIT ?
+                ]]
+                local search_pattern = "%" .. search .. "%"
+                query_params = { channel_uuid, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit }
+            else
+                -- No search - get all channel members
+                sql = [[
+                    SELECT uuid, username, first_name, last_name, email, presence_status
+                    FROM (
+                        SELECT DISTINCT ON (u.uuid)
+                            u.uuid,
+                            u.username,
+                            u.first_name,
+                            u.last_name,
+                            u.email,
+                            COALESCE(up.status, 'offline') as presence_status,
+                            CASE WHEN up.status = 'online' THEN 0
+                                 WHEN up.status = 'away' THEN 1
+                                 ELSE 2
+                            END as presence_order
+                        FROM users u
+                        INNER JOIN chat_channel_members cm ON cm.user_uuid = u.uuid
+                        LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
+                        WHERE cm.channel_uuid = ?
+                          AND cm.left_at IS NULL
+                          AND u.uuid != ?
+                        ORDER BY u.uuid
+                    ) sub
+                    ORDER BY presence_order, first_name, last_name
+                    LIMIT ?
+                ]]
+                query_params = { channel_uuid, user.uuid, limit }
+            end
         else
             -- Get all users (for DMs or when channel not specified)
-            sql = [[
-                SELECT DISTINCT
-                    u.uuid,
-                    u.username,
-                    u.first_name,
-                    u.last_name,
-                    u.email,
-                    COALESCE(up.status, 'offline') as presence_status
-                FROM users u
-                LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
-                WHERE u.uuid != ?
-                  AND u.active = true
-                  AND (
-                      u.username ILIKE ?
-                      OR u.first_name ILIKE ?
-                      OR u.last_name ILIKE ?
-                      OR u.email ILIKE ?
-                  )
-                ORDER BY
-                    CASE WHEN up.status = 'online' THEN 0
-                         WHEN up.status = 'away' THEN 1
-                         ELSE 2
-                    END,
-                    u.first_name, u.last_name
-                LIMIT ?
-            ]]
-            local search_pattern = "%" .. search .. "%"
-            query_params = { user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, limit }
+            if has_search then
+                sql = [[
+                    SELECT uuid, username, first_name, last_name, email, presence_status
+                    FROM (
+                        SELECT DISTINCT ON (u.uuid)
+                            u.uuid,
+                            u.username,
+                            u.first_name,
+                            u.last_name,
+                            u.email,
+                            COALESCE(up.status, 'offline') as presence_status,
+                            CASE WHEN up.status = 'online' THEN 0
+                                 WHEN up.status = 'away' THEN 1
+                                 ELSE 2
+                            END as presence_order
+                        FROM users u
+                        LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
+                        WHERE u.uuid != ?
+                          AND (u.active = true OR u.active IS NULL)
+                          AND (
+                              LOWER(u.username) LIKE LOWER(?)
+                              OR LOWER(u.first_name) LIKE LOWER(?)
+                              OR LOWER(u.last_name) LIKE LOWER(?)
+                              OR LOWER(u.email) LIKE LOWER(?)
+                              OR LOWER(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) LIKE LOWER(?)
+                          )
+                        ORDER BY u.uuid
+                    ) sub
+                    ORDER BY presence_order, first_name, last_name
+                    LIMIT ?
+                ]]
+                local search_pattern = "%" .. search .. "%"
+                query_params = { user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit }
+            else
+                -- No search - get all active users
+                sql = [[
+                    SELECT uuid, username, first_name, last_name, email, presence_status
+                    FROM (
+                        SELECT DISTINCT ON (u.uuid)
+                            u.uuid,
+                            u.username,
+                            u.first_name,
+                            u.last_name,
+                            u.email,
+                            COALESCE(up.status, 'offline') as presence_status,
+                            CASE WHEN up.status = 'online' THEN 0
+                                 WHEN up.status = 'away' THEN 1
+                                 ELSE 2
+                            END as presence_order
+                        FROM users u
+                        LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
+                        WHERE u.uuid != ?
+                          AND (u.active = true OR u.active IS NULL)
+                        ORDER BY u.uuid
+                    ) sub
+                    ORDER BY presence_order, first_name, last_name
+                    LIMIT ?
+                ]]
+                query_params = { user.uuid, limit }
+            end
         end
 
         local users = db.query(sql, table.unpack(query_params))

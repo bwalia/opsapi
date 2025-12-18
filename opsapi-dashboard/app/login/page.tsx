@@ -4,20 +4,32 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { LoginForm } from '@/components/auth';
 import { useAuthStore } from '@/store/auth.store';
+import { AUTH_TOKEN_KEY } from '@/lib/api-client';
 import { Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthenticated, token, _hasHydrated } = useAuthStore();
+  const { isAuthenticated, token, _hasHydrated, setToken } = useAuthStore();
 
   useEffect(() => {
     // Wait for hydration before redirecting
     if (!_hasHydrated) return;
 
-    if (isAuthenticated && token) {
+    // Verify actual localStorage token matches Zustand state
+    // This prevents redirect loops when 401 clears localStorage but Zustand still thinks authenticated
+    const actualToken = localStorage.getItem(AUTH_TOKEN_KEY);
+
+    // If Zustand thinks we're authenticated but localStorage has no token, clear Zustand state
+    if (isAuthenticated && !actualToken) {
+      setToken(null);
+      return;
+    }
+
+    // Only redirect if both Zustand state AND localStorage have valid token
+    if (isAuthenticated && token && actualToken) {
       router.push('/dashboard');
     }
-  }, [isAuthenticated, token, _hasHydrated, router]);
+  }, [isAuthenticated, token, _hasHydrated, router, setToken]);
 
   // Show loading while hydrating
   if (!_hasHydrated) {
