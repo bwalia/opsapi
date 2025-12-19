@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useMemo, forwardRef } from 'react';
+import React, { memo, useMemo, forwardRef, useCallback } from 'react';
 import {
   Calendar,
   MessageSquare,
@@ -281,20 +281,24 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
       onKeyDown={handleKeyDown}
       style={combinedStyle}
       className={cn(
-        'relative bg-white rounded-lg border shadow-sm p-3 cursor-pointer transition-all',
+        'relative bg-white rounded-lg border shadow-sm p-3 cursor-pointer transition-all duration-200',
         'hover:shadow-md hover:border-primary-200',
         'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
-        isDragging && 'shadow-lg opacity-50',
-        isOverlay && 'shadow-2xl rotate-3 scale-105',
+        isDragging && 'shadow-lg opacity-40 scale-[0.98] border-primary-300',
+        isOverlay && 'shadow-2xl rotate-2 scale-105 border-primary-400 ring-2 ring-primary-200',
         overdue && 'border-l-4 border-l-red-500',
         task.cover_color && 'border-t-4',
         className
       )}
     >
-      {/* Drag Handle */}
+      {/* Drag Handle - always visible on touch devices, hover on desktop */}
       <div
         {...dragHandleProps}
-        className="absolute top-2 right-2 p-1 rounded opacity-0 hover:opacity-100 hover:bg-gray-100 cursor-grab active:cursor-grabbing transition-opacity"
+        className={cn(
+          'absolute top-2 right-2 p-1 rounded transition-all cursor-grab active:cursor-grabbing',
+          'md:opacity-0 md:hover:opacity-100 hover:bg-gray-100',
+          'touch-none' // Prevent scroll interference on touch
+        )}
       >
         <GripVertical size={14} className="text-gray-400" />
       </div>
@@ -378,21 +382,41 @@ const SortableTaskCard = memo(function SortableTaskCard({
     },
   });
 
-  const style = {
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
+    touchAction: 'none', // Important for touch devices
   };
 
+  // Handle click - only pass through if not dragging
+  const handleTaskClick = useCallback(
+    (clickedTask: KanbanTask) => {
+      // Don't trigger click if dragging
+      if (isDragging) return;
+      onClick?.(clickedTask);
+    },
+    [isDragging, onClick]
+  );
+
   return (
-    <BaseTaskCard
+    <div
       ref={setNodeRef}
-      task={task}
-      onClick={onClick}
-      isDragging={isDragging}
-      className={className}
       style={style}
-      dragHandleProps={{ ...attributes, ...listeners }}
-    />
+      className={cn(
+        'touch-none', // Prevent scroll interference
+        isDragging && 'opacity-50 z-50'
+      )}
+      {...attributes}
+      {...listeners}
+    >
+      <BaseTaskCard
+        task={task}
+        onClick={handleTaskClick}
+        isDragging={isDragging}
+        className={className}
+        dragHandleProps={{}}
+      />
+    </div>
   );
 });
 

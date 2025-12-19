@@ -11,12 +11,12 @@ import {
   Plus,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import DashboardLayout from '@/components/layout/DashboardLayout';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import {
   KanbanBoard,
   TaskDetailModal,
+  CreateTaskModal,
 } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
 import { kanbanService } from '@/services/kanban.service';
@@ -169,6 +169,9 @@ export default function ProjectDetailPage() {
 
   const [currentBoardUuid, setCurrentBoardUuid] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');
+  const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
+  const [createTaskColumnId, setCreateTaskColumnId] = useState<number | null>(null);
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
   // Load project data
   useEffect(() => {
@@ -258,17 +261,33 @@ export default function ProjectDetailPage() {
     [createColumn, currentBoardUuid]
   );
 
+  // Open Create Task Modal with the column preselected
   const handleAddTask = useCallback(
-    async (columnId: number, title: string) => {
+    async (columnId: number) => {
+      setCreateTaskColumnId(columnId);
+      setIsCreateTaskModalOpen(true);
+    },
+    []
+  );
+
+  // Handle task creation from modal
+  const handleCreateTaskSubmit = useCallback(
+    async (data: CreateKanbanTaskDto) => {
       if (!currentBoardUuid) return;
-      const result = await createTask(currentBoardUuid, {
-        title,
-        column_id: columnId,
-      });
-      if (result) {
-        toast.success('Task created');
-      } else {
+      setIsSubmittingTask(true);
+      try {
+        const result = await createTask(currentBoardUuid, data);
+        if (result) {
+          toast.success('Task created successfully');
+          setIsCreateTaskModalOpen(false);
+        } else {
+          toast.error('Failed to create task');
+        }
+      } catch (error) {
+        console.error('Failed to create task:', error);
         toast.error('Failed to create task');
+      } finally {
+        setIsSubmittingTask(false);
       }
     },
     [createTask, currentBoardUuid]
@@ -431,8 +450,7 @@ export default function ProjectDetailPage() {
 
   // Render
   return (
-    <DashboardLayout>
-      <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
           <div className="flex items-center gap-4">
@@ -540,7 +558,18 @@ export default function ProjectDetailPage() {
           onAddChecklist={handleAddChecklist}
           onAddChecklistItem={handleAddChecklistItem}
         />
-      </div>
-    </DashboardLayout>
+
+        {/* Create Task Modal */}
+        <CreateTaskModal
+          isOpen={isCreateTaskModalOpen}
+          onClose={() => setIsCreateTaskModalOpen(false)}
+          onSubmit={handleCreateTaskSubmit}
+          columnId={createTaskColumnId || (boardData?.columns?.[0]?.id ?? 0)}
+          columns={boardData?.columns}
+          members={members}
+          labels={labels}
+          isLoading={isSubmittingTask}
+        />
+    </div>
   );
 }

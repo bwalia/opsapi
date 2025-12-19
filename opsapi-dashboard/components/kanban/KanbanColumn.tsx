@@ -10,7 +10,6 @@ import {
 import { cn } from '@/lib/utils';
 import type { KanbanColumn as KanbanColumnType, KanbanTask } from '@/types';
 import KanbanTaskCard from './KanbanTaskCard';
-import Button from '@/components/ui/Button';
 
 // ============================================
 // Column Header Component
@@ -145,72 +144,6 @@ const ColumnHeader = memo(function ColumnHeader({
 });
 
 // ============================================
-// Add Task Inline Component
-// ============================================
-
-interface AddTaskInlineProps {
-  onSubmit: (title: string) => void;
-  onCancel: () => void;
-  isLoading?: boolean;
-}
-
-const AddTaskInline = memo(function AddTaskInline({
-  onSubmit,
-  onCancel,
-  isLoading,
-}: AddTaskInlineProps) {
-  const [title, setTitle] = useState('');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (title.trim()) {
-      onSubmit(title.trim());
-      setTitle('');
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onCancel();
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="p-2">
-      <textarea
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Enter task title..."
-        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        rows={2}
-        autoFocus
-        disabled={isLoading}
-      />
-      <div className="flex items-center gap-2 mt-2">
-        <Button
-          type="submit"
-          size="sm"
-          disabled={!title.trim() || isLoading}
-          isLoading={isLoading}
-        >
-          Add
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onCancel}
-          disabled={isLoading}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
-  );
-});
-
-// ============================================
 // Main Column Component
 // ============================================
 
@@ -219,7 +152,9 @@ export interface KanbanColumnProps {
   onTaskClick?: (task: KanbanTask) => void;
   onEditColumn?: (column: KanbanColumnType) => void;
   onDeleteColumn?: (column: KanbanColumnType) => void;
-  onAddTask?: (columnId: number, title: string) => Promise<void>;
+  onAddTask?: (columnId: number) => Promise<void>;
+  isDragOver?: boolean;
+  isDragging?: boolean;
   className?: string;
 }
 
@@ -229,13 +164,12 @@ const KanbanColumn = memo(function KanbanColumn({
   onEditColumn,
   onDeleteColumn,
   onAddTask,
+  isDragOver: externalIsDragOver,
+  isDragging,
   className,
 }: KanbanColumnProps) {
-  const [isAddingTask, setIsAddingTask] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-
   // Make this column a drop target
-  const { setNodeRef, isOver } = useDroppable({
+  const { setNodeRef, isOver: localIsOver } = useDroppable({
     id: `column-${column.uuid}`,
     data: {
       type: 'column',
@@ -243,28 +177,12 @@ const KanbanColumn = memo(function KanbanColumn({
     },
   });
 
+  // Use external isDragOver if provided (more accurate), otherwise use local
+  const isOver = externalIsDragOver ?? localIsOver;
+
   const handleAddTaskClick = useCallback(() => {
-    setIsAddingTask(true);
-  }, []);
-
-  const handleAddTaskSubmit = useCallback(
-    async (title: string) => {
-      if (onAddTask) {
-        setIsCreating(true);
-        try {
-          await onAddTask(column.id, title);
-          setIsAddingTask(false);
-        } finally {
-          setIsCreating(false);
-        }
-      }
-    },
-    [onAddTask, column.id]
-  );
-
-  const handleAddTaskCancel = useCallback(() => {
-    setIsAddingTask(false);
-  }, []);
+    onAddTask?.(column.id);
+  }, [onAddTask, column.id]);
 
   // Sort tasks by position
   const sortedTasks = [...column.tasks].sort((a, b) => a.position - b.position);
@@ -277,7 +195,10 @@ const KanbanColumn = memo(function KanbanColumn({
       className={cn(
         'flex flex-col w-72 min-w-72 bg-gray-100 rounded-lg',
         'max-h-full transition-all duration-200',
-        isOver && 'ring-2 ring-primary-400 ring-opacity-50 bg-primary-50',
+        // Highlight when dragging over this column
+        isOver && 'ring-2 ring-primary-500 bg-primary-50/80 shadow-lg',
+        // Subtle highlight when any drag is happening to indicate this is a drop target
+        isDragging && !isOver && 'ring-1 ring-primary-200',
         className
       )}
     >
@@ -294,7 +215,7 @@ const KanbanColumn = memo(function KanbanColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          'flex-1 overflow-y-auto p-2 space-y-2 min-h-[100px] transition-colors',
+          'flex-1 overflow-y-auto p-2 space-y-2 min-h-[120px] transition-all duration-200',
           isOver && 'bg-primary-50/50'
         )}
       >
@@ -308,38 +229,45 @@ const KanbanColumn = memo(function KanbanColumn({
           ))}
         </SortableContext>
 
-        {/* Empty State */}
-        {sortedTasks.length === 0 && !isAddingTask && (
+        {/* Empty State / Drop Zone */}
+        {sortedTasks.length === 0 && (
           <div
             className={cn(
-              'text-center py-8 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg transition-colors',
-              isOver && 'border-primary-300 bg-primary-50 text-primary-500'
+              'text-center py-8 text-gray-400 text-sm border-2 border-dashed rounded-lg transition-all duration-200',
+              isOver
+                ? 'border-primary-400 bg-primary-100 text-primary-600 scale-[1.02]'
+                : isDragging
+                ? 'border-primary-200 bg-primary-50/50 text-primary-400'
+                : 'border-gray-200'
             )}
           >
-            {isOver ? 'Drop here' : 'No tasks yet'}
+            {isOver ? (
+              <span className="font-medium">Drop task here</span>
+            ) : isDragging ? (
+              <span>Drag here to move</span>
+            ) : (
+              <span>No tasks yet</span>
+            )}
           </div>
         )}
 
-        {/* Add Task Inline Form */}
-        {isAddingTask && (
-          <AddTaskInline
-            onSubmit={handleAddTaskSubmit}
-            onCancel={handleAddTaskCancel}
-            isLoading={isCreating}
-          />
+        {/* Drop indicator when dragging over a column with tasks */}
+        {sortedTasks.length > 0 && isOver && (
+          <div className="h-1 bg-primary-400 rounded-full animate-pulse my-1" />
         )}
       </div>
 
       {/* Add Task Footer */}
-      {!isAddingTask && (
-        <button
-          onClick={handleAddTaskClick}
-          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-b-lg transition-colors"
-        >
-          <Plus size={16} />
-          Add a task
-        </button>
-      )}
+      <button
+        onClick={handleAddTaskClick}
+        className={cn(
+          'flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-b-lg transition-colors',
+          isDragging && 'pointer-events-none opacity-50'
+        )}
+      >
+        <Plus size={16} />
+        Add a task
+      </button>
     </div>
   );
 });

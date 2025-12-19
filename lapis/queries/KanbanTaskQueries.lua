@@ -50,10 +50,27 @@ function KanbanTaskQueries.create(params)
         params.position = pos_result[1].next_pos
     end
 
+    -- Remove nil values for fields with foreign key constraints
+    -- to prevent inserting defaults that violate FK
+    if params.parent_task_id == nil or params.parent_task_id == "" or params.parent_task_id == 0 then
+        params.parent_task_id = nil
+    end
+    if params.sprint_id == nil or params.sprint_id == "" or params.sprint_id == 0 then
+        params.sprint_id = nil
+    end
+
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
 
-    return KanbanTaskModel:create(params, { returning = "*" })
+    -- Build clean params excluding nil values
+    local clean_params = {}
+    for k, v in pairs(params) do
+        if v ~= nil then
+            clean_params[k] = v
+        end
+    end
+
+    return KanbanTaskModel:create(clean_params, { returning = "*" })
 end
 
 --- Get tasks for a board

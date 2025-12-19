@@ -190,10 +190,40 @@ export const kanbanService = {
    * Get project members
    */
   async getProjectMembers(projectUuid: string): Promise<KanbanProjectMember[]> {
-    const response = await apiClient.get<ApiListResponse<KanbanProjectMember>>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await apiClient.get<ApiListResponse<any>>(
       `/api/v2/kanban/projects/${projectUuid}/members`
     );
-    return response.data.data;
+    // Transform flat member data to nested user structure expected by frontend
+    // Backend returns: { id, uuid, user_uuid, first_name, last_name, email, username, ... }
+    // Frontend expects: { id, uuid, user_uuid, user: { first_name, last_name, email, ... }, ... }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return response.data.data.map((member: any) => {
+      const transformed: KanbanProjectMember = {
+        id: member.id,
+        uuid: member.uuid,
+        project_id: member.project_id,
+        user_uuid: member.user_uuid,
+        role: member.role,
+        permissions: member.permissions,
+        joined_at: member.joined_at,
+        invited_by: member.invited_by,
+        is_starred: member.is_starred || false,
+        notification_preference: member.notification_preference || 'all',
+        last_accessed_at: member.last_accessed_at,
+        created_at: member.created_at,
+        updated_at: member.updated_at,
+        left_at: member.left_at,
+        deleted_at: member.deleted_at,
+        user: {
+          uuid: member.user_uuid,
+          first_name: member.first_name || '',
+          last_name: member.last_name || '',
+          email: member.email || '',
+        },
+      };
+      return transformed;
+    });
   },
 
   /**
@@ -211,15 +241,15 @@ export const kanbanService = {
   },
 
   /**
-   * Update a project member
+   * Update a project member's role
    */
   async updateProjectMember(
     projectUuid: string,
-    memberUuid: string,
+    userUuid: string,
     data: UpdateKanbanMemberDto
   ): Promise<KanbanProjectMember> {
     const response = await apiClient.put<ApiDataResponse<KanbanProjectMember>>(
-      `/api/v2/kanban/projects/${projectUuid}/members/${memberUuid}`,
+      `/api/v2/kanban/projects/${projectUuid}/members/${userUuid}/role`,
       toFormData(data as unknown as Record<string, unknown>)
     );
     return response.data.data;
@@ -228,8 +258,8 @@ export const kanbanService = {
   /**
    * Remove a member from project
    */
-  async removeProjectMember(projectUuid: string, memberUuid: string): Promise<void> {
-    await apiClient.delete(`/api/v2/kanban/projects/${projectUuid}/members/${memberUuid}`);
+  async removeProjectMember(projectUuid: string, userUuid: string): Promise<void> {
+    await apiClient.delete(`/api/v2/kanban/projects/${projectUuid}/members/${userUuid}`);
   },
 
   // ============================================
@@ -260,10 +290,64 @@ export const kanbanService = {
    * Get full board with columns and tasks (main board view)
    */
   async getBoardFull(uuid: string): Promise<KanbanBoardFullResponse> {
-    const response = await apiClient.get<KanbanBoardFullResponse>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await apiClient.get<ApiDataResponse<any>>(
       `/api/v2/kanban/boards/${uuid}/full`
     );
-    return response.data;
+
+    // Transform the API response to match the expected KanbanBoardFullResponse structure
+    // The API returns a flat structure with board fields + columns + project fields mixed together
+    const rawData = response.data.data;
+
+    // Extract board data
+    const board: KanbanBoard = {
+      id: rawData.id,
+      uuid: rawData.uuid,
+      project_id: rawData.project_id,
+      name: rawData.name,
+      description: rawData.description,
+      position: rawData.position,
+      is_default: rawData.is_default,
+      wip_limit: rawData.wip_limit,
+      settings: rawData.settings || {},
+      column_count: rawData.column_count || rawData.columns?.length || 0,
+      task_count: rawData.task_count || 0,
+      created_by: rawData.created_by,
+      created_at: rawData.created_at,
+      updated_at: rawData.updated_at,
+    };
+
+    // Extract project data from the flat response
+    const project: KanbanProject = {
+      id: rawData.project_id,
+      uuid: rawData.project_uuid,
+      namespace_id: rawData.namespace_id,
+      name: rawData.project_name,
+      slug: '',
+      status: 'active',
+      visibility: 'private',
+      task_count: 0,
+      completed_task_count: 0,
+      member_count: 1,
+      board_count: 1,
+      budget: 0,
+      budget_spent: 0,
+      budget_currency: 'USD',
+      owner_user_uuid: rawData.created_by || '',
+      settings: {},
+      metadata: {},
+      created_at: rawData.created_at,
+      updated_at: rawData.updated_at,
+    };
+
+    // Columns are already in the correct format with tasks embedded
+    const columns = Array.isArray(rawData.columns) ? rawData.columns : [];
+
+    return {
+      board,
+      columns,
+      project,
+    };
   },
 
   /**
@@ -491,10 +575,15 @@ export const kanbanService = {
    * Get all labels for a project
    */
   async getLabels(projectUuid: string): Promise<KanbanLabel[]> {
-    const response = await apiClient.get<ApiListResponse<KanbanLabel>>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await apiClient.get<any>(
       `/api/v2/kanban/projects/${projectUuid}/labels`
     );
-    return response.data.data;
+    // Handle both response formats:
+    // Standard API: { success: true, data: [...] }
+    // Paginated API: { data: [...], total, page, per_page }
+    const data = response.data?.data || response.data || [];
+    return Array.isArray(data) ? data : [];
   },
 
   /**
