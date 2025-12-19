@@ -237,7 +237,7 @@ export interface KanbanBoardProps {
   onEditColumn?: (column: KanbanColumnType) => void;
   onDeleteColumn?: (column: KanbanColumnType) => void;
   onAddColumn?: (data: CreateKanbanColumnDto) => Promise<void>;
-  onAddTask?: (columnId: number, title: string) => Promise<void>;
+  onAddTask?: (columnId: number) => Promise<void>;
   onMoveTask?: (taskUuid: string, targetColumnId: number, position: number) => Promise<void>;
   onRefresh?: () => void;
   onSettings?: () => void;
@@ -268,6 +268,7 @@ const KanbanBoard = memo(function KanbanBoard({
 }: KanbanBoardProps) {
   const { board, columns, project } = data;
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
+  const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
 
   // Configure sensors for drag detection
   const sensors = useSensors(
@@ -338,33 +339,70 @@ const KanbanBoard = memo(function KanbanBoard({
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       const { active } = event;
+      console.log('[DnD] Drag started:', active.id);
       const task = taskMap.get(String(active.id));
       if (task) {
+        console.log('[DnD] Found task:', task.title);
         setActiveTask(task);
+      } else {
+        console.log('[DnD] Task not found in taskMap');
       }
     },
     [taskMap]
   );
 
   // Handle drag over (for visual feedback during drag)
-  const handleDragOver = useCallback((event: DragOverEvent) => {
-    // Optional: Add logic here for real-time visual feedback
-  }, []);
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { over } = event;
+
+      if (!over) {
+        setActiveColumnId(null);
+        return;
+      }
+
+      const overId = String(over.id);
+
+      // If dropping on a column directly
+      if (overId.startsWith('column-')) {
+        setActiveColumnId(overId);
+        return;
+      }
+
+      // If dropping on a task, find its column
+      const column = findColumnByTaskId(overId);
+      if (column) {
+        setActiveColumnId(`column-${column.uuid}`);
+      } else {
+        setActiveColumnId(null);
+      }
+    },
+    [findColumnByTaskId]
+  );
 
   // Handle drag end
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
+      console.log('[DnD] Drag ended:', { activeId: active.id, overId: over?.id });
       setActiveTask(null);
+      setActiveColumnId(null);
 
-      if (!over) return;
+      if (!over) {
+        console.log('[DnD] No drop target');
+        return;
+      }
 
       const activeId = String(active.id);
       const overId = String(over.id);
 
       // Find the source column
       const sourceColumn = findColumnByTaskId(activeId);
-      if (!sourceColumn) return;
+      if (!sourceColumn) {
+        console.log('[DnD] Source column not found');
+        return;
+      }
+      console.log('[DnD] Source column:', sourceColumn.name);
 
       // Determine target column
       let targetColumn: (KanbanColumnType & { tasks: KanbanTask[] }) | undefined;
@@ -387,24 +425,32 @@ const KanbanBoard = memo(function KanbanBoard({
         }
       }
 
-      if (!targetColumn) return;
+      if (!targetColumn) {
+        console.log('[DnD] Target column not found');
+        return;
+      }
+      console.log('[DnD] Target column:', targetColumn.name, 'at index:', targetIndex);
 
       // Only call API if column changed or position changed
       const isSameColumn = sourceColumn.uuid === targetColumn.uuid;
 
       if (!isSameColumn) {
         // Task moved to different column
+        console.log('[DnD] Moving task to different column:', targetColumn.id);
         await onMoveTask?.(activeId, targetColumn.id, targetIndex);
       } else {
         // Task moved within same column
         const task = taskMap.get(activeId);
         if (task) {
-          const sortedTasks = sourceColumn.tasks.sort((a, b) => a.position - b.position);
+          const sortedTasks = [...sourceColumn.tasks].sort((a, b) => a.position - b.position);
           const currentIndex = sortedTasks.findIndex((t) => t.uuid === activeId);
 
           // Only update if position actually changed
           if (currentIndex !== targetIndex) {
+            console.log('[DnD] Moving task within column from', currentIndex, 'to', targetIndex);
             await onMoveTask?.(activeId, targetColumn.id, targetIndex);
+          } else {
+            console.log('[DnD] Position unchanged, skipping update');
           }
         }
       }
@@ -457,6 +503,8 @@ const KanbanBoard = memo(function KanbanBoard({
                   onEditColumn={onEditColumn}
                   onDeleteColumn={onDeleteColumn}
                   onAddTask={onAddTask}
+                  isDragOver={activeColumnId === `column-${column.uuid}`}
+                  isDragging={!!activeTask}
                 />
               ))}
 
@@ -465,10 +513,12 @@ const KanbanBoard = memo(function KanbanBoard({
             </div>
 
             {/* Drag Overlay - Shows the task being dragged */}
-            <DragOverlay dropAnimation={{
-              duration: 200,
-              easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-            }}>
+            <DragOverlay
+              dropAnimation={{
+                duration: 250,
+                easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+              }}
+            >
               {activeTask && (
                 <KanbanTaskCard
                   task={activeTask}
