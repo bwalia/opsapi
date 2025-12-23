@@ -18,3 +18,48 @@ export {
   formatDeploymentStatus,
   formatServiceStatus,
 } from './services.service';
+export {
+  notificationService,
+  getNotificationTypeLabel,
+  getNotificationPriorityColor,
+  getNotificationIcon,
+  formatNotificationTime,
+  groupNotificationsByDate,
+} from './notification.service';
+export {
+  timeTrackingService,
+  formatDuration,
+  formatDurationLong,
+  formatTimerDisplay,
+  calculateElapsedSeconds,
+  getTimeEntryStatusColor,
+  formatHourlyRate,
+  calculateBillableAmount,
+  formatTimesheetDate,
+  getWeekDates,
+  getMonthDates,
+} from './time-tracking.service';
+export {
+  sprintService,
+  getSprintStatusColor,
+  getSprintStatusLabel,
+  calculateSprintProgress,
+  calculateDaysRemaining,
+  calculateSprintDuration,
+  formatSprintDateRange,
+  calculateIdealBurndown,
+  calculateAverageVelocity,
+  predictSprintCompletion,
+} from './sprint.service';
+export {
+  analyticsService,
+  formatPercentage,
+  formatNumber,
+  getTrendIndicator,
+  getHealthScoreColor,
+  getHealthScoreLabel,
+  formatActivityAction,
+  getDateRange,
+  calculateAverageCycleTime,
+  getWorkloadLevel,
+} from './analytics.service';

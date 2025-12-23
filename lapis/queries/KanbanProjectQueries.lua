@@ -10,10 +10,114 @@ local KanbanProjectModel = require "models.KanbanProjectModel"
 local KanbanProjectMemberModel = require "models.KanbanProjectMemberModel"
 local KanbanBoardModel = require "models.KanbanBoardModel"
 local KanbanColumnModel = require "models.KanbanColumnModel"
+local ChatChannelQueries = require "queries.ChatChannelQueries"
+local ChatChannelMemberQueries = require "queries.ChatChannelMemberQueries"
+local NamespaceQueries = require "queries.NamespaceQueries"
 local Global = require "helper.global"
 local db = require("lapis.db")
 
 local KanbanProjectQueries = {}
+
+--------------------------------------------------------------------------------
+-- Internal Helper Functions for Chat Channel Integration
+--------------------------------------------------------------------------------
+
+--- Create a chat channel for a project
+-- @param project table The project
+-- @param owner_user_uuid string The owner's UUID
+-- @param namespace table The namespace object containing id and uuid
+-- @return table|nil Created channel or nil
+local function createProjectChatChannel(project, owner_user_uuid, namespace)
+    -- Create the channel with project name
+    -- chat_channels requires namespace_id (FK to namespaces) and uuid_business_id
+    local channel = ChatChannelQueries.create({
+        namespace_id = namespace.id,
+        uuid_business_id = namespace.uuid,
+        name = project.name,
+        description = "Chat channel for project: " .. project.name,
+        type = "private",
+        created_by = owner_user_uuid,
+        linked_task_uuid = project.uuid,
+        linked_task_id = project.id
+    })
+
+    if channel then
+        -- Add owner as channel admin (addMember expects channel_uuid)
+        ChatChannelMemberQueries.addMember(channel.uuid, owner_user_uuid, "admin")
+
+        -- Update project with chat channel UUID
+        project:update({
+            chat_channel_uuid = channel.uuid,
+            updated_at = db.raw("NOW()")
+        })
+
+        ngx.log(ngx.INFO, "[Kanban] Created chat channel ", channel.uuid, " for project ", project.uuid)
+    end
+
+    return channel
+end
+
+--- Add a user to the project's chat channel
+-- @param project_id number Project ID
+-- @param user_uuid string User UUID
+-- @param role string Member role in project (used to determine channel role)
+-- @return boolean Success
+local function addUserToProjectChannel(project_id, user_uuid, role)
+    -- Get project with chat channel
+    local project = KanbanProjectModel:find({ id = project_id })
+    if not project or not project.chat_channel_uuid then
+        return false
+    end
+
+    -- Get channel by UUID
+    local channel = ChatChannelQueries.show(project.chat_channel_uuid)
+    if not channel then
+        return false
+    end
+
+    -- Map project role to channel role
+    local channel_role = "member"
+    if role == "owner" or role == "admin" then
+        channel_role = "admin"
+    elseif role == "viewer" or role == "guest" then
+        channel_role = "viewer"
+    end
+
+    -- Add to channel (addMember expects channel_uuid)
+    local member, err = ChatChannelMemberQueries.addMember(channel.uuid, user_uuid, channel_role)
+    if member then
+        ngx.log(ngx.INFO, "[Kanban] Added user ", user_uuid, " to project channel ", channel.uuid)
+        return true
+    else
+        ngx.log(ngx.WARN, "[Kanban] Failed to add user to channel: ", err or "unknown error")
+        return false
+    end
+end
+
+--- Remove a user from the project's chat channel
+-- @param project_id number Project ID
+-- @param user_uuid string User UUID
+-- @return boolean Success
+local function removeUserFromProjectChannel(project_id, user_uuid)
+    -- Get project with chat channel
+    local project = KanbanProjectModel:find({ id = project_id })
+    if not project or not project.chat_channel_uuid then
+        return false
+    end
+
+    -- Get channel by UUID
+    local channel = ChatChannelQueries.show(project.chat_channel_uuid)
+    if not channel then
+        return false
+    end
+
+    -- Remove from channel (removeMember expects channel_uuid)
+    local success = ChatChannelMemberQueries.removeMember(channel.uuid, user_uuid)
+    if success then
+        ngx.log(ngx.INFO, "[Kanban] Removed user ", user_uuid, " from project channel ", channel.uuid)
+    end
+    return success
+end
 
 --------------------------------------------------------------------------------
 -- Project CRUD Operations
@@ -71,11 +175,11 @@ function KanbanProjectQueries.create(params)
         -- Create default columns
         if board then
             local default_columns = {
-                { name = "Backlog", position = 0, color = "#6B7280" },
-                { name = "To Do", position = 1, color = "#3B82F6" },
+                { name = "Backlog",     position = 0, color = "#6B7280" },
+                { name = "To Do",       position = 1, color = "#3B82F6" },
                 { name = "In Progress", position = 2, color = "#F59E0B" },
-                { name = "Review", position = 3, color = "#8B5CF6" },
-                { name = "Done", position = 4, color = "#10B981", is_done_column = true, auto_close_tasks = true }
+                { name = "Review",      position = 3, color = "#8B5CF6" },
+                { name = "Done",        position = 4, color = "#10B981", is_done_column = true, auto_close_tasks = true }
             }
 
             for _, col in ipairs(default_columns) do
@@ -91,6 +195,13 @@ function KanbanProjectQueries.create(params)
                     updated_at = db.raw("NOW()")
                 })
             end
+        end
+
+        -- Create chat channel for the project and add owner as admin
+        -- Get namespace for chat channel (requires both id and uuid)
+        local namespace = NamespaceQueries.show(params.namespace_id)
+        if namespace then
+            createProjectChatChannel(project, params.owner_user_uuid, namespace)
         end
     end
 
@@ -142,7 +253,7 @@ function KanbanProjectQueries.getByNamespace(namespace_id, params)
     table.insert(where_values, perPage)
     table.insert(where_values, offset)
 
-    local projects = db.query(sql, unpack(where_values))
+    local projects = db.query(sql, table.unpack(where_values))
 
     -- Count query
     local count_sql = string.format([[
@@ -155,7 +266,7 @@ function KanbanProjectQueries.getByNamespace(namespace_id, params)
         table.insert(count_values, where_values[i])
     end
 
-    local count_result = db.query(count_sql, unpack(count_values))
+    local count_result = db.query(count_sql, table.unpack(count_values))
     local total = count_result and count_result[1] and count_result[1].total or 0
 
     return {
@@ -407,16 +518,25 @@ function KanbanProjectQueries.addMember(project_id, user_uuid, role, invited_by)
         return nil, "User is already a member"
     end
 
-    return KanbanProjectMemberModel:create({
+    local member_role = role or "member"
+
+    local member = KanbanProjectMemberModel:create({
         uuid = Global.generateUUID(),
         project_id = project_id,
         user_uuid = user_uuid,
-        role = role or "member",
+        role = member_role,
         invited_by = invited_by,
         joined_at = db.raw("NOW()"),
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
+
+    -- Also add user to the project's chat channel
+    if member then
+        addUserToProjectChannel(project_id, user_uuid, member_role)
+    end
+
+    return member
 end
 
 --- Remove member from project
@@ -442,6 +562,9 @@ function KanbanProjectQueries.removeMember(project_id, user_uuid)
         left_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     })
+
+    -- Also remove user from the project's chat channel
+    removeUserFromProjectChannel(project_id, user_uuid)
 
     return true
 end
@@ -521,7 +644,8 @@ function KanbanProjectQueries.getStats(project_id)
         local stats = result[1]
         -- Calculate progress percentage
         if stats.task_count and tonumber(stats.task_count) > 0 then
-            stats.progress_percentage = math.floor((tonumber(stats.completed_task_count) / tonumber(stats.task_count)) * 100)
+            stats.progress_percentage = math.floor((tonumber(stats.completed_task_count) / tonumber(stats.task_count)) *
+                100)
         else
             stats.progress_percentage = 0
         end
