@@ -299,10 +299,14 @@ safe_load_routes("routes.namespaces") -- Namespace management, members, roles, s
 safe_load_routes("routes.services") -- Service management, secrets, deployments, GitHub workflows
 
 -- Kanban Project Management System (Integrated with Chat)
-safe_load_routes("routes.kanban-projects") -- Projects, members, starred
-safe_load_routes("routes.kanban-boards")   -- Boards, columns, reordering
-safe_load_routes("routes.kanban-tasks")    -- Tasks, assignments, comments, checklists, attachments
-safe_load_routes("routes.kanban-labels")   -- Project labels
+safe_load_routes("routes.kanban-projects")      -- Projects, members, starred
+safe_load_routes("routes.kanban-boards")        -- Boards, columns, reordering
+safe_load_routes("routes.kanban-tasks")         -- Tasks, assignments, comments, checklists, attachments
+safe_load_routes("routes.kanban-labels")        -- Project labels
+safe_load_routes("routes.kanban-sprints")       -- Sprint management, burndown, velocity
+safe_load_routes("routes.kanban-time-tracking") -- Time tracking, timers, timesheets
+safe_load_routes("routes.kanban-notifications") -- Notifications, preferences
+safe_load_routes("routes.kanban-analytics")     -- Project analytics, activity feed, reports
 
 -- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")

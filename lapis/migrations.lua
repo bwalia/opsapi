@@ -25,6 +25,7 @@ local namespace_system_migrations = require("migrations.namespace-system")
 local services_module_migrations = require("migrations.services-module")
 local chat_production_migrations = require("migrations.chat-system-production")
 local kanban_project_migrations = require("migrations.kanban-project-system")
+local kanban_enhancement_migrations = require("migrations.kanban-enhancements")
 
 return {
     ['01_create_users'] = function()
@@ -604,6 +605,20 @@ return {
     ['247_create_kanban_label_usage_trigger'] = kanban_project_migrations[38],
     ['248_create_kanban_board_count_triggers'] = kanban_project_migrations[39],
     ['249_create_kanban_comment_reply_trigger'] = kanban_project_migrations[40],
+
+    -- Kanban Project Enhancements (Time Tracking, Notifications, Sprint Burndown)
+    ['250_create_kanban_time_entries_table'] = kanban_enhancement_migrations[1],
+    ['251_add_kanban_time_entries_indexes'] = kanban_enhancement_migrations[2],
+    ['252_create_kanban_notifications_table'] = kanban_enhancement_migrations[3],
+    ['253_add_kanban_notifications_indexes'] = kanban_enhancement_migrations[4],
+    ['254_create_kanban_notification_preferences_table'] = kanban_enhancement_migrations[5],
+    ['255_create_kanban_project_activity_feed_view'] = kanban_enhancement_migrations[6],
+    ['256_create_kanban_sprint_burndown_table'] = kanban_enhancement_migrations[7],
+    ['257_add_sprint_retrospective_fields'] = kanban_enhancement_migrations[8],
+    ['258_create_task_time_spent_trigger'] = kanban_enhancement_migrations[9],
+    ['259_create_project_budget_spent_trigger'] = kanban_enhancement_migrations[10],
+    ['260_create_due_date_notification_function'] = kanban_enhancement_migrations[11],
+    ['261_kanban_enhancements_complete'] = kanban_enhancement_migrations[12],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()

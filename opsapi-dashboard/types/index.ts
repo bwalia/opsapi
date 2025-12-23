@@ -1376,3 +1376,534 @@ export interface DropResult {
   } | null;
   taskId: number;
 }
+
+// ============================================
+// Time Tracking Types
+// ============================================
+
+export type TimeEntryStatus = 'running' | 'logged' | 'approved' | 'invoiced' | 'rejected';
+
+export interface TimeEntry {
+  id: number;
+  uuid: string;
+  task_id: number;
+  user_uuid: string;
+  description?: string;
+  started_at: string;
+  ended_at?: string;
+  duration_minutes: number;
+  is_billable: boolean;
+  hourly_rate?: number;
+  billed_amount?: number;
+  invoice_id?: string;
+  status: TimeEntryStatus;
+  approved_by?: string;
+  approved_at?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string;
+  // Populated fields
+  task_uuid?: string;
+  task_title?: string;
+  task_number?: number;
+  board_name?: string;
+  project_name?: string;
+  project_uuid?: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  elapsed_minutes?: number; // For running timers
+}
+
+export interface RunningTimer extends TimeEntry {
+  elapsed_minutes: number;
+  task_uuid: string;
+  task_title: string;
+  task_number: number;
+  project_name: string;
+  project_uuid: string;
+}
+
+export interface TimesheetSummary {
+  total_minutes: number;
+  billable_minutes: number;
+  total_billed: number;
+  unique_users?: number;
+}
+
+export interface TimeReportByUser {
+  user_uuid: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  total_minutes: number;
+  billable_minutes: number;
+  total_billed: number;
+  entry_count: number;
+}
+
+// Time Tracking DTOs
+export interface CreateTimeEntryDto {
+  description?: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_minutes?: number;
+  is_billable?: boolean;
+  hourly_rate?: number;
+}
+
+export interface UpdateTimeEntryDto extends Partial<CreateTimeEntryDto> {}
+
+export interface StartTimerDto {
+  task_uuid: string;
+  description?: string;
+}
+
+export interface StopTimerDto {
+  description?: string;
+}
+
+export interface TimesheetParams {
+  page?: number;
+  perPage?: number;
+  start_date?: string;
+  end_date?: string;
+  project_id?: number;
+  status?: TimeEntryStatus;
+}
+
+export interface TimesheetResponse {
+  data: TimeEntry[];
+  summary: TimesheetSummary;
+  meta: {
+    total: number;
+    page: number;
+    perPage: number;
+  };
+}
+
+export interface TimeReportResponse extends TimesheetResponse {
+  user_breakdown?: TimeReportByUser[];
+}
+
+// ============================================
+// Notification Types
+// ============================================
+
+export type NotificationType =
+  | 'task_assigned'
+  | 'task_unassigned'
+  | 'task_commented'
+  | 'task_mentioned'
+  | 'task_completed'
+  | 'task_status_changed'
+  | 'task_due_soon'
+  | 'task_overdue'
+  | 'project_invited'
+  | 'project_removed'
+  | 'project_role_changed'
+  | 'sprint_started'
+  | 'sprint_ended'
+  | 'checklist_completed'
+  | 'comment_reply'
+  | 'comment_mentioned'
+  | 'general';
+
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent';
+export type DigestFrequency = 'instant' | 'hourly' | 'daily' | 'weekly';
+
+export interface KanbanNotification {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  recipient_user_uuid: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  action_url?: string;
+  project_id?: number;
+  task_id?: number;
+  comment_id?: number;
+  actor_user_uuid?: string;
+  is_read: boolean;
+  read_at?: string;
+  is_email_sent: boolean;
+  email_sent_at?: string;
+  is_push_sent: boolean;
+  push_sent_at?: string;
+  priority: NotificationPriority;
+  group_key?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  expires_at?: string;
+  deleted_at?: string;
+  // Populated fields
+  project_name?: string;
+  project_uuid?: string;
+  task_title?: string;
+  task_number?: number;
+  task_uuid?: string;
+  actor_first_name?: string;
+  actor_last_name?: string;
+}
+
+export interface NotificationPreferences {
+  id?: number;
+  user_uuid?: string;
+  project_id?: number;
+  email_enabled: boolean;
+  push_enabled: boolean;
+  in_app_enabled: boolean;
+  digest_frequency: DigestFrequency;
+  digest_hour: number;
+  digest_day: number;
+  quiet_hours_enabled: boolean;
+  quiet_hours_start?: number;
+  quiet_hours_end?: number;
+  timezone: string;
+  preferences: Record<NotificationType, boolean>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NotificationsResponse {
+  data: KanbanNotification[];
+  meta: {
+    total: number;
+    unread_count: number;
+    page: number;
+    perPage: number;
+  };
+}
+
+export interface UpdateNotificationPreferencesDto {
+  email_enabled?: boolean;
+  push_enabled?: boolean;
+  in_app_enabled?: boolean;
+  digest_frequency?: DigestFrequency;
+  digest_hour?: number;
+  digest_day?: number;
+  quiet_hours_enabled?: boolean;
+  quiet_hours_start?: number;
+  quiet_hours_end?: number;
+  timezone?: string;
+  preferences?: Record<NotificationType, boolean>;
+}
+
+// ============================================
+// Sprint Enhancement Types
+// ============================================
+
+export interface SprintBurndownPoint {
+  id: number;
+  sprint_id: number;
+  recorded_date: string;
+  total_points: number;
+  completed_points: number;
+  remaining_points: number;
+  total_tasks: number;
+  completed_tasks: number;
+  remaining_tasks: number;
+  added_points: number;
+  removed_points: number;
+  ideal_remaining: number;
+  created_at: string;
+}
+
+export interface SprintRetrospective {
+  what_went_well?: string[];
+  what_to_improve?: string[];
+  action_items?: string[];
+  notes?: string;
+}
+
+export interface KanbanSprintEnhanced extends KanbanSprint {
+  velocity?: number;
+  retrospective?: SprintRetrospective;
+  review_notes?: string;
+  // Enhanced stats from API
+  completed_count?: number;
+  // Board info
+  board_name?: string;
+  board_uuid?: string;
+  project_name?: string;
+  project_uuid?: string;
+}
+
+export interface SprintBurndownResponse {
+  sprint: {
+    uuid: string;
+    name: string;
+    start_date?: string;
+    end_date?: string;
+    total_points: number;
+    completed_points: number;
+  };
+  data_points: SprintBurndownPoint[];
+}
+
+export interface VelocityHistoryItem {
+  uuid: string;
+  name: string;
+  start_date?: string;
+  end_date?: string;
+  velocity?: number;
+  total_points: number;
+  completed_points: number;
+  task_count: number;
+  completed_task_count?: number;
+  status: KanbanSprintStatus;
+}
+
+export interface VelocityHistory {
+  sprints: VelocityHistoryItem[];
+  average_velocity: number;
+  sprint_count: number;
+}
+
+// Sprint DTOs
+export interface CreateSprintDto {
+  name: string;
+  goal?: string;
+  board_id?: number;
+  start_date?: string;
+  end_date?: string;
+}
+
+export interface UpdateSprintDto extends Partial<CreateSprintDto> {
+  retrospective?: SprintRetrospective;
+  review_notes?: string;
+}
+
+export interface CompleteSprintDto {
+  retrospective?: SprintRetrospective;
+}
+
+export interface AddTasksToSprintDto {
+  task_ids: number[];
+}
+
+// ============================================
+// Analytics Types
+// ============================================
+
+export interface ProjectAnalyticsStats {
+  tasks: {
+    total_tasks: number;
+    open_tasks: number;
+    in_progress_tasks: number;
+    blocked_tasks: number;
+    review_tasks: number;
+    completed_tasks: number;
+    cancelled_tasks: number;
+    overdue_tasks: number;
+    due_today_tasks: number;
+    total_points: number;
+    completed_points: number;
+  };
+  members: {
+    member_count: number;
+  };
+  boards: {
+    board_count: number;
+  };
+  sprints: {
+    total_sprints: number;
+    active_sprints: number;
+    completed_sprints: number;
+    avg_velocity?: number;
+  };
+  time: {
+    total_minutes: number;
+    billable_minutes: number;
+    total_billed: number;
+  };
+  budget: {
+    budget: number;
+    budget_spent: number;
+    budget_currency: BudgetCurrency;
+  };
+  progress_percentage: number;
+}
+
+export interface CompletionTrendPoint {
+  date: string;
+  completed_count: number;
+  completed_points: number;
+  created_count: number;
+}
+
+export interface CompletionTrendResponse {
+  days: number;
+  trend: CompletionTrendPoint[];
+}
+
+export interface PriorityDistribution {
+  priority: KanbanTaskPriority;
+  count: number;
+  active_count: number;
+}
+
+export interface TeamWorkloadMember {
+  user_uuid: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  role: KanbanMemberRole;
+  assigned_tasks: number;
+  active_tasks: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  overdue_tasks: number;
+  total_points: number;
+  completed_points: number;
+}
+
+export interface MemberActivityPoint {
+  date: string;
+  activity_count: number;
+  completed_count: number;
+  comment_count: number;
+  time_spent_minutes: number;
+}
+
+export interface MemberActivityResponse {
+  user_uuid: string;
+  days: number;
+  activity: MemberActivityPoint[];
+}
+
+export interface CycleTimeByColumn {
+  column_name: string;
+  column_color?: string;
+  position: number;
+  avg_hours_to_complete: number;
+  avg_time_minutes: number;
+  task_count: number;
+}
+
+export interface CycleTimeByPriority {
+  priority: KanbanTaskPriority;
+  avg_hours: number;
+  min_hours: number;
+  max_hours: number;
+  task_count: number;
+}
+
+export interface CycleTimeResponse {
+  by_column: CycleTimeByColumn[];
+  by_priority: CycleTimeByPriority[];
+}
+
+export interface ProjectActivity {
+  id: number;
+  uuid: string;
+  task_id: number;
+  user_uuid: string;
+  action: string;
+  entity_type?: string;
+  entity_id?: number;
+  old_value?: string;
+  new_value?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  task_uuid: string;
+  task_title: string;
+  task_number: number;
+  board_uuid: string;
+  board_name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+}
+
+export interface ActivityFeedResponse {
+  data: ProjectActivity[];
+  meta: {
+    total: number;
+    page: number;
+    perPage: number;
+  };
+}
+
+export interface ActivitySummary {
+  by_action: Array<{
+    action: string;
+    count: number;
+  }>;
+  active_users: Array<{
+    user_uuid: string;
+    first_name: string;
+    last_name: string;
+    activity_count: number;
+  }>;
+  total_activities: number;
+  hours: number;
+}
+
+export interface LabelStats {
+  uuid: string;
+  name: string;
+  color: string;
+  usage_count: number;
+  active_task_count: number;
+  open_task_count: number;
+}
+
+// ============================================
+// WebSocket Event Types
+// ============================================
+
+export type WebSocketEventType =
+  | 'notification:new'
+  | 'notification:read'
+  | 'notification:count_updated'
+  | 'task:updated'
+  | 'task:created'
+  | 'task:deleted'
+  | 'task:moved'
+  | 'comment:new'
+  | 'timer:started'
+  | 'timer:stopped'
+  | 'sprint:started'
+  | 'sprint:completed'
+  | 'project:updated'
+  | 'member:joined'
+  | 'member:left'
+  | 'ping'
+  | 'pong';
+
+export interface WebSocketMessage<T = unknown> {
+  type: WebSocketEventType | string;
+  data?: T;
+  payload?: T;
+  timestamp?: string;
+  namespace_id?: number;
+  project_id?: number;
+  user_uuid?: string;
+}
+
+export interface NotificationNewEvent {
+  notification: KanbanNotification;
+}
+
+export interface NotificationCountEvent {
+  unread_count: number;
+}
+
+export interface TaskUpdateEvent {
+  task: KanbanTask;
+  action: 'created' | 'updated' | 'deleted' | 'moved';
+  old_column_id?: number;
+  new_column_id?: number;
+}
+
+export interface TimerEvent {
+  time_entry: TimeEntry;
+  task: {
+    uuid: string;
+    title: string;
+    task_number: number;
+  };
+}
