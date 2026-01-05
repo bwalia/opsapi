@@ -1,5 +1,27 @@
 import { apiClient, toFormData, AUTH_TOKEN_KEY, AUTH_USER_KEY, clearAllAuthStorage } from '@/lib/api-client';
-import type { LoginCredentials, LoginResponse, User } from '@/types';
+import type { LoginCredentials, LoginResponse, User, NamespacePermissions } from '@/types';
+
+/**
+ * Decode JWT payload (base64url)
+ */
+function decodeJWTPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    // Base64url decode
+    let payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    // Add padding
+    while (payload.length % 4) {
+      payload += '=';
+    }
+
+    const decoded = atob(payload);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Authentication Service
@@ -23,6 +45,27 @@ export const authService = {
     // Store token and user in localStorage
     if (data.token) {
       this.setToken(data.token);
+
+      // Decode JWT to extract namespace permissions
+      const jwtPayload = decodeJWTPayload(data.token);
+      if (jwtPayload?.userinfo) {
+        const userinfo = jwtPayload.userinfo as {
+          namespace?: {
+            id?: number;
+            uuid?: string;
+            name?: string;
+            slug?: string;
+            is_owner?: boolean;
+            role?: string;
+            permissions?: NamespacePermissions;
+          };
+        };
+
+        // Merge namespace info with user object so it's available in the auth store
+        if (userinfo.namespace && data.user) {
+          (data.user as User & { namespace?: typeof userinfo.namespace }).namespace = userinfo.namespace;
+        }
+      }
     }
     if (data.user) {
       this.setUser(data.user);

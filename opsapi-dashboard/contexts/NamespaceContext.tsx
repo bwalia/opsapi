@@ -103,15 +103,27 @@ export function NamespaceProvider({ children }: NamespaceProviderProps) {
     if (user && _hasHydrated && !currentNamespace) {
       // Check if user has namespace info from JWT (set during login)
       const userAny = user as unknown as {
-        namespace?: { uuid: string; name: string; slug: string; is_owner?: boolean };
+        namespace?: {
+          uuid: string;
+          name: string;
+          slug: string;
+          id?: number;
+          is_owner?: boolean;
+          role?: string;
+          permissions?: NamespacePermissions;
+        };
         namespace_settings?: UserNamespaceSettings;
       };
 
       if (userAny.namespace) {
+        // Extract permissions from the JWT namespace object
+        const namespacePermissions = userAny.namespace.permissions || null;
+        const isOwner = userAny.namespace.is_owner || userAny.namespace.role === 'owner' || false;
+
         setCurrentNamespace(
           userAny.namespace as Namespace,
-          null,
-          userAny.namespace.is_owner || false
+          namespacePermissions,
+          isOwner
         );
       }
 

@@ -9,11 +9,16 @@ local bcrypt = require("bcrypt")
 local UserQueries = {}
 
 function UserQueries.create(params)
+    local db = require("lapis.db")
     local userData = params
     -- Validate the user data
     Validation.createUser(userData)
     local role = params.role
+    local namespace_id = params.namespace_id  -- Optional: specific namespace to add user to
+    local namespace_role = params.namespace_role  -- Optional: role within namespace
     userData.role = nil
+    userData.namespace_id = nil
+    userData.namespace_role = nil
     if userData.uuid == nil then
         userData.uuid = Global.generateUUID()
     end
@@ -24,7 +29,70 @@ function UserQueries.create(params)
     })
     user.password = nil
 
+    -- Add global role (legacy system)
     UserRolesQueries.addRole(user.id, role)
+
+    -- Auto-add user to a namespace
+    local target_namespace_id = namespace_id
+    if not target_namespace_id then
+        -- Default to "System" namespace
+        local system_ns = db.select("id FROM namespaces WHERE slug = ?", "system")
+        if system_ns and #system_ns > 0 then
+            target_namespace_id = system_ns[1].id
+        end
+    end
+
+    if target_namespace_id then
+        -- Check if not already a member
+        local existing = db.select("id FROM namespace_members WHERE namespace_id = ? AND user_id = ?", target_namespace_id, user.id)
+        if not existing or #existing == 0 then
+            -- Add user as member
+            local member_uuid = Global.generateUUID()
+            local timestamp = os.date("!%Y-%m-%d %H:%M:%S")
+
+            db.insert("namespace_members", {
+                uuid = member_uuid,
+                namespace_id = target_namespace_id,
+                user_id = user.id,
+                status = "active",
+                is_owner = false,
+                joined_at = timestamp,
+                created_at = timestamp,
+                updated_at = timestamp
+            })
+
+            -- Get the member record
+            local member = db.select("id FROM namespace_members WHERE uuid = ?", member_uuid)
+            if member and #member > 0 then
+                -- Assign role (default to "member" if not specified)
+                local role_name = namespace_role or "member"
+                local ns_role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", target_namespace_id, role_name)
+
+                if ns_role and #ns_role > 0 then
+                    db.insert("namespace_user_roles", {
+                        uuid = Global.generateUUID(),
+                        namespace_member_id = member[1].id,
+                        namespace_role_id = ns_role[1].id,
+                        created_at = timestamp,
+                        updated_at = timestamp
+                    })
+                end
+
+                -- Create user namespace settings
+                local settings_exist = db.select("id FROM user_namespace_settings WHERE user_id = ?", user.id)
+                if not settings_exist or #settings_exist == 0 then
+                    db.insert("user_namespace_settings", {
+                        user_id = user.id,
+                        default_namespace_id = target_namespace_id,
+                        last_active_namespace_id = target_namespace_id,
+                        created_at = timestamp,
+                        updated_at = timestamp
+                    })
+                end
+            end
+        end
+    end
+
     return user
 end
 
@@ -115,9 +183,9 @@ function UserQueries.showDetailed(id)
     for _, membership in ipairs(memberships or {}) do
         local roles = db.query([[
             SELECT nr.id, nr.role_name, nr.display_name
-            FROM namespace_member_roles nmr
-            JOIN namespace_roles nr ON nmr.namespace_role_id = nr.id
-            WHERE nmr.namespace_member_id = ?
+            FROM namespace_user_roles nur
+            JOIN namespace_roles nr ON nur.namespace_role_id = nr.id
+            WHERE nur.namespace_member_id = ?
         ]], membership.membership_id)
         membership.roles = roles or {}
     end

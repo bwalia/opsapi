@@ -27,33 +27,33 @@ import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { RoleBadge } from '@/components/permissions';
-import type { DashboardModule } from '@/types';
+import type { DashboardModule, NamespaceModule } from '@/types';
 
 interface NavItem {
   name: string;
   href: string;
   icon: React.ElementType;
   badge?: number;
-  module?: DashboardModule; // Permission module to check
+  module?: DashboardModule | NamespaceModule; // Permission module to check
   adminOnly?: boolean; // Show only for admins
+  alwaysShow?: boolean; // Always show regardless of permissions (e.g., namespace workspace)
 }
 
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
-  { name: 'My Workspace', href: '/dashboard/namespace', icon: Building2 },
+  { name: 'My Workspace', href: '/dashboard/namespace', icon: Building2, module: 'namespace', alwaysShow: true },
   { name: 'All Namespaces', href: '/dashboard/namespaces', icon: Building2, module: 'namespaces', adminOnly: true },
-  { name: 'Projects', href: '/dashboard/projects', icon: Kanban },
-  { name: 'Services', href: '/dashboard/services', icon: Rocket },
+  { name: 'Projects', href: '/dashboard/projects', icon: Kanban, module: 'projects' },
+  { name: 'Services', href: '/dashboard/services', icon: Rocket, module: 'services' },
   { name: 'Users', href: '/dashboard/users', icon: Users, module: 'users' },
-  { name: 'Roles', href: '/dashboard/roles', icon: Shield, module: 'roles', adminOnly: true },
+  { name: 'Roles', href: '/dashboard/roles', icon: Shield, module: 'roles' },
   { name: 'Orders', href: '/dashboard/orders', icon: ShoppingCart, module: 'orders' },
   { name: 'Products', href: '/dashboard/products', icon: Package, module: 'products' },
   { name: 'Stores', href: '/dashboard/stores', icon: Store, module: 'stores' },
   { name: 'Customers', href: '/dashboard/customers', icon: UserCircle, module: 'customers' },
-  { name: 'Delivery', href: '/dashboard/delivery', icon: Truck },
-  { name: 'Chat', href: '/dashboard/chat', icon: MessageSquare },
-  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
-  { name: 'Documents', href: '/dashboard/documents', icon: FileText },
+  { name: 'Delivery', href: '/dashboard/delivery', icon: Truck, module: 'delivery' },
+  { name: 'Chat', href: '/dashboard/chat', icon: MessageSquare, module: 'chat' },
+  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, module: 'reports' },
 ];
 
 const secondaryNavigation: NavItem[] = [
@@ -127,6 +127,9 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
     return navigation.filter((item) => {
       // Admin-only items
       if (item.adminOnly && !isAdmin) return false;
+
+      // Items marked as alwaysShow are always visible
+      if (item.alwaysShow) return true;
 
       // Items without module requirement are always shown
       if (!item.module) return true;

@@ -715,5 +715,35 @@ return {
         -- Models created: KanbanTimeEntryModel, KanbanNotificationModel,
         -- KanbanNotificationPreferenceModel, KanbanSprintBurndownModel
         print("[Migration] Kanban enhancements migration completed.")
+    end,
+
+    -- ========================================
+    -- [13] Fix nullable FK columns with DEFAULT 0
+    -- ========================================
+    [13] = function()
+        -- Fix nullable FK columns that incorrectly have DEFAULT 0
+        -- This causes FK constraint violations when inserting without providing a value
+        -- because 0 is used as the default, but 0 doesn't exist in the referenced table
+
+        local columns_to_fix = {
+            { table = "kanban_task_comments", column = "parent_comment_id" },
+            { table = "kanban_notification_preferences", column = "project_id" },
+            { table = "kanban_notifications", column = "comment_id" },
+            { table = "kanban_notifications", column = "project_id" },
+            { table = "kanban_notifications", column = "task_id" },
+            { table = "kanban_sprints", column = "board_id" },
+            { table = "kanban_task_activities", column = "entity_id" },
+        }
+
+        for _, fix in ipairs(columns_to_fix) do
+            pcall(function()
+                db.query(string.format(
+                    "ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT",
+                    fix.table, fix.column
+                ))
+            end)
+        end
+
+        print("[Migration] Fixed nullable FK columns with DEFAULT 0")
     end
 }

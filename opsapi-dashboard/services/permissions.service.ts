@@ -243,6 +243,26 @@ export const DASHBOARD_MODULES: { value: DashboardModule; label: string; icon: s
 ];
 
 /**
+ * Namespace-specific modules for permission configuration
+ */
+export const NAMESPACE_MODULES: { value: string; label: string; icon: string; description: string }[] = [
+  { value: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', description: 'Main dashboard and analytics' },
+  { value: 'users', label: 'Users', icon: 'Users', description: 'User management within namespace' },
+  { value: 'roles', label: 'Roles', icon: 'Shield', description: 'Role management within namespace' },
+  { value: 'stores', label: 'Stores', icon: 'Store', description: 'Store management' },
+  { value: 'products', label: 'Products', icon: 'Package', description: 'Product catalog management' },
+  { value: 'orders', label: 'Orders', icon: 'ShoppingCart', description: 'Order processing' },
+  { value: 'customers', label: 'Customers', icon: 'UserCheck', description: 'Customer management' },
+  { value: 'settings', label: 'Settings', icon: 'Settings', description: 'Namespace settings' },
+  { value: 'namespace', label: 'Namespace', icon: 'Building2', description: 'Namespace administration' },
+  { value: 'services', label: 'Services', icon: 'Rocket', description: 'Service deployment and management' },
+  { value: 'chat', label: 'Chat', icon: 'MessageCircle', description: 'Chat and messaging' },
+  { value: 'delivery', label: 'Delivery', icon: 'Truck', description: 'Delivery partners management' },
+  { value: 'reports', label: 'Reports', icon: 'BarChart', description: 'Analytics and reports' },
+  { value: 'projects', label: 'Projects', icon: 'Kanban', description: 'Kanban projects and tasks' },
+];
+
+/**
  * All available permission actions
  */
 export const PERMISSION_ACTIONS: { value: PermissionAction; label: string }[] = [

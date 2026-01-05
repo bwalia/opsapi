@@ -1,12 +1,13 @@
 'use client';
 
 import React, { memo, ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import type { DashboardModule, PermissionAction } from '@/types';
-import { Lock } from 'lucide-react';
+import type { DashboardModule, NamespaceModule, PermissionAction } from '@/types';
+import { Lock, ShieldOff, ArrowLeft } from 'lucide-react';
 
 interface PermissionGateProps {
-  module: DashboardModule;
+  module: DashboardModule | NamespaceModule;
   action?: PermissionAction;
   children: ReactNode;
   fallback?: ReactNode;
@@ -130,6 +131,75 @@ export const RequireAdmin: React.FC<{
   }
 
   return fallback ? <>{fallback}</> : null;
+});
+
+/**
+ * Access Denied page component - shown when user lacks permission to view a page
+ */
+export const AccessDenied: React.FC<{
+  title?: string;
+  message?: string;
+}> = memo(function AccessDenied({
+  title = 'Access Denied',
+  message = "You don't have permission to access this page.",
+}) {
+  const router = useRouter();
+
+  return (
+    <div className="min-h-[400px] flex items-center justify-center p-8">
+      <div className="text-center max-w-md">
+        <div className="w-16 h-16 mx-auto mb-6 bg-error-100 rounded-full flex items-center justify-center">
+          <ShieldOff className="w-8 h-8 text-error-600" />
+        </div>
+        <h2 className="text-xl font-semibold text-secondary-900 mb-2">{title}</h2>
+        <p className="text-secondary-600 mb-6">{message}</p>
+        <button
+          onClick={() => router.push('/dashboard')}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Protected page wrapper - redirects/shows access denied if user lacks module access
+ */
+export const ProtectedPage: React.FC<{
+  module: DashboardModule | NamespaceModule;
+  action?: PermissionAction;
+  children: ReactNode;
+  title?: string;
+}> = memo(function ProtectedPage({ module, action, children, title }) {
+  const { hasPermission, canAccess, isLoading } = usePermissions();
+
+  // Show loading skeleton while checking permissions
+  if (isLoading) {
+    return (
+      <div className="animate-pulse space-y-4 p-6">
+        <div className="h-8 bg-secondary-200 rounded w-1/4"></div>
+        <div className="h-4 bg-secondary-200 rounded w-1/2"></div>
+        <div className="h-64 bg-secondary-200 rounded"></div>
+      </div>
+    );
+  }
+
+  // Check permission
+  const hasAccess = action ? hasPermission(module, action) : canAccess(module);
+
+  if (!hasAccess) {
+    return (
+      <AccessDenied
+        title={title ? `Cannot Access ${title}` : undefined}
+        message={`You don't have permission to access the ${module} module. Contact your administrator to request access.`}
+      />
+    );
+  }
+
+  return <>{children}</>;
 });
 
 export default PermissionGate;

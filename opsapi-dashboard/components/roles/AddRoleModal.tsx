@@ -72,8 +72,11 @@ const AddRoleModal: React.FC<AddRoleModalProps> = memo(function AddRoleModal({
 
       setIsSubmitting(true);
       try {
+        // Use role_name for namespace-specific roles API
+        const roleName = formData.name.toLowerCase().replace(/\s+/g, '_');
         await rolesService.createRole({
-          name: formData.name.toLowerCase().replace(/\s+/g, '_'),
+          role_name: roleName,
+          display_name: formData.name.charAt(0).toUpperCase() + formData.name.slice(1),
           description: formData.description || undefined,
         });
 

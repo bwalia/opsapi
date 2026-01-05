@@ -5,8 +5,8 @@ export { storesService } from './stores.service';
 export { productsService } from './products.service';
 export { customersService } from './customers.service';
 export { dashboardService } from './dashboard.service';
-export { rolesService, formatRoleName, getRoleColor } from './roles.service';
-export { permissionsService, DASHBOARD_MODULES, PERMISSION_ACTIONS } from './permissions.service';
+export { rolesService, formatRoleName, getRoleColor, type NamespaceRole, type CreateRoleData, type UpdateRoleData } from './roles.service';
+export { permissionsService, DASHBOARD_MODULES, NAMESPACE_MODULES, PERMISSION_ACTIONS } from './permissions.service';
 export { modulesService } from './modules.service';
 export { namespaceService } from './namespace.service';
 export {

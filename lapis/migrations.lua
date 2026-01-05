@@ -619,6 +619,7 @@ return {
     ['259_create_project_budget_spent_trigger'] = kanban_enhancement_migrations[10],
     ['260_create_due_date_notification_function'] = kanban_enhancement_migrations[11],
     ['261_kanban_enhancements_complete'] = kanban_enhancement_migrations[12],
+    ['262_fix_kanban_nullable_fk_defaults'] = kanban_enhancement_migrations[13],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()

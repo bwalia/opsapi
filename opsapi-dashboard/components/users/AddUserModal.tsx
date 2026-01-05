@@ -4,10 +4,9 @@ import React, { useState, useCallback, useEffect, memo } from 'react';
 import Modal from '@/components/ui/Modal';
 import { Input, Button } from '@/components/ui';
 import { User, Mail, Lock, Phone, MapPin, Shield, ChevronDown } from 'lucide-react';
-import { usersService, rolesService, formatRoleName, getRoleColor } from '@/services';
+import { usersService, rolesService, formatRoleName, getRoleColor, type NamespaceRole } from '@/services';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import type { Role } from '@/types';
 
 export interface AddUserModalProps {
   isOpen: boolean;
@@ -54,7 +53,7 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
   const [formData, setFormData] = useState<FormData>(initialFormData);
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles, setRoles] = useState<NamespaceRole[]>([]);
   const [isLoadingRoles, setIsLoadingRoles] = useState(false);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
 
