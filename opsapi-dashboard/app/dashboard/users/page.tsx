@@ -12,14 +12,14 @@ import {
   ConfirmDialog,
 } from "@/components/ui";
 import { AddUserModal } from "@/components/users";
-import { RoleBadge } from "@/components/permissions";
+import { RoleBadge, ProtectedPage } from "@/components/permissions";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { usersService } from "@/services";
 import { formatDate, getInitials, getFullName } from "@/lib/utils";
 import type { User, TableColumn, PaginatedResponse } from "@/types";
 import toast from "react-hot-toast";
 
-export default function UsersPage() {
+function UsersPageContent() {
   const { canCreate, canUpdate, canDelete } = usePermissions();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -278,5 +278,13 @@ export default function UsersPage() {
         onSuccess={fetchUsers}
       />
     </div>
+  );
+}
+
+export default function UsersPage() {
+  return (
+    <ProtectedPage module="users" title="Users">
+      <UsersPageContent />
+    </ProtectedPage>
   );
 }

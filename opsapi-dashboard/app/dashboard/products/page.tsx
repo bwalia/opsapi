@@ -3,12 +3,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Package } from 'lucide-react';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
+import { ProtectedPage } from '@/components/permissions';
 import { productsService } from '@/services';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import type { StoreProduct, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
-export default function ProductsPage() {
+function ProductsPageContent() {
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -275,5 +276,13 @@ export default function ProductsPage() {
         isLoading={isDeleting}
       />
     </div>
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <ProtectedPage module="products" title="Products">
+      <ProductsPageContent />
+    </ProtectedPage>
   );
 }

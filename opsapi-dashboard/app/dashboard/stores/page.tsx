@@ -3,12 +3,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Store as StoreIcon, MapPin, Phone, Mail } from 'lucide-react';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
+import { ProtectedPage } from '@/components/permissions';
 import { storesService } from '@/services';
 import { formatDate } from '@/lib/utils';
 import type { Store, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
-export default function StoresPage() {
+function StoresPageContent() {
   const [stores, setStores] = useState<Store[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -295,5 +296,13 @@ export default function StoresPage() {
         isLoading={isDeleting}
       />
     </div>
+  );
+}
+
+export default function StoresPage() {
+  return (
+    <ProtectedPage module="stores" title="Stores">
+      <StoresPageContent />
+    </ProtectedPage>
   );
 }

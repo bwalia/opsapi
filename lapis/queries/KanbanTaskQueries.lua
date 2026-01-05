@@ -633,8 +633,27 @@ function KanbanTaskQueries.getComments(task_id, params)
 
     local comments = db.query(sql, task_id, perPage, offset)
 
+    -- Transform to include nested user object for frontend compatibility
+    local function transform_comment(comment)
+        comment.user = {
+            uuid = comment.user_uuid,
+            first_name = comment.first_name,
+            last_name = comment.last_name,
+            email = comment.email,
+            username = comment.username
+        }
+        -- Clean up flat user fields
+        comment.first_name = nil
+        comment.last_name = nil
+        comment.email = nil
+        comment.username = nil
+        return comment
+    end
+
     -- Get replies for each comment
     for _, comment in ipairs(comments) do
+        transform_comment(comment)
+
         local replies_sql = [[
             SELECT c.*, u.email, u.first_name, u.last_name, u.username
             FROM kanban_task_comments c
@@ -642,7 +661,11 @@ function KanbanTaskQueries.getComments(task_id, params)
             WHERE c.parent_comment_id = ? AND c.deleted_at IS NULL
             ORDER BY c.created_at ASC
         ]]
-        comment.replies = db.query(replies_sql, comment.id)
+        local replies = db.query(replies_sql, comment.id)
+        for _, reply in ipairs(replies) do
+            transform_comment(reply)
+        end
+        comment.replies = replies
     end
 
     local count_sql = [[
@@ -667,10 +690,25 @@ function KanbanTaskQueries.addComment(params)
         params.uuid = Global.generateUUID()
     end
 
+    -- Clean up parent_comment_id to avoid FK violation
+    -- If it's 0, empty, or nil, set to nil so it's not included in INSERT
+    if params.parent_comment_id == nil or params.parent_comment_id == ""
+       or params.parent_comment_id == 0 or params.parent_comment_id == "0" then
+        params.parent_comment_id = nil
+    end
+
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
 
-    local comment = KanbanTaskCommentModel:create(params, { returning = "*" })
+    -- Build clean params excluding nil values
+    local clean_params = {}
+    for k, v in pairs(params) do
+        if v ~= nil then
+            clean_params[k] = v
+        end
+    end
+
+    local comment = KanbanTaskCommentModel:create(clean_params, { returning = "*" })
 
     if comment then
         -- Log activity

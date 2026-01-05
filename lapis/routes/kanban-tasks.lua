@@ -293,7 +293,7 @@ return function(app)
         end
 
         -- Get additional details
-        task.comments_preview = KanbanTaskQueries.getComments(task.id, { perPage = 5 }).data
+        task.comments = KanbanTaskQueries.getComments(task.id, { perPage = 50 }).data
         task.attachments = KanbanTaskQueries.getAttachments(task.id)
 
         return api_response(200, task)

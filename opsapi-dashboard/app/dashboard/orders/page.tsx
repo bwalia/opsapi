@@ -11,13 +11,13 @@ import {
   TrendingUp,
   Clock,
   CheckCircle,
-  XCircle,
   Truck,
   RefreshCw,
   X,
   ChevronDown,
 } from 'lucide-react';
 import { Input, Table, Badge, Pagination, Card, Modal } from '@/components/ui';
+import { ProtectedPage } from '@/components/permissions';
 import { ordersService, type OrderFilters, type OrderStats, type StoreOption } from '@/services/orders.service';
 import { formatDate, formatCurrency, getFullName } from '@/lib/utils';
 import type { Order, TableColumn, OrderStatus, PaymentStatus } from '@/types';
@@ -271,7 +271,7 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, isOpen, on
   );
 };
 
-export default function OrdersPage() {
+function OrdersPageContent() {
   // State
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -777,5 +777,13 @@ export default function OrdersPage() {
         isAdmin={isAdmin}
       />
     </div>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <ProtectedPage module="orders" title="Orders">
+      <OrdersPageContent />
+    </ProtectedPage>
   );
 }

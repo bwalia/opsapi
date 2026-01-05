@@ -615,7 +615,7 @@ function NamespaceQueries.createWithOwner(user_id, data)
             role_name = "owner",
             display_name = "Owner",
             description = "Full control over the namespace",
-            permissions = '{"dashboard":["create","read","update","delete","manage"],"users":["create","read","update","delete","manage"],"roles":["create","read","update","delete","manage"],"stores":["create","read","update","delete","manage"],"products":["create","read","update","delete","manage"],"orders":["create","read","update","delete","manage"],"customers":["create","read","update","delete","manage"],"settings":["create","read","update","delete","manage"],"namespace":["create","read","update","delete","manage"],"chat":["create","read","update","delete","manage"],"delivery":["create","read","update","delete","manage"],"reports":["create","read","update","delete","manage"]}',
+            permissions = '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["manage"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
             is_system = true,
             is_default = false,
             priority = 100
@@ -623,8 +623,8 @@ function NamespaceQueries.createWithOwner(user_id, data)
         {
             role_name = "admin",
             display_name = "Administrator",
-            description = "Full administrative access",
-            permissions = '{"dashboard":["create","read","update","delete","manage"],"users":["create","read","update","delete"],"roles":["create","read","update","delete"],"stores":["create","read","update","delete","manage"],"products":["create","read","update","delete","manage"],"orders":["create","read","update","delete","manage"],"customers":["create","read","update","delete","manage"],"settings":["create","read","update","delete"],"namespace":["read","update"],"chat":["create","read","update","delete","manage"],"delivery":["create","read","update","delete","manage"],"reports":["read","manage"]}',
+            description = "Full administrative access except namespace ownership",
+            permissions = '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["read"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
             is_system = true,
             is_default = false,
             priority = 90
@@ -632,17 +632,17 @@ function NamespaceQueries.createWithOwner(user_id, data)
         {
             role_name = "manager",
             display_name = "Manager",
-            description = "Manage daily operations",
-            permissions = '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["create","read","update"],"products":["create","read","update","delete"],"orders":["create","read","update"],"customers":["create","read","update"],"settings":["read"],"namespace":["read"],"chat":["create","read","update"],"delivery":["read","update"],"reports":["read"]}',
-            is_system = true,
+            description = "Manage daily operations - stores, products, orders, and customers",
+            permissions = '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["read"],"namespace":[],"services":["read"],"chat":["manage"],"delivery":["manage"],"reports":["read"],"projects":["manage"]}',
+            is_system = false,
             is_default = false,
             priority = 50
         },
         {
             role_name = "member",
             display_name = "Member",
-            description = "Standard member access",
-            permissions = '{"dashboard":["read"],"stores":["read"],"products":["read"],"orders":["read"],"customers":["read"],"chat":["read"]}',
+            description = "Standard member access - view and participate in projects",
+            permissions = '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["read"],"products":["read"],"orders":["read"],"customers":["read"],"settings":[],"namespace":[],"services":["read"],"chat":["create","read"],"delivery":["read"],"reports":["read"],"projects":["create","read","update"]}',
             is_system = true,
             is_default = true,
             priority = 20
@@ -650,9 +650,9 @@ function NamespaceQueries.createWithOwner(user_id, data)
         {
             role_name = "viewer",
             display_name = "Viewer",
-            description = "Read-only access",
-            permissions = '{"dashboard":["read"],"stores":["read"],"products":["read"],"orders":["read"]}',
-            is_system = true,
+            description = "Read-only access to all content",
+            permissions = '{"dashboard":["read"],"users":[],"roles":[],"stores":["read"],"products":["read"],"orders":["read"],"customers":[],"settings":[],"namespace":[],"services":["read"],"chat":["read"],"delivery":[],"reports":["read"],"projects":["read"]}',
+            is_system = false,
             is_default = false,
             priority = 10
         }

@@ -59,10 +59,30 @@ export interface LoginCredentials {
   password: string;
 }
 
+export interface LoginNamespace {
+  id: number;
+  uuid: string;
+  name: string;
+  slug: string;
+  is_owner?: boolean;
+  role?: string;
+  permissions?: NamespacePermissions;
+}
+
 export interface LoginResponse {
   token: string;
   user: User;
   message?: string;
+  namespaces?: Array<{
+    id: number;
+    uuid: string;
+    name: string;
+    slug: string;
+    is_owner?: boolean;
+    status?: string;
+    member_status?: string;
+  }>;
+  current_namespace?: LoginNamespace;
 }
 
 // ============================================
@@ -499,9 +519,10 @@ export type NamespaceModule =
   | 'chat'
   | 'delivery'
   | 'reports'
-  | 'services';
+  | 'services'
+  | 'projects';
 
-export type NamespacePermissions = Record<NamespaceModule, PermissionAction[]>;
+export type NamespacePermissions = Partial<Record<NamespaceModule, PermissionAction[]>>;
 
 export interface NamespaceInvitation {
   id: number;

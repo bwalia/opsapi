@@ -10,17 +10,17 @@ import {
   Card,
   ConfirmDialog,
 } from "@/components/ui";
-import { RoleBadge } from "@/components/permissions";
+import { RoleBadge, ProtectedPage } from "@/components/permissions";
 import { AddRoleModal, EditRolePermissionsModal } from "@/components/roles";
 import { usePermissions } from "@/contexts/PermissionsContext";
-import { rolesService } from "@/services";
+import { rolesService, type NamespaceRole } from "@/services";
 import { formatDate } from "@/lib/utils";
-import type { Role, TableColumn, PaginatedResponse } from "@/types";
+import type { TableColumn, PaginatedResponse } from "@/types";
 import toast from "react-hot-toast";
 
-export default function RolesPage() {
+function RolesPageContent() {
   const { canCreate, canUpdate, canDelete, isAdmin } = usePermissions();
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles, setRoles] = useState<NamespaceRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -29,11 +29,11 @@ export default function RolesPage() {
   const [sortColumn, setSortColumn] = useState("created_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
+  const [roleToDelete, setRoleToDelete] = useState<NamespaceRole | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [addRoleModalOpen, setAddRoleModalOpen] = useState(false);
   const [editPermissionsModalOpen, setEditPermissionsModalOpen] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [selectedRole, setSelectedRole] = useState<NamespaceRole | null>(null);
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -42,7 +42,7 @@ export default function RolesPage() {
     const fetchId = ++fetchIdRef.current;
     setIsLoading(true);
     try {
-      const response: PaginatedResponse<Role> = await rolesService.getRoles({
+      const response: PaginatedResponse<NamespaceRole> = await rolesService.getRoles({
         page: currentPage,
         perPage,
         orderBy: sortColumn,
@@ -80,9 +80,9 @@ export default function RolesPage() {
     setCurrentPage(1);
   };
 
-  const handleDeleteClick = (role: Role) => {
+  const handleDeleteClick = (role: NamespaceRole) => {
     // Prevent deleting system roles
-    if (isSystemRole(role.role_name)) {
+    if (role.is_system || isSystemRole(role.role_name)) {
       toast.error("Cannot delete system roles");
       return;
     }
@@ -95,7 +95,8 @@ export default function RolesPage() {
 
     setIsDeleting(true);
     try {
-      await rolesService.deleteRole(roleToDelete.uuid);
+      // Use id for namespace roles (not uuid)
+      await rolesService.deleteRole(roleToDelete.id);
       toast.success("Role deleted successfully");
       fetchRoles();
     } catch (error) {
@@ -107,7 +108,7 @@ export default function RolesPage() {
     }
   };
 
-  const handleEditPermissions = (role: Role) => {
+  const handleEditPermissions = (role: NamespaceRole) => {
     setSelectedRole(role);
     setEditPermissionsModalOpen(true);
   };
@@ -117,7 +118,7 @@ export default function RolesPage() {
     return systemRoles.includes(roleName.toLowerCase());
   };
 
-  const columns: TableColumn<Role>[] = [
+  const columns: TableColumn<NamespaceRole>[] = [
     {
       key: "role_name",
       header: "Role",
@@ -129,21 +130,36 @@ export default function RolesPage() {
           </div>
           <div>
             <RoleBadge roleName={role.role_name} size="md" />
+            <p className="text-xs text-secondary-500 mt-1">
+              {role.display_name || role.role_name}
+              {role.is_system && (
+                <span className="ml-2 text-primary-600 font-medium">(System)</span>
+              )}
+            </p>
             {role.description && (
-              <p className="text-xs text-secondary-500 mt-1">{role.description}</p>
+              <p className="text-xs text-secondary-400">{role.description}</p>
             )}
           </div>
         </div>
       ),
     },
     {
-      key: "users_count",
-      header: "Users",
-      render: () => (
+      key: "member_count",
+      header: "Members",
+      render: (role) => (
         <div className="flex items-center gap-2 text-secondary-600">
           <Users className="w-4 h-4 text-secondary-400" />
-          <span className="text-sm">-</span>
+          <span className="text-sm">{role.member_count ?? '-'}</span>
         </div>
+      ),
+    },
+    {
+      key: "priority",
+      header: "Priority",
+      render: (role) => (
+        <span className="text-sm text-secondary-600">
+          {role.priority}
+        </span>
       ),
     },
     {
@@ -152,7 +168,7 @@ export default function RolesPage() {
       sortable: true,
       render: (role) => (
         <span className="text-sm text-secondary-600">
-          {formatDate(role.created_at)}
+          {role.created_at ? formatDate(role.created_at) : '-'}
         </span>
       ),
     },
@@ -186,7 +202,7 @@ export default function RolesPage() {
               <Edit className="w-4 h-4" />
             </button>
           )}
-          {canDelete("roles") && !isSystemRole(role.role_name) && (
+          {canDelete("roles") && !role.is_system && !isSystemRole(role.role_name) && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -207,6 +223,7 @@ export default function RolesPage() {
     ? roles.filter(
         (role) =>
           role.role_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          role.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           role.description?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : roles;
@@ -237,12 +254,12 @@ export default function RolesPage() {
           <Shield className="w-5 h-5 text-primary-600 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-primary-900">
-              Role-Based Access Control
+              Namespace Role-Based Access Control
             </p>
             <p className="text-sm text-primary-700 mt-1">
-              Assign permissions to roles, then assign roles to users. Users inherit all
-              permissions from their assigned role. Administrative role has full access to
-              all features.
+              These roles are specific to the current namespace. Assign permissions to roles,
+              then assign roles to members. Users can have different roles in different namespaces.
+              Owner role has full access to all namespace features.
             </p>
           </div>
         </div>
@@ -267,7 +284,7 @@ export default function RolesPage() {
         <Table
           columns={columns}
           data={filteredRoles}
-          keyExtractor={(role) => role.uuid}
+          keyExtractor={(role) => role.uuid || String(role.id)}
           onRowClick={(role) => {
             if (isAdmin) {
               handleEditPermissions(role);
@@ -321,5 +338,13 @@ export default function RolesPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function RolesPage() {
+  return (
+    <ProtectedPage module="roles" title="Roles & Permissions">
+      <RolesPageContent />
+    </ProtectedPage>
   );
 }

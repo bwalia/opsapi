@@ -10,20 +10,49 @@ import React, {
   ReactNode,
 } from 'react';
 import { useAuthStore } from '@/store/auth.store';
+import { useNamespaceStore } from '@/store/namespace.store';
 import { permissionsService } from '@/services';
-import type { User, UserPermissions, DashboardModule, PermissionAction } from '@/types';
+import type { User, UserPermissions, DashboardModule, PermissionAction, NamespacePermissions, NamespaceModule } from '@/types';
+
+// Subscribe to namespace store hydration state
+const useNamespaceHydrated = () => {
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    // Check initial state
+    const state = useNamespaceStore.getState();
+    if (state._hasHydrated) {
+      setHydrated(true);
+      return;
+    }
+
+    // Subscribe to changes
+    const unsubscribe = useNamespaceStore.subscribe((state) => {
+      if (state._hasHydrated) {
+        setHydrated(true);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  return hydrated;
+};
 
 interface PermissionsContextValue {
   permissions: UserPermissions;
+  namespacePermissions: NamespacePermissions | null;
   isLoading: boolean;
   userRole: string | null;
-  hasPermission: (module: DashboardModule, action: PermissionAction) => boolean;
-  canAccess: (module: DashboardModule) => boolean;
-  canCreate: (module: DashboardModule) => boolean;
-  canRead: (module: DashboardModule) => boolean;
-  canUpdate: (module: DashboardModule) => boolean;
-  canDelete: (module: DashboardModule) => boolean;
-  canManage: (module: DashboardModule) => boolean;
+  namespaceRole: string | null;
+  isNamespaceOwner: boolean;
+  hasPermission: (module: DashboardModule | NamespaceModule, action: PermissionAction) => boolean;
+  canAccess: (module: DashboardModule | NamespaceModule) => boolean;
+  canCreate: (module: DashboardModule | NamespaceModule) => boolean;
+  canRead: (module: DashboardModule | NamespaceModule) => boolean;
+  canUpdate: (module: DashboardModule | NamespaceModule) => boolean;
+  canDelete: (module: DashboardModule | NamespaceModule) => boolean;
+  canManage: (module: DashboardModule | NamespaceModule) => boolean;
   isAdmin: boolean;
   refreshPermissions: () => Promise<void>;
 }
@@ -43,8 +72,11 @@ const defaultPermissions: UserPermissions = {
 
 const PermissionsContext = createContext<PermissionsContextValue>({
   permissions: defaultPermissions,
+  namespacePermissions: null,
   isLoading: true,
   userRole: null,
+  namespaceRole: null,
+  isNamespaceOwner: false,
   hasPermission: () => false,
   canAccess: () => false,
   canCreate: () => false,
@@ -58,8 +90,19 @@ const PermissionsContext = createContext<PermissionsContextValue>({
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuthStore();
+  const {
+    namespacePermissions: storeNamespacePermissions,
+    isNamespaceOwner,
+    currentNamespace
+  } = useNamespaceStore();
   const [permissions, setPermissions] = useState<UserPermissions>(defaultPermissions);
-  const [isLoading, setIsLoading] = useState(true);
+  const [legacyPermissionsLoading, setLegacyPermissionsLoading] = useState(true);
+
+  // Wait for namespace store to hydrate from localStorage
+  const namespaceStoreHydrated = useNamespaceHydrated();
+
+  // isLoading is true until BOTH legacy permissions are loaded AND namespace store is hydrated
+  const isLoading = legacyPermissionsLoading || !namespaceStoreHydrated;
 
   // Extract primary role from user - handle multiple formats
   const userRole = useMemo(() => {
@@ -82,7 +125,6 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
     // Handle roles as comma-separated string (from JWT token)
     if (typeof userData.roles === 'string' && userData.roles.length > 0) {
-      // Could be "administrative" or "administrative,seller"
       const firstRole = userData.roles.split(',')[0].trim();
       return firstRole || null;
     }
@@ -95,7 +137,23 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     return null;
   }, [user]);
 
-  // Check if user is admin - check userRole and also directly check user.roles
+  // Extract namespace role from user/JWT
+  const namespaceRole = useMemo(() => {
+    if (!user) return null;
+
+    // Check if user has namespace info from JWT
+    const userData = user as User & {
+      namespace?: { role?: string };
+    };
+
+    if (userData.namespace?.role) {
+      return userData.namespace.role;
+    }
+
+    return null;
+  }, [user]);
+
+  // Check if user is platform admin (has administrative role globally)
   const isAdmin = useMemo(() => {
     // First check derived userRole
     if (userRole?.toLowerCase() === 'administrative' || userRole?.toLowerCase() === 'admin') {
@@ -104,7 +162,6 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
     // Also check user.roles directly for admin role
     if (user?.roles) {
-      // Cast to unknown first to handle various API formats
       const roles = user.roles as unknown;
       if (Array.isArray(roles)) {
         const found = roles.some((r: unknown) => {
@@ -125,15 +182,15 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     return false;
   }, [userRole, user]);
 
-  // Load permissions based on user role
+  // Load legacy permissions based on user role (fallback)
   const loadPermissions = useCallback(async () => {
     if (!isAuthenticated || !userRole) {
       setPermissions(defaultPermissions);
-      setIsLoading(false);
+      setLegacyPermissionsLoading(false);
       return;
     }
 
-    setIsLoading(true);
+    setLegacyPermissionsLoading(true);
     try {
       const userPermissions = await permissionsService.getPermissionsForRole(userRole);
       setPermissions(userPermissions);
@@ -142,7 +199,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       // Fall back to default permissions
       setPermissions(permissionsService.getDefaultPermissions(userRole));
     } finally {
-      setIsLoading(false);
+      setLegacyPermissionsLoading(false);
     }
   }, [isAuthenticated, userRole]);
 
@@ -151,46 +208,80 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     loadPermissions();
   }, [loadPermissions]);
 
-  // Permission check helpers
+  // Permission check - prioritizes namespace permissions over legacy permissions
   const hasPermission = useCallback(
-    (module: DashboardModule, action: PermissionAction): boolean => {
-      // Admin has all permissions
+    (module: DashboardModule | NamespaceModule, action: PermissionAction): boolean => {
+      // Platform admin has all permissions
       if (isAdmin) return true;
-      return permissionsService.hasPermission(permissions, module, action);
+
+      // Namespace owner has all permissions within their namespace
+      if (isNamespaceOwner && currentNamespace) return true;
+
+      // Check namespace permissions first (from store/JWT)
+      if (storeNamespacePermissions) {
+        const modulePerms = storeNamespacePermissions[module as NamespaceModule];
+        if (modulePerms) {
+          // Has manage = has all permissions
+          if (modulePerms.includes('manage')) return true;
+          // Check specific action
+          if (modulePerms.includes(action)) return true;
+        }
+        // If we have namespace context, use namespace permissions exclusively
+        if (currentNamespace) {
+          return false;
+        }
+      }
+
+      // Fall back to legacy permissions
+      return permissionsService.hasPermission(permissions, module as DashboardModule, action);
     },
-    [permissions, isAdmin]
+    [permissions, storeNamespacePermissions, isAdmin, isNamespaceOwner, currentNamespace]
   );
 
   const canAccess = useCallback(
-    (module: DashboardModule): boolean => {
+    (module: DashboardModule | NamespaceModule): boolean => {
       if (isAdmin) return true;
-      return permissionsService.canAccessModule(permissions, module);
+      if (isNamespaceOwner && currentNamespace) return true;
+
+      // When in namespace context, use namespace permissions exclusively
+      if (currentNamespace) {
+        // If we have namespace permissions, check them
+        if (storeNamespacePermissions) {
+          const modulePerms = storeNamespacePermissions[module as NamespaceModule];
+          return Array.isArray(modulePerms) && modulePerms.length > 0;
+        }
+        // In namespace context but no permissions loaded = no access
+        return false;
+      }
+
+      // Fall back to legacy permissions only when not in namespace context
+      return permissionsService.canAccessModule(permissions, module as DashboardModule);
     },
-    [permissions, isAdmin]
+    [permissions, storeNamespacePermissions, isAdmin, isNamespaceOwner, currentNamespace]
   );
 
   const canCreate = useCallback(
-    (module: DashboardModule): boolean => hasPermission(module, 'create'),
+    (module: DashboardModule | NamespaceModule): boolean => hasPermission(module, 'create'),
     [hasPermission]
   );
 
   const canRead = useCallback(
-    (module: DashboardModule): boolean => hasPermission(module, 'read'),
+    (module: DashboardModule | NamespaceModule): boolean => hasPermission(module, 'read'),
     [hasPermission]
   );
 
   const canUpdate = useCallback(
-    (module: DashboardModule): boolean => hasPermission(module, 'update'),
+    (module: DashboardModule | NamespaceModule): boolean => hasPermission(module, 'update'),
     [hasPermission]
   );
 
   const canDelete = useCallback(
-    (module: DashboardModule): boolean => hasPermission(module, 'delete'),
+    (module: DashboardModule | NamespaceModule): boolean => hasPermission(module, 'delete'),
     [hasPermission]
   );
 
   const canManage = useCallback(
-    (module: DashboardModule): boolean => hasPermission(module, 'manage'),
+    (module: DashboardModule | NamespaceModule): boolean => hasPermission(module, 'manage'),
     [hasPermission]
   );
 
@@ -201,8 +292,11 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       permissions,
+      namespacePermissions: storeNamespacePermissions,
       isLoading,
       userRole,
+      namespaceRole,
+      isNamespaceOwner,
       hasPermission,
       canAccess,
       canCreate,
@@ -215,8 +309,11 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }),
     [
       permissions,
+      storeNamespacePermissions,
       isLoading,
       userRole,
+      namespaceRole,
+      isNamespaceOwner,
       hasPermission,
       canAccess,
       canCreate,
@@ -246,7 +343,7 @@ export function usePermissions() {
 /**
  * Hook to check a specific permission
  */
-export function useHasPermission(module: DashboardModule, action: PermissionAction): boolean {
+export function useHasPermission(module: DashboardModule | NamespaceModule, action: PermissionAction): boolean {
   const { hasPermission } = usePermissions();
   return hasPermission(module, action);
 }
@@ -254,7 +351,7 @@ export function useHasPermission(module: DashboardModule, action: PermissionActi
 /**
  * Hook to check module access
  */
-export function useCanAccess(module: DashboardModule): boolean {
+export function useCanAccess(module: DashboardModule | NamespaceModule): boolean {
   const { canAccess } = usePermissions();
   return canAccess(module);
 }

@@ -112,6 +112,9 @@ return function(app)
     end)
 
     -- CREATE user
+    -- Supports optional namespace assignment:
+    --   - namespace_id: ID of namespace to add user to (defaults to "System")
+    --   - namespace_role: Role within the namespace (defaults to "member")
     app:post("/api/v2/users", function(self)
         local params, files = RequestParser.parse_request(self)
 
@@ -126,7 +129,10 @@ return function(app)
             first_name = params.first_name or params.firstName,
             last_name = params.last_name or params.lastName,
             username = params.username or params.email,
-            role = params.role or "buyer"
+            role = params.role or "buyer",
+            -- Namespace assignment (optional)
+            namespace_id = params.namespace_id and tonumber(params.namespace_id),
+            namespace_role = params.namespace_role  -- e.g., "admin", "manager", "member"
         }
 
         ngx.log(ngx.NOTICE, "Creating user: ", params.email)

@@ -18,20 +18,25 @@ import {
   Loader2,
   Rocket,
   Building2,
+  MessageCircle,
+  Truck,
+  BarChart,
+  Kanban,
 } from 'lucide-react';
 import {
-  permissionsService,
-  DASHBOARD_MODULES,
+  rolesService,
+  NAMESPACE_MODULES,
   PERMISSION_ACTIONS,
+  type NamespaceRole,
 } from '@/services';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import type { Role, DashboardModule, PermissionAction, UserPermissions } from '@/types';
+import type { PermissionAction, NamespacePermissions, NamespaceModule } from '@/types';
 
 export interface EditRolePermissionsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  role: Role;
+  role: NamespaceRole;
   onSuccess?: () => void;
 }
 
@@ -45,31 +50,29 @@ const MODULE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   orders: ShoppingCart,
   customers: UserCheck,
   settings: Settings,
-  namespaces: Building2,
+  namespace: Building2,
   services: Rocket,
+  chat: MessageCircle,
+  delivery: Truck,
+  reports: BarChart,
+  projects: Kanban,
 };
 
 const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
   function EditRolePermissionsModal({ isOpen, onClose, role, onSuccess }) {
-    const [permissions, setPermissions] = useState<UserPermissions>({
-      dashboard: [],
-      users: [],
-      roles: [],
-      stores: [],
-      products: [],
-      orders: [],
-      customers: [],
-      settings: [],
-      namespaces: [],
-      services: [],
-    });
+    const [permissions, setPermissions] = useState<NamespacePermissions>({});
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Check if this is the administrative role (read-only, full access)
-    const isAdminRole = useMemo(() => {
-      return ['administrative', 'admin'].includes(role.role_name.toLowerCase());
+    // Check if this is the owner role (read-only, full access)
+    const isOwnerRole = useMemo(() => {
+      return role.role_name.toLowerCase() === 'owner';
     }, [role.role_name]);
+
+    // Check if this is a system role
+    const isSystemRole = useMemo(() => {
+      return role.is_system;
+    }, [role.is_system]);
 
     // Load current permissions when modal opens
     useEffect(() => {
@@ -81,55 +84,47 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
     const loadPermissions = async () => {
       setIsLoading(true);
       try {
-        // First try to get permissions from API
-        const response = await permissionsService.getPermissions({
-          role: role.role_name,
-          perPage: 100,
-        });
+        // Get role details with permissions
+        const response = await rolesService.getRole(role.id);
+        const roleData = response.role;
 
-        if (response.data.length > 0) {
-          // Parse permissions from API
-          const parsed: UserPermissions = {
-            dashboard: [],
-            users: [],
-            roles: [],
-            stores: [],
-            products: [],
-            orders: [],
-            customers: [],
-            settings: [],
-            namespaces: [],
-            services: [],
-          };
-
-          for (const perm of response.data) {
-            const moduleName = perm.module_machine_name as DashboardModule;
-            if (parsed[moduleName] !== undefined) {
-              parsed[moduleName] = perm.permissions
-                .split(',')
-                .map((a) => a.trim()) as PermissionAction[];
+        if (roleData.permissions) {
+          // Parse permissions if they're stored as a string
+          let parsed: NamespacePermissions;
+          if (typeof roleData.permissions === 'string') {
+            try {
+              parsed = JSON.parse(roleData.permissions);
+            } catch {
+              parsed = {};
             }
+          } else {
+            parsed = roleData.permissions as NamespacePermissions;
           }
-
           setPermissions(parsed);
         } else {
-          // Use default permissions if none in database
-          const defaults = permissionsService.getDefaultPermissions(role.role_name);
-          setPermissions(defaults);
+          // Initialize with empty permissions
+          const empty: NamespacePermissions = {};
+          NAMESPACE_MODULES.forEach(module => {
+            empty[module.value as NamespaceModule] = [];
+          });
+          setPermissions(empty);
         }
       } catch (error) {
         console.error('Failed to load permissions:', error);
-        // Fall back to defaults
-        const defaults = permissionsService.getDefaultPermissions(role.role_name);
-        setPermissions(defaults);
+        // Initialize with empty permissions
+        const empty: NamespacePermissions = {};
+        NAMESPACE_MODULES.forEach(module => {
+          empty[module.value as NamespaceModule] = [];
+        });
+        setPermissions(empty);
       } finally {
         setIsLoading(false);
       }
     };
 
     const togglePermission = useCallback(
-      (module: DashboardModule, action: PermissionAction) => {
-        if (isAdminRole) return; // Don't allow changes to admin role
+      (module: NamespaceModule, action: PermissionAction) => {
+        if (isOwnerRole) return; // Don't allow changes to owner role
 
         setPermissions((prev) => {
           const modulePerms = [...(prev[module] || [])];
@@ -157,11 +152,11 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
           }
         });
       },
-      [isAdminRole]
+      [isOwnerRole]
     );
 
     const hasPermission = useCallback(
-      (module: DashboardModule, action: PermissionAction): boolean => {
+      (module: NamespaceModule, action: PermissionAction): boolean => {
         const modulePerms = permissions[module] || [];
         return modulePerms.includes(action) || modulePerms.includes('manage');
       },
@@ -169,22 +164,19 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
     );
 
     const handleSave = useCallback(async () => {
-      if (isAdminRole) {
-        toast.error('Cannot modify administrative role permissions');
+      if (isOwnerRole) {
+        toast.error('Cannot modify owner role permissions');
         return;
       }
 
       setIsSaving(true);
       try {
-        // Use batch API for efficient single-request update
-        const result = await permissionsService.batchUpdatePermissions(
-          role.role_name,
-          permissions
-        );
+        // Update role permissions via namespace roles API
+        await rolesService.updateRole(role.id, {
+          permissions: permissions as Record<string, string[]>,
+        });
 
-        toast.success(
-          `Permissions updated: ${result.created} created, ${result.updated} updated, ${result.deleted} removed`
-        );
+        toast.success('Role permissions updated successfully');
         onClose();
         onSuccess?.();
       } catch (error: unknown) {
@@ -194,7 +186,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
       } finally {
         setIsSaving(false);
       }
-    }, [permissions, role, isAdminRole, onClose, onSuccess]);
+    }, [permissions, role, isOwnerRole, onClose, onSuccess]);
 
     const handleClose = useCallback(() => {
       if (!isSaving) {
@@ -204,15 +196,15 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
 
     // Set all permissions for a module
     const setAllModulePermissions = useCallback(
-      (module: DashboardModule, enabled: boolean) => {
-        if (isAdminRole) return;
+      (module: NamespaceModule, enabled: boolean) => {
+        if (isOwnerRole) return;
 
         setPermissions((prev) => ({
           ...prev,
           [module]: enabled ? ['create', 'read', 'update', 'delete'] : [],
         }));
       },
-      [isAdminRole]
+      [isOwnerRole]
     );
 
     return (
@@ -231,16 +223,29 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
               </div>
               <div>
                 <RoleBadge roleName={role.role_name} size="lg" />
+                <p className="text-sm text-secondary-500 mt-1">
+                  {role.display_name || role.role_name}
+                </p>
                 {role.description && (
-                  <p className="text-sm text-secondary-500 mt-1">{role.description}</p>
+                  <p className="text-xs text-secondary-400 mt-0.5">{role.description}</p>
                 )}
               </div>
             </div>
-            {isAdminRole && (
-              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">
-                Full Access (Read-Only)
+            <div className="flex flex-col items-end gap-1">
+              {isOwnerRole && (
+                <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-medium">
+                  Owner (Full Access)
+                </span>
+              )}
+              {isSystemRole && !isOwnerRole && (
+                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">
+                  System Role
+                </span>
+              )}
+              <span className="text-xs text-secondary-400">
+                Priority: {role.priority}
               </span>
-            )}
+            </div>
           </div>
 
           {/* Loading State */}
@@ -265,38 +270,43 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                 </div>
 
                 {/* Permission Rows */}
-                <div className="divide-y divide-secondary-200">
-                  {DASHBOARD_MODULES.map((module) => {
+                <div className="divide-y divide-secondary-200 max-h-[400px] overflow-y-auto">
+                  {NAMESPACE_MODULES.map((module) => {
                     const Icon = MODULE_ICONS[module.value] || Shield;
-                    const hasFullAccess = hasPermission(module.value, 'manage');
+                    const hasFullAccess = hasPermission(module.value as NamespaceModule, 'manage');
 
                     return (
                       <div
                         key={module.value}
                         className={cn(
                           'px-4 py-3 hover:bg-secondary-50 transition-colors',
-                          isAdminRole && 'bg-purple-50/50'
+                          isOwnerRole && 'bg-red-50/50'
                         )}
                       >
                         <div className="grid grid-cols-[200px_repeat(5,1fr)] gap-2 items-center">
                           {/* Module Name */}
                           <div className="flex items-center gap-2">
                             <Icon className="w-4 h-4 text-secondary-500" />
-                            <span className="font-medium text-secondary-900">
-                              {module.label}
-                            </span>
-                            {!isAdminRole && (
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium text-secondary-900 text-sm">
+                                {module.label}
+                              </span>
+                              <p className="text-xs text-secondary-400 truncate">
+                                {module.description}
+                              </p>
+                            </div>
+                            {!isOwnerRole && (
                               <button
                                 type="button"
                                 onClick={() =>
                                   setAllModulePermissions(
-                                    module.value,
-                                    !hasPermission(module.value, 'read')
+                                    module.value as NamespaceModule,
+                                    !hasPermission(module.value as NamespaceModule, 'read')
                                   )
                                 }
-                                className="ml-auto text-xs text-primary-600 hover:text-primary-700 hover:underline"
+                                className="text-xs text-primary-600 hover:text-primary-700 hover:underline whitespace-nowrap"
                               >
-                                {hasPermission(module.value, 'read') ? 'Clear' : 'Enable All'}
+                                {hasPermission(module.value as NamespaceModule, 'read') ? 'Clear' : 'All'}
                               </button>
                             )}
                           </div>
@@ -304,7 +314,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                           {/* Permission Toggles */}
                           {PERMISSION_ACTIONS.map((action) => {
                             const isChecked =
-                              isAdminRole || hasPermission(module.value, action.value);
+                              isOwnerRole || hasPermission(module.value as NamespaceModule, action.value);
                             const isManageAction = action.value === 'manage';
 
                             return (
@@ -312,9 +322,9 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    togglePermission(module.value, action.value)
+                                    togglePermission(module.value as NamespaceModule, action.value)
                                   }
-                                  disabled={isAdminRole}
+                                  disabled={isOwnerRole}
                                   className={cn(
                                     'w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200',
                                     isChecked
@@ -322,8 +332,8 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                                         ? 'bg-purple-100 text-purple-600 border-2 border-purple-300'
                                         : 'bg-success-100 text-success-600 border-2 border-success-300'
                                       : 'bg-secondary-100 text-secondary-400 border-2 border-secondary-200 hover:border-secondary-300',
-                                    !isAdminRole && 'cursor-pointer hover:scale-110',
-                                    isAdminRole && 'cursor-not-allowed opacity-75',
+                                    !isOwnerRole && 'cursor-pointer hover:scale-110',
+                                    isOwnerRole && 'cursor-not-allowed opacity-75',
                                     hasFullAccess &&
                                       !isManageAction &&
                                       'bg-purple-50 border-purple-200 text-purple-500'
@@ -358,7 +368,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                   <div className="w-6 h-6 rounded bg-purple-100 flex items-center justify-center border border-purple-300">
                     <Check className="w-3 h-3 text-purple-600" />
                   </div>
-                  <span>Full Access</span>
+                  <span>Full Access (Manage)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded bg-secondary-100 flex items-center justify-center border border-secondary-200">
@@ -368,33 +378,49 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                 </div>
               </div>
 
-              {/* Admin Notice */}
-              {isAdminRole && (
-                <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+              {/* Owner Notice */}
+              {isOwnerRole && (
+                <div className="bg-red-50 rounded-lg p-4 border border-red-200">
                   <div className="flex items-start gap-3">
-                    <Shield className="w-5 h-5 text-purple-600 mt-0.5" />
+                    <Shield className="w-5 h-5 text-red-600 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-purple-900">
-                        Administrative Role
+                      <p className="text-sm font-medium text-red-900">
+                        Owner Role
                       </p>
-                      <p className="text-sm text-purple-700 mt-1">
-                        The administrative role has full access to all features and cannot
+                      <p className="text-sm text-red-700 mt-1">
+                        The owner role has full access to all namespace features and cannot
                         be modified. This ensures there is always a role with complete
-                        system access.
+                        namespace access.
                       </p>
                     </div>
                   </div>
                 </div>
               )}
+
+              {/* Info about permission hierarchy */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <div className="flex items-start gap-3">
+                  <Shield className="w-5 h-5 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-900">
+                      Permission Hierarchy
+                    </p>
+                    <p className="text-sm text-blue-700 mt-1">
+                      <strong>Manage</strong> grants all permissions (create, read, update, delete) for that module.
+                      Users with multiple roles get the combined permissions from all their roles.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </>
           )}
 
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
             <Button type="button" variant="ghost" onClick={handleClose} disabled={isSaving}>
-              {isAdminRole ? 'Close' : 'Cancel'}
+              {isOwnerRole ? 'Close' : 'Cancel'}
             </Button>
-            {!isAdminRole && (
+            {!isOwnerRole && (
               <Button onClick={handleSave} isLoading={isSaving}>
                 Save Permissions
               </Button>

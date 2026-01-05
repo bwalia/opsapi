@@ -3,12 +3,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Mail, Phone, MapPin } from 'lucide-react';
 import { Button, Input, Table, Pagination, Card, ConfirmDialog } from '@/components/ui';
+import { ProtectedPage } from '@/components/permissions';
 import { customersService } from '@/services';
 import { formatDate, getInitials, getFullName } from '@/lib/utils';
 import type { Customer, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
-export default function CustomersPage() {
+function CustomersPageContent() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -255,5 +256,13 @@ export default function CustomersPage() {
         isLoading={isDeleting}
       />
     </div>
+  );
+}
+
+export default function CustomersPage() {
+  return (
+    <ProtectedPage module="customers" title="Customers">
+      <CustomersPageContent />
+    </ProtectedPage>
   );
 }

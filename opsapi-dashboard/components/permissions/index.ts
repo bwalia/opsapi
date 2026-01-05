@@ -5,5 +5,7 @@ export {
   RequireUpdate,
   RequireDelete,
   RequireAdmin,
+  AccessDenied,
+  ProtectedPage,
 } from './PermissionGate';
 export { default as RoleBadge } from './RoleBadge';

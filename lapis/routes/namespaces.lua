@@ -44,6 +44,48 @@ return function(app)
         }
     end
 
+    -- Helper function to check platform admin access
+    local function check_platform_admin(current_user)
+        if not current_user then
+            return false
+        end
+
+        local admin_check = db.query([[
+            SELECT ur.id FROM user__roles ur
+            JOIN roles r ON ur.role_id = r.id
+            JOIN users u ON ur.user_id = u.id
+            WHERE u.uuid = ? AND LOWER(r.role_name) = 'administrative'
+        ]], current_user.uuid)
+
+        return admin_check and #admin_check > 0
+    end
+
+    -- Helper function to check namespace create permission
+    local function check_namespace_create_permission(current_user)
+        if not current_user then
+            return false
+        end
+
+        -- First check if user is platform admin
+        if check_platform_admin(current_user) then
+            return true
+        end
+
+        -- Then check for specific namespace create permission
+        local perm_check = db.query([[
+            SELECT p.id FROM permissions p
+            JOIN roles r ON p.role_id = r.id
+            JOIN user__roles ur ON ur.role_id = r.id
+            JOIN users u ON ur.user_id = u.id
+            JOIN modules m ON p.module_id = m.id
+            WHERE u.uuid = ?
+            AND m.machine_name = 'namespaces'
+            AND p.permissions LIKE '%create%'
+        ]], current_user.uuid)
+
+        return perm_check and #perm_check > 0
+    end
+
     -- ============================================================
     -- USER NAMESPACE ROUTES (Available to all authenticated users)
     -- ============================================================
@@ -453,6 +495,258 @@ return function(app)
             end)
         )
     }))
+
+    -- ============================================================
+    -- USER MULTI-NAMESPACE MANAGEMENT
+    -- Add user to multiple namespaces with different roles
+    -- ============================================================
+
+    -- Add user to a namespace with a specific role (from user context)
+    -- POST /api/v2/user/namespaces/:id/join
+    -- Body: { role_name?: string } - defaults to "member"
+    app:post("/api/v2/user/add-to-namespace", AuthMiddleware.requireAuth(function(self)
+        local params = RequestParser.parse_request(self)
+
+        if not params.namespace_id then
+            return error_response(400, "namespace_id is required")
+        end
+
+        -- Get user
+        local user = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
+        if not user or #user == 0 then
+            return error_response(404, "User not found")
+        end
+
+        -- Validate namespace exists
+        local namespace = NamespaceQueries.show(params.namespace_id)
+        if not namespace then
+            return error_response(404, "Namespace not found")
+        end
+
+        -- Check if already a member
+        local existing = NamespaceMemberQueries.findByUserAndNamespace(self.current_user.uuid, namespace.id)
+        if existing then
+            return error_response(400, "You are already a member of this namespace")
+        end
+
+        -- Check namespace member limit
+        local member_count = NamespaceMemberQueries.count(namespace.id, "active")
+        if member_count >= (namespace.max_users or 10) then
+            return error_response(400, "Namespace has reached maximum member limit")
+        end
+
+        -- Get the role (default to "member")
+        local role_name = params.role_name or "member"
+        local ns_role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", namespace.id, role_name)
+
+        local role_ids = {}
+        if ns_role and #ns_role > 0 then
+            table.insert(role_ids, ns_role[1].id)
+        end
+
+        -- Add as member
+        local ok, member = pcall(NamespaceMemberQueries.create, {
+            namespace_id = namespace.id,
+            user_id = user[1].id,
+            status = "active",
+            role_ids = role_ids
+        })
+
+        if not ok then
+            return error_response(500, "Failed to join namespace", member)
+        end
+
+        return success_response({
+            message = "Successfully joined namespace: " .. namespace.name,
+            membership = NamespaceMemberQueries.getWithDetails(member.id),
+            namespace = {
+                uuid = namespace.uuid,
+                name = namespace.name,
+                slug = namespace.slug
+            }
+        }, 201)
+    end))
+
+    -- Get all namespaces a user belongs to with their roles
+    app:get("/api/v2/user/:user_uuid/namespace-memberships", AuthMiddleware.requireAuth(function(self)
+        local user_uuid = self.params.user_uuid
+
+        -- Get user
+        local user = db.select("id, uuid, email, first_name, last_name FROM users WHERE uuid = ?", user_uuid)
+        if not user or #user == 0 then
+            return error_response(404, "User not found")
+        end
+
+        -- Get all memberships with roles
+        local memberships = db.query([[
+            SELECT
+                nm.id as membership_id,
+                nm.uuid as membership_uuid,
+                nm.status,
+                nm.is_owner,
+                nm.joined_at,
+                n.id as namespace_id,
+                n.uuid as namespace_uuid,
+                n.name as namespace_name,
+                n.slug as namespace_slug,
+                n.status as namespace_status,
+                n.logo_url,
+                (
+                    SELECT json_agg(json_build_object(
+                        'id', nr.id,
+                        'role_name', nr.role_name,
+                        'display_name', nr.display_name
+                    ))
+                    FROM namespace_user_roles nur
+                    JOIN namespace_roles nr ON nur.namespace_role_id = nr.id
+                    WHERE nur.namespace_member_id = nm.id
+                ) as roles
+            FROM namespace_members nm
+            JOIN namespaces n ON nm.namespace_id = n.id
+            WHERE nm.user_id = ?
+            ORDER BY nm.is_owner DESC, nm.joined_at DESC
+        ]], user[1].id)
+
+        return success_response({
+            user = {
+                uuid = user[1].uuid,
+                email = user[1].email,
+                first_name = user[1].first_name,
+                last_name = user[1].last_name
+            },
+            memberships = memberships or {},
+            total = #(memberships or {})
+        })
+    end))
+
+    -- Add a user to a namespace with specific role (admin action)
+    -- POST /api/v2/admin/users/:user_uuid/namespaces
+    app:post("/api/v2/admin/users/:user_uuid/namespaces", AuthMiddleware.requireAuth(function(self)
+        if not check_platform_admin(self.current_user) then
+            return error_response(403, "Platform admin access required")
+        end
+
+        local params = RequestParser.parse_request(self)
+
+        if not params.namespace_id then
+            return error_response(400, "namespace_id is required")
+        end
+
+        -- Get user
+        local user = db.select("id FROM users WHERE uuid = ?", self.params.user_uuid)
+        if not user or #user == 0 then
+            return error_response(404, "User not found")
+        end
+
+        -- Validate namespace
+        local namespace = NamespaceQueries.show(params.namespace_id)
+        if not namespace then
+            return error_response(404, "Namespace not found")
+        end
+
+        -- Check if already a member
+        local existing = NamespaceMemberQueries.findByUserAndNamespace(self.params.user_uuid, namespace.id)
+        if existing then
+            -- Update roles if provided
+            if params.role_ids or params.role_name then
+                local role_ids = params.role_ids or {}
+                if params.role_name and #role_ids == 0 then
+                    local ns_role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", namespace.id, params.role_name)
+                    if ns_role and #ns_role > 0 then
+                        table.insert(role_ids, ns_role[1].id)
+                    end
+                end
+                NamespaceMemberQueries.setRoles(existing.id, role_ids)
+                return success_response({
+                    message = "User roles updated in namespace",
+                    membership = NamespaceMemberQueries.getWithDetails(existing.id)
+                })
+            end
+            return error_response(400, "User is already a member of this namespace")
+        end
+
+        -- Get role IDs
+        local role_ids = params.role_ids or {}
+        if params.role_name and #role_ids == 0 then
+            local ns_role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", namespace.id, params.role_name)
+            if ns_role and #ns_role > 0 then
+                table.insert(role_ids, ns_role[1].id)
+            end
+        end
+
+        -- Add user to namespace
+        local ok, member = pcall(NamespaceMemberQueries.create, {
+            namespace_id = namespace.id,
+            user_id = user[1].id,
+            status = "active",
+            is_owner = params.is_owner == true,
+            role_ids = role_ids
+        })
+
+        if not ok then
+            return error_response(500, "Failed to add user to namespace", member)
+        end
+
+        return success_response({
+            message = "User added to namespace successfully",
+            membership = NamespaceMemberQueries.getWithDetails(member.id)
+        }, 201)
+    end))
+
+    -- Remove user from a namespace (admin action)
+    app:delete("/api/v2/admin/users/:user_uuid/namespaces/:namespace_id", AuthMiddleware.requireAuth(function(self)
+        if not check_platform_admin(self.current_user) then
+            return error_response(403, "Platform admin access required")
+        end
+
+        local membership = NamespaceMemberQueries.findByUserAndNamespace(self.params.user_uuid, self.params.namespace_id)
+        if not membership then
+            return error_response(404, "User is not a member of this namespace")
+        end
+
+        local ok, result = pcall(NamespaceMemberQueries.destroy, membership.id)
+        if not ok then
+            return error_response(500, "Failed to remove user from namespace", result)
+        end
+
+        return success_response({
+            message = "User removed from namespace successfully"
+        })
+    end))
+
+    -- Update user's roles in a namespace (admin action)
+    app:put("/api/v2/admin/users/:user_uuid/namespaces/:namespace_id/roles", AuthMiddleware.requireAuth(function(self)
+        if not check_platform_admin(self.current_user) then
+            return error_response(403, "Platform admin access required")
+        end
+
+        local params = RequestParser.parse_request(self)
+
+        local membership = NamespaceMemberQueries.findByUserAndNamespace(self.params.user_uuid, self.params.namespace_id)
+        if not membership then
+            return error_response(404, "User is not a member of this namespace")
+        end
+
+        -- Get role IDs
+        local role_ids = params.role_ids or {}
+        if params.role_name and #role_ids == 0 then
+            local ns_role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", membership.namespace_id, params.role_name)
+            if ns_role and #ns_role > 0 then
+                table.insert(role_ids, ns_role[1].id)
+            end
+        end
+
+        if #role_ids == 0 then
+            return error_response(400, "At least one role_id or role_name is required")
+        end
+
+        NamespaceMemberQueries.setRoles(membership.id, role_ids)
+
+        return success_response({
+            message = "User roles updated successfully",
+            membership = NamespaceMemberQueries.getWithDetails(membership.id)
+        })
+    end))
 
     -- ============================================================
     -- NAMESPACE MEMBERS ROUTES
@@ -912,28 +1206,6 @@ return function(app)
         end)
     ))
 
-    -- Get single role
-    app:get("/api/v2/namespace/roles/:id", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requirePermission("roles", "read", function(self)
-            local role = NamespaceRoleQueries.show(self.params.id)
-
-            if not role or role.namespace_id ~= self.namespace.id then
-                return error_response(404, "Role not found")
-            end
-
-            -- Get members with this role
-            local members = NamespaceRoleQueries.getMembers(role.id, {
-                page = 1,
-                perPage = 10
-            })
-
-            return success_response({
-                role = role,
-                members = members
-            })
-        end)
-    ))
-
     -- Create role
     app:post("/api/v2/namespace/roles", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("roles", "create", function(self)
@@ -964,8 +1236,29 @@ return function(app)
         end)
     ))
 
-    -- Update role
-    app:match("update_namespace_role", "/api/v2/namespace/roles/:id", respond_to({
+    -- Get, Update, Delete single role
+    app:match("namespace_role_detail", "/api/v2/namespace/roles/:id", respond_to({
+        GET = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requirePermission("roles", "read", function(self)
+                local role = NamespaceRoleQueries.show(self.params.id)
+
+                if not role or role.namespace_id ~= self.namespace.id then
+                    return error_response(404, "Role not found")
+                end
+
+                -- Get members with this role
+                local members = NamespaceRoleQueries.getMembers(role.id, {
+                    page = 1,
+                    perPage = 10
+                })
+
+                return success_response({
+                    role = role,
+                    members = members
+                })
+            end)
+        ),
+
         PUT = AuthMiddleware.requireAuth(
             NamespaceMiddleware.requirePermission("roles", "update", function(self)
                 local role = NamespaceRoleQueries.show(self.params.id)
@@ -1023,48 +1316,6 @@ return function(app)
     -- ============================================================
     -- PLATFORM ADMIN ROUTES (Super admin only)
     -- ============================================================
-
-    -- Helper function to check platform admin access
-    local function check_platform_admin(current_user)
-        if not current_user then
-            return false
-        end
-
-        local admin_check = db.query([[
-            SELECT ur.id FROM user__roles ur
-            JOIN roles r ON ur.role_id = r.id
-            JOIN users u ON ur.user_id = u.id
-            WHERE u.uuid = ? AND LOWER(r.role_name) = 'administrative'
-        ]], current_user.uuid)
-
-        return admin_check and #admin_check > 0
-    end
-
-    -- Helper function to check namespace create permission
-    local function check_namespace_create_permission(current_user)
-        if not current_user then
-            return false
-        end
-
-        -- First check if user is platform admin
-        if check_platform_admin(current_user) then
-            return true
-        end
-
-        -- Then check for specific namespace create permission
-        local perm_check = db.query([[
-            SELECT p.id FROM permissions p
-            JOIN roles r ON p.role_id = r.id
-            JOIN user__roles ur ON ur.role_id = r.id
-            JOIN users u ON ur.user_id = u.id
-            JOIN modules m ON p.module_id = m.id
-            WHERE u.uuid = ?
-            AND m.machine_name = 'namespaces'
-            AND p.permissions LIKE '%create%'
-        ]], current_user.uuid)
-
-        return perm_check and #perm_check > 0
-    end
 
     -- List all namespaces (platform admin)
     app:get("/api/v2/admin/namespaces", AuthMiddleware.requireAuth(function(self)

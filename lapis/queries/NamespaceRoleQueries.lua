@@ -448,9 +448,11 @@ function NamespaceRoleQueries.getAvailableModules()
         { name = "customers", display_name = "Customers", description = "Customer management" },
         { name = "settings", display_name = "Settings", description = "Namespace settings" },
         { name = "namespace", display_name = "Namespace", description = "Namespace administration" },
+        { name = "services", display_name = "Services", description = "Service deployment and management" },
         { name = "chat", display_name = "Chat", description = "Chat and messaging" },
         { name = "delivery", display_name = "Delivery", description = "Delivery partners management" },
-        { name = "reports", display_name = "Reports", description = "Analytics and reports" }
+        { name = "reports", display_name = "Reports", description = "Analytics and reports" },
+        { name = "projects", display_name = "Projects", description = "Kanban projects and tasks" }
     }
 end
 
@@ -464,6 +466,144 @@ function NamespaceRoleQueries.getAvailableActions()
         { name = "delete", display_name = "Delete", description = "Remove records" },
         { name = "manage", display_name = "Manage", description = "Full control (includes all actions)" }
     }
+end
+
+--- Get full permissions for owner (all modules with manage permission)
+-- @return table Full permissions object
+function NamespaceRoleQueries.getOwnerPermissions()
+    local modules = NamespaceRoleQueries.getAvailableModules()
+    local permissions = {}
+    for _, module in ipairs(modules) do
+        permissions[module.name] = { "manage" }
+    end
+    return permissions
+end
+
+--- Get default admin permissions (all except namespace management)
+-- @return table Admin permissions object
+function NamespaceRoleQueries.getAdminPermissions()
+    local modules = NamespaceRoleQueries.getAvailableModules()
+    local permissions = {}
+    for _, module in ipairs(modules) do
+        if module.name == "namespace" then
+            permissions[module.name] = { "read" }
+        else
+            permissions[module.name] = { "manage" }
+        end
+    end
+    return permissions
+end
+
+--- Get default member permissions (read-only on most modules)
+-- @return table Member permissions object
+function NamespaceRoleQueries.getMemberPermissions()
+    return {
+        dashboard = { "read" },
+        users = { "read" },
+        roles = { "read" },
+        stores = { "read" },
+        products = { "read" },
+        orders = { "read" },
+        customers = { "read" },
+        settings = {},
+        namespace = {},
+        services = { "read" },
+        chat = { "read", "create" },
+        delivery = { "read" },
+        reports = { "read" },
+        projects = { "read", "create", "update" }
+    }
+end
+
+--- Create default roles for a new namespace
+-- @param namespace_id number Namespace ID
+-- @return table List of created roles
+function NamespaceRoleQueries.createDefaultRoles(namespace_id)
+    local created_roles = {}
+
+    -- Admin role (full access except namespace management)
+    local admin_role = NamespaceRoleQueries.create({
+        namespace_id = namespace_id,
+        role_name = "admin",
+        display_name = "Administrator",
+        description = "Full access to all namespace features",
+        permissions = NamespaceRoleQueries.getAdminPermissions(),
+        is_system = true,
+        is_default = false,
+        priority = 90
+    })
+    table.insert(created_roles, admin_role)
+
+    -- Manager role
+    local manager_role = NamespaceRoleQueries.create({
+        namespace_id = namespace_id,
+        role_name = "manager",
+        display_name = "Manager",
+        description = "Can manage stores, products, orders, and customers",
+        permissions = {
+            dashboard = { "read" },
+            users = { "read" },
+            roles = { "read" },
+            stores = { "manage" },
+            products = { "manage" },
+            orders = { "manage" },
+            customers = { "manage" },
+            settings = { "read" },
+            namespace = {},
+            services = { "read" },
+            chat = { "manage" },
+            delivery = { "manage" },
+            reports = { "read" },
+            projects = { "manage" }
+        },
+        is_system = false,
+        is_default = false,
+        priority = 70
+    })
+    table.insert(created_roles, manager_role)
+
+    -- Member role (default for new members)
+    local member_role = NamespaceRoleQueries.create({
+        namespace_id = namespace_id,
+        role_name = "member",
+        display_name = "Member",
+        description = "Basic access to view content and participate in projects",
+        permissions = NamespaceRoleQueries.getMemberPermissions(),
+        is_system = true,
+        is_default = true,
+        priority = 10
+    })
+    table.insert(created_roles, member_role)
+
+    -- Viewer role (read-only)
+    local viewer_role = NamespaceRoleQueries.create({
+        namespace_id = namespace_id,
+        role_name = "viewer",
+        display_name = "Viewer",
+        description = "Read-only access to namespace content",
+        permissions = {
+            dashboard = { "read" },
+            users = {},
+            roles = {},
+            stores = { "read" },
+            products = { "read" },
+            orders = { "read" },
+            customers = {},
+            settings = {},
+            namespace = {},
+            services = { "read" },
+            chat = { "read" },
+            delivery = {},
+            reports = { "read" },
+            projects = { "read" }
+        },
+        is_system = false,
+        is_default = false,
+        priority = 5
+    })
+    table.insert(created_roles, viewer_role)
+
+    return created_roles
 end
 
 return NamespaceRoleQueries
