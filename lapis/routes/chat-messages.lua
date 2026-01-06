@@ -1,7 +1,14 @@
+--[[
+    Chat Message Routes
+
+    SECURITY: All endpoints require JWT authentication via AuthMiddleware.
+    User identity is derived from the validated JWT token, not from headers.
+]]
+
 local cJson = require("cjson")
 local ChatMessageQueries = require "queries.ChatMessageQueries"
 local ChatChannelQueries = require "queries.ChatChannelQueries"
-local ChatChannelMemberQueries = require "queries.ChatChannelMemberQueries"
+local AuthMiddleware = require("middleware.auth")
 local Global = require "helper.global"
 
 return function(app)
@@ -24,28 +31,9 @@ return function(app)
         return {}
     end
 
-    -- Get current user from headers
-    local function get_current_user()
-        local user_uuid = ngx.var.http_x_user_id
-        local user_business_id = ngx.var.http_x_business_id
-
-        if not user_uuid or user_uuid == "" then
-            return nil, "Unauthorized"
-        end
-
-        return {
-            uuid = user_uuid,
-            uuid_business_id = user_business_id
-        }
-    end
-
     -- GET /api/chat/channels/:channel_uuid/messages - Get messages for a channel
-    app:get("/api/chat/channels/:channel_uuid/messages", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:get("/api/chat/channels/:channel_uuid/messages", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local channel_uuid = self.params.channel_uuid
 
         -- Check membership
@@ -72,15 +60,11 @@ return function(app)
                 channel_uuid = channel_uuid
             }
         }
-    end)
+    end))
 
     -- POST /api/chat/channels/:channel_uuid/messages - Send a message
-    app:post("/api/chat/channels/:channel_uuid/messages", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:post("/api/chat/channels/:channel_uuid/messages", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local channel_uuid = self.params.channel_uuid
 
         -- Check membership
@@ -90,15 +74,9 @@ return function(app)
 
         local data = parse_json_body()
 
-        -- Debug logging
-        ngx.log(ngx.NOTICE, "[ChatMessages] Received message data: ", require("cjson").encode(data))
-        ngx.log(ngx.NOTICE, "[ChatMessages] Attachments: ", data.attachments and require("cjson").encode(data.attachments) or "nil")
-
         -- Allow messages with either content or attachments (or both)
         local has_content = data.content and data.content ~= ""
         local has_attachments = data.attachments and type(data.attachments) == "table" and #data.attachments > 0
-
-        ngx.log(ngx.NOTICE, "[ChatMessages] has_content: ", tostring(has_content), " has_attachments: ", tostring(has_attachments))
 
         if not has_content and not has_attachments then
             return { status = 400, json = { error = "Message content or attachments required" } }
@@ -115,12 +93,6 @@ return function(app)
 
         -- Create message
         local message_uuid = Global.generateUUID()
-        ngx.log(ngx.NOTICE, "[ChatMessages] Creating message with UUID: ", message_uuid)
-        ngx.log(ngx.NOTICE, "[ChatMessages] Creating message with attachments: ", data.attachments and require("cjson").encode(data.attachments) or "nil")
-        ngx.log(ngx.NOTICE, "[ChatMessages] Attachments type: ", type(data.attachments))
-        if type(data.attachments) == "table" then
-            ngx.log(ngx.NOTICE, "[ChatMessages] Attachments count: ", #data.attachments)
-        end
 
         local message = ChatMessageQueries.create({
             uuid = message_uuid,
@@ -139,9 +111,6 @@ return function(app)
             return { status = 500, json = { error = "Failed to send message" } }
         end
 
-        ngx.log(ngx.NOTICE, "[ChatMessages] Message created with id: ", message.id or "nil", " uuid: ", message.uuid or "nil")
-        ngx.log(ngx.NOTICE, "[ChatMessages] Message raw attachments from DB: ", message.attachments or "nil")
-
         -- Update channel's last_message_at
         ChatChannelQueries.updateLastMessageAt(channel_uuid)
 
@@ -153,22 +122,15 @@ return function(app)
         -- Get full message with user info
         local full_message = ChatMessageQueries.show(message.uuid)
 
-        ngx.log(ngx.NOTICE, "[ChatMessages] Full message response: ", require("cjson").encode(full_message))
-        ngx.log(ngx.NOTICE, "[ChatMessages] Full message attachments: ", full_message.attachments and require("cjson").encode(full_message.attachments) or "nil")
-
         return {
             status = 201,
             json = full_message
         }
-    end)
+    end))
 
     -- GET /api/chat/messages/:uuid - Get single message
-    app:get("/api/chat/messages/:uuid", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:get("/api/chat/messages/:uuid", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local message_uuid = self.params.uuid
 
         local message = ChatMessageQueries.show(message_uuid)
@@ -189,15 +151,11 @@ return function(app)
             status = 200,
             json = message
         }
-    end)
+    end))
 
     -- PUT /api/chat/messages/:uuid - Edit a message
-    app:put("/api/chat/messages/:uuid", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:put("/api/chat/messages/:uuid", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local message_uuid = self.params.uuid
 
         -- Get message to verify ownership
@@ -242,15 +200,11 @@ return function(app)
             status = 200,
             json = full_message
         }
-    end)
+    end))
 
     -- DELETE /api/chat/messages/:uuid - Delete a message
-    app:delete("/api/chat/messages/:uuid", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:delete("/api/chat/messages/:uuid", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local message_uuid = self.params.uuid
 
         -- Get message to verify ownership
@@ -284,15 +238,11 @@ return function(app)
             status = 200,
             json = { message = "Message deleted successfully" }
         }
-    end)
+    end))
 
     -- GET /api/chat/messages/:uuid/thread - Get thread replies
-    app:get("/api/chat/messages/:uuid/thread", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:get("/api/chat/messages/:uuid/thread", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local parent_uuid = self.params.uuid
 
         -- Get parent message to verify access
@@ -321,15 +271,11 @@ return function(app)
             status = 200,
             json = thread
         }
-    end)
+    end))
 
     -- POST /api/chat/messages/:uuid/pin - Pin a message
-    app:post("/api/chat/messages/:uuid/pin", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:post("/api/chat/messages/:uuid/pin", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local message_uuid = self.params.uuid
 
         local message = ChatMessageQueries.show(message_uuid)
@@ -353,15 +299,11 @@ return function(app)
             status = 200,
             json = { message = "Message pinned successfully" }
         }
-    end)
+    end))
 
     -- DELETE /api/chat/messages/:uuid/pin - Unpin a message
-    app:delete("/api/chat/messages/:uuid/pin", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:delete("/api/chat/messages/:uuid/pin", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local message_uuid = self.params.uuid
 
         local message = ChatMessageQueries.show(message_uuid)
@@ -385,15 +327,11 @@ return function(app)
             status = 200,
             json = { message = "Message unpinned successfully" }
         }
-    end)
+    end))
 
     -- GET /api/chat/channels/:channel_uuid/messages/pinned - Get pinned messages
-    app:get("/api/chat/channels/:channel_uuid/messages/pinned", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:get("/api/chat/channels/:channel_uuid/messages/pinned", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local channel_uuid = self.params.channel_uuid
 
         -- Check membership
@@ -413,15 +351,11 @@ return function(app)
                 channel_uuid = channel_uuid
             }
         }
-    end)
+    end))
 
     -- GET /api/chat/channels/:channel_uuid/messages/search - Search messages in channel
-    app:get("/api/chat/channels/:channel_uuid/messages/search", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:get("/api/chat/channels/:channel_uuid/messages/search", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local channel_uuid = self.params.channel_uuid
 
         -- Check membership
@@ -452,15 +386,11 @@ return function(app)
                 channel_uuid = channel_uuid
             }
         }
-    end)
+    end))
 
     -- GET /api/chat/channels/:channel_uuid/unread - Get unread count
-    app:get("/api/chat/channels/:channel_uuid/unread", function(self)
-        local user, err = get_current_user()
-        if not user then
-            return { status = 401, json = { error = err } }
-        end
-
+    app:get("/api/chat/channels/:channel_uuid/unread", AuthMiddleware.requireAuth(function(self)
+        local user = self.current_user
         local channel_uuid = self.params.channel_uuid
 
         local count = ChatMessageQueries.getUnreadCount(channel_uuid, user.uuid)
@@ -472,5 +402,5 @@ return function(app)
                 channel_uuid = channel_uuid
             }
         }
-    end)
+    end))
 end

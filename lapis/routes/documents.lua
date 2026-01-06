@@ -2,6 +2,9 @@
     Document Management Routes
     ==========================
 
+    SECURITY: All endpoints require JWT authentication via AuthMiddleware.
+    User identity is derived from the validated JWT token.
+
     API endpoints for managing documents with direct MinIO/S3 file uploads.
 
     Features:
@@ -26,6 +29,7 @@ local respond_to = require("lapis.application").respond_to
 local DocumentQueries = require("queries.DocumentQueries")
 local Global = require("helper.global")
 local MinioClient = require("helper.minio")
+local AuthMiddleware = require("middleware.auth")
 
 -- Configuration
 local MAX_FILE_SIZE = 50 * 1024 * 1024  -- 50MB
@@ -116,7 +120,7 @@ return function(app)
     ----------------- Document Routes --------------------
 
     -- GET /api/v2/all-documents - Get all documents without pagination
-    app:get("/api/v2/all-documents", function(self)
+    app:get("/api/v2/all-documents", AuthMiddleware.requireAuth(function(self)
         local result = DocumentQueries.allData()
 
         if not result or not result.data then
@@ -126,10 +130,12 @@ return function(app)
         return apiResponse(200, result.data, nil, {
             total = #result.data
         })
-    end)
+    end))
 
     -- Main documents endpoint
     app:match("documents", "/api/v2/documents", respond_to({
+        before = AuthMiddleware.requireAuthBefore,
+
         -- GET /api/v2/documents - List documents with pagination
         GET = function(self)
             local params = {
@@ -216,6 +222,11 @@ return function(app)
     -- Single document endpoint
     app:match("edit_documents", "/api/v2/documents/:id", respond_to({
         before = function(self)
+            -- First authenticate
+            AuthMiddleware.requireAuthBefore(self)
+            -- If auth failed and wrote response, stop processing
+            if self.res and self.res.status then return end
+
             local record = DocumentQueries.show(tostring(self.params.id))
             if not record then
                 self:write(apiResponse(404, nil, "Document not found"))
@@ -306,7 +317,7 @@ return function(app)
     }))
 
     -- POST /api/v2/documents/upload - Standalone file upload
-    app:post("/api/v2/documents/upload", function(self)
+    app:post("/api/v2/documents/upload", AuthMiddleware.requireAuth(function(self)
         local file = self.params.file or self.params.image or self.params.cover_image
 
         if not file then
@@ -333,10 +344,10 @@ return function(app)
             size = metadata and metadata.size,
             key = metadata and metadata.key
         }, "File uploaded successfully")
-    end)
+    end))
 
     -- GET /api/v2/documents/presigned/:key - Get presigned URL for file
-    app:get("/api/v2/documents/presigned/(.*)", function(self)
+    app:get("/api/v2/documents/presigned/(.*)", AuthMiddleware.requireAuth(function(self)
         local object_key = self.params.splat
 
         if not object_key or object_key == "" then
@@ -358,5 +369,5 @@ return function(app)
             url = presigned_url,
             expires_in = expires_in
         })
-    end)
+    end))
 end

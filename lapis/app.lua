@@ -295,6 +295,9 @@ safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, presence, invite
 -- Namespace System (Multi-tenant)
 safe_load_routes("routes.namespaces") -- Namespace management, members, roles, switching
 
+-- Menu System (Backend-driven navigation)
+safe_load_routes("routes.menu") -- User menu based on permissions
+
 -- Services Module (GitHub Workflow Integration)
 safe_load_routes("routes.services") -- Service management, secrets, deployments, GitHub workflows
 

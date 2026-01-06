@@ -23,6 +23,14 @@ import { kanbanService } from '@/services/kanban.service';
 // State Types
 // ============================================
 
+// Project-level permissions returned by API
+interface ProjectPermissions {
+  can_create: boolean;
+  can_update: boolean;
+  can_delete: boolean;
+  can_manage: boolean;
+}
+
 interface KanbanState {
   // Projects
   projects: KanbanProject[];
@@ -30,6 +38,9 @@ interface KanbanState {
   projectsError: string | null;
   currentProject: KanbanProject | null;
   projectLoading: boolean;
+
+  // Project permissions (from API response)
+  projectPermissions: ProjectPermissions;
 
   // Boards
   boards: KanbanBoard[];
@@ -153,6 +164,14 @@ const initialState: KanbanState = {
   currentProject: null,
   projectLoading: false,
 
+  // Default to no permissions until API confirms
+  projectPermissions: {
+    can_create: false,
+    can_update: false,
+    can_delete: false,
+    can_manage: false,
+  },
+
   boards: [],
   boardsLoading: false,
   currentBoard: null,
@@ -211,7 +230,20 @@ export const useKanbanStore = create<KanbanStore>()(
             status: params?.status as 'active' | 'on_hold' | 'completed' | 'archived' | 'cancelled' | undefined,
             starred: params?.starred,
           });
-          set({ projects: response.data, projectsLoading: false });
+
+          // Extract permissions from API response
+          const permissions = response.permissions || {
+            can_create: false,
+            can_update: false,
+            can_delete: false,
+            can_manage: false,
+          };
+
+          set({
+            projects: response.data,
+            projectPermissions: permissions,
+            projectsLoading: false,
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to load projects';
           set({ projectsError: message, projectsLoading: false });

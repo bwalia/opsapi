@@ -63,3 +63,4 @@ export {
   calculateAverageCycleTime,
   getWorkloadLevel,
 } from './analytics.service';
+export { menuService } from './menu.service';

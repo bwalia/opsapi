@@ -97,8 +97,12 @@ function UserQueries.create(params)
 end
 
 function UserQueries.all(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, first_name = true, last_name = true, email = true, username = true, active = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
     local paginated = Users:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage,
@@ -266,8 +270,12 @@ end
 
 -- SCIM user response
 function UserQueries.SCIMall(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, first_name = true, last_name = true, email = true, username = true, active = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
     local paginated = Users:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage,

@@ -6,6 +6,113 @@ local cjson = require "cjson"
 local RequestParser = {}
 
 ---
+-- Reconstruct nested objects from flat form-urlencoded keys
+-- Converts keys like "permissions[dashboard][0]" back to nested tables
+-- @param flat_params The flat parameters from ngx.req.get_post_args()
+-- @return params Reconstructed nested parameters
+local function reconstruct_nested_params(flat_params)
+    local params = {}
+    local nested_keys = {} -- Track which base keys have nested data
+
+    for k, v in pairs(flat_params) do
+        -- Check if this is a nested key like "permissions[dashboard][0]"
+        local base_key = k:match("^([^%[]+)%[")
+
+        if base_key then
+            -- This is a nested key - mark it for later processing
+            nested_keys[base_key] = nested_keys[base_key] or {}
+
+            -- Parse all bracket contents: "permissions[dashboard][0]" -> {"dashboard", "0"}
+            local path = {}
+            for part in k:gmatch("%[([^%]]+)%]") do
+                table.insert(path, part)
+            end
+
+            -- Build the nested structure
+            local current = nested_keys[base_key]
+            for i = 1, #path - 1 do
+                local key = path[i]
+                -- Convert numeric strings to numbers for array indices
+                local idx = tonumber(key)
+                if idx ~= nil then
+                    key = idx + 1 -- Lua arrays are 1-indexed
+                end
+                current[key] = current[key] or {}
+                current = current[key]
+            end
+
+            -- Set the final value
+            local final_key = path[#path]
+            local idx = tonumber(final_key)
+            if idx ~= nil then
+                final_key = idx + 1 -- Lua arrays are 1-indexed
+            end
+            current[final_key] = v
+        else
+            -- Regular key - check if value looks like JSON
+            if type(v) == "string" and (v:match("^%s*{") or v:match("^%s*%[")) then
+                local ok, json_val = pcall(cjson.decode, v)
+                if ok then
+                    params[k] = json_val
+                else
+                    params[k] = v
+                end
+            else
+                params[k] = v
+            end
+        end
+    end
+
+    -- Convert nested arrays from {[1]="a", [2]="b"} to {"a", "b"}
+    local function convert_to_array_if_needed(tbl)
+        if type(tbl) ~= "table" then
+            return tbl
+        end
+
+        -- Check if all keys are sequential integers starting from 1
+        local is_array = true
+        local max_idx = 0
+        local has_numeric = false
+
+        for k, _ in pairs(tbl) do
+            if type(k) == "number" then
+                has_numeric = true
+                if k > max_idx then
+                    max_idx = k
+                end
+            else
+                is_array = false
+            end
+        end
+
+        -- Recursively convert nested tables
+        for k, v in pairs(tbl) do
+            tbl[k] = convert_to_array_if_needed(v)
+        end
+
+        -- If it's an array-like table with numeric keys, convert to proper array
+        if is_array and has_numeric then
+            local arr = {}
+            for i = 1, max_idx do
+                if tbl[i] ~= nil then
+                    table.insert(arr, tbl[i])
+                end
+            end
+            return arr
+        end
+
+        return tbl
+    end
+
+    -- Merge nested keys into params
+    for base_key, nested_val in pairs(nested_keys) do
+        params[base_key] = convert_to_array_if_needed(nested_val)
+    end
+
+    return params
+end
+
+---
 -- Parse request body and return params and files
 -- Handles both JSON and form-urlencoded data
 -- @param self The Lapis request context
@@ -40,7 +147,8 @@ function RequestParser.parse_request(self)
         ngx.req.read_body()
         local post_args = ngx.req.get_post_args()
         if post_args then
-            for k, v in pairs(post_args) do
+            local reconstructed = reconstruct_nested_params(post_args)
+            for k, v in pairs(reconstructed) do
                 params[k] = v
             end
         end
@@ -50,7 +158,8 @@ function RequestParser.parse_request(self)
         ngx.req.read_body()
         local post_args = ngx.req.get_post_args()
         if post_args then
-            for k, v in pairs(post_args) do
+            local reconstructed = reconstruct_nested_params(post_args)
+            for k, v in pairs(reconstructed) do
                 params[k] = v
             end
         end

@@ -24,7 +24,7 @@ show_help() {
     echo "  ./run-development.sh [OPTIONS]"
     echo ""
     echo -e "${BLUE}Options:${NC}"
-    echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod)"
+    echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod|remote|<custom>)"
     echo "  -s, --stash [y|n]     Git stash option (y=stash, n=skip)"
     echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
     echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
@@ -33,18 +33,25 @@ show_help() {
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -h, --help            Show this help message"
     echo ""
-    echo -e "${BLUE}Environments:${NC}"
+    echo -e "${BLUE}Preset Environments:${NC}"
     echo "  local    - http://localhost:4010 (default for local development)"
     echo "  dev      - https://dev-api.${BASE_DOMAIN}"
     echo "  test     - https://test-api.${BASE_DOMAIN}"
     echo "  acc      - https://acc-api.${BASE_DOMAIN}"
     echo "  prod     - https://api.${BASE_DOMAIN}"
+    echo "  remote   - https://remote-api.${BASE_DOMAIN}"
+    echo ""
+    echo -e "${BLUE}Dynamic Environments:${NC}"
+    echo "  Any custom name will generate: https://<name>-api.${BASE_DOMAIN}"
+    echo "  Example: -e staging  -> https://staging-api.${BASE_DOMAIN}"
+    echo "  Example: -e demo     -> https://demo-api.${BASE_DOMAIN}"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
     echo "  ./run-development.sh                    # Interactive mode (prompts)"
     echo "  ./run-development.sh -e local           # Local development environment"
     echo "  ./run-development.sh -e dev -a          # Dev environment, auto git"
-    echo "  ./run-development.sh -e test -n         # Test environment, no git ops"
+    echo "  ./run-development.sh -e remote -n       # Remote environment, no git ops"
+    echo "  ./run-development.sh -e staging -a      # Custom 'staging' environment"
     echo "  ./run-development.sh --env=prod -a      # Prod environment, auto mode"
     echo "  ./run-development.sh -c -e dev          # Just check/update .env for dev"
     echo "  ./run-development.sh -r                 # Reset database (fresh start)"
@@ -156,56 +163,59 @@ is_no() {
 }
 
 # Function to get API URL based on environment
+# Supports both preset environments and dynamic custom environments
 get_api_url() {
     local env="$1"
     case "$env" in
         local)
             echo "http://localhost:4010"
             ;;
-        dev)
-            echo "https://dev-api.${BASE_DOMAIN}"
-            ;;
-        test)
-            echo "https://test-api.${BASE_DOMAIN}"
-            ;;
-        acc)
-            echo "https://acc-api.${BASE_DOMAIN}"
-            ;;
         prod)
+            # Production uses api.domain.com (no prefix)
             echo "https://api.${BASE_DOMAIN}"
             ;;
         *)
-            echo ""
+            # All other environments use {env}-api.domain.com pattern
+            # This includes: dev, test, acc, remote, and any custom environment
+            echo "https://${env}-api.${BASE_DOMAIN}"
             ;;
     esac
 }
 
 # Function to validate environment
+# Now accepts any alphanumeric environment name (dynamic environments)
 validate_environment() {
     local env="$1"
-    case "$env" in
-        local|dev|test|acc|prod)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+
+    # Check if environment name is empty
+    if [[ -z "$env" ]]; then
+        return 1
+    fi
+
+    # Check if environment name contains only valid characters (alphanumeric, hyphen, underscore)
+    if [[ "$env" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Function to prompt for environment selection
 prompt_environment() {
     echo -e "${CYAN}Select target environment:${NC}"
-    echo "  1) local  - http://localhost:4010"
-    echo "  2) dev    - https://dev-api.${BASE_DOMAIN}"
-    echo "  3) test   - https://test-api.${BASE_DOMAIN}"
-    echo "  4) acc    - https://acc-api.${BASE_DOMAIN}"
-    echo "  5) prod   - https://api.${BASE_DOMAIN}"
+    echo "  1) local   - http://localhost:4010"
+    echo "  2) dev     - https://dev-api.${BASE_DOMAIN}"
+    echo "  3) test    - https://test-api.${BASE_DOMAIN}"
+    echo "  4) acc     - https://acc-api.${BASE_DOMAIN}"
+    echo "  5) prod    - https://api.${BASE_DOMAIN}"
+    echo "  6) remote  - https://remote-api.${BASE_DOMAIN}"
+    echo ""
+    echo -e "${CYAN}Or enter a custom environment name (e.g., staging, demo, etc.)${NC}"
     echo ""
 
     local choice
     while true; do
-        read -p "Enter choice [1-5] or environment name: " choice
+        read -p "Enter choice [1-6] or custom environment name: " choice
         case "$choice" in
             1|local)
                 echo "local"
@@ -227,8 +237,19 @@ prompt_environment() {
                 echo "prod"
                 return 0
                 ;;
+            6|remote)
+                echo "remote"
+                return 0
+                ;;
             *)
-                echo -e "${YELLOW}Invalid choice. Please enter 1-5 or environment name (local/dev/test/acc/prod).${NC}" >&2
+                # Check if it's a valid custom environment name
+                if validate_environment "$choice"; then
+                    echo "$choice"
+                    return 0
+                else
+                    echo -e "${YELLOW}Invalid choice. Please enter 1-6 or a valid environment name.${NC}" >&2
+                    echo -e "${YELLOW}Environment names must start with a letter and contain only letters, numbers, hyphens, or underscores.${NC}" >&2
+                fi
                 ;;
         esac
     done
@@ -378,10 +399,14 @@ echo ""
 if [[ -n "$TARGET_ENV" ]]; then
     # Environment provided via argument
     if validate_environment "$TARGET_ENV"; then
+        API_URL_PREVIEW=$(get_api_url "$TARGET_ENV")
         echo -e "${BLUE}[i] Environment from argument: ${CYAN}${TARGET_ENV}${NC}"
+        echo -e "${BLUE}[i] API URL will be: ${CYAN}${API_URL_PREVIEW}${NC}"
     else
         echo -e "${RED}[!] Invalid environment: '$TARGET_ENV'${NC}"
-        echo -e "${YELLOW}[!] Valid options: local, dev, test, acc, prod${NC}"
+        echo -e "${YELLOW}[!] Environment name must start with a letter and contain only letters, numbers, hyphens, or underscores.${NC}"
+        echo -e "${YELLOW}[!] Preset options: local, dev, test, acc, prod, remote${NC}"
+        echo -e "${YELLOW}[!] Or use any custom name (e.g., staging, demo, feature-x)${NC}"
         exit 1
     fi
 else

@@ -302,6 +302,9 @@ interface UseNotificationSocketOptions {
 /**
  * Specialized WebSocket hook for notifications
  * Provides a simpler API for common notification patterns
+ *
+ * NOTE: WebSocket is DISABLED by default until a WebSocket server is available.
+ * Set NEXT_PUBLIC_WS_URL environment variable to enable WebSocket connections.
  */
 export function useNotificationSocket(options: UseNotificationSocketOptions = {}) {
   const {
@@ -311,10 +314,12 @@ export function useNotificationSocket(options: UseNotificationSocketOptions = {}
     onTimerEvent,
   } = options;
 
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL ||
-    (typeof window !== 'undefined'
-      ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
-      : 'ws://localhost:4010/ws');
+  // Only enable WebSocket if explicitly configured
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || '';
+
+  // Disable WebSocket connections if no URL is configured
+  // This prevents connection errors when no WS server is available
+  const shouldConnect = enabled && Boolean(wsUrl);
 
   const {
     status,
@@ -322,8 +327,10 @@ export function useNotificationSocket(options: UseNotificationSocketOptions = {}
     subscribe,
     connect,
     disconnect,
-  } = useWebSocket(wsUrl, {
-    autoConnect: enabled,
+  } = useWebSocket(wsUrl || 'ws://disabled', {
+    autoConnect: shouldConnect,
+    reconnect: shouldConnect, // Disable reconnect if WS is not configured
+    maxReconnectAttempts: shouldConnect ? 5 : 0, // Reduce max attempts
     onMessage: (message) => {
       // Handle notification events
       if (message.type === 'notification:new' && onNotification) {
@@ -339,10 +346,10 @@ export function useNotificationSocket(options: UseNotificationSocketOptions = {}
   });
 
   return {
-    status,
-    isConnected,
+    status: shouldConnect ? status : 'disconnected' as ConnectionStatus,
+    isConnected: shouldConnect ? isConnected : false,
     subscribe,
-    connect,
+    connect: shouldConnect ? connect : () => {},
     disconnect,
   };
 }

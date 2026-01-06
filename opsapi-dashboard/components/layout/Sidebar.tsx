@@ -1,64 +1,29 @@
 'use client';
 
-import React, { memo, useCallback, useMemo } from 'react';
+/**
+ * Sidebar Component (Backend-Driven Navigation)
+ *
+ * This component renders the navigation sidebar using menu items
+ * fetched from the backend API. The backend is the SINGLE SOURCE
+ * OF TRUTH for navigation - NO permission filtering happens here.
+ *
+ * The API returns only the menu items the user has access to based on:
+ * - Their namespace permissions (from assigned roles)
+ * - Namespace ownership status
+ * - Platform admin status
+ * - Namespace-specific menu configuration
+ *
+ * @module components/layout/Sidebar
+ */
+
+import React, { memo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutDashboard,
-  Users,
-  ShoppingCart,
-  Package,
-  Store,
-  Settings,
-  FileText,
-  Truck,
-  MessageSquare,
-  BarChart3,
-  LogOut,
-  UserCircle,
-  X,
-  ChevronLeft,
-  Shield,
-  Building2,
-  Rocket,
-  Kanban,
-} from 'lucide-react';
+import { LogOut, X, ChevronLeft, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
-import { usePermissions } from '@/contexts/PermissionsContext';
+import { useMenu, type MenuItemWithIcon } from '@/hooks';
 import { RoleBadge } from '@/components/permissions';
-import type { DashboardModule, NamespaceModule } from '@/types';
-
-interface NavItem {
-  name: string;
-  href: string;
-  icon: React.ElementType;
-  badge?: number;
-  module?: DashboardModule | NamespaceModule; // Permission module to check
-  adminOnly?: boolean; // Show only for admins
-  alwaysShow?: boolean; // Always show regardless of permissions (e.g., namespace workspace)
-}
-
-const navigation: NavItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
-  { name: 'My Workspace', href: '/dashboard/namespace', icon: Building2, module: 'namespace', alwaysShow: true },
-  { name: 'All Namespaces', href: '/dashboard/namespaces', icon: Building2, module: 'namespaces', adminOnly: true },
-  { name: 'Projects', href: '/dashboard/projects', icon: Kanban, module: 'projects' },
-  { name: 'Services', href: '/dashboard/services', icon: Rocket, module: 'services' },
-  { name: 'Users', href: '/dashboard/users', icon: Users, module: 'users' },
-  { name: 'Roles', href: '/dashboard/roles', icon: Shield, module: 'roles' },
-  { name: 'Orders', href: '/dashboard/orders', icon: ShoppingCart, module: 'orders' },
-  { name: 'Products', href: '/dashboard/products', icon: Package, module: 'products' },
-  { name: 'Stores', href: '/dashboard/stores', icon: Store, module: 'stores' },
-  { name: 'Customers', href: '/dashboard/customers', icon: UserCircle, module: 'customers' },
-  { name: 'Delivery', href: '/dashboard/delivery', icon: Truck, module: 'delivery' },
-  { name: 'Chat', href: '/dashboard/chat', icon: MessageSquare, module: 'chat' },
-  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, module: 'reports' },
-];
-
-const secondaryNavigation: NavItem[] = [
-  { name: 'Settings', href: '/dashboard/settings', icon: Settings, module: 'settings' },
-];
 
 interface SidebarProps {
   isOpen: boolean;
@@ -74,16 +39,16 @@ const NavItemLink = memo(function NavItemLink({
   isCollapsed,
   onClick,
 }: {
-  item: NavItem;
+  item: MenuItemWithIcon;
   isActive: boolean;
   isCollapsed: boolean;
   onClick?: () => void;
 }) {
-  const Icon = item.icon;
+  const Icon = item.IconComponent;
 
   return (
     <Link
-      href={item.href}
+      href={item.path}
       onClick={onClick}
       className={cn(
         'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
@@ -98,14 +63,72 @@ const NavItemLink = memo(function NavItemLink({
       {!isCollapsed && (
         <>
           <span className="flex-1 truncate">{item.name}</span>
-          {item.badge !== undefined && (
+          {/* Badge support for dynamic counts */}
+          {item.badge_key && (
             <span className="px-2 py-0.5 text-xs font-medium bg-primary-500 text-white rounded-full">
-              {item.badge}
+              {/* Badge count would come from a separate API/store */}
             </span>
           )}
         </>
       )}
     </Link>
+  );
+});
+
+// Loading skeleton for menu items
+const MenuSkeleton = memo(function MenuSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
+  return (
+    <div className="space-y-2">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div
+          key={i}
+          className={cn(
+            'flex items-center gap-3 px-3 py-2.5 rounded-lg animate-pulse',
+            isCollapsed && 'justify-center px-2'
+          )}
+        >
+          <div className="w-5 h-5 bg-secondary-200 rounded" />
+          {!isCollapsed && <div className="flex-1 h-4 bg-secondary-200 rounded" />}
+        </div>
+      ))}
+    </div>
+  );
+});
+
+// Error state component
+const MenuError = memo(function MenuError({
+  error,
+  onRetry,
+  isCollapsed,
+}: {
+  error: string;
+  onRetry: () => void;
+  isCollapsed: boolean;
+}) {
+  if (isCollapsed) {
+    return (
+      <button
+        onClick={onRetry}
+        className="flex items-center justify-center p-2 text-error-500 hover:bg-error-50 rounded-lg"
+        title="Error loading menu. Click to retry."
+      >
+        <AlertCircle className="w-5 h-5" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="px-3 py-4 text-center">
+      <AlertCircle className="w-8 h-8 text-error-500 mx-auto mb-2" />
+      <p className="text-sm text-secondary-600 mb-3">{error}</p>
+      <button
+        onClick={onRetry}
+        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+      >
+        <RefreshCw className="w-4 h-4" />
+        Retry
+      </button>
+    </div>
   );
 });
 
@@ -118,35 +141,23 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
   const pathname = usePathname();
   const { user } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
-  const { canAccess, isAdmin, userRole, isLoading } = usePermissions();
 
-  // Filter navigation items based on permissions
-  const filteredNavigation = useMemo(() => {
-    if (isLoading) return [];
+  // Use the backend-driven menu hook
+  const {
+    mainMenu,
+    secondaryMenu,
+    isLoading,
+    isHydrated,
+    error,
+    namespaceContext,
+    refreshMenu,
+    clearError,
+  } = useMenu();
 
-    return navigation.filter((item) => {
-      // Admin-only items
-      if (item.adminOnly && !isAdmin) return false;
-
-      // Items marked as alwaysShow are always visible
-      if (item.alwaysShow) return true;
-
-      // Items without module requirement are always shown
-      if (!item.module) return true;
-
-      // Check if user can access the module
-      return canAccess(item.module);
-    });
-  }, [canAccess, isAdmin, isLoading]);
-
-  const filteredSecondaryNav = useMemo(() => {
-    if (isLoading) return [];
-
-    return secondaryNavigation.filter((item) => {
-      if (!item.module) return true;
-      return canAccess(item.module);
-    });
-  }, [canAccess, isLoading]);
+  // Get user role from namespace context or fall back to platform role
+  const userRole = namespaceContext?.is_owner
+    ? 'owner'
+    : user?.roles?.[0]?.role_name || 'member';
 
   const handleLogout = useCallback(async () => {
     await logout();
@@ -159,6 +170,14 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
       onClose();
     }
   }, [onClose]);
+
+  const handleRetry = useCallback(() => {
+    clearError();
+    refreshMenu();
+  }, [clearError, refreshMenu]);
+
+  // Show loading state while hydrating
+  const showLoading = !isHydrated || (isLoading && mainMenu.length === 0);
 
   return (
     <>
@@ -239,6 +258,12 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
                 <RoleBadge roleName={userRole} size="sm" showIcon={false} />
               </div>
             </div>
+            {/* Show current namespace */}
+            {namespaceContext && (
+              <p className="mt-2 text-xs text-secondary-500 truncate">
+                {namespaceContext.name}
+              </p>
+            )}
           </div>
         )}
 
@@ -250,29 +275,52 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
                 Main Menu
               </p>
             )}
-            {filteredNavigation.map((item) => (
+
+            {/* Loading State */}
+            {showLoading && <MenuSkeleton isCollapsed={isCollapsed} />}
+
+            {/* Error State */}
+            {error && !showLoading && (
+              <MenuError error={error} onRetry={handleRetry} isCollapsed={isCollapsed} />
+            )}
+
+            {/* Menu Items */}
+            {!showLoading && !error && mainMenu.map((item) => (
               <NavItemLink
-                key={item.name}
+                key={item.key}
                 item={item}
-                isActive={pathname === item.href}
+                isActive={pathname === item.path}
                 isCollapsed={isCollapsed}
                 onClick={handleNavClick}
               />
             ))}
+
+            {/* Loading indicator when refreshing (not initial load) */}
+            {isLoading && mainMenu.length > 0 && (
+              <div className={cn(
+                'flex items-center gap-2 px-3 py-2 text-secondary-400',
+                isCollapsed && 'justify-center'
+              )}>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {!isCollapsed && <span className="text-xs">Updating...</span>}
+              </div>
+            )}
           </div>
 
           {/* Secondary Navigation */}
           <div className="pt-4 mt-4 border-t border-secondary-200 space-y-1 flex-shrink-0">
-            {!isCollapsed && (
+            {!isCollapsed && secondaryMenu.length > 0 && (
               <p className="px-3 mb-2 text-xs font-semibold text-secondary-400 uppercase tracking-wider">
                 Settings
               </p>
             )}
-            {filteredSecondaryNav.map((item) => (
+
+            {/* Secondary Menu Items */}
+            {!showLoading && !error && secondaryMenu.map((item) => (
               <NavItemLink
-                key={item.name}
+                key={item.key}
                 item={item}
-                isActive={pathname === item.href}
+                isActive={pathname === item.path}
                 isCollapsed={isCollapsed}
                 onClick={handleNavClick}
               />

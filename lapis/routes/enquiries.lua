@@ -1,59 +1,53 @@
-local respond_to = require("lapis.application").respond_to
+--[[
+    Enquiry Routes
+
+    SECURITY: All endpoints require JWT authentication via AuthMiddleware.
+    User identity is derived from the validated JWT token.
+]]
+
 local EnquiryQueries = require "queries.EnquiryQueries"
+local AuthMiddleware = require("middleware.auth")
 
 return function(app)
-    app:match("enquiries", "/api/v2/enquiries", respond_to({
-        GET = function(self)
-            self.params.timestamp = true
-            local roles = EnquiryQueries.all(self.params)
-            return {
-                json = roles
-            }
-        end,
-        POST = function(self)
-            local roles = EnquiryQueries.create(self.params)
-            return {
-                json = roles,
-                status = 201
-            }
-        end
-    }))
+    -- GET /api/v2/enquiries - List enquiries
+    app:get("/api/v2/enquiries", AuthMiddleware.requireAuth(function(self)
+        self.params.timestamp = true
+        local enquiries = EnquiryQueries.all(self.params)
+        return { json = enquiries }
+    end))
 
-    app:match("edit_enquiry", "/api/v2/enquiries/:id", respond_to({
-        before = function(self)
-            self.role = EnquiryQueries.show(tostring(self.params.id))
-            if not self.role then
-                self:write({
-                    json = {
-                        lapis = {
-                            version = require("lapis.version")
-                        },
-                        error = "Role not found! Please check the UUID and try again."
-                    },
-                    status = 404
-                })
-            end
-        end,
-        GET = function(self)
-            local role = EnquiryQueries.show(tostring(self.params.id))
-            return {
-                json = role,
-                status = 200
-            }
-        end,
-        PUT = function(self)
-            local role = EnquiryQueries.update(tostring(self.params.id), self.params)
-            return {
-                json = role,
-                status = 204
-            }
-        end,
-        DELETE = function(self)
-            local role = EnquiryQueries.destroy(tostring(self.params.id))
-            return {
-                json = role,
-                status = 204
-            }
+    -- POST /api/v2/enquiries - Create enquiry
+    app:post("/api/v2/enquiries", AuthMiddleware.requireAuth(function(self)
+        local enquiry = EnquiryQueries.create(self.params)
+        return { json = enquiry, status = 201 }
+    end))
+
+    -- GET /api/v2/enquiries/:id - Get single enquiry
+    app:get("/api/v2/enquiries/:id", AuthMiddleware.requireAuth(function(self)
+        local enquiry = EnquiryQueries.show(tostring(self.params.id))
+        if not enquiry then
+            return { json = { error = "Enquiry not found" }, status = 404 }
         end
-    }))
+        return { json = enquiry, status = 200 }
+    end))
+
+    -- PUT /api/v2/enquiries/:id - Update enquiry
+    app:put("/api/v2/enquiries/:id", AuthMiddleware.requireAuth(function(self)
+        local enquiry = EnquiryQueries.show(tostring(self.params.id))
+        if not enquiry then
+            return { json = { error = "Enquiry not found" }, status = 404 }
+        end
+        local updated = EnquiryQueries.update(tostring(self.params.id), self.params)
+        return { json = updated, status = 200 }
+    end))
+
+    -- DELETE /api/v2/enquiries/:id - Delete enquiry
+    app:delete("/api/v2/enquiries/:id", AuthMiddleware.requireAuth(function(self)
+        local enquiry = EnquiryQueries.show(tostring(self.params.id))
+        if not enquiry then
+            return { json = { error = "Enquiry not found" }, status = 404 }
+        end
+        EnquiryQueries.destroy(tostring(self.params.id))
+        return { json = { message = "Enquiry deleted successfully" }, status = 200 }
+    end))
 end

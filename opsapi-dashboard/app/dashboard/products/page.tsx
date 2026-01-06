@@ -4,12 +4,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Package } from 'lucide-react';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { productsService } from '@/services';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import type { StoreProduct, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
 function ProductsPageContent() {
+  const { canCreate, canUpdate, canDelete } = usePermissions();
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -169,24 +171,28 @@ function ProductsPageContent() {
       width: 'w-20',
       render: (product) => (
         <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              window.location.href = `/dashboard/products/${product.uuid}`;
-            }}
-            className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDeleteClick(product);
-            }}
-            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {canUpdate('products') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.location.href = `/dashboard/products/${product.uuid}`;
+              }}
+              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+          )}
+          {canDelete('products') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteClick(product);
+              }}
+              className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ),
     },
@@ -208,7 +214,9 @@ function ProductsPageContent() {
           <h1 className="text-2xl font-bold text-secondary-900">Products</h1>
           <p className="text-secondary-500 mt-1">Manage your product catalog</p>
         </div>
-        <Button leftIcon={<Plus className="w-4 h-4" />}>Add Product</Button>
+        {canCreate('products') && (
+          <Button leftIcon={<Plus className="w-4 h-4" />}>Add Product</Button>
+        )}
       </div>
 
       {/* Filters */}

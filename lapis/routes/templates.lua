@@ -1,71 +1,53 @@
-local respond_to = require("lapis.application").respond_to
+--[[
+    Template Routes
+
+    SECURITY: All endpoints require JWT authentication via AuthMiddleware.
+    User identity is derived from the validated JWT token.
+]]
+
 local TemplateQueries = require "queries.TemplateQueries"
+local AuthMiddleware = require("middleware.auth")
 
 return function(app)
-    app:match("templates", "/api/v2/templates", respond_to({
-        GET = function(self)
-            self.params.timestamp = true
-            local templates = TemplateQueries.all(self.params)
-            return {
-                json = templates,
-                status = 200
-            }
-        end,
-        POST = function(self)
-            local project = TemplateQueries.create(self.params)
-            return {
-                json = project,
-                status = 201
-            }
-        end
-    }))
+    -- GET /api/v2/templates - List templates
+    app:get("/api/v2/templates", AuthMiddleware.requireAuth(function(self)
+        self.params.timestamp = true
+        local templates = TemplateQueries.all(self.params)
+        return { json = templates, status = 200 }
+    end))
 
-    app:match("edit_templates", "/api/v2/templates/:id", respond_to({
-        before = function(self)
-            self.project = TemplateQueries.show(tostring(self.params.id))
-            if not self.project then
-                self:write({
-                    json = {
-                        lapis = {
-                            version = require("lapis.version")
-                        },
-                        error = "Project not found! Please check the UUID and try again."
-                    },
-                    status = 404
-                })
-            end
-        end,
-        GET = function(self)
-            local project = TemplateQueries.show(tostring(self.params.id))
-            return {
-                json = project,
-                status = 200
-            }
-        end,
-        PUT = function(self)
-            if not self.params.id then
-                return {
-                    json = {
-                        lapis = {
-                            version = require("lapis.version")
-                        },
-                        error = "assert_valid was not captured: Please pass the uuid of project that you want to update"
-                    },
-                    status = 500
-                }
-            end
-            local project = TemplateQueries.update(tostring(self.params.id), self.params)
-            return {
-                json = project,
-                status = 204
-            }
-        end,
-        DELETE = function(self)
-            local project = TemplateQueries.destroy(tostring(self.params.id))
-            return {
-                json = project,
-                status = 204
-            }
+    -- POST /api/v2/templates - Create template
+    app:post("/api/v2/templates", AuthMiddleware.requireAuth(function(self)
+        local template = TemplateQueries.create(self.params)
+        return { json = template, status = 201 }
+    end))
+
+    -- GET /api/v2/templates/:id - Get single template
+    app:get("/api/v2/templates/:id", AuthMiddleware.requireAuth(function(self)
+        local template = TemplateQueries.show(tostring(self.params.id))
+        if not template then
+            return { json = { error = "Template not found" }, status = 404 }
         end
-    }))
+        return { json = template, status = 200 }
+    end))
+
+    -- PUT /api/v2/templates/:id - Update template
+    app:put("/api/v2/templates/:id", AuthMiddleware.requireAuth(function(self)
+        local template = TemplateQueries.show(tostring(self.params.id))
+        if not template then
+            return { json = { error = "Template not found" }, status = 404 }
+        end
+        local updated = TemplateQueries.update(tostring(self.params.id), self.params)
+        return { json = updated, status = 200 }
+    end))
+
+    -- DELETE /api/v2/templates/:id - Delete template
+    app:delete("/api/v2/templates/:id", AuthMiddleware.requireAuth(function(self)
+        local template = TemplateQueries.show(tostring(self.params.id))
+        if not template then
+            return { json = { error = "Template not found" }, status = 404 }
+        end
+        TemplateQueries.destroy(tostring(self.params.id))
+        return { json = { message = "Template deleted successfully" }, status = 200 }
+    end))
 end

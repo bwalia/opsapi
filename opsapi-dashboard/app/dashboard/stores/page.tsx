@@ -4,12 +4,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Store as StoreIcon, MapPin, Phone, Mail } from 'lucide-react';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { storesService } from '@/services';
 import { formatDate } from '@/lib/utils';
 import type { Store, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
 function StoresPageContent() {
+  const { canCreate, canUpdate, canDelete } = usePermissions();
   const [stores, setStores] = useState<Store[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -177,24 +179,28 @@ function StoresPageContent() {
       width: 'w-20',
       render: (store) => (
         <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              window.location.href = `/dashboard/stores/${store.uuid}`;
-            }}
-            className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDeleteClick(store);
-            }}
-            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {canUpdate('stores') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.location.href = `/dashboard/stores/${store.uuid}`;
+              }}
+              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+          )}
+          {canDelete('stores') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteClick(store);
+              }}
+              className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ),
     },
@@ -229,7 +235,9 @@ function StoresPageContent() {
           <h1 className="text-2xl font-bold text-secondary-900">Stores</h1>
           <p className="text-secondary-500 mt-1">Manage your store locations</p>
         </div>
-        <Button leftIcon={<Plus className="w-4 h-4" />}>Add Store</Button>
+        {canCreate('stores') && (
+          <Button leftIcon={<Plus className="w-4 h-4" />}>Add Store</Button>
+        )}
       </div>
 
       {/* Filters */}

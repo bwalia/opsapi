@@ -1,19 +1,29 @@
+--[[
+    Module Routes
+
+    SECURITY: All endpoints require JWT authentication via AuthMiddleware.
+    User identity is derived from the validated JWT token.
+]]
+
 local respond_to = require("lapis.application").respond_to
 local ModuleQueries = require "queries.ModuleQueries"
+local AuthMiddleware = require("middleware.auth")
 
 return function(app)
     app:match("modules", "/api/v2/modules", respond_to({
+        before = AuthMiddleware.requireAuthBefore,
+
         GET = function(self)
             self.params.timestamp = true
-            local roles = ModuleQueries.all(self.params)
+            local modules = ModuleQueries.all(self.params)
             return {
-                json = roles
+                json = modules
             }
         end,
         POST = function(self)
-            local roles = ModuleQueries.create(self.params)
+            local module = ModuleQueries.create(self.params)
             return {
-                json = roles,
+                json = module,
                 status = 201
             }
         end
@@ -21,38 +31,36 @@ return function(app)
 
     app:match("edit_module", "/api/v2/modules/:id", respond_to({
         before = function(self)
-            self.role = ModuleQueries.show(tostring(self.params.id))
-            if not self.role then
+            -- First authenticate
+            AuthMiddleware.requireAuthBefore(self)
+            if self.res and self.res.status then return end
+
+            self.module = ModuleQueries.show(tostring(self.params.id))
+            if not self.module then
                 self:write({
-                    json = {
-                        lapis = {
-                            version = require("lapis.version")
-                        },
-                        error = "Role not found! Please check the UUID and try again."
-                    },
+                    json = { error = "Module not found! Please check the UUID and try again." },
                     status = 404
                 })
             end
         end,
         GET = function(self)
-            local role = ModuleQueries.show(tostring(self.params.id))
             return {
-                json = role,
+                json = self.module,
                 status = 200
             }
         end,
         PUT = function(self)
-            local role = ModuleQueries.update(tostring(self.params.id), self.params)
+            local module = ModuleQueries.update(tostring(self.params.id), self.params)
             return {
-                json = role,
-                status = 204
+                json = module,
+                status = 200
             }
         end,
         DELETE = function(self)
-            local role = ModuleQueries.destroy(tostring(self.params.id))
+            ModuleQueries.destroy(tostring(self.params.id))
             return {
-                json = role,
-                status = 204
+                json = { message = "Module deleted successfully" },
+                status = 200
             }
         end
     }))

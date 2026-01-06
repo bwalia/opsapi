@@ -24,13 +24,17 @@ function OrderQueries.create(params)
 end
 
 function OrderQueries.getByStore(store_id, params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, order_number = true, status = true, total_price = true, financial_status = true, fulfillment_status = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
+
     local paginated = OrderModel:paginated("WHERE store_id = ? ORDER BY " .. orderField .. " " .. orderDir, {
         per_page = perPage
     }, store_id)
-    
+
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()
@@ -38,13 +42,17 @@ function OrderQueries.getByStore(store_id, params)
 end
 
 function OrderQueries.all(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, order_number = true, status = true, total_price = true, financial_status = true, fulfillment_status = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
+
     local paginated = OrderModel:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
-    
+
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()

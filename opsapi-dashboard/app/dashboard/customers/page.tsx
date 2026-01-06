@@ -3,13 +3,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Mail, Phone, MapPin } from 'lucide-react';
 import { Button, Input, Table, Pagination, Card, ConfirmDialog } from '@/components/ui';
+import { AddCustomerModal } from '@/components/customers';
 import { ProtectedPage } from '@/components/permissions';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { customersService } from '@/services';
 import { formatDate, getInitials, getFullName } from '@/lib/utils';
 import type { Customer, TableColumn, PaginatedResponse } from '@/types';
 import toast from 'react-hot-toast';
 
 function CustomersPageContent() {
+  const { canCreate, canUpdate, canDelete } = usePermissions();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -21,6 +24,7 @@ function CustomersPageContent() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -91,7 +95,21 @@ function CustomersPageContent() {
   };
 
   const getLocation = (customer: Customer): string => {
-    const parts = [customer.city, customer.state, customer.country].filter(Boolean);
+    // addresses is a JSON array stored as text, or already parsed as array
+    let addresses = customer.addresses;
+    if (typeof addresses === 'string') {
+      try {
+        addresses = JSON.parse(addresses);
+      } catch {
+        return 'No location';
+      }
+    }
+    if (!Array.isArray(addresses) || addresses.length === 0) {
+      return 'No location';
+    }
+    // Get the first (default) address
+    const addr = addresses[0];
+    const parts = [addr?.city, addr?.province, addr?.country].filter(Boolean);
     return parts.join(', ') || 'No location';
   };
 
@@ -158,24 +176,28 @@ function CustomersPageContent() {
       width: 'w-20',
       render: (customer) => (
         <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              window.location.href = `/dashboard/customers/${customer.uuid}`;
-            }}
-            className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDeleteClick(customer);
-            }}
-            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {canUpdate('customers') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.location.href = `/dashboard/customers/${customer.uuid}`;
+              }}
+              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+          )}
+          {canDelete('customers') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteClick(customer);
+              }}
+              className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ),
     },
@@ -202,7 +224,14 @@ function CustomersPageContent() {
           <h1 className="text-2xl font-bold text-secondary-900">Customers</h1>
           <p className="text-secondary-500 mt-1">Manage your customer database</p>
         </div>
-        <Button leftIcon={<Plus className="w-4 h-4" />}>Add Customer</Button>
+        {canCreate('customers') && (
+          <Button
+            leftIcon={<Plus className="w-4 h-4" />}
+            onClick={() => setIsAddModalOpen(true)}
+          >
+            Add Customer
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
@@ -254,6 +283,16 @@ function CustomersPageContent() {
         confirmText="Delete"
         variant="danger"
         isLoading={isDeleting}
+      />
+
+      {/* Add Customer Modal */}
+      <AddCustomerModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={() => {
+          fetchCustomers();
+          setCurrentPage(1);
+        }}
       />
     </div>
   );

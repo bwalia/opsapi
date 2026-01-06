@@ -19,6 +19,8 @@ export const NAMESPACE_KEY = 'current_namespace';
 export const AUTH_TOKEN_KEY = 'auth_token';
 export const AUTH_USER_KEY = 'auth_user';
 export const ZUSTAND_AUTH_KEY = 'auth-storage';
+export const ZUSTAND_MENU_KEY = 'menu-storage';
+export const ZUSTAND_NAMESPACE_KEY = 'namespace-storage';
 
 // Track if we're currently redirecting to prevent loops
 let isRedirecting = false;
@@ -53,7 +55,7 @@ function getAuthToken(): string | null {
 }
 
 /**
- * Clear all auth-related storage
+ * Clear all auth-related storage including menu and namespace cache
  */
 export function clearAllAuthStorage(): void {
   if (typeof window === 'undefined') return;
@@ -62,6 +64,8 @@ export function clearAllAuthStorage(): void {
   localStorage.removeItem(AUTH_USER_KEY);
   localStorage.removeItem(ZUSTAND_AUTH_KEY);
   localStorage.removeItem(NAMESPACE_KEY);
+  localStorage.removeItem(ZUSTAND_MENU_KEY);
+  localStorage.removeItem(ZUSTAND_NAMESPACE_KEY);
 }
 
 /**

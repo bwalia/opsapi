@@ -59,6 +59,30 @@ function AuthMiddleware.requireAuth(handler)
     end
 end
 
+-- For use as 'before' filter in respond_to handlers
+function AuthMiddleware.requireAuthBefore(self)
+    ngx.log(ngx.INFO, "=== AUTH MIDDLEWARE (before) CALLED for: " .. (self.req.parsed_url.path or "unknown"))
+
+    -- Check for public browse header
+    local public_browse = self.req.headers["x-public-browse"]
+    if public_browse and public_browse:lower() == "true" then
+        ngx.log(ngx.INFO, "Public browse access granted")
+        self.current_user = nil
+        self.is_public_browse = true
+        return
+    end
+
+    local user, err = AuthMiddleware.authenticate(self)
+    if err then
+        ngx.log(ngx.INFO, "Authentication failed: " .. (err.error or "unknown error"))
+        self:write({ json = { error = err.error }, status = err.status })
+        return
+    end
+
+    ngx.log(ngx.INFO, "Authentication successful for user: " .. (user and (user.uuid or user.sub) or "unknown"))
+    self.current_user = user
+end
+
 function AuthMiddleware.requireRole(role, handler)
     return function(self)
         -- Note: role-based endpoints require authentication regardless of public browse setting
