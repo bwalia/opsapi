@@ -320,10 +320,12 @@ const EmptyState = React.memo(function EmptyState({
   onCreateProject,
   filterActive,
   onClearFilter,
+  canCreate,
 }: {
   onCreateProject: () => void;
   filterActive?: boolean;
   onClearFilter?: () => void;
+  canCreate?: boolean;
 }) {
   if (filterActive) {
     return (
@@ -349,13 +351,16 @@ const EmptyState = React.memo(function EmptyState({
       </div>
       <h3 className="text-xl font-semibold text-gray-900 mb-2">No projects yet</h3>
       <p className="text-gray-500 text-center max-w-md mb-6">
-        Create your first project to start organizing your work with Kanban boards,
-        tasks, and team collaboration.
+        {canCreate
+          ? 'Create your first project to start organizing your work with Kanban boards, tasks, and team collaboration.'
+          : 'You don\'t have any projects yet. Contact your administrator to get access.'}
       </p>
-      <Button onClick={onCreateProject} size="lg">
-        <Plus size={20} className="mr-2" />
-        Create your first project
-      </Button>
+      {canCreate && (
+        <Button onClick={onCreateProject} size="lg">
+          <Plus size={20} className="mr-2" />
+          Create your first project
+        </Button>
+      )}
     </div>
   );
 });
@@ -425,6 +430,7 @@ export default function ProjectsPage() {
     deleteProject,
     toggleProjectStar,
     isCreatingProject,
+    projectPermissions,
   } = useKanbanStore();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -551,10 +557,12 @@ export default function ProjectsPage() {
             Manage your projects and track progress with Kanban boards
           </p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
-          <Plus size={18} className="mr-2" />
-          New Project
-        </Button>
+        {projectPermissions.can_create && (
+          <Button onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
+            <Plus size={18} className="mr-2" />
+            New Project
+          </Button>
+        )}
       </div>
 
       {/* Stats Cards - Only show when there are projects */}
@@ -680,7 +688,10 @@ export default function ProjectsPage() {
       {/* Empty State */}
       {!projectsLoading && projects.length === 0 && (
         <Card className="border-dashed">
-          <EmptyState onCreateProject={() => setShowCreateModal(true)} />
+          <EmptyState
+            onCreateProject={() => setShowCreateModal(true)}
+            canCreate={projectPermissions.can_create}
+          />
         </Card>
       )}
 
@@ -691,6 +702,7 @@ export default function ProjectsPage() {
             onCreateProject={() => setShowCreateModal(true)}
             filterActive={isFiltered}
             onClearFilter={handleClearFilters}
+            canCreate={projectPermissions.can_create}
           />
         </Card>
       )}

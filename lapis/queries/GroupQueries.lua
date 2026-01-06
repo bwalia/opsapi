@@ -19,8 +19,12 @@ function GroupQueries.create(data)
 end
 
 function GroupQueries.all(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, name = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
     local paginated = Groups:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
@@ -122,8 +126,12 @@ end
 -- SCIM functions
 
 function GroupQueries.SCIMall(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, name = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
     local paginated = Groups:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage

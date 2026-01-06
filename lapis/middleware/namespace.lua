@@ -131,12 +131,16 @@ function NamespaceMiddleware.requireNamespace(handler)
             local member_details = NamespaceMemberQueries.getWithDetails(membership.id)
             local permissions = NamespaceMemberQueries.getPermissions(membership.id)
 
+            -- Ensure is_owner is a proper boolean (PostgreSQL might return 't'/'f' or other formats)
+            local raw_is_owner = membership.is_owner
+            local is_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
+
             -- Set namespace context
             self.namespace = namespace
             self.namespace_membership = membership
             self.namespace_member = member_details
             self.namespace_permissions = permissions
-            self.is_namespace_owner = membership.is_owner
+            self.is_namespace_owner = is_owner
 
             -- Parse roles if available
             if member_details and member_details.roles then
@@ -187,7 +191,9 @@ function NamespaceMiddleware.optionalNamespace(handler)
                     if membership and membership.status == "active" then
                         self.namespace_membership = membership
                         self.namespace_permissions = NamespaceMemberQueries.getPermissions(membership.id)
-                        self.is_namespace_owner = membership.is_owner
+                        -- Ensure is_owner is a proper boolean
+                        local raw_is_owner = membership.is_owner
+                        self.is_namespace_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
                     end
                 end
             end

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { User, AuthState, LoginCredentials } from '@/types';
 import { authService } from '@/services/auth.service';
 import { AUTH_TOKEN_KEY, clearAllAuthStorage } from '@/lib/api-client';
+import { useMenuStore } from '@/store/menu.store';
 
 interface AuthStore extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
@@ -67,6 +68,12 @@ export const useAuthStore = create<AuthStore>()(
         } finally {
           // Clear all auth storage to ensure clean state
           clearAllAuthStorage();
+          // Clear menu cache to prevent stale data on next login
+          try {
+            useMenuStore.getState().clearMenu();
+          } catch {
+            // Silently ignore if menu store not available
+          }
           set({
             user: null,
             token: null,

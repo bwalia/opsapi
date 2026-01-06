@@ -311,23 +311,66 @@ export interface OrderItem {
 // Customer Types
 // ============================================
 
+export type CustomerState = 'enabled' | 'disabled' | 'invited' | 'declined';
+export type MarketingOptInLevel = 'single_opt_in' | 'confirmed_opt_in' | 'unknown';
+
+export interface CustomerAddress {
+  id?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  country?: string;
+  zip?: string;
+  phone?: string;
+  name?: string;
+  company?: string;
+  country_code?: string;
+  province_code?: string;
+  is_default?: boolean;
+}
+
 export interface Customer {
   id: number;
   uuid: string;
-  first_name: string;
-  last_name: string;
   email: string;
+  first_name?: string;
+  last_name?: string;
   phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  postal_code?: string;
+  date_of_birth?: string;
+  addresses: CustomerAddress[] | string; // JSON array stored as text
   notes?: string;
-  store_uuid?: string;
+  tags?: string;
+  accepts_marketing: boolean;
+  namespace_id?: number;
+  marketing_opt_in_level: MarketingOptInLevel;
+  last_order_date?: string;
+  orders_count: number;
+  total_spent: number;
+  average_order_value: number;
+  verified_email: boolean;
+  tax_exempt: boolean;
+  state: CustomerState;
   user_id?: number;
+  stripe_customer_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface CreateCustomerDto {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  date_of_birth?: string;
+  addresses?: CustomerAddress[];
+  notes?: string;
+  tags?: string;
+  accepts_marketing?: boolean;
+  marketing_opt_in_level?: MarketingOptInLevel;
+  verified_email?: boolean;
+  tax_exempt?: boolean;
+  state?: CustomerState;
 }
 
 // ============================================
@@ -1344,12 +1387,21 @@ export interface ReorderTasksDto {
   task_ids: number[];
 }
 
+// Kanban project permissions (returned by API)
+export interface KanbanProjectPermissions {
+  can_create: boolean;
+  can_update: boolean;
+  can_delete: boolean;
+  can_manage: boolean;
+}
+
 // Kanban API Response types
 export interface KanbanProjectsResponse {
   data: KanbanProject[];
   total: number;
   page: number;
   per_page: number;
+  permissions?: KanbanProjectPermissions;
 }
 
 export interface KanbanBoardFullResponse {
@@ -1927,4 +1979,117 @@ export interface TimerEvent {
     title: string;
     task_number: number;
   };
+}
+
+// ============================================
+// Menu Types (Backend-Driven Navigation)
+// ============================================
+
+/**
+ * Menu item returned from the API
+ * Represents a navigation item that the user has permission to access
+ */
+export interface MenuItem {
+  key: string;
+  name: string;
+  icon: string;
+  path: string;
+  module: NamespaceModule | null;
+  priority: number;
+  badge_key?: string | null;
+  always_show: boolean;
+  is_admin_only: boolean;
+}
+
+/**
+ * Namespace context returned with menu
+ */
+export interface MenuNamespaceContext {
+  id: number;
+  uuid: string;
+  name: string;
+  slug: string;
+  is_owner: boolean;
+}
+
+/**
+ * Response from GET /api/v2/user/menu
+ */
+export interface MenuResponse {
+  menu: MenuItem[];
+  main_menu: MenuItem[];
+  secondary_menu: MenuItem[];
+  namespace: MenuNamespaceContext;
+  permissions: NamespacePermissions;
+  is_admin: boolean;
+}
+
+/**
+ * Namespace menu configuration item
+ */
+export interface NamespaceMenuConfig {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  menu_item_id: number;
+  is_enabled: boolean;
+  custom_name?: string | null;
+  custom_icon?: string | null;
+  custom_priority?: number | null;
+  settings?: string;
+  menu_key?: string;
+  default_name?: string;
+  default_icon?: string;
+  path?: string;
+  module?: string;
+  default_priority?: number;
+  is_admin_only?: boolean;
+  always_show?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Response from GET /api/v2/namespace/menu-config
+ */
+export interface NamespaceMenuConfigResponse {
+  namespace: {
+    id: number;
+    uuid: string;
+    name: string;
+  };
+  menu_config: NamespaceMenuConfig[];
+}
+
+/**
+ * Payload for updating menu configuration
+ */
+export interface MenuConfigUpdate {
+  is_enabled?: boolean;
+  custom_name?: string | null;
+  custom_icon?: string | null;
+  custom_priority?: number | null;
+  settings?: Record<string, unknown>;
+}
+
+/**
+ * Batch menu config update payload
+ */
+export interface BatchMenuConfigUpdate {
+  menus: Record<string, MenuConfigUpdate>;
+}
+
+/**
+ * Menu store state
+ */
+export interface MenuState {
+  menu: MenuItem[];
+  mainMenu: MenuItem[];
+  secondaryMenu: MenuItem[];
+  isLoading: boolean;
+  error: string | null;
+  lastFetched: number | null;
+  namespaceContext: MenuNamespaceContext | null;
+  permissions: NamespacePermissions | null;
+  isAdmin: boolean;
 }

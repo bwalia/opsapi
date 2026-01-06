@@ -78,13 +78,17 @@ end
 
 -- Get stores by user (store owner)
 function StoreQueries.getByUser(user_id, params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, name = true, slug = true, status = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
+
     local paginated = StoreModel:paginated("WHERE user_id = ? ORDER BY " .. orderField .. " " .. orderDir, user_id, {
         per_page = perPage
     })
-    
+
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()
@@ -92,13 +96,17 @@ function StoreQueries.getByUser(user_id, params)
 end
 
 function StoreQueries.all(params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
-    
+    local page = params.page or 1
+    local perPage = params.perPage or 10
+
+    -- Validate ORDER BY to prevent SQL injection
+    local valid_fields = { id = true, name = true, slug = true, status = true, created_at = true, updated_at = true }
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
+
     local paginated = StoreModel:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
-    
+
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()

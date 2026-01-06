@@ -1,5 +1,5 @@
 import apiClient, { toFormData } from '@/lib/api-client';
-import type { Customer, PaginatedResponse, PaginationParams } from '@/types';
+import type { Customer, CreateCustomerDto, PaginatedResponse, PaginationParams } from '@/types';
 
 export interface CustomerFilters extends PaginationParams {
   storeUuid?: string;
@@ -30,23 +30,36 @@ export const customersService = {
 
   async getCustomer(uuid: string): Promise<Customer> {
     const response = await apiClient.get(`/api/v2/customers/${uuid}`);
-    return response.data;
+    return response.data?.data || response.data;
   },
 
-  async createCustomer(data: Partial<Customer>): Promise<Customer> {
+  async createCustomer(data: CreateCustomerDto): Promise<Customer> {
+    // Prepare data for form encoding
+    // addresses needs to be JSON stringified as the DB stores it as a JSON text field
+    const formData: Record<string, unknown> = { ...data };
+    if (data.addresses && Array.isArray(data.addresses)) {
+      formData.addresses = JSON.stringify(data.addresses);
+    }
+
     const response = await apiClient.post(
       '/api/v2/customers',
-      toFormData(data as Record<string, unknown>)
+      toFormData(formData)
     );
-    return response.data;
+    return response.data?.data || response.data;
   },
 
-  async updateCustomer(uuid: string, data: Partial<Customer>): Promise<Customer> {
+  async updateCustomer(uuid: string, data: Partial<CreateCustomerDto>): Promise<Customer> {
+    // Prepare data for form encoding
+    const formData: Record<string, unknown> = { ...data };
+    if (data.addresses && Array.isArray(data.addresses)) {
+      formData.addresses = JSON.stringify(data.addresses);
+    }
+
     const response = await apiClient.put(
       `/api/v2/customers/${uuid}`,
-      toFormData(data as Record<string, unknown>)
+      toFormData(formData)
     );
-    return response.data;
+    return response.data?.data || response.data;
   },
 
   async deleteCustomer(uuid: string): Promise<void> {

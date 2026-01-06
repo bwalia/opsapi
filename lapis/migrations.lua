@@ -26,6 +26,7 @@ local services_module_migrations = require("migrations.services-module")
 local chat_production_migrations = require("migrations.chat-system-production")
 local kanban_project_migrations = require("migrations.kanban-project-system")
 local kanban_enhancement_migrations = require("migrations.kanban-enhancements")
+local menu_system_migrations = require("migrations.menu-system")
 
 return {
     ['01_create_users'] = function()
@@ -620,6 +621,16 @@ return {
     ['260_create_due_date_notification_function'] = kanban_enhancement_migrations[11],
     ['261_kanban_enhancements_complete'] = kanban_enhancement_migrations[12],
     ['262_fix_kanban_nullable_fk_defaults'] = kanban_enhancement_migrations[13],
+
+    -- Menu System (Backend-driven navigation with Multi-Tenant support)
+    ['263_create_menu_items_table'] = menu_system_migrations[1],
+    ['264_add_menu_items_indexes'] = menu_system_migrations[2],
+    ['265_create_namespace_menu_config_table'] = menu_system_migrations[3],
+    ['266_add_namespace_menu_config_indexes'] = menu_system_migrations[4],
+    ['267_seed_default_menu_items'] = menu_system_migrations[5],
+    ['268_add_new_modules_to_modules_table'] = menu_system_migrations[6],
+    ['269_update_namespace_roles_default_permissions'] = menu_system_migrations[7],
+    ['270_init_namespace_menu_configs'] = menu_system_migrations[8],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()

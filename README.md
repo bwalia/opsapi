@@ -73,6 +73,8 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    The script supports multiple deployment environments with automatic URL configuration:
 
+   **Preset Environments:**
+
    | Environment | API URL |
    |-------------|---------|
    | `local` | `http://localhost:4010` |
@@ -80,6 +82,20 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    | `test` | `https://test-api.wslcrm.com` |
    | `acc` | `https://acc-api.wslcrm.com` |
    | `prod` | `https://api.wslcrm.com` |
+   | `remote` | `https://remote-api.wslcrm.com` |
+
+   **Dynamic Environments:**
+
+   You can also use any custom environment name. The script will automatically generate the API URL using the pattern `https://<name>-api.wslcrm.com`:
+
+   | Custom Environment | Generated API URL |
+   |-------------------|-------------------|
+   | `staging` | `https://staging-api.wslcrm.com` |
+   | `demo` | `https://demo-api.wslcrm.com` |
+   | `feature-x` | `https://feature-x-api.wslcrm.com` |
+   | `my_custom_env` | `https://my_custom_env-api.wslcrm.com` |
+
+   Environment names must start with a letter and can contain letters, numbers, hyphens, or underscores.
 
    The script automatically validates and updates these environment variables in `lapis/.env`:
    - `NEXT_PUBLIC_API_URL` - API base URL
@@ -92,17 +108,24 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    # Interactive mode (default - prompts for environment and git options)
    ./run-development.sh
 
-   # Specify environment directly
+   # Specify preset environment directly
    ./run-development.sh -e local           # Local development
    ./run-development.sh -e dev             # Dev environment
    ./run-development.sh -e test            # Test environment
    ./run-development.sh -e acc             # Acceptance environment
    ./run-development.sh -e prod            # Production environment
+   ./run-development.sh -e remote          # Remote environment
    ./run-development.sh --env=dev          # Alternative syntax
+
+   # Use custom/dynamic environments
+   ./run-development.sh -e staging         # https://staging-api.wslcrm.com
+   ./run-development.sh -e demo            # https://demo-api.wslcrm.com
+   ./run-development.sh -e feature-x       # https://feature-x-api.wslcrm.com
 
    # Combined with git options
    ./run-development.sh -e dev -a          # Dev env, auto git (stash + pull)
-   ./run-development.sh -e test -n         # Test env, no git operations
+   ./run-development.sh -e remote -n       # Remote env, no git operations
+   ./run-development.sh -e staging -a      # Custom staging env, auto git
 
    # Check/update .env only (don't start containers)
    ./run-development.sh -c -e dev          # Just validate .env for dev
@@ -129,7 +152,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    | Option | Description |
    |--------|-------------|
-   | `-e ENV` / `--env ENV` | Target environment (local/dev/test/acc/prod) |
+   | `-e ENV` / `--env ENV` | Target environment (local/dev/test/acc/prod/remote or any custom name) |
    | `-c` / `--check-env` | Only check/update .env, don't start containers |
    | `-s y` / `--stash y` | Stash uncommitted changes |
    | `-s n` / `--stash n` | Skip stashing |
@@ -214,9 +237,19 @@ KEYCLOAK_REDIRECT_URI=https://test-api.wslcrm.com/auth/callback
 NEXT_PUBLIC_API_URL=https://api.wslcrm.com
 GOOGLE_REDIRECT_URI=https://api.wslcrm.com/auth/google/callback
 KEYCLOAK_REDIRECT_URI=https://api.wslcrm.com/auth/callback
+
+# For remote environment
+NEXT_PUBLIC_API_URL=https://remote-api.wslcrm.com
+GOOGLE_REDIRECT_URI=https://remote-api.wslcrm.com/auth/google/callback
+KEYCLOAK_REDIRECT_URI=https://remote-api.wslcrm.com/auth/callback
+
+# For custom environments (e.g., staging)
+NEXT_PUBLIC_API_URL=https://staging-api.wslcrm.com
+GOOGLE_REDIRECT_URI=https://staging-api.wslcrm.com/auth/google/callback
+KEYCLOAK_REDIRECT_URI=https://staging-api.wslcrm.com/auth/callback
 ```
 
-**Tip:** Use `./run-development.sh -c -e <env>` to check and update these URLs without starting containers.
+**Tip:** Use `./run-development.sh -c -e <env>` to check and update these URLs without starting containers. Works with both preset environments (local, dev, test, acc, prod, remote) and custom environment names (staging, demo, etc.).
 
 **Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
 

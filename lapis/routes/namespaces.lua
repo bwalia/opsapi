@@ -215,6 +215,10 @@ return function(app)
             end
         end
 
+        -- Ensure is_owner is a proper boolean (PostgreSQL might return 't'/'f' or other formats)
+        local raw_is_owner = membership and membership.is_owner
+        local is_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
+
         local payload = {
             userinfo = {
                 uuid = self.current_user.uuid,
@@ -226,7 +230,7 @@ return function(app)
                 slug = namespace.slug,
                 name = namespace.name,
                 role = primary_role,
-                is_owner = membership.is_owner
+                is_owner = is_owner
             },
             exp = os.time() + 86400 -- 24 hours
         }
@@ -246,7 +250,7 @@ return function(app)
                 logo_url = namespace.logo_url
             },
             membership = {
-                is_owner = membership.is_owner,
+                is_owner = is_owner,
                 roles = member_details and member_details.roles,
                 permissions = permissions
             }

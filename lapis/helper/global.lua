@@ -357,4 +357,33 @@ function Global.getMinioPresignedUrl(object_key, expires_in)
     return MinioClient.getDefault():getPresignedUrl(object_key, expires_in)
 end
 
+--- Safely validate and sanitize ORDER BY parameters to prevent SQL injection
+-- @param order_by string The requested order field
+-- @param order_dir string The requested order direction (asc/desc)
+-- @param valid_fields table A table of valid field names { field1 = true, field2 = true }
+-- @param default_field string Default field if invalid (defaults to "created_at")
+-- @param default_dir string Default direction if invalid (defaults to "desc")
+-- @return string, string Sanitized order_by field and direction
+function Global.sanitizeOrderBy(order_by, order_dir, valid_fields, default_field, default_dir)
+    default_field = default_field or "created_at"
+    default_dir = default_dir or "desc"
+
+    -- Validate order_by against whitelist
+    if not order_by or not valid_fields[order_by] then
+        order_by = default_field
+    end
+
+    -- Validate order_dir is strictly asc or desc
+    if order_dir then
+        order_dir = order_dir:lower()
+        if order_dir ~= "asc" and order_dir ~= "desc" then
+            order_dir = default_dir
+        end
+    else
+        order_dir = default_dir
+    end
+
+    return order_by, order_dir:upper()
+end
+
 return Global

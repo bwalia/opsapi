@@ -69,7 +69,11 @@ return function(app)
     end
 
     -- Helper to check namespace permission
-    local function check_permission(permissions, module_name, action)
+    -- IMPORTANT: Namespace owners have ALL permissions - always check is_owner first
+    local function check_permission(is_owner, permissions, module_name, action)
+        -- Namespace owners have full access to everything
+        if is_owner then return true end
+
         if not permissions then return false end
         local module_perms = permissions[module_name]
         if not module_perms then return false end
@@ -89,7 +93,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view services")
             end
 
@@ -107,7 +111,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view GitHub integrations")
             end
 
@@ -124,7 +128,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "create") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "create") then
                 return error_response(403, "You don't have permission to create GitHub integrations")
             end
 
@@ -154,7 +158,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view GitHub integrations")
             end
 
@@ -177,7 +181,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "update") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "update") then
                 return error_response(403, "You don't have permission to update GitHub integrations")
             end
 
@@ -212,7 +216,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "delete") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "delete") then
                 return error_response(403, "You don't have permission to delete GitHub integrations")
             end
 
@@ -243,7 +247,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view services")
             end
 
@@ -270,7 +274,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "create") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "create") then
                 return error_response(403, "You don't have permission to create services")
             end
 
@@ -311,7 +315,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view services")
             end
 
@@ -338,7 +342,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "update") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "update") then
                 return error_response(403, "You don't have permission to update services")
             end
 
@@ -380,7 +384,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "delete") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "delete") then
                 return error_response(403, "You don't have permission to delete services")
             end
 
@@ -411,7 +415,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view service secrets")
             end
 
@@ -437,7 +441,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "create") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "create") then
                 return error_response(403, "You don't have permission to add secrets")
             end
 
@@ -484,7 +488,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "update") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "update") then
                 return error_response(403, "You don't have permission to update secrets")
             end
 
@@ -524,7 +528,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "delete") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "delete") then
                 return error_response(403, "You don't have permission to delete secrets")
             end
 
@@ -555,7 +559,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view service variables")
             end
 
@@ -581,7 +585,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "create") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "create") then
                 return error_response(403, "You don't have permission to add variables")
             end
 
@@ -624,7 +628,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "update") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "update") then
                 return error_response(403, "You don't have permission to update variables")
             end
 
@@ -664,7 +668,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "delete") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "delete") then
                 return error_response(403, "You don't have permission to delete variables")
             end
 
@@ -696,7 +700,7 @@ return function(app)
             local permissions = self.namespace_permissions or {}
 
             -- Check for deploy permission specifically
-            if not check_permission(permissions, "services", "deploy") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "deploy") then
                 return error_response(403, "You don't have permission to trigger deployments")
             end
 
@@ -750,7 +754,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view deployments")
             end
 
@@ -783,7 +787,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view deployments")
             end
 
@@ -819,7 +823,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view deployments")
             end
 
@@ -858,7 +862,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to view deployments")
             end
 
@@ -957,7 +961,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local permissions = self.namespace_permissions or {}
 
-            if not check_permission(permissions, "services", "read") then
+            if not check_permission(self.is_namespace_owner, permissions, "services", "read") then
                 return error_response(403, "You don't have permission to run diagnostics")
             end
 

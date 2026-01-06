@@ -1,5 +1,13 @@
+--[[
+    Permissions Routes (Admin Only)
+
+    SECURITY: All endpoints require authentication and admin role.
+    These routes manage RBAC permissions for roles.
+]]
+
 local PermissionQueries = require "queries.PermissionQueries"
 local RequestParser = require "helper.request_parser"
+local AuthMiddleware = require("middleware.auth")
 local cjson = require "cjson"
 
 -- Configure cjson to encode empty tables as arrays
@@ -18,8 +26,32 @@ return function(app)
         }
     end
 
-    -- LIST all permissions (with optional role filter)
-    app:get("/api/v2/permissions", function(self)
+    -- Helper to check if user is admin
+    local function is_admin(user)
+        if not user then return false end
+
+        if user.roles then
+            if type(user.roles) == "string" then
+                return user.roles:lower():find("admin") ~= nil
+            elseif type(user.roles) == "table" then
+                for _, role in ipairs(user.roles) do
+                    local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
+                    if role_name:lower():find("admin") then
+                        return true
+                    end
+                end
+            end
+        end
+
+        return false
+    end
+
+    -- LIST all permissions (with optional role filter) - Admin only
+    app:get("/api/v2/permissions", AuthMiddleware.requireAuth(function(self)
+        if not is_admin(self.current_user) then
+            return error_response(403, "Access denied. Admin privileges required.")
+        end
+
         local params = self.params or {}
 
         local perPage = tonumber(params.limit) or tonumber(params.perPage) or 100
@@ -49,10 +81,14 @@ return function(app)
             status = 200,
             json = result
         }
-    end)
+    end))
 
-    -- GET single permission by UUID
-    app:get("/api/v2/permissions/:id", function(self)
+    -- GET single permission by UUID - Admin only
+    app:get("/api/v2/permissions/:id", AuthMiddleware.requireAuth(function(self)
+        if not is_admin(self.current_user) then
+            return error_response(403, "Access denied. Admin privileges required.")
+        end
+
         local uuid = self.params.id
 
         ngx.log(ngx.NOTICE, "Fetching permission: ", uuid)
@@ -71,11 +107,15 @@ return function(app)
             status = 200,
             json = permission
         }
-    end)
+    end))
 
-    -- CREATE new permission
-    app:post("/api/v2/permissions", function(self)
-        local params, _ = RequestParser.parse_request(self)
+    -- CREATE new permission - Admin only
+    app:post("/api/v2/permissions", AuthMiddleware.requireAuth(function(self)
+        if not is_admin(self.current_user) then
+            return error_response(403, "Access denied. Admin privileges required.")
+        end
+
+        local params = RequestParser.parse_request(self)
 
         -- Validate required fields
         local valid, missing = RequestParser.require_params(params, { "role", "module_machine_name", "permissions" })
@@ -101,12 +141,16 @@ return function(app)
             status = 201,
             json = permission
         }
-    end)
+    end))
 
-    -- UPDATE existing permission
-    app:put("/api/v2/permissions/:id", function(self)
+    -- UPDATE existing permission - Admin only
+    app:put("/api/v2/permissions/:id", AuthMiddleware.requireAuth(function(self)
+        if not is_admin(self.current_user) then
+            return error_response(403, "Access denied. Admin privileges required.")
+        end
+
         local uuid = self.params.id
-        local params, _ = RequestParser.parse_request(self)
+        local params = RequestParser.parse_request(self)
 
         local update_data = {}
         if params.permissions then update_data.permissions = params.permissions end
@@ -131,10 +175,14 @@ return function(app)
             status = 200,
             json = permission
         }
-    end)
+    end))
 
-    -- DELETE permission
-    app:delete("/api/v2/permissions/:id", function(self)
+    -- DELETE permission - Admin only
+    app:delete("/api/v2/permissions/:id", AuthMiddleware.requireAuth(function(self)
+        if not is_admin(self.current_user) then
+            return error_response(403, "Access denied. Admin privileges required.")
+        end
+
         local uuid = self.params.id
 
         ngx.log(ngx.NOTICE, "Deleting permission: ", uuid)
@@ -152,12 +200,15 @@ return function(app)
                 id = uuid
             }
         }
-    end)
+    end))
 
-    -- BATCH update/create permissions for a role
-    -- This is the efficient endpoint - single API call for all module permissions
-    app:post("/api/v2/permissions/batch", function(self)
-        local params, _ = RequestParser.parse_request(self)
+    -- BATCH update/create permissions for a role - Admin only
+    app:post("/api/v2/permissions/batch", AuthMiddleware.requireAuth(function(self)
+        if not is_admin(self.current_user) then
+            return error_response(403, "Access denied. Admin privileges required.")
+        end
+
+        local params = RequestParser.parse_request(self)
 
         -- Validate required fields
         local valid, missing = RequestParser.require_params(params, { "role", "permissions" })
@@ -202,7 +253,7 @@ return function(app)
                 deleted = result.deleted or 0
             }
         }
-    end)
+    end))
 
     ngx.log(ngx.NOTICE, "Permissions routes initialized successfully")
 end
