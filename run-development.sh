@@ -25,6 +25,7 @@ show_help() {
     echo ""
     echo -e "${BLUE}Options:${NC}"
     echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod|remote|<custom>)"
+    echo "  -P, --protocol [PROTO] API protocol (http|https). Default: https for remote, http for local"
     echo "  -s, --stash [y|n]     Git stash option (y=stash, n=skip)"
     echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
     echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
@@ -43,13 +44,15 @@ show_help() {
     echo ""
     echo -e "${BLUE}Dynamic Environments:${NC}"
     echo "  Any custom name will generate: https://<name>-api.${BASE_DOMAIN}"
-    echo "  Example: -e staging  -> https://staging-api.${BASE_DOMAIN}"
-    echo "  Example: -e demo     -> https://demo-api.${BASE_DOMAIN}"
+    echo "  Use -P http to override protocol: http://<name>-api.${BASE_DOMAIN}"
+    echo "  Example: -e staging           -> https://staging-api.${BASE_DOMAIN}"
+    echo "  Example: -e staging -P http   -> http://staging-api.${BASE_DOMAIN}"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
     echo "  ./run-development.sh                    # Interactive mode (prompts)"
     echo "  ./run-development.sh -e local           # Local development environment"
-    echo "  ./run-development.sh -e dev -a          # Dev environment, auto git"
+    echo "  ./run-development.sh -e dev -a          # Dev environment, auto git (https)"
+    echo "  ./run-development.sh -e dev -P http     # Dev environment with HTTP"
     echo "  ./run-development.sh -e remote -n       # Remote environment, no git ops"
     echo "  ./run-development.sh -e staging -a      # Custom 'staging' environment"
     echo "  ./run-development.sh --env=prod -a      # Prod environment, auto mode"
@@ -66,6 +69,7 @@ PULL_ARG=""
 RESET_DB=false
 TARGET_ENV=""
 CHECK_ENV_ONLY=false
+PROTOCOL=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -109,6 +113,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--check-env)
             CHECK_ENV_ONLY=true
+            shift
+            ;;
+        -P|--protocol)
+            PROTOCOL="$2"
+            shift 2
+            ;;
+        --protocol=*)
+            PROTOCOL="${1#*=}"
             shift
             ;;
         -h|--help)
@@ -162,22 +174,29 @@ is_no() {
     esac
 }
 
-# Function to get API URL based on environment
+# Function to get API URL based on environment and protocol
 # Supports both preset environments and dynamic custom environments
+# Usage: get_api_url <env> [protocol]
 get_api_url() {
     local env="$1"
+    local proto="$2"
+
     case "$env" in
         local)
-            echo "http://localhost:4010"
+            # Local always uses http unless explicitly overridden
+            local local_proto="${proto:-http}"
+            echo "${local_proto}://localhost:4010"
             ;;
         prod)
             # Production uses api.domain.com (no prefix)
-            echo "https://api.${BASE_DOMAIN}"
+            local prod_proto="${proto:-https}"
+            echo "${prod_proto}://api.${BASE_DOMAIN}"
             ;;
         *)
             # All other environments use {env}-api.domain.com pattern
             # This includes: dev, test, acc, remote, and any custom environment
-            echo "https://${env}-api.${BASE_DOMAIN}"
+            local remote_proto="${proto:-https}"
+            echo "${remote_proto}://${env}-api.${BASE_DOMAIN}"
             ;;
     esac
 }
@@ -198,6 +217,57 @@ validate_environment() {
     else
         return 1
     fi
+}
+
+# Function to validate protocol
+validate_protocol() {
+    local proto="$1"
+    case "$proto" in
+        http|https) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Function to prompt for protocol selection
+prompt_protocol() {
+    local env="$1"
+    local default_proto
+
+    # Set default based on environment
+    if [[ "$env" == "local" ]]; then
+        default_proto="http"
+    else
+        default_proto="https"
+    fi
+
+    echo -e "${CYAN}Select API protocol:${NC}"
+    echo "  1) https - Secure connection (recommended for remote environments)"
+    echo "  2) http  - Non-secure connection (typical for local development)"
+    echo ""
+    echo -e "${BLUE}[i] Default for '$env' environment: ${CYAN}${default_proto}${NC}"
+    echo ""
+
+    local choice
+    while true; do
+        read -p "Enter choice [1-2] or press Enter for default ($default_proto): " choice
+        case "$choice" in
+            "")
+                echo "$default_proto"
+                return 0
+                ;;
+            1|https)
+                echo "https"
+                return 0
+                ;;
+            2|http)
+                echo "http"
+                return 0
+                ;;
+            *)
+                echo -e "${YELLOW}Invalid choice. Please enter 1 for https, 2 for http, or press Enter for default.${NC}" >&2
+                ;;
+        esac
+    done
 }
 
 # Function to prompt for environment selection
@@ -258,8 +328,9 @@ prompt_environment() {
 # Function to check and update .env file
 check_and_update_env() {
     local target_env="$1"
+    local proto="$2"
     local api_url
-    api_url=$(get_api_url "$target_env")
+    api_url=$(get_api_url "$target_env" "$proto")
 
     if [[ -z "$api_url" ]]; then
         echo -e "${RED}[!] Error: Invalid environment '$target_env'${NC}"
@@ -399,9 +470,7 @@ echo ""
 if [[ -n "$TARGET_ENV" ]]; then
     # Environment provided via argument
     if validate_environment "$TARGET_ENV"; then
-        API_URL_PREVIEW=$(get_api_url "$TARGET_ENV")
         echo -e "${BLUE}[i] Environment from argument: ${CYAN}${TARGET_ENV}${NC}"
-        echo -e "${BLUE}[i] API URL will be: ${CYAN}${API_URL_PREVIEW}${NC}"
     else
         echo -e "${RED}[!] Invalid environment: '$TARGET_ENV'${NC}"
         echo -e "${YELLOW}[!] Environment name must start with a letter and contain only letters, numbers, hyphens, or underscores.${NC}"
@@ -415,8 +484,41 @@ else
     echo ""
 fi
 
+# Determine protocol
+if [[ -n "$PROTOCOL" ]]; then
+    # Protocol provided via argument
+    if validate_protocol "$PROTOCOL"; then
+        echo -e "${BLUE}[i] Protocol from argument: ${CYAN}${PROTOCOL}${NC}"
+    else
+        echo -e "${RED}[!] Invalid protocol: '$PROTOCOL'${NC}"
+        echo -e "${YELLOW}[!] Protocol must be 'http' or 'https'${NC}"
+        exit 1
+    fi
+else
+    # Interactive mode - prompt for protocol (unless environment is 'local' and no explicit protocol)
+    # For non-interactive mode with no protocol specified, use defaults
+    if [[ -n "$STASH_ARG" ]] || [[ -n "$PULL_ARG" ]]; then
+        # Non-interactive mode - use default protocol based on environment
+        if [[ "$TARGET_ENV" == "local" ]]; then
+            PROTOCOL="http"
+        else
+            PROTOCOL="https"
+        fi
+        echo -e "${BLUE}[i] Protocol (default): ${CYAN}${PROTOCOL}${NC}"
+    else
+        # Interactive mode - prompt for protocol
+        PROTOCOL=$(prompt_protocol "$TARGET_ENV")
+        echo ""
+    fi
+fi
+
+# Show final API URL
+API_URL_PREVIEW=$(get_api_url "$TARGET_ENV" "$PROTOCOL")
+echo -e "${BLUE}[i] API URL will be: ${CYAN}${API_URL_PREVIEW}${NC}"
+echo ""
+
 # Check and update .env file
-check_and_update_env "$TARGET_ENV"
+check_and_update_env "$TARGET_ENV" "$PROTOCOL"
 if [[ $? -ne 0 ]]; then
     echo -e "${RED}[!] Environment check failed. Exiting.${NC}"
     exit 1

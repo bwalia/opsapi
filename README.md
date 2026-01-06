@@ -105,12 +105,12 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    **Command-line options:**
 
    ```bash
-   # Interactive mode (default - prompts for environment and git options)
+   # Interactive mode (default - prompts for environment, protocol, and git options)
    ./run-development.sh
 
    # Specify preset environment directly
-   ./run-development.sh -e local           # Local development
-   ./run-development.sh -e dev             # Dev environment
+   ./run-development.sh -e local           # Local development (http://localhost:4010)
+   ./run-development.sh -e dev             # Dev environment (https://dev-api.wslcrm.com)
    ./run-development.sh -e test            # Test environment
    ./run-development.sh -e acc             # Acceptance environment
    ./run-development.sh -e prod            # Production environment
@@ -122,13 +122,21 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    ./run-development.sh -e demo            # https://demo-api.wslcrm.com
    ./run-development.sh -e feature-x       # https://feature-x-api.wslcrm.com
 
+   # Specify protocol (http or https)
+   ./run-development.sh -e dev -P http     # Dev env with HTTP: http://dev-api.wslcrm.com
+   ./run-development.sh -e dev -P https    # Dev env with HTTPS (default)
+   ./run-development.sh -e local -P https  # Local with HTTPS: https://localhost:4010
+   ./run-development.sh --protocol=http    # Alternative syntax
+
    # Combined with git options
    ./run-development.sh -e dev -a          # Dev env, auto git (stash + pull)
    ./run-development.sh -e remote -n       # Remote env, no git operations
    ./run-development.sh -e staging -a      # Custom staging env, auto git
+   ./run-development.sh -e dev -P http -a  # Dev with HTTP, auto git
 
    # Check/update .env only (don't start containers)
    ./run-development.sh -c -e dev          # Just validate .env for dev
+   ./run-development.sh -c -e dev -P http  # Validate with HTTP protocol
 
    # Reset database (removes volumes)
    ./run-development.sh -e local -r        # Local with fresh database
@@ -153,6 +161,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    | Option | Description |
    |--------|-------------|
    | `-e ENV` / `--env ENV` | Target environment (local/dev/test/acc/prod/remote or any custom name) |
+   | `-P PROTO` / `--protocol PROTO` | API protocol (http or https). Default: http for local, https for others |
    | `-c` / `--check-env` | Only check/update .env, don't start containers |
    | `-s y` / `--stash y` | Stash uncommitted changes |
    | `-s n` / `--stash n` | Skip stashing |
@@ -250,6 +259,12 @@ KEYCLOAK_REDIRECT_URI=https://staging-api.wslcrm.com/auth/callback
 ```
 
 **Tip:** Use `./run-development.sh -c -e <env>` to check and update these URLs without starting containers. Works with both preset environments (local, dev, test, acc, prod, remote) and custom environment names (staging, demo, etc.).
+
+**Protocol Customization:** By default, `local` uses `http://` and all other environments use `https://`. You can override this with the `-P` option:
+```bash
+./run-development.sh -e dev -P http    # Use HTTP for dev: http://dev-api.wslcrm.com
+./run-development.sh -e local -P https # Use HTTPS for local: https://localhost:4010
+```
 
 **Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
 
