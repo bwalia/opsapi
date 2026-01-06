@@ -378,6 +378,85 @@ docker exec -it opsapi lapis migrate
 
 ---
 
+## Deploy via GitHub Actions (Self-Hosted Runner)
+
+Deploy OPSAPI to a self-hosted runner using Docker Compose. This mirrors the `run-development.sh` script functionality for automated CI/CD deployments.
+
+### Prerequisites
+
+1. Self-hosted GitHub Actions runner configured
+2. Docker and Docker Compose installed on the runner
+3. `.env` file pre-configured on the runner (or pass via workflow input)
+
+### Triggering the Workflow
+
+Go to **Actions** → **Deploy OPSAPI via Docker Compose (Self-Hosted)** → **Run workflow**
+
+### Workflow Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `TARGET_ENV` | Preset environment (local/dev/test/acc/prod/remote) | `remote` |
+| `CUSTOM_ENV` | Custom environment name (overrides TARGET_ENV) | - |
+| `PROTOCOL` | API protocol (http/https) | `https` |
+| `RESET_DB` | Reset database (removes volumes) | `false` |
+| `RUN_MIGRATIONS` | Run database migrations after deployment | `true` |
+| `PULL_LATEST` | Pull latest code before deploying | `true` |
+| `RUNNER_LABEL` | Self-hosted runner label | `self-hosted` |
+| `ENV_FILE_CONTENT` | Base64 encoded .env file content (optional) | - |
+| `SLACK_WEBHOOK_URL` | Slack webhook for notifications (optional) | - |
+
+### Example Usage
+
+**Deploy to remote environment (default):**
+```
+TARGET_ENV: remote
+PROTOCOL: https
+```
+
+**Deploy to custom staging environment:**
+```
+CUSTOM_ENV: staging
+PROTOCOL: https
+```
+This generates API URL: `https://staging-api.wslcrm.com`
+
+**Deploy with database reset (use with caution):**
+```
+TARGET_ENV: dev
+RESET_DB: true
+RUN_MIGRATIONS: true
+```
+
+**Deploy with custom .env file:**
+```bash
+# Encode your .env file
+cat lapis/.env | base64 -w0
+
+# Paste the output in ENV_FILE_CONTENT input
+```
+
+### What the Workflow Does
+
+1. Checks out the repository code
+2. Optionally pulls latest changes
+3. Updates `.env` file with environment-specific URLs
+4. Creates required directories (logs, pgdata, keycloak_data)
+5. Stops existing Docker containers
+6. Builds and starts containers with `docker compose up --build -d`
+7. Runs database migrations (if enabled)
+8. Verifies deployment health
+9. Sends Slack notification (if configured)
+
+### Setting Up a Self-Hosted Runner
+
+1. Go to **Settings** → **Actions** → **Runners** → **New self-hosted runner**
+2. Follow the instructions to install the runner on your server
+3. Add labels to your runner (e.g., `remote`, `production`, `staging`)
+4. Use the `RUNNER_LABEL` input to target specific runners
+
+---
+
 ## Deploy on Kubernetes
 
 To deploy OPSAPI on Kubernetes, please follow the instructions.

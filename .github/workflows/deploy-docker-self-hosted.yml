@@ -1,0 +1,424 @@
+name: Deploy OPSAPI via Docker Compose (Self-Hosted)
+
+# This workflow deploys OPSAPI to self-hosted runners using Docker Compose
+# It mirrors the functionality of run-development.sh for automated deployments
+#
+# TRIGGERS:
+# - Automatically on push to main branch (deploys to 'remote' environment)
+# - Manually via workflow_dispatch with custom options
+#
+# REQUIREMENTS:
+# - Self-hosted runner with Docker and Docker Compose installed
+# - Runner must have access to the target environment
+# - .env file should be pre-configured on the runner or passed via secrets
+# - SLACK_WEBHOOK secret configured for notifications
+
+on:
+  # Auto-trigger on push to main branch
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+
+  # Manual trigger with options
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: "Target environment"
+        default: "remote"
+        required: true
+        options:
+          - local
+          - dev
+          - test
+          - acc
+          - prod
+          - remote
+
+      CUSTOM_ENV:
+        type: string
+        description: "Custom environment name (overrides TARGET_ENV if provided)"
+        required: false
+
+      PROTOCOL:
+        type: choice
+        description: "API protocol"
+        default: "https"
+        required: true
+        options:
+          - https
+          - http
+
+      RESET_DB:
+        type: boolean
+        description: "Reset database (removes volumes - USE WITH CAUTION)"
+        default: false
+        required: false
+
+      RUN_MIGRATIONS:
+        type: boolean
+        description: "Run database migrations after deployment"
+        default: true
+        required: false
+
+      RUNNER_LABEL:
+        type: string
+        description: "Self-hosted runner label (default: self-hosted)"
+        default: "self-hosted"
+        required: false
+
+      # Optional: Environment file content (base64 encoded)
+      ENV_FILE_CONTENT:
+        type: string
+        description: "Base64 encoded .env file content (optional - uses existing if not provided)"
+        required: false
+
+env:
+  BASE_DOMAIN: "wslcrm.com"
+  ENV_FILE_PATH: "lapis/.env"
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.CUSTOM_ENV || github.event.inputs.TARGET_ENV || 'remote' }}
+    runs-on: ${{ github.event.inputs.RUNNER_LABEL || 'self-hosted' }}
+
+    steps:
+      - name: Mask sensitive inputs
+        run: |
+          if [ -n "${{ github.event.inputs.ENV_FILE_CONTENT }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.ENV_FILE_CONTENT }}"
+          fi
+          echo "Sensitive inputs masked"
+        shell: bash
+
+      - name: Set environment variables
+        id: env-setup
+        run: |
+          # Determine trigger type and set defaults
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "Triggered by push to main branch"
+            TARGET_ENV="remote"
+            PROTOCOL="https"
+            RESET_DB="false"
+            RUN_MIGRATIONS="true"
+          else
+            echo "Triggered manually via workflow_dispatch"
+            # Determine target environment
+            if [ -n "${{ github.event.inputs.CUSTOM_ENV }}" ]; then
+              TARGET_ENV="${{ github.event.inputs.CUSTOM_ENV }}"
+              echo "Using custom environment: $TARGET_ENV"
+            elif [ -n "${{ github.event.inputs.TARGET_ENV }}" ]; then
+              TARGET_ENV="${{ github.event.inputs.TARGET_ENV }}"
+              echo "Using preset environment: $TARGET_ENV"
+            else
+              TARGET_ENV="remote"
+              echo "Using default environment: $TARGET_ENV"
+            fi
+            PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
+            RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
+            RUN_MIGRATIONS="${{ github.event.inputs.RUN_MIGRATIONS || 'true' }}"
+          fi
+
+          BASE_DOMAIN="${{ env.BASE_DOMAIN }}"
+
+          # Generate API URL based on environment and protocol
+          case "$TARGET_ENV" in
+            local)
+              API_URL="${PROTOCOL}://localhost:4010"
+              ;;
+            prod)
+              API_URL="${PROTOCOL}://api.${BASE_DOMAIN}"
+              ;;
+            *)
+              API_URL="${PROTOCOL}://${TARGET_ENV}-api.${BASE_DOMAIN}"
+              ;;
+          esac
+
+          echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
+          echo "API_URL=$API_URL" >> $GITHUB_OUTPUT
+          echo "PROTOCOL=$PROTOCOL" >> $GITHUB_OUTPUT
+          echo "RESET_DB=$RESET_DB" >> $GITHUB_OUTPUT
+          echo "RUN_MIGRATIONS=$RUN_MIGRATIONS" >> $GITHUB_OUTPUT
+          echo "TRIGGER=${{ github.event_name }}" >> $GITHUB_OUTPUT
+
+          echo "=========================================="
+          echo "Deployment Configuration:"
+          echo "  Trigger: ${{ github.event_name }}"
+          echo "  Environment: $TARGET_ENV"
+          echo "  Protocol: $PROTOCOL"
+          echo "  API URL: $API_URL"
+          echo "  Reset DB: $RESET_DB"
+          echo "  Run Migrations: $RUN_MIGRATIONS"
+          echo "=========================================="
+        shell: bash
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update .env file with environment credentials
+        if: ${{ github.event.inputs.ENV_FILE_CONTENT != '' }}
+        run: |
+          echo "Updating .env file from workflow input..."
+
+          # Backup existing .env if it exists
+          if [ -f "${{ env.ENV_FILE_PATH }}" ]; then
+            cp "${{ env.ENV_FILE_PATH }}" "${{ env.ENV_FILE_PATH }}.backup.$(date +%Y%m%d_%H%M%S)"
+            echo "Existing .env backed up"
+          fi
+
+          # Decode and write new .env content
+          echo "${{ github.event.inputs.ENV_FILE_CONTENT }}" | base64 -d > "${{ env.ENV_FILE_PATH }}"
+          echo ".env file updated from workflow input"
+        shell: bash
+
+      - name: Update environment-specific URLs in .env
+        run: |
+          API_URL="${{ steps.env-setup.outputs.API_URL }}"
+          ENV_FILE="${{ env.ENV_FILE_PATH }}"
+
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "Error: .env file not found at $ENV_FILE"
+            echo "Please ensure .env file exists or provide ENV_FILE_CONTENT"
+            exit 1
+          fi
+
+          echo "Updating environment URLs in .env..."
+
+          # Update NEXT_PUBLIC_API_URL
+          if grep -q "^NEXT_PUBLIC_API_URL=" "$ENV_FILE"; then
+            sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=${API_URL}|" "$ENV_FILE"
+          else
+            echo "NEXT_PUBLIC_API_URL=${API_URL}" >> "$ENV_FILE"
+          fi
+
+          # Update GOOGLE_REDIRECT_URI
+          if grep -q "^GOOGLE_REDIRECT_URI=" "$ENV_FILE"; then
+            sed -i "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=${API_URL}/auth/google/callback|" "$ENV_FILE"
+          else
+            echo "GOOGLE_REDIRECT_URI=${API_URL}/auth/google/callback" >> "$ENV_FILE"
+          fi
+
+          # Update KEYCLOAK_REDIRECT_URI
+          if grep -q "^KEYCLOAK_REDIRECT_URI=" "$ENV_FILE"; then
+            sed -i "s|^KEYCLOAK_REDIRECT_URI=.*|KEYCLOAK_REDIRECT_URI=${API_URL}/auth/callback|" "$ENV_FILE"
+          else
+            echo "KEYCLOAK_REDIRECT_URI=${API_URL}/auth/callback" >> "$ENV_FILE"
+          fi
+
+          echo "Environment URLs updated:"
+          echo "  NEXT_PUBLIC_API_URL=${API_URL}"
+          echo "  GOOGLE_REDIRECT_URI=${API_URL}/auth/google/callback"
+          echo "  KEYCLOAK_REDIRECT_URI=${API_URL}/auth/callback"
+        shell: bash
+
+      - name: Create required directories
+        run: |
+          echo "Creating required directories..."
+          mkdir -p lapis/logs
+          mkdir -p lapis/pgdata
+          mkdir -p lapis/keycloak_data
+          chmod -R 755 lapis/logs lapis/pgdata lapis/keycloak_data
+          echo "Directories created successfully"
+        shell: bash
+
+      - name: Stop existing containers
+        run: |
+          echo "Stopping existing Docker containers..."
+          cd lapis
+
+          if [ "${{ steps.env-setup.outputs.RESET_DB }}" == "true" ]; then
+            echo "WARNING: Resetting database - removing volumes..."
+            docker compose down --volumes || true
+          else
+            echo "Preserving database data..."
+            docker compose down || true
+          fi
+
+          echo "Existing containers stopped"
+        shell: bash
+
+      - name: Build and start Docker containers
+        run: |
+          echo "Building and starting Docker containers..."
+          cd lapis
+          docker compose up --build -d
+
+          # Wait for services to be ready
+          echo "Waiting for services to be ready (30 seconds)..."
+          sleep 30
+
+          echo "Docker containers started successfully"
+        shell: bash
+
+      - name: Run database migrations
+        if: ${{ steps.env-setup.outputs.RUN_MIGRATIONS == 'true' }}
+        run: |
+          echo "Running database migrations..."
+
+          # Wait a bit more for the database to be ready
+          sleep 10
+
+          docker exec opsapi lapis migrate
+
+          echo "Migrations completed successfully"
+        shell: bash
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying deployment..."
+
+          # Check if containers are running
+          cd lapis
+          docker compose ps
+
+          # Health check - try to reach the API
+          echo ""
+          echo "Performing health check..."
+
+          HEALTH_URL="http://localhost:4010/health"
+
+          # Retry health check up to 5 times
+          for i in {1..5}; do
+            if curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" | grep -q "200"; then
+              echo "Health check passed!"
+              break
+            fi
+            echo "Health check attempt $i failed, retrying in 5 seconds..."
+            sleep 5
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "Deployment Summary"
+          echo "=========================================="
+          echo "Trigger: ${{ steps.env-setup.outputs.TRIGGER }}"
+          echo "Environment: ${{ steps.env-setup.outputs.TARGET_ENV }}"
+          echo "API URL: ${{ steps.env-setup.outputs.API_URL }}"
+          echo "Protocol: ${{ steps.env-setup.outputs.PROTOCOL }}"
+          echo "Reset DB: ${{ steps.env-setup.outputs.RESET_DB }}"
+          echo "Migrations: ${{ steps.env-setup.outputs.RUN_MIGRATIONS }}"
+          echo "=========================================="
+        shell: bash
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Showing container logs..."
+          cd lapis
+          docker compose logs --tail=100
+        shell: bash
+
+      - name: Slack notification - Success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: github-updates
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_MESSAGE: "OPSAPI deployed successfully to ${{ steps.env-setup.outputs.TARGET_ENV }} environment :rocket:\nAPI URL: ${{ steps.env-setup.outputs.API_URL }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}"
+          SLACK_TITLE: OPSAPI Deployment Success
+          SLACK_USERNAME: rtCamp
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Slack notification - Failure
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: github-updates
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_MESSAGE: "OPSAPI deployment FAILED for ${{ steps.env-setup.outputs.TARGET_ENV }} environment :x:\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}\nCheck workflow logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_TITLE: OPSAPI Deployment Failed
+          SLACK_USERNAME: rtCamp
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Optional: Run post-deployment tests
+  post-deploy-verification:
+    name: Post-deployment verification
+    runs-on: ${{ github.event.inputs.RUNNER_LABEL || 'self-hosted' }}
+    needs: deploy
+    if: success()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Wait for services to stabilize
+        run: |
+          echo "Waiting for services to stabilize..."
+          sleep 10
+        shell: bash
+
+      - name: Verify API endpoints
+        run: |
+          echo "Verifying API endpoints..."
+
+          # Test health endpoint
+          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:4010/health")
+          if [ "$HEALTH_RESPONSE" == "200" ]; then
+            echo "✓ Health endpoint: OK (HTTP $HEALTH_RESPONSE)"
+          else
+            echo "✗ Health endpoint: FAILED (HTTP $HEALTH_RESPONSE)"
+            exit 1
+          fi
+
+          # Test root endpoint
+          ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:4010/")
+          if [ "$ROOT_RESPONSE" == "200" ]; then
+            echo "✓ Root endpoint: OK (HTTP $ROOT_RESPONSE)"
+          else
+            echo "✗ Root endpoint: FAILED (HTTP $ROOT_RESPONSE)"
+            exit 1
+          fi
+
+          echo ""
+          echo "All endpoint verifications passed!"
+        shell: bash
+
+      - name: Check container health
+        run: |
+          echo "Checking container health..."
+          cd lapis
+
+          # List running containers
+          docker compose ps
+
+          # Check if all expected containers are running
+          RUNNING_COUNT=$(docker compose ps --status running -q | wc -l)
+          echo "Running containers: $RUNNING_COUNT"
+
+          if [ "$RUNNING_COUNT" -lt 2 ]; then
+            echo "Warning: Expected at least 2 running containers"
+            docker compose logs --tail=50
+          fi
+        shell: bash
+
+      - name: Slack notification - Verification Success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: github-updates
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_MESSAGE: "OPSAPI post-deployment verification completed successfully :white_check_mark:\nAll API endpoints responding correctly."
+          SLACK_TITLE: OPSAPI Verification Passed
+          SLACK_USERNAME: rtCamp
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Slack notification - Verification Failed
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: github-updates
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_MESSAGE: "OPSAPI post-deployment verification FAILED :warning:\nAPI endpoints may not be responding correctly.\nCheck workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_TITLE: OPSAPI Verification Failed
+          SLACK_USERNAME: rtCamp
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
