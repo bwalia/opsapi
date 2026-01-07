@@ -123,13 +123,18 @@ function KanbanTimeTrackingQueries.stopTimer(user_uuid, description)
         update_params.description = description
     end
 
-    local updated = entry:update(update_params, { returning = "*" })
+    local success = entry:update(update_params)
 
-    if updated then
-        ngx.log(ngx.INFO, "[TimeTracking] Timer stopped: ", entry.uuid, " duration: ", duration_minutes, " minutes")
+    if not success then
+        return nil, "Failed to stop timer"
     end
 
-    return updated
+    ngx.log(ngx.INFO, "[TimeTracking] Timer stopped: ", entry.uuid, " duration: ", duration_minutes, " minutes")
+
+    -- Refresh entry to get updated values
+    entry:refresh()
+
+    return entry
 end
 
 --- Get current running timer for user
@@ -137,14 +142,23 @@ end
 -- @return table|nil Running timer entry or nil
 function KanbanTimeTrackingQueries.getRunningTimer(user_uuid)
     local sql = [[
-        SELECT te.*,
+        SELECT te.id,
+               te.uuid,
+               te.task_id,
+               te.user_uuid,
+               te.description,
+               te.status,
+               te.is_billable,
+               te.hourly_rate,
+               te.billed_amount,
+               TO_CHAR(te.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as started_at,
                t.uuid as task_uuid,
                t.title as task_title,
                t.task_number,
                b.name as board_name,
                p.name as project_name,
                p.uuid as project_uuid,
-               EXTRACT(EPOCH FROM (NOW() - te.started_at))::integer / 60 as elapsed_minutes
+               EXTRACT(EPOCH FROM (NOW() - te.started_at))::integer as elapsed_seconds
         FROM kanban_time_entries te
         INNER JOIN kanban_tasks t ON t.id = te.task_id
         INNER JOIN kanban_boards b ON b.id = t.board_id
@@ -259,7 +273,13 @@ function KanbanTimeTrackingQueries.update(uuid, params, user_uuid)
 
     params.updated_at = db.raw("NOW()")
 
-    return entry:update(params, { returning = "*" })
+    local success = entry:update(params)
+    if not success then
+        return nil, "Failed to update time entry"
+    end
+
+    entry:refresh()
+    return entry
 end
 
 --- Delete a time entry (soft delete)
@@ -308,12 +328,19 @@ function KanbanTimeTrackingQueries.approve(uuid, approver_uuid)
         return nil, "Only logged entries can be approved"
     end
 
-    return entry:update({
+    local success = entry:update({
         status = "approved",
         approved_by = approver_uuid,
         approved_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
-    }, { returning = "*" })
+    })
+
+    if not success then
+        return nil, "Failed to approve time entry"
+    end
+
+    entry:refresh()
+    return entry
 end
 
 --- Reject a time entry
@@ -330,12 +357,19 @@ function KanbanTimeTrackingQueries.reject(uuid, rejector_uuid)
         return nil, "Only logged entries can be rejected"
     end
 
-    return entry:update({
+    local success = entry:update({
         status = "rejected",
         approved_by = rejector_uuid,
         approved_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
-    }, { returning = "*" })
+    })
+
+    if not success then
+        return nil, "Failed to reject time entry"
+    end
+
+    entry:refresh()
+    return entry
 end
 
 --------------------------------------------------------------------------------

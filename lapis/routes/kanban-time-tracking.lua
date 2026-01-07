@@ -34,22 +34,50 @@ return function(app)
 
     local function parse_request_body()
         ngx.req.read_body()
+
+        -- Try to get body data (could be nil if body is in a temp file)
+        local body = ngx.req.get_body_data()
+
+        -- If body is in a temp file, read from there
+        if not body then
+            local body_file = ngx.req.get_body_file()
+            if body_file then
+                local f = io.open(body_file, "r")
+                if f then
+                    body = f:read("*all")
+                    f:close()
+                end
+            end
+        end
+
+        -- Check content type to determine parsing method
+        local content_type = ngx.var.content_type or ""
+
+        -- If JSON content type, parse as JSON first
+        if content_type:find("application/json", 1, true) then
+            if body and body ~= "" then
+                local ok, result = pcall(cJson.decode, body)
+                if ok and type(result) == "table" then
+                    return result
+                end
+            end
+            return {}
+        end
+
+        -- For form data, try get_post_args
         local post_args = ngx.req.get_post_args()
         if post_args and next(post_args) then
             return post_args
         end
 
-        local ok, result = pcall(function()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then
-                return {}
+        -- Fallback: try to parse as JSON anyway
+        if body and body ~= "" then
+            local ok, result = pcall(cJson.decode, body)
+            if ok and type(result) == "table" then
+                return result
             end
-            return cJson.decode(body)
-        end)
-
-        if ok and type(result) == "table" then
-            return result
         end
+
         return {}
     end
 
@@ -162,7 +190,27 @@ return function(app)
 
         local timer = KanbanTimeTrackingQueries.getRunningTimer(user.uuid)
 
-        return api_response(200, timer or { running = false })
+        if timer then
+            -- Create a new table with running flag to ensure it serializes properly
+            local response = {
+                running = true,
+                uuid = timer.uuid,
+                task_id = timer.task_id,
+                task_uuid = timer.task_uuid,
+                task_title = timer.task_title,
+                task_number = timer.task_number,
+                board_name = timer.board_name,
+                project_name = timer.project_name,
+                project_uuid = timer.project_uuid,
+                started_at = timer.started_at,
+                elapsed_seconds = timer.elapsed_seconds,
+                description = timer.description,
+                user_uuid = timer.user_uuid
+            }
+            return api_response(200, response)
+        else
+            return api_response(200, { running = false })
+        end
     end)
 
     ----------------- Time Entry Routes --------------------
