@@ -193,6 +193,7 @@ jobs:
           ARGS="-e ${{ steps.env-setup.outputs.TARGET_ENV }}"
           ARGS="$ARGS -P ${{ steps.env-setup.outputs.PROTOCOL }}"
           ARGS="$ARGS -n"  # No git operations (already checked out)
+          ARGS="$ARGS -C"  # CI mode: uses override file (no dev volume mounts, different ports)
 
           # Add reset-db flag if requested
           if [ "${{ steps.env-setup.outputs.RESET_DB }}" == "true" ]; then

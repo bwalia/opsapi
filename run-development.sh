@@ -32,6 +32,7 @@ show_help() {
     echo "  -n, --no-git          Skip all git operations (stash=n, pull=n)"
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
+    echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Preset Environments:${NC}"
@@ -58,6 +59,7 @@ show_help() {
     echo "  ./run-development.sh --env=prod -a      # Prod environment, auto mode"
     echo "  ./run-development.sh -c -e dev          # Just check/update .env for dev"
     echo "  ./run-development.sh -r                 # Reset database (fresh start)"
+    echo "  ./run-development.sh -e remote -n -C    # CI/CD deployment (no dev mounts)"
     echo ""
 }
 
@@ -70,6 +72,7 @@ RESET_DB=false
 TARGET_ENV=""
 CHECK_ENV_ONLY=false
 PROTOCOL=""
+CI_MODE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -113,6 +116,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--check-env)
             CHECK_ENV_ONLY=true
+            shift
+            ;;
+        -C|--ci)
+            CI_MODE=true
             shift
             ;;
         -P|--protocol)
@@ -621,20 +628,34 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
+# Build docker compose command based on CI mode
+# CI mode uses override file to remove dev volume mounts and change conflicting ports
+if $CI_MODE; then
+    echo -e "${BLUE}[i] CI/CD mode enabled - using docker-compose.override.ci.yml${NC}"
+    COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.override.ci.yml"
+else
+    COMPOSE_CMD="docker compose"
+fi
+
 # Stop existing containers - only remove volumes if --reset-db flag is set
 if $RESET_DB; then
     echo -e "${YELLOW}[!] Resetting database - removing volumes...${NC}"
-    docker compose down --volumes
+    $COMPOSE_CMD down --volumes
 else
     echo -e "${GREEN}[+] Preserving database data...${NC}"
-    docker compose down
+    $COMPOSE_CMD down
 fi
 
-docker compose up --build -d
+$COMPOSE_CMD up --build -d
 
 sleep 15
 
-docker exec -it opsapi lapis migrate
+# Run migrations - use -t flag only in non-CI mode (CI has no TTY)
+if $CI_MODE; then
+    docker exec opsapi lapis migrate
+else
+    docker exec -it opsapi lapis migrate
+fi
 
 sleep 5
 
