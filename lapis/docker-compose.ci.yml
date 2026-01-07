@@ -1,0 +1,231 @@
+# Docker Compose for CI/CD deployments
+# This file is a modified copy of docker-compose.yml without development volume mounts
+#
+# Key differences from docker-compose.yml:
+# - No .:/app volume mount on lapis (uses files baked into Docker image)
+# - Prometheus uses port 9099 instead of 9090 to avoid conflicts
+#
+# Usage: docker compose -f docker-compose.ci.yml up --build -d
+
+services:
+
+  gatus:
+      image: twinproduction/gatus:latest
+      container_name: opsapi-gatus
+      ports:
+        - "8711:8080"
+      depends_on:
+      - minio
+      - adminer
+      - lapis
+      volumes:
+        - ./gatus/config:/config
+      networks:
+        opsapi-network:
+          ipv4_address: 172.71.0.18
+
+  lapis:
+    container_name: opsapi
+    build: .
+    ports:
+      - "4010:80"
+    volumes:
+      # NOTE: .:/app is intentionally NOT included here
+      # In CI/CD, we want to use the files baked into the Docker image
+      - ./logs:/var/log/nginx
+    env_file: ".env"
+    depends_on:
+      - postgres
+      - minio
+    # DNS configuration for external API calls (GitHub, etc.)
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.12
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Next.js Dashboard
+  dashboard:
+    container_name: opsapi-dashboard
+    build:
+      context: ../opsapi-dashboard
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4010}
+    ports:
+      - "8039:8039"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - lapis
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.19
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8039"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    container_name: opsapi-postgres-dev-db
+    image: postgres:14-alpine
+    ports:
+      - "5439:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_DB: opsapi
+    command: ["postgres", "-c", "max_connections=200"]
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.10
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pguser"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - 7779:8080
+    networks:
+      opsapi-network:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+
+  redis:
+    image: redis:alpine
+    container_name: opsapi-redis
+    ports:
+      - "6373:6379"
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.13
+    volumes:
+      - ./session-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    image: minio/minio:latest
+    container_name: opsapi-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.17
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO initialization - creates bucket and sets public policy
+  minio-init:
+    image: minio/mc:latest
+    container_name: opsapi-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin123;
+      mc mb local/opsapi --ignore-existing;
+      mc anonymous set public local/opsapi;
+      echo 'Bucket opsapi created and set to public';
+      exit 0;
+      "
+    networks:
+      opsapi-network:
+
+  # Prometheus - Metrics collection and alerting
+  # NOTE: Port changed to 9099 to avoid conflicts with existing services
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: opsapi-prometheus
+    ports:
+      - "9099:9090"
+    volumes:
+      - ../devops/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../devops/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.15
+    depends_on:
+      - lapis
+
+  # Grafana - Metrics visualization and dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: opsapi-grafana
+    ports:
+      - "3011:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../devops/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ../devops/grafana-dashboards-provisioning.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ../devops/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/opsapi-dashboard.json
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3011
+      - GF_INSTALL_PLUGINS=
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.16
+    depends_on:
+      - prometheus
+
+networks:
+  opsapi-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.71.0.0/16
+          gateway: 172.71.0.1
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  minio_data:

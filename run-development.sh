@@ -629,10 +629,10 @@ cd lapis
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
 # Build docker compose command based on CI mode
-# CI mode uses override file to remove dev volume mounts and change conflicting ports
+# CI mode uses a separate compose file without dev volume mounts
 if $CI_MODE; then
-    echo -e "${BLUE}[i] CI/CD mode enabled - using docker-compose.override.ci.yml${NC}"
-    COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.override.ci.yml"
+    echo -e "${BLUE}[i] CI/CD mode enabled - using docker-compose.ci.yml (no dev volume mounts)${NC}"
+    COMPOSE_CMD="docker compose -f docker-compose.ci.yml"
 else
     COMPOSE_CMD="docker compose"
 fi
