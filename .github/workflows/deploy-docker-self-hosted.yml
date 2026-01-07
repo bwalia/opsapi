@@ -80,6 +80,7 @@ on:
 env:
   BASE_DOMAIN: "wslcrm.com"
   ENV_FILE_PATH: "lapis/.env"
+  SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/.env"
 
 jobs:
   deploy:
@@ -161,12 +162,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Update .env file with environment credentials
+      - name: Copy .env file from server secrets
+        run: |
+          echo "Copying .env file from server secrets path..."
+
+          SERVER_ENV="${{ env.SERVER_ENV_PATH }}"
+          TARGET_ENV_FILE="${{ env.ENV_FILE_PATH }}"
+
+          # Check if server .env file exists
+          if [ -f "$SERVER_ENV" ]; then
+            echo "Found .env file at $SERVER_ENV"
+            cp "$SERVER_ENV" "$TARGET_ENV_FILE"
+            echo ".env file copied successfully to $TARGET_ENV_FILE"
+          else
+            echo "Error: .env file not found at $SERVER_ENV"
+            echo "Please ensure the .env file exists on the runner at: $SERVER_ENV"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Update .env file with environment credentials (optional override)
         if: ${{ github.event.inputs.ENV_FILE_CONTENT != '' }}
         run: |
-          echo "Updating .env file from workflow input..."
+          echo "Overriding .env file from workflow input..."
 
-          # Backup existing .env if it exists
+          # Backup existing .env
           if [ -f "${{ env.ENV_FILE_PATH }}" ]; then
             cp "${{ env.ENV_FILE_PATH }}" "${{ env.ENV_FILE_PATH }}.backup.$(date +%Y%m%d_%H%M%S)"
             echo "Existing .env backed up"
@@ -182,13 +202,8 @@ jobs:
           API_URL="${{ steps.env-setup.outputs.API_URL }}"
           ENV_FILE="${{ env.ENV_FILE_PATH }}"
 
-          if [ ! -f "$ENV_FILE" ]; then
-            echo "Error: .env file not found at $ENV_FILE"
-            echo "Please ensure .env file exists or provide ENV_FILE_CONTENT"
-            exit 1
-          fi
-
           echo "Updating environment URLs in .env..."
+          echo "API URL: $API_URL"
 
           # Update NEXT_PUBLIC_API_URL
           if grep -q "^NEXT_PUBLIC_API_URL=" "$ENV_FILE"; then
