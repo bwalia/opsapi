@@ -19,9 +19,9 @@ on:
     branches:
       - main
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.gitignore'
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
 
   # Manual trigger with options
   workflow_dispatch:
@@ -47,7 +47,7 @@ on:
       PROTOCOL:
         type: choice
         description: "API protocol"
-        default: "https"
+        default: "http"
         required: true
         options:
           - https
@@ -103,7 +103,7 @@ jobs:
           if [ "${{ github.event_name }}" == "push" ]; then
             echo "Triggered by push to main branch"
             TARGET_ENV="remote"
-            PROTOCOL="https"
+            PROTOCOL="http"
             RESET_DB="false"
             RUN_MIGRATIONS="true"
           else
@@ -119,7 +119,7 @@ jobs:
               TARGET_ENV="remote"
               echo "Using default environment: $TARGET_ENV"
             fi
-            PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
+            PROTOCOL="${{ github.event.inputs.PROTOCOL || 'http' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
             RUN_MIGRATIONS="${{ github.event.inputs.RUN_MIGRATIONS || 'true' }}"
           fi
