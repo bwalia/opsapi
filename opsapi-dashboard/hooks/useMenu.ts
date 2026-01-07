@@ -12,53 +12,52 @@
 
 'use client';
 
-import { useEffect, useCallback, useMemo } from 'react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import { useMenuStore, useMenuHydrated } from '@/store/menu.store';
 import { useNamespaceStore } from '@/store/namespace.store';
 import { useAuthStore } from '@/store/auth.store';
 import type { MenuItem, MenuNamespaceContext } from '@/types';
 
-// Icon mapping for Lucide React icons
-import {
-  LayoutDashboard,
-  Users,
-  ShoppingCart,
-  Package,
-  Store,
-  Settings,
-  Truck,
-  MessageSquare,
-  BarChart3,
-  UserCircle,
-  Shield,
-  Building2,
-  Rocket,
-  Kanban,
-  HelpCircle,
-  type LucideIcon,
-} from 'lucide-react';
+// Import only the type and default icon - other icons loaded dynamically
+import { HelpCircle, type LucideIcon } from 'lucide-react';
 
-// Map icon names from backend to Lucide components
-const ICON_MAP: Record<string, LucideIcon> = {
-  LayoutDashboard,
-  Users,
-  ShoppingCart,
-  Package,
-  Store,
-  Settings,
-  Truck,
-  MessageSquare,
-  BarChart3,
-  UserCircle,
-  Shield,
-  Building2,
-  Rocket,
-  Kanban,
-  HelpCircle,
-};
-
-// Default fallback icon
+// Default fallback icon (imported statically as it's always needed)
 const DEFAULT_ICON: LucideIcon = HelpCircle;
+
+// Lazy-loaded icon map - icons are loaded on first use
+// This prevents the entire Lucide library from being bundled on initial load
+let ICON_MAP: Record<string, LucideIcon> | null = null;
+
+// Async icon loader - populated on first call
+async function loadIconMap(): Promise<Record<string, LucideIcon>> {
+  if (ICON_MAP) return ICON_MAP;
+
+  const icons = await import('lucide-react');
+  ICON_MAP = {
+    LayoutDashboard: icons.LayoutDashboard,
+    Users: icons.Users,
+    ShoppingCart: icons.ShoppingCart,
+    Package: icons.Package,
+    Store: icons.Store,
+    Settings: icons.Settings,
+    Truck: icons.Truck,
+    MessageSquare: icons.MessageSquare,
+    BarChart3: icons.BarChart3,
+    UserCircle: icons.UserCircle,
+    Shield: icons.Shield,
+    Building2: icons.Building2,
+    Rocket: icons.Rocket,
+    Kanban: icons.Kanban,
+    HelpCircle: icons.HelpCircle,
+  };
+  return ICON_MAP;
+}
+
+// Synchronous icon getter - returns default if map not loaded yet
+function getIconFromMap(iconName: string): LucideIcon {
+  if (!ICON_MAP) return DEFAULT_ICON;
+  return ICON_MAP[iconName] ?? DEFAULT_ICON;
+}
 
 /**
  * Extended menu item with resolved icon component
@@ -106,7 +105,7 @@ function getIconComponent(iconName: string | null | undefined): LucideIcon {
     if (!iconName || typeof iconName !== 'string') {
       return DEFAULT_ICON;
     }
-    return ICON_MAP[iconName] ?? DEFAULT_ICON;
+    return getIconFromMap(iconName);
   } catch {
     return DEFAULT_ICON;
   }
@@ -159,6 +158,9 @@ function transformMenuItems(items: MenuItem[] | null | undefined): MenuItemWithI
  * ```
  */
 export function useMenu(): UseMenuReturn {
+  // Track if icons are loaded (for re-rendering after lazy load)
+  const [iconsLoaded, setIconsLoaded] = useState(!!ICON_MAP);
+
   // Get menu state from store with safe defaults
   const rawMainMenu = useMenuStore((state) => state.mainMenu ?? []);
   const rawSecondaryMenu = useMenuStore((state) => state.secondaryMenu ?? []);
@@ -182,20 +184,37 @@ export function useMenu(): UseMenuReturn {
   // Get menu hydration state
   const menuHydrated = useMenuHydrated();
 
+  // Lazy load icons on mount (deferred to avoid blocking initial render)
+  useEffect(() => {
+    if (!iconsLoaded) {
+      // Use requestIdleCallback if available, otherwise setTimeout
+      const loadIcons = () => {
+        loadIconMap().then(() => setIconsLoaded(true));
+      };
+
+      if ('requestIdleCallback' in window) {
+        (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(loadIcons);
+      } else {
+        setTimeout(loadIcons, 100);
+      }
+    }
+  }, [iconsLoaded]);
+
   // Transform menu items to include icon components (memoized)
+  // Include iconsLoaded to trigger re-render when icons finish loading
   const mainMenu = useMemo(
     () => transformMenuItems(rawMainMenu),
-    [rawMainMenu]
+    [rawMainMenu, iconsLoaded]
   );
 
   const secondaryMenu = useMemo(
     () => transformMenuItems(rawSecondaryMenu),
-    [rawSecondaryMenu]
+    [rawSecondaryMenu, iconsLoaded]
   );
 
   const allMenu = useMemo(
     () => transformMenuItems(rawMenu),
-    [rawMenu]
+    [rawMenu, iconsLoaded]
   );
 
   // Refresh menu handler with error handling
