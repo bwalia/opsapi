@@ -63,6 +63,13 @@ services:
       - "8039:8039"
     environment:
       - NODE_ENV=production
+    # Resource limits to ensure stable performance
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
     depends_on:
       - lapis
     networks:
