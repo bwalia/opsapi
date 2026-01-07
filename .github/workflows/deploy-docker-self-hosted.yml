@@ -1,7 +1,7 @@
 name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 
 # This workflow deploys OPSAPI to self-hosted runners using Docker Compose
-# It mirrors the functionality of run-development.sh for automated deployments
+# It uses the run-development.sh script to ensure consistency with local deployments
 #
 # TRIGGERS:
 # - Automatically on push to main branch (deploys to 'remote' environment)
@@ -10,7 +10,7 @@ name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 # REQUIREMENTS:
 # - Self-hosted runner with Docker and Docker Compose installed
 # - Runner must have access to the target environment
-# - .env file should be pre-configured on the runner or passed via secrets
+# - .env file should be pre-configured on the runner at /home/bwalia/.secrets/opsapi/.env
 # - SLACK_WEBHOOK secret configured for notifications
 
 on:
@@ -71,15 +71,8 @@ on:
         default: "self-hosted"
         required: false
 
-      # Optional: Environment file content (base64 encoded)
-      ENV_FILE_CONTENT:
-        type: string
-        description: "Base64 encoded .env file content (optional - uses existing if not provided)"
-        required: false
-
 env:
   BASE_DOMAIN: "wslcrm.com"
-  ENV_FILE_PATH: "lapis/.env"
   SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/.env"
 
 jobs:
@@ -100,17 +93,12 @@ jobs:
           sudo rm -rf ${{ github.workspace }}/lapis/logs 2>/dev/null || true
           sudo rm -rf ${{ github.workspace }}/lapis/keycloak_data 2>/dev/null || true
 
+          # Prune Docker build cache to fix snapshot errors
+          docker builder prune -f 2>/dev/null || true
+
           echo "Cleanup completed"
         shell: bash
         continue-on-error: true
-
-      - name: Mask sensitive inputs
-        run: |
-          if [ -n "${{ github.event.inputs.ENV_FILE_CONTENT }}" ]; then
-            echo "::add-mask::${{ github.event.inputs.ENV_FILE_CONTENT }}"
-          fi
-          echo "Sensitive inputs masked"
-        shell: bash
 
       - name: Set environment variables
         id: env-setup
@@ -121,7 +109,6 @@ jobs:
             TARGET_ENV="remote"
             PROTOCOL="http"
             RESET_DB="false"
-            RUN_MIGRATIONS="true"
           else
             echo "Triggered manually via workflow_dispatch"
             # Determine target environment
@@ -137,7 +124,6 @@ jobs:
             fi
             PROTOCOL="${{ github.event.inputs.PROTOCOL || 'http' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
-            RUN_MIGRATIONS="${{ github.event.inputs.RUN_MIGRATIONS || 'true' }}"
           fi
 
           BASE_DOMAIN="${{ env.BASE_DOMAIN }}"
@@ -159,7 +145,6 @@ jobs:
           echo "API_URL=$API_URL" >> $GITHUB_OUTPUT
           echo "PROTOCOL=$PROTOCOL" >> $GITHUB_OUTPUT
           echo "RESET_DB=$RESET_DB" >> $GITHUB_OUTPUT
-          echo "RUN_MIGRATIONS=$RUN_MIGRATIONS" >> $GITHUB_OUTPUT
           echo "TRIGGER=${{ github.event_name }}" >> $GITHUB_OUTPUT
 
           echo "=========================================="
@@ -169,7 +154,6 @@ jobs:
           echo "  Protocol: $PROTOCOL"
           echo "  API URL: $API_URL"
           echo "  Reset DB: $RESET_DB"
-          echo "  Run Migrations: $RUN_MIGRATIONS"
           echo "=========================================="
         shell: bash
 
@@ -183,7 +167,7 @@ jobs:
           echo "Copying .env file from server secrets path..."
 
           SERVER_ENV="${{ env.SERVER_ENV_PATH }}"
-          TARGET_ENV_FILE="${{ env.ENV_FILE_PATH }}"
+          TARGET_ENV_FILE="lapis/.env"
 
           # Check if server .env file exists
           if [ -f "$SERVER_ENV" ]; then
@@ -197,107 +181,26 @@ jobs:
           fi
         shell: bash
 
-      - name: Update .env file with environment credentials (optional override)
-        if: ${{ github.event.inputs.ENV_FILE_CONTENT != '' }}
-        run: |
-          echo "Overriding .env file from workflow input..."
-
-          # Backup existing .env
-          if [ -f "${{ env.ENV_FILE_PATH }}" ]; then
-            cp "${{ env.ENV_FILE_PATH }}" "${{ env.ENV_FILE_PATH }}.backup.$(date +%Y%m%d_%H%M%S)"
-            echo "Existing .env backed up"
-          fi
-
-          # Decode and write new .env content
-          echo "${{ github.event.inputs.ENV_FILE_CONTENT }}" | base64 -d > "${{ env.ENV_FILE_PATH }}"
-          echo ".env file updated from workflow input"
+      - name: Make run-development.sh executable
+        run: chmod +x ./run-development.sh
         shell: bash
 
-      - name: Update environment-specific URLs in .env
+      - name: Deploy using run-development.sh
         run: |
-          API_URL="${{ steps.env-setup.outputs.API_URL }}"
-          ENV_FILE="${{ env.ENV_FILE_PATH }}"
+          echo "Running deployment using run-development.sh..."
 
-          echo "Updating environment URLs in .env..."
-          echo "API URL: $API_URL"
+          # Build the command arguments
+          ARGS="-e ${{ steps.env-setup.outputs.TARGET_ENV }}"
+          ARGS="$ARGS -P ${{ steps.env-setup.outputs.PROTOCOL }}"
+          ARGS="$ARGS -n"  # No git operations (already checked out)
 
-          # Update NEXT_PUBLIC_API_URL
-          if grep -q "^NEXT_PUBLIC_API_URL=" "$ENV_FILE"; then
-            sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=${API_URL}|" "$ENV_FILE"
-          else
-            echo "NEXT_PUBLIC_API_URL=${API_URL}" >> "$ENV_FILE"
-          fi
-
-          # Update GOOGLE_REDIRECT_URI
-          if grep -q "^GOOGLE_REDIRECT_URI=" "$ENV_FILE"; then
-            sed -i "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=${API_URL}/auth/google/callback|" "$ENV_FILE"
-          else
-            echo "GOOGLE_REDIRECT_URI=${API_URL}/auth/google/callback" >> "$ENV_FILE"
-          fi
-
-          # Update KEYCLOAK_REDIRECT_URI
-          if grep -q "^KEYCLOAK_REDIRECT_URI=" "$ENV_FILE"; then
-            sed -i "s|^KEYCLOAK_REDIRECT_URI=.*|KEYCLOAK_REDIRECT_URI=${API_URL}/auth/callback|" "$ENV_FILE"
-          else
-            echo "KEYCLOAK_REDIRECT_URI=${API_URL}/auth/callback" >> "$ENV_FILE"
-          fi
-
-          echo "Environment URLs updated:"
-          echo "  NEXT_PUBLIC_API_URL=${API_URL}"
-          echo "  GOOGLE_REDIRECT_URI=${API_URL}/auth/google/callback"
-          echo "  KEYCLOAK_REDIRECT_URI=${API_URL}/auth/callback"
-        shell: bash
-
-      - name: Create required directories
-        run: |
-          echo "Creating required directories..."
-          mkdir -p lapis/logs
-          mkdir -p lapis/pgdata
-          mkdir -p lapis/keycloak_data
-          chmod -R 755 lapis/logs lapis/pgdata lapis/keycloak_data
-          echo "Directories created successfully"
-        shell: bash
-
-      - name: Stop existing containers
-        run: |
-          echo "Stopping existing Docker containers..."
-          cd lapis
-
+          # Add reset-db flag if requested
           if [ "${{ steps.env-setup.outputs.RESET_DB }}" == "true" ]; then
-            echo "WARNING: Resetting database - removing volumes..."
-            docker compose down --volumes || true
-          else
-            echo "Preserving database data..."
-            docker compose down || true
+            ARGS="$ARGS -r"
           fi
 
-          echo "Existing containers stopped"
-        shell: bash
-
-      - name: Build and start Docker containers
-        run: |
-          echo "Building and starting Docker containers..."
-          cd lapis
-          docker compose up --build -d
-
-          # Wait for services to be ready
-          echo "Waiting for services to be ready (30 seconds)..."
-          sleep 30
-
-          echo "Docker containers started successfully"
-        shell: bash
-
-      - name: Run database migrations
-        if: ${{ steps.env-setup.outputs.RUN_MIGRATIONS == 'true' }}
-        run: |
-          echo "Running database migrations..."
-
-          # Wait a bit more for the database to be ready
-          sleep 10
-
-          docker exec opsapi lapis migrate
-
-          echo "Migrations completed successfully"
+          echo "Executing: ./run-development.sh $ARGS"
+          ./run-development.sh $ARGS
         shell: bash
 
       - name: Verify deployment
@@ -333,7 +236,6 @@ jobs:
           echo "API URL: ${{ steps.env-setup.outputs.API_URL }}"
           echo "Protocol: ${{ steps.env-setup.outputs.PROTOCOL }}"
           echo "Reset DB: ${{ steps.env-setup.outputs.RESET_DB }}"
-          echo "Migrations: ${{ steps.env-setup.outputs.RUN_MIGRATIONS }}"
           echo "=========================================="
         shell: bash
 
@@ -377,9 +279,6 @@ jobs:
     if: success()
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Wait for services to stabilize
         run: |
           echo "Waiting for services to stabilize..."
@@ -410,24 +309,6 @@ jobs:
 
           echo ""
           echo "All endpoint verifications passed!"
-        shell: bash
-
-      - name: Check container health
-        run: |
-          echo "Checking container health..."
-          cd lapis
-
-          # List running containers
-          docker compose ps
-
-          # Check if all expected containers are running
-          RUNNING_COUNT=$(docker compose ps --status running -q | wc -l)
-          echo "Running containers: $RUNNING_COUNT"
-
-          if [ "$RUNNING_COUNT" -lt 2 ]; then
-            echo "Warning: Expected at least 2 running containers"
-            docker compose logs --tail=50
-          fi
         shell: bash
 
       - name: Slack notification - Verification Success
