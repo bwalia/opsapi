@@ -98,9 +98,34 @@ return function(app)
 
     -- GET /api/v2/kanban/projects - List projects
     -- Requires: projects.read permission
+    -- Supports filtering by chat_channel_uuid to get project linked to a specific chat channel
     app:get("/api/v2/kanban/projects", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
             local user = self.current_user
+
+            -- Check if filtering by chat_channel_uuid (for chat app integration)
+            local chat_channel_uuid = self.params.chat_channel_uuid
+            if chat_channel_uuid and chat_channel_uuid ~= "" then
+                -- Get single project linked to this chat channel
+                local project = KanbanProjectQueries.getByChannelUuid(chat_channel_uuid, user.uuid)
+
+                -- Return as array for consistency with list endpoint
+                local data = project and { project } or {}
+
+                return {
+                    status = 200,
+                    json = {
+                        success = true,
+                        data = data,
+                        meta = {
+                            total = #data,
+                            page = 1,
+                            perPage = 1,
+                            totalPages = #data > 0 and 1 or 0
+                        }
+                    }
+                }
+            end
 
             local params = {
                 page = tonumber(self.params.page) or 1,

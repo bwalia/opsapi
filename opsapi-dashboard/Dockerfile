@@ -26,6 +26,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# Install PM2 globally for process management, clustering, and auto-restart
+RUN npm install -g pm2
+
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -35,6 +38,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Copy PM2 ecosystem config
+COPY --chown=nextjs:nodejs ecosystem.config.js ./
+
 USER nextjs
 
 EXPOSE 8039
@@ -42,4 +48,5 @@ EXPOSE 8039
 ENV PORT=8039
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+# Use PM2 to run with clustering for better concurrency and auto-restart on crash
+CMD ["pm2-runtime", "ecosystem.config.js"]

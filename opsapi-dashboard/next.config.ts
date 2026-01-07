@@ -13,6 +13,30 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:4010",
   },
+
+  // Experimental features for better performance
+  experimental: {
+    // Reduce memory usage
+    webpackMemoryOptimizations: true,
+  },
+
+  // Reduce aggressive prefetching which causes 503 errors under load
+  // This prevents the browser from sending too many concurrent requests
+  onDemandEntries: {
+    // Keep pages in memory for longer (in ms)
+    maxInactiveAge: 60 * 1000,
+    // Number of pages to keep in memory
+    pagesBufferLength: 5,
+  },
+
+  // Compress responses
+  compress: true,
+
+  // Increase powered by header removal for security
+  poweredByHeader: false,
+
+  // Generate ETags for caching
+  generateEtags: true,
 };
 
 export default nextConfig;

@@ -10,6 +10,7 @@ local KanbanProjectModel = require "models.KanbanProjectModel"
 local KanbanProjectMemberModel = require "models.KanbanProjectMemberModel"
 local KanbanBoardModel = require "models.KanbanBoardModel"
 local KanbanColumnModel = require "models.KanbanColumnModel"
+local KanbanBoardQueries = require "queries.KanbanBoardQueries"
 local ChatChannelQueries = require "queries.ChatChannelQueries"
 local ChatChannelMemberQueries = require "queries.ChatChannelMemberQueries"
 local NamespaceQueries = require "queries.NamespaceQueries"
@@ -367,6 +368,50 @@ end
 -- @return table|nil Project
 function KanbanProjectQueries.getById(id)
     return KanbanProjectModel:find({ id = id })
+end
+
+--- Get project by linked chat channel UUID
+-- @param channel_uuid string Chat channel UUID
+-- @param user_uuid string Optional user UUID to get membership info
+-- @return table|nil Project with details and boards
+function KanbanProjectQueries.getByChannelUuid(channel_uuid, user_uuid)
+    local sql = [[
+        SELECT p.*,
+               n.name as namespace_name,
+               n.slug as namespace_slug,
+               (SELECT COUNT(*) FROM kanban_project_members WHERE project_id = p.id AND left_at IS NULL) as member_count,
+               (SELECT COUNT(*) FROM kanban_boards WHERE project_id = p.id AND archived_at IS NULL) as board_count
+        FROM kanban_projects p
+        LEFT JOIN namespaces n ON n.id = p.namespace_id
+        WHERE p.chat_channel_uuid = ?
+    ]]
+
+    local result = db.query(sql, channel_uuid)
+    if not result or #result == 0 then
+        return nil
+    end
+
+    local project = result[1]
+
+    -- Get user's membership if user_uuid provided
+    if user_uuid then
+        local member_sql = [[
+            SELECT role, is_starred, notification_preference
+            FROM kanban_project_members
+            WHERE project_id = ? AND user_uuid = ? AND left_at IS NULL
+        ]]
+        local member_result = db.query(member_sql, project.id, user_uuid)
+        if member_result and #member_result > 0 then
+            project.current_user_role = member_result[1].role
+            project.is_starred = member_result[1].is_starred
+            project.notification_preference = member_result[1].notification_preference
+        end
+    end
+
+    -- Include boards for the project
+    project.boards = KanbanBoardQueries.getByProject(project.id)
+
+    return project
 end
 
 --- Update project
