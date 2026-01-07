@@ -50,6 +50,7 @@ const NavItemLink = memo(function NavItemLink({
     <Link
       href={item.path}
       onClick={onClick}
+      prefetch={false}
       className={cn(
         'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
         isCollapsed && 'justify-center px-2',
@@ -206,7 +207,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
       >
         {/* Logo Header */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-secondary-200 flex-shrink-0">
-          <Link href="/dashboard" className="flex items-center gap-3" onClick={handleNavClick}>
+          <Link href="/dashboard" className="flex items-center gap-3" onClick={handleNavClick} prefetch={false}>
             <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25 flex-shrink-0">
               <span className="text-white font-bold text-xl">O</span>
             </div>

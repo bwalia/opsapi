@@ -32,11 +32,14 @@ const nextConfig: NextConfig = {
   // Compress responses
   compress: true,
 
-  // Increase powered by header removal for security
+  // Remove powered by header for security
   poweredByHeader: false,
 
   // Generate ETags for caching
   generateEtags: true,
+
+  // Optimize production builds
+  productionBrowserSourceMaps: false, // Disable source maps in production for faster load
 };
 
 export default nextConfig;
