@@ -88,6 +88,22 @@ jobs:
     runs-on: ${{ github.event.inputs.RUNNER_LABEL || 'self-hosted' }}
 
     steps:
+      - name: Clean up Docker-owned files
+        run: |
+          echo "Cleaning up Docker-owned files from previous runs..."
+          # Stop any running containers first
+          cd ${{ github.workspace }}/lapis 2>/dev/null && docker compose down 2>/dev/null || true
+
+          # Remove Docker-owned directories that cause permission issues
+          sudo rm -rf ${{ github.workspace }}/lapis/session-data 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/pgdata 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/logs 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/keycloak_data 2>/dev/null || true
+
+          echo "Cleanup completed"
+        shell: bash
+        continue-on-error: true
+
       - name: Mask sensitive inputs
         run: |
           if [ -n "${{ github.event.inputs.ENV_FILE_CONTENT }}" ]; then
