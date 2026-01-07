@@ -51,7 +51,7 @@ services:
       timeout: 20s
       retries: 3
 
-  # Next.js Dashboard
+  # Next.js Dashboard with PM2 for clustering and auto-restart
   dashboard:
     container_name: opsapi-dashboard
     build:
@@ -63,13 +63,17 @@ services:
       - "8039:8039"
     environment:
       - NODE_ENV=production
+      # Increase Node.js memory limit for better performance
+      - NODE_OPTIONS=--max-old-space-size=768
     # Resource limits to ensure stable performance
     deploy:
       resources:
         limits:
           memory: 1G
+          cpus: '1.0'
         reservations:
           memory: 512M
+          cpus: '0.5'
     depends_on:
       - lapis
     networks:
@@ -77,10 +81,11 @@ services:
         ipv4_address: 172.71.0.19
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8039"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    restart: unless-stopped
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
 
   postgres:
     container_name: opsapi-postgres-dev-db
