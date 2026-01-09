@@ -19,6 +19,44 @@ local cjson = require("cjson")
 
 local NamespaceMiddleware = {}
 
+--- Check if user is platform admin (administrative role)
+-- Platform admins have access to all namespaces without membership
+-- @param user table User object from JWT
+-- @return boolean
+local function isPlatformAdmin(user)
+    if not user then return false end
+
+    -- Check primary role (string - userinfo.roles)
+    if user.roles then
+        if type(user.roles) == "string" then
+            if user.roles:lower():find("admin") then
+                return true
+            end
+        elseif type(user.roles) == "table" then
+            for _, role in ipairs(user.roles) do
+                local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
+                if role_name:lower():find("admin") then
+                    return true
+                end
+            end
+        end
+    end
+
+    -- Also check user_roles array (userinfo.user_roles)
+    if user.user_roles then
+        if type(user.user_roles) == "table" then
+            for _, role in ipairs(user.user_roles) do
+                local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
+                if role_name:lower():find("admin") then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
+
 --- Extract namespace identifier from request
 -- @param self table Lapis request context
 -- @return string|nil Namespace identifier (uuid, id, or slug)
@@ -103,12 +141,17 @@ function NamespaceMiddleware.requireNamespace(handler)
 
         -- Check user has access to this namespace (if authenticated)
         if self.current_user then
+            -- Check if user is a platform admin (administrative role)
+            local is_platform_admin = isPlatformAdmin(self.current_user)
+            self.is_platform_admin = is_platform_admin
+
             local membership = NamespaceMemberQueries.findByUserAndNamespace(
                 self.current_user.uuid,
                 namespace.id
             )
 
-            if not membership then
+            -- Platform admins can access any namespace even without membership
+            if not membership and not is_platform_admin then
                 ngx.log(ngx.WARN, "User ", self.current_user.uuid, " does not have access to namespace ", namespace.slug)
                 return {
                     json = { error = "Access denied to this namespace" },
@@ -116,7 +159,7 @@ function NamespaceMiddleware.requireNamespace(handler)
                 }
             end
 
-            if membership.status ~= "active" then
+            if membership and membership.status ~= "active" and not is_platform_admin then
                 ngx.log(ngx.WARN, "User membership is not active in namespace: ", membership.status)
                 return {
                     json = {
@@ -127,31 +170,40 @@ function NamespaceMiddleware.requireNamespace(handler)
                 }
             end
 
-            -- Get member's roles and permissions
-            local member_details = NamespaceMemberQueries.getWithDetails(membership.id)
-            local permissions = NamespaceMemberQueries.getPermissions(membership.id)
-
-            -- Ensure is_owner is a proper boolean (PostgreSQL might return 't'/'f' or other formats)
-            local raw_is_owner = membership.is_owner
-            local is_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
-
             -- Set namespace context
             self.namespace = namespace
-            self.namespace_membership = membership
-            self.namespace_member = member_details
-            self.namespace_permissions = permissions
-            self.is_namespace_owner = is_owner
 
-            -- Parse roles if available
-            if member_details and member_details.roles then
-                if type(member_details.roles) == "string" then
-                    local ok, parsed = pcall(cjson.decode, member_details.roles)
-                    if ok then
-                        self.namespace_roles = parsed
+            if membership then
+                -- Get member's roles and permissions
+                local member_details = NamespaceMemberQueries.getWithDetails(membership.id)
+                local permissions = NamespaceMemberQueries.getPermissions(membership.id)
+
+                -- Ensure is_owner is a proper boolean (PostgreSQL might return 't'/'f' or other formats)
+                local raw_is_owner = membership.is_owner
+                local is_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
+
+                self.namespace_membership = membership
+                self.namespace_member = member_details
+                self.namespace_permissions = permissions
+                self.is_namespace_owner = is_owner
+
+                -- Parse roles if available
+                if member_details and member_details.roles then
+                    if type(member_details.roles) == "string" then
+                        local ok, parsed = pcall(cjson.decode, member_details.roles)
+                        if ok then
+                            self.namespace_roles = parsed
+                        end
+                    else
+                        self.namespace_roles = member_details.roles
                     end
-                else
-                    self.namespace_roles = member_details.roles
                 end
+            else
+                -- Platform admin without membership - grant full access
+                self.namespace_membership = nil
+                self.namespace_member = nil
+                self.namespace_permissions = {}
+                self.is_namespace_owner = false  -- Not actual owner, but has admin access
             end
         else
             -- No authenticated user - just set namespace
@@ -159,6 +211,7 @@ function NamespaceMiddleware.requireNamespace(handler)
             self.namespace_membership = nil
             self.namespace_permissions = {}
             self.is_namespace_owner = false
+            self.is_platform_admin = false
         end
 
         ngx.log(ngx.INFO, "Namespace context set: ", namespace.slug, " for user: ",
@@ -210,7 +263,12 @@ end
 -- @return function Wrapped handler
 function NamespaceMiddleware.requirePermission(module, action, handler)
     return NamespaceMiddleware.requireNamespace(function(self)
-        -- Owners have all permissions
+        -- Platform admins have all permissions
+        if self.is_platform_admin then
+            return handler(self)
+        end
+
+        -- Namespace owners have all permissions within their namespace
         if self.is_namespace_owner then
             return handler(self)
         end
@@ -259,6 +317,11 @@ end
 -- @return function Wrapped handler
 function NamespaceMiddleware.requireOwner(handler)
     return NamespaceMiddleware.requireNamespace(function(self)
+        -- Platform admins can act as owners
+        if self.is_platform_admin then
+            return handler(self)
+        end
+
         if not self.is_namespace_owner then
             ngx.log(ngx.WARN, "Owner access denied for user ", self.current_user.uuid)
             return {
@@ -284,6 +347,12 @@ end
 -- @param action string Action name
 -- @return boolean
 function NamespaceMiddleware.hasPermission(self, module, action)
+    -- Platform admins have all permissions
+    if self.is_platform_admin then
+        return true
+    end
+
+    -- Namespace owners have all permissions within their namespace
     if self.is_namespace_owner then
         return true
     end

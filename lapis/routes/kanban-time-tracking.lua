@@ -143,6 +143,26 @@ return function(app)
             return api_response(404, nil, "Task not found")
         end
 
+        ngx.log(ngx.INFO, "[TimeTracking] Starting timer - task_uuid: ", data.task_uuid, " task.id: ", task.id, " user.uuid: ", user.uuid)
+
+        -- Debug: Check what entries exist for this task
+        local debug_entries = db.query([[
+            SELECT id, task_id, user_uuid, status, duration_minutes,
+                   TO_CHAR(started_at, 'YYYY-MM-DD HH24:MI:SS') as started_at,
+                   TO_CHAR(ended_at, 'YYYY-MM-DD HH24:MI:SS') as ended_at
+            FROM kanban_time_entries
+            WHERE task_id = ? AND user_uuid = ? AND deleted_at IS NULL
+            ORDER BY id DESC LIMIT 5
+        ]], task.id, user.uuid)
+        ngx.log(ngx.INFO, "[TimeTracking] Debug - found ", #(debug_entries or {}), " entries for task_id=", task.id)
+        for i, e in ipairs(debug_entries or {}) do
+            ngx.log(ngx.INFO, "[TimeTracking] Entry ", i, ": id=", e.id, " status=", e.status, " duration_minutes=", (e.duration_minutes or "nil"), " started=", e.started_at, " ended=", (e.ended_at or "nil"))
+        end
+
+        -- Get previous seconds for this task BEFORE starting (for accurate resume)
+        local previous_seconds = KanbanTimeTrackingQueries.getTaskTotalSeconds(task.id, user.uuid)
+        ngx.log(ngx.INFO, "[TimeTracking] Got previous_seconds: ", previous_seconds)
+
         local entry, start_err = KanbanTimeTrackingQueries.startTimer(
             task.id,
             user.uuid,
@@ -153,12 +173,20 @@ return function(app)
             return api_response(400, nil, start_err or "Failed to start timer")
         end
 
-        ngx.log(ngx.INFO, "[TimeTracking] Timer started by user: ", user.uuid)
+        ngx.log(ngx.INFO, "[TimeTracking] Timer started by user: ", user.uuid, " previous_seconds: ", previous_seconds)
 
-        return api_response(201, entry)
+        -- Include previous_seconds in response for accurate timer display
+        return api_response(201, {
+            uuid = entry.uuid,
+            task_id = entry.task_id,
+            user_uuid = entry.user_uuid,
+            started_at = entry.started_at,
+            previous_seconds = previous_seconds
+        })
     end)
 
     -- POST /api/v2/kanban/timer/stop - Stop running timer
+    -- Accepts: description (optional), accumulated_seconds (optional, client-tracked time)
     app:post("/api/v2/kanban/timer/stop", function(self)
         local user, err = get_current_user()
         if not user then
@@ -167,16 +195,29 @@ return function(app)
 
         local data = parse_request_body()
 
+        ngx.log(ngx.INFO, "[TimeTracking] Stop request - raw data: ", require("cjson").encode(data))
+
+        -- Get accumulated_seconds from client (more accurate than server calculation)
+        local accumulated_seconds = nil
+        if data.accumulated_seconds then
+            accumulated_seconds = tonumber(data.accumulated_seconds)
+            ngx.log(ngx.INFO, "[TimeTracking] Received accumulated_seconds from client: ", accumulated_seconds)
+        else
+            ngx.log(ngx.INFO, "[TimeTracking] No accumulated_seconds in request")
+        end
+
         local entry, stop_err = KanbanTimeTrackingQueries.stopTimer(
             user.uuid,
-            data.description
+            data.description,
+            accumulated_seconds
         )
 
         if not entry then
+            ngx.log(ngx.ERR, "[TimeTracking] Stop timer failed: ", stop_err)
             return api_response(400, nil, stop_err or "Failed to stop timer")
         end
 
-        ngx.log(ngx.INFO, "[TimeTracking] Timer stopped by user: ", user.uuid, " duration: ", entry.duration_minutes, " min")
+        ngx.log(ngx.INFO, "[TimeTracking] Timer stopped by user: ", user.uuid, " entry.task_id: ", entry.task_id, " duration_minutes: ", entry.duration_minutes, " duration_seconds: ", (entry.duration_seconds or "nil"))
 
         return api_response(200, entry)
     end)
@@ -192,6 +233,8 @@ return function(app)
 
         if timer then
             -- Create a new table with running flag to ensure it serializes properly
+            -- Total seconds = previous completed sessions + current session elapsed
+            local total_seconds = (timer.previous_seconds or 0) + (timer.elapsed_seconds or 0)
             local response = {
                 running = true,
                 uuid = timer.uuid,
@@ -204,6 +247,8 @@ return function(app)
                 project_uuid = timer.project_uuid,
                 started_at = timer.started_at,
                 elapsed_seconds = timer.elapsed_seconds,
+                previous_seconds = timer.previous_seconds,
+                total_seconds = total_seconds,
                 description = timer.description,
                 user_uuid = timer.user_uuid
             }

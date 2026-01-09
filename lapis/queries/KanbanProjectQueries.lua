@@ -375,6 +375,7 @@ end
 -- @param user_uuid string Optional user UUID to get membership info
 -- @return table|nil Project with details and boards
 function KanbanProjectQueries.getByChannelUuid(channel_uuid, user_uuid)
+    -- First try to find a project directly linked to this channel
     local sql = [[
         SELECT p.*,
                n.name as namespace_name,
@@ -387,6 +388,23 @@ function KanbanProjectQueries.getByChannelUuid(channel_uuid, user_uuid)
     ]]
 
     local result = db.query(sql, channel_uuid)
+
+    -- If no project found, check if this is a task channel and get the task's project
+    if not result or #result == 0 then
+        local task_sql = [[
+            SELECT p.*,
+                   n.name as namespace_name,
+                   n.slug as namespace_slug,
+                   (SELECT COUNT(*) FROM kanban_project_members WHERE project_id = p.id AND left_at IS NULL) as member_count,
+                   (SELECT COUNT(*) FROM kanban_boards WHERE project_id = p.id AND archived_at IS NULL) as board_count
+            FROM kanban_projects p
+            LEFT JOIN namespaces n ON n.id = p.namespace_id
+            INNER JOIN kanban_boards b ON b.project_id = p.id
+            INNER JOIN kanban_tasks t ON t.board_id = b.id
+            WHERE t.chat_channel_uuid = ?
+        ]]
+        result = db.query(task_sql, channel_uuid)
+    end
     if not result or #result == 0 then
         return nil
     end

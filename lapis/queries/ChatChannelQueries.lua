@@ -36,6 +36,7 @@ function ChatChannelQueries.getByBusiness(uuid_business_id, params)
 end
 
 -- Get all channels for a user (channels they are a member of)
+-- For DM channels, includes the other participant's info
 function ChatChannelQueries.getByUser(user_uuid, params)
     local page = params.page or 1
     local perPage = params.perPage or 20
@@ -50,15 +51,30 @@ function ChatChannelQueries.getByUser(user_uuid, params)
                (SELECT COUNT(*) FROM chat_messages m
                 WHERE m.channel_uuid = c.uuid
                 AND m.is_deleted = false
-                AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')) as unread_count
+                AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')) as unread_count,
+               -- Other user info for DM channels
+               other_member.user_uuid as other_user_uuid,
+               other_user.first_name as other_user_first_name,
+               other_user.last_name as other_user_last_name,
+               other_user.email as other_user_email,
+               other_user.username as other_user_username,
+               COALESCE(other_presence.status, 'offline') as other_user_status
         FROM chat_channels c
         INNER JOIN chat_channel_members cm ON cm.channel_uuid = c.uuid
+        -- Join to get the other member in DM channels
+        LEFT JOIN chat_channel_members other_member ON
+            other_member.channel_uuid = c.uuid
+            AND other_member.user_uuid != ?
+            AND other_member.left_at IS NULL
+            AND c.type = 'direct'
+        LEFT JOIN users other_user ON other_user.uuid = other_member.user_uuid
+        LEFT JOIN chat_user_presence other_presence ON other_presence.user_uuid = other_member.user_uuid
         WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false
         ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
         LIMIT ? OFFSET ?
     ]]
 
-    local channels = db.query(sql, user_uuid, perPage, offset)
+    local channels = db.query(sql, user_uuid, user_uuid, perPage, offset)
 
     local count_sql = [[
         SELECT COUNT(*) as total
@@ -81,6 +97,7 @@ function ChatChannelQueries.show(uuid)
 end
 
 -- Get channel with member count
+-- For DM channels, includes the other participant's info
 function ChatChannelQueries.showWithDetails(uuid, user_uuid)
     local sql = [[
         SELECT c.*,
@@ -88,13 +105,28 @@ function ChatChannelQueries.showWithDetails(uuid, user_uuid)
                cm.role as current_user_role,
                cm.is_muted,
                cm.notification_preference,
-               cm.last_read_at
+               cm.last_read_at,
+               -- Other user info for DM channels
+               other_member.user_uuid as other_user_uuid,
+               other_user.first_name as other_user_first_name,
+               other_user.last_name as other_user_last_name,
+               other_user.email as other_user_email,
+               other_user.username as other_user_username,
+               COALESCE(other_presence.status, 'offline') as other_user_status
         FROM chat_channels c
         LEFT JOIN chat_channel_members cm ON cm.channel_uuid = c.uuid AND cm.user_uuid = ?
+        -- Join to get the other member in DM channels
+        LEFT JOIN chat_channel_members other_member ON
+            other_member.channel_uuid = c.uuid
+            AND other_member.user_uuid != ?
+            AND other_member.left_at IS NULL
+            AND c.type = 'direct'
+        LEFT JOIN users other_user ON other_user.uuid = other_member.user_uuid
+        LEFT JOIN chat_user_presence other_presence ON other_presence.user_uuid = other_member.user_uuid
         WHERE c.uuid = ?
     ]]
 
-    local result = db.query(sql, user_uuid, uuid)
+    local result = db.query(sql, user_uuid, user_uuid, uuid)
     if result and #result > 0 then
         return result[1]
     end
@@ -236,18 +268,27 @@ function ChatChannelQueries.search(uuid_business_id, search_term, params)
 end
 
 -- Get direct message channel between two users
+-- Returns channel with the other user's info (relative to user1_uuid)
 function ChatChannelQueries.getDirectChannel(user1_uuid, user2_uuid)
     local sql = [[
-        SELECT c.*
+        SELECT c.*,
+               other_user.uuid as other_user_uuid,
+               other_user.first_name as other_user_first_name,
+               other_user.last_name as other_user_last_name,
+               other_user.email as other_user_email,
+               other_user.username as other_user_username,
+               COALESCE(other_presence.status, 'offline') as other_user_status
         FROM chat_channels c
         INNER JOIN chat_channel_members cm1 ON cm1.channel_uuid = c.uuid AND cm1.user_uuid = ? AND cm1.left_at IS NULL
         INNER JOIN chat_channel_members cm2 ON cm2.channel_uuid = c.uuid AND cm2.user_uuid = ? AND cm2.left_at IS NULL
+        LEFT JOIN users other_user ON other_user.uuid = ?
+        LEFT JOIN chat_user_presence other_presence ON other_presence.user_uuid = ?
         WHERE c.type = 'direct'
         AND (SELECT COUNT(*) FROM chat_channel_members WHERE channel_uuid = c.uuid AND left_at IS NULL) = 2
         LIMIT 1
     ]]
 
-    local result = db.query(sql, user1_uuid, user2_uuid)
+    local result = db.query(sql, user1_uuid, user2_uuid, user2_uuid, user2_uuid)
     if result and #result > 0 then
         return result[1]
     end

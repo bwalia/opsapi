@@ -405,7 +405,11 @@ check_and_update_env() {
         echo -e "${YELLOW}[!] Environment URLs need to be updated.${NC}"
 
         local do_update=false
-        if [[ -n "$STASH_ARG" ]] || [[ "$CHECK_ENV_ONLY" == "true" ]]; then
+        if $CI_MODE; then
+            # CI/CD mode - automatically update without prompting
+            echo -e "${BLUE}[i] CI/CD mode: Automatically updating .env file${NC}"
+            do_update=true
+        elif [[ -n "$STASH_ARG" ]] || [[ "$CHECK_ENV_ONLY" == "true" ]]; then
             # Non-interactive mode or check-only mode - ask for confirmation
             if prompt_yes_no "Do you want to update the .env file?"; then
                 do_update=true
