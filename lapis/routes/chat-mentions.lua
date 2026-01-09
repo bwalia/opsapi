@@ -518,8 +518,14 @@ return function(app)
             ngx.log(ngx.NOTICE, "[Chat Search] Users in namespaces: ", nm_stats[1].users_in_namespaces, ", Total users: ", nm_stats[1].total_users)
         end
 
-        -- Query users in the same namespace(s) as current user, with their chat membership status
-        -- This ensures users only see other users from their organization/namespace
+        -- For chat search, we show ALL users regardless of namespace
+        -- This is appropriate for a Slack-clone where users within the same deployment
+        -- should be able to message each other. If multi-tenancy isolation is needed,
+        -- it should be enforced at the deployment/database level, not within chat search.
+        --
+        -- Note: If you need namespace-based user isolation, you would filter by
+        -- user.uuid_business_id or implement a different tenant isolation strategy.
+
         local sql = [[
             SELECT DISTINCT
                 u.uuid,
@@ -541,18 +547,7 @@ return function(app)
                 END as presence_order
             FROM users u
             LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
-            -- Join to namespace_members to filter by namespace
-            INNER JOIN namespace_members nm ON nm.user_id = u.id AND nm.status = 'active'
             WHERE u.uuid != ?
-              -- Note: We don't filter by u.active since users may have active=false by default
-              -- All users in the same namespace should be searchable for chat
-              -- User must be in a namespace that the current user is also in
-              AND nm.namespace_id IN (
-                  SELECT nm2.namespace_id
-                  FROM namespace_members nm2
-                  INNER JOIN users u2 ON u2.id = nm2.user_id
-                  WHERE u2.uuid = ? AND nm2.status = 'active'
-              )
               AND (
                   LOWER(COALESCE(u.username, '')) LIKE LOWER(?)
                   OR LOWER(COALESCE(u.first_name, '')) LIKE LOWER(?)
@@ -568,7 +563,7 @@ return function(app)
             LIMIT ?
         ]]
 
-        local users = db.query(sql, user.uuid, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit)
+        local users = db.query(sql, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit)
 
         ngx.log(ngx.NOTICE, "[Chat Search] Search '", search, "' found ", users and #users or 0, " users")
 
