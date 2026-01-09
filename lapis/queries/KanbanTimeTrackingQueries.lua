@@ -79,8 +79,9 @@ end
 --- Stop a running timer
 -- @param user_uuid string User UUID
 -- @param description string|nil Optional updated description
+-- @param accumulated_seconds number|nil Optional client-tracked seconds (more accurate)
 -- @return table|nil Stopped entry or nil with error
-function KanbanTimeTrackingQueries.stopTimer(user_uuid, description)
+function KanbanTimeTrackingQueries.stopTimer(user_uuid, description, accumulated_seconds)
     -- Find running timer
     local running = db.query([[
         SELECT * FROM kanban_time_entries
@@ -98,12 +99,27 @@ function KanbanTimeTrackingQueries.stopTimer(user_uuid, description)
         return nil, "Timer entry not found"
     end
 
-    -- Calculate duration
-    local duration_result = db.query([[
-        SELECT EXTRACT(EPOCH FROM (NOW() - ?::timestamp))::integer / 60 as minutes
-    ]], entry.started_at)
-
-    local duration_minutes = duration_result[1].minutes or 0
+    -- Use client-provided seconds if available (more accurate), otherwise calculate from timestamps
+    local duration_seconds
+    local duration_minutes
+    if accumulated_seconds and accumulated_seconds > 0 then
+        duration_seconds = accumulated_seconds
+        -- Round to nearest minute for display, minimum 1 minute if any time was tracked
+        duration_minutes = math.floor((accumulated_seconds + 30) / 60)
+        if duration_minutes == 0 and accumulated_seconds > 0 then
+            duration_minutes = 1  -- At least 1 minute if any time was tracked
+        end
+    else
+        -- Fallback: calculate from timestamps (less accurate due to network latency)
+        local duration_result = db.query([[
+            SELECT EXTRACT(EPOCH FROM (NOW() - ?::timestamp))::integer as seconds
+        ]], entry.started_at)
+        duration_seconds = duration_result[1].seconds or 0
+        duration_minutes = math.floor((duration_seconds + 30) / 60)
+        if duration_minutes == 0 and duration_seconds > 0 then
+            duration_minutes = 1
+        end
+    end
 
     -- Calculate billed amount if billable
     local billed_amount = nil
@@ -114,6 +130,7 @@ function KanbanTimeTrackingQueries.stopTimer(user_uuid, description)
     local update_params = {
         ended_at = db.raw("NOW()"),
         duration_minutes = duration_minutes,
+        duration_seconds = duration_seconds,  -- Store exact seconds for accurate resume
         status = "logged",
         billed_amount = billed_amount,
         updated_at = db.raw("NOW()")
@@ -123,13 +140,16 @@ function KanbanTimeTrackingQueries.stopTimer(user_uuid, description)
         update_params.description = description
     end
 
+    ngx.log(ngx.INFO, "[TimeTracking] Stopping timer - entry.id: ", entry.id, " task_id: ", entry.task_id, " duration_seconds: ", duration_seconds, " duration_minutes: ", duration_minutes)
+
     local success = entry:update(update_params)
 
     if not success then
+        ngx.log(ngx.ERR, "[TimeTracking] Update failed for entry: ", entry.id)
         return nil, "Failed to stop timer"
     end
 
-    ngx.log(ngx.INFO, "[TimeTracking] Timer stopped: ", entry.uuid, " duration: ", duration_minutes, " minutes")
+    ngx.log(ngx.INFO, "[TimeTracking] Timer stopped - entry updated to status=logged, duration_minutes=", duration_minutes)
 
     -- Refresh entry to get updated values
     entry:refresh()
@@ -158,7 +178,15 @@ function KanbanTimeTrackingQueries.getRunningTimer(user_uuid)
                b.name as board_name,
                p.name as project_name,
                p.uuid as project_uuid,
-               EXTRACT(EPOCH FROM (NOW() - te.started_at))::integer as elapsed_seconds
+               EXTRACT(EPOCH FROM (NOW() - te.started_at))::integer as elapsed_seconds,
+               COALESCE((
+                   SELECT SUM(COALESCE(prev.duration_seconds, prev.duration_minutes * 60))
+                   FROM kanban_time_entries prev
+                   WHERE prev.task_id = te.task_id
+                     AND prev.user_uuid = te.user_uuid
+                     AND prev.status != 'running'
+                     AND prev.deleted_at IS NULL
+               ), 0)::integer as previous_seconds
         FROM kanban_time_entries te
         INNER JOIN kanban_tasks t ON t.id = te.task_id
         INNER JOIN kanban_boards b ON b.id = t.board_id
@@ -172,6 +200,36 @@ function KanbanTimeTrackingQueries.getRunningTimer(user_uuid)
         return result[1]
     end
     return nil
+end
+
+--- Get total time spent on a task in seconds (for a specific user)
+-- @param task_id number Task ID
+-- @param user_uuid string User UUID
+-- @return number Total seconds spent
+function KanbanTimeTrackingQueries.getTaskTotalSeconds(task_id, user_uuid)
+    -- Get sum of duration_seconds for all logged entries
+    -- Use COALESCE to fall back to duration_minutes * 60 for legacy entries without duration_seconds
+    local sql = [[
+        SELECT COALESCE(
+            SUM(COALESCE(duration_seconds, duration_minutes * 60)),
+            0
+        )::integer as total_seconds
+        FROM kanban_time_entries
+        WHERE task_id = ?
+          AND user_uuid = ?
+          AND status = 'logged'
+          AND deleted_at IS NULL
+    ]]
+
+    local result = db.query(sql, task_id, user_uuid)
+    local total_seconds = 0
+    if result and #result > 0 then
+        total_seconds = tonumber(result[1].total_seconds) or 0
+    end
+
+    ngx.log(ngx.INFO, "[TimeTracking] getTaskTotalSeconds - task_id: ", task_id, " user_uuid: ", user_uuid, " total_seconds: ", total_seconds)
+
+    return total_seconds
 end
 
 --------------------------------------------------------------------------------

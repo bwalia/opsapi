@@ -745,5 +745,22 @@ return {
         end
 
         print("[Migration] Fixed nullable FK columns with DEFAULT 0")
+    end,
+
+    -- ========================================
+    -- [14] Add duration_seconds column to time entries for precise tracking
+    -- ========================================
+    [14] = function()
+        -- Add duration_seconds column for precise time tracking
+        -- This stores exact seconds instead of just minutes to avoid rounding errors
+        -- when resuming timers (e.g., stopped at 1:10 should resume at 1:10, not 2:00)
+        pcall(function()
+            db.query([[
+                ALTER TABLE kanban_time_entries
+                ADD COLUMN IF NOT EXISTS duration_seconds INTEGER DEFAULT NULL
+            ]])
+        end)
+
+        print("[Migration] Added duration_seconds column to kanban_time_entries for precise time tracking")
     end
 }

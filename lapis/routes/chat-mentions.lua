@@ -384,7 +384,6 @@ return function(app)
                         FROM users u
                         LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
                         WHERE u.uuid != ?
-                          AND (u.active = true OR u.active IS NULL)
                           AND (
                               LOWER(u.username) LIKE LOWER(?)
                               OR LOWER(u.first_name) LIKE LOWER(?)
@@ -400,7 +399,7 @@ return function(app)
                 local search_pattern = "%" .. search .. "%"
                 query_params = { user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit }
             else
-                -- No search - get all active users
+                -- No search - get all users
                 sql = [[
                     SELECT uuid, username, first_name, last_name, email, presence_status
                     FROM (
@@ -418,7 +417,6 @@ return function(app)
                         FROM users u
                         LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
                         WHERE u.uuid != ?
-                          AND (u.active = true OR u.active IS NULL)
                         ORDER BY u.uuid
                     ) sub
                     ORDER BY presence_order, first_name, last_name
@@ -455,6 +453,160 @@ return function(app)
                     { id = "here", display = "@here", description = "Notify online members" },
                     { id = "everyone", display = "@everyone", description = "Notify all members" }
                 }
+            }
+        }
+    end)
+
+    -- GET /api/chat/users/search - Search all users with chat status for DM
+    -- Returns whether user is active on chat (member of any channel)
+    -- Used for Direct Message user search
+    -- Filters by namespace membership (users in the same namespace as the current user)
+    app:get("/api/chat/users/search", function(self)
+        local user, err = get_current_user()
+        if not user then
+            return { status = 401, json = { error = err } }
+        end
+
+        local search = self.params.q or self.params.search or ""
+        local limit = tonumber(self.params.limit) or 20
+
+        -- Validate search query
+        if not search or search == "" or #search < 2 then
+            return {
+                status = 400,
+                json = { error = "Search query must be at least 2 characters" }
+            }
+        end
+
+        local search_pattern = "%" .. search .. "%"
+
+        -- Debug: Log the current user's namespaces
+        local debug_ns_sql = [[
+            SELECT nm.namespace_id, n.name as namespace_name, n.slug
+            FROM namespace_members nm
+            INNER JOIN users u ON u.id = nm.user_id
+            INNER JOIN namespaces n ON n.id = nm.namespace_id
+            WHERE u.uuid = ? AND nm.status = 'active'
+        ]]
+        local user_namespaces = db.query(debug_ns_sql, user.uuid)
+        ngx.log(ngx.NOTICE, "[Chat Search] User ", user.uuid, " namespaces: ", cjson.encode(user_namespaces or {}))
+
+        -- Debug: Count total users matching search (without namespace filter)
+        local debug_count_sql = [[
+            SELECT COUNT(*) as total FROM users u
+            WHERE u.uuid != ?
+              AND (
+                  LOWER(COALESCE(u.username, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.first_name, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.last_name, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.email, '')) LIKE LOWER(?)
+              )
+        ]]
+        local total_matching = db.query(debug_count_sql, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern)
+        ngx.log(ngx.NOTICE, "[Chat Search] Total users matching '", search, "' (without namespace filter): ", total_matching and total_matching[1] and total_matching[1].total or 0)
+
+        -- Debug: Check how many users are in namespace_members at all
+        local debug_nm_sql = [[
+            SELECT COUNT(DISTINCT nm.user_id) as users_in_namespaces,
+                   COUNT(DISTINCT u.id) as total_users
+            FROM users u
+            LEFT JOIN namespace_members nm ON nm.user_id = u.id AND nm.status = 'active'
+            WHERE u.uuid != ?
+        ]]
+        local nm_stats = db.query(debug_nm_sql, user.uuid)
+        if nm_stats and nm_stats[1] then
+            ngx.log(ngx.NOTICE, "[Chat Search] Users in namespaces: ", nm_stats[1].users_in_namespaces, ", Total users: ", nm_stats[1].total_users)
+        end
+
+        -- Query users in the same namespace(s) as current user, with their chat membership status
+        -- This ensures users only see other users from their organization/namespace
+        local sql = [[
+            SELECT DISTINCT
+                u.uuid,
+                u.username,
+                u.first_name,
+                u.last_name,
+                u.email,
+                COALESCE(up.status, 'offline') as presence_status,
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM chat_channel_members cm
+                        WHERE cm.user_uuid = u.uuid AND cm.left_at IS NULL
+                    ) THEN true
+                    ELSE false
+                END as is_chat_active,
+                CASE WHEN up.status = 'online' THEN 0
+                     WHEN up.status = 'away' THEN 1
+                     ELSE 2
+                END as presence_order
+            FROM users u
+            LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
+            -- Join to namespace_members to filter by namespace
+            INNER JOIN namespace_members nm ON nm.user_id = u.id AND nm.status = 'active'
+            WHERE u.uuid != ?
+              -- Note: We don't filter by u.active since users may have active=false by default
+              -- All users in the same namespace should be searchable for chat
+              -- User must be in a namespace that the current user is also in
+              AND nm.namespace_id IN (
+                  SELECT nm2.namespace_id
+                  FROM namespace_members nm2
+                  INNER JOIN users u2 ON u2.id = nm2.user_id
+                  WHERE u2.uuid = ? AND nm2.status = 'active'
+              )
+              AND (
+                  LOWER(COALESCE(u.username, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.first_name, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.last_name, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.email, '')) LIKE LOWER(?)
+                  OR LOWER(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) LIKE LOWER(?)
+              )
+            ORDER BY
+                is_chat_active DESC,
+                presence_order,
+                first_name,
+                last_name
+            LIMIT ?
+        ]]
+
+        local users = db.query(sql, user.uuid, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit)
+
+        ngx.log(ngx.NOTICE, "[Chat Search] Search '", search, "' found ", users and #users or 0, " users")
+
+        -- Format response
+        local result = {}
+        if users then
+            for _, u in ipairs(users) do
+                local display_name = ""
+                if u.first_name and u.last_name then
+                    display_name = u.first_name .. " " .. u.last_name
+                elseif u.first_name then
+                    display_name = u.first_name
+                elseif u.last_name then
+                    display_name = u.last_name
+                elseif u.username then
+                    display_name = u.username
+                else
+                    display_name = u.email
+                end
+
+                table.insert(result, {
+                    uuid = u.uuid,
+                    username = u.username,
+                    display_name = display_name,
+                    first_name = u.first_name,
+                    last_name = u.last_name,
+                    email = u.email,
+                    status = u.presence_status,
+                    is_chat_active = u.is_chat_active
+                })
+            end
+        end
+
+        return {
+            status = 200,
+            json = {
+                data = result,
+                total = #result
             }
         }
     end)

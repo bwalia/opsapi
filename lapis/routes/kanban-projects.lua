@@ -21,6 +21,7 @@
 ]]
 
 local cJson = require("cjson")
+local db = require("lapis.db")
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local KanbanBoardQueries = require "queries.KanbanBoardQueries"
 local KanbanTaskQueries = require "queries.KanbanTaskQueries"
@@ -97,68 +98,96 @@ return function(app)
     ----------------- Project Routes --------------------
 
     -- GET /api/v2/kanban/projects - List projects
-    -- Requires: projects.read permission
+    -- Requires: projects.read permission OR channel membership when filtering by chat_channel_uuid
     -- Supports filtering by chat_channel_uuid to get project linked to a specific chat channel
     app:get("/api/v2/kanban/projects", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requirePermission("projects", "read", function(self)
-            local user = self.current_user
+        NamespaceMiddleware.requireNamespace(function(self)
+        local user = self.current_user
 
-            -- Check if filtering by chat_channel_uuid (for chat app integration)
-            local chat_channel_uuid = self.params.chat_channel_uuid
-            if chat_channel_uuid and chat_channel_uuid ~= "" then
-                -- Get single project linked to this chat channel
-                local project = KanbanProjectQueries.getByChannelUuid(chat_channel_uuid, user.uuid)
+        -- Check if filtering by chat_channel_uuid (for chat app integration)
+        -- This path allows channel members to see their project without projects.read permission
+        local chat_channel_uuid = self.params.chat_channel_uuid
+        if chat_channel_uuid and chat_channel_uuid ~= "" then
+            -- Verify user is a member of this channel (security check)
+            local channel_member = db.query([[
+                SELECT id FROM chat_channel_members
+                WHERE channel_uuid = ? AND user_uuid = ? AND left_at IS NULL
+            ]], chat_channel_uuid, user.uuid)
 
-                -- Return as array for consistency with list endpoint
-                local data = project and { project } or {}
-
+            if not channel_member or #channel_member == 0 then
+                -- User is not a member of this channel
                 return {
                     status = 200,
                     json = {
                         success = true,
-                        data = data,
-                        meta = {
-                            total = #data,
-                            page = 1,
-                            perPage = 1,
-                            totalPages = #data > 0 and 1 or 0
-                        }
+                        data = {},
+                        meta = { total = 0, page = 1, perPage = 1, totalPages = 0 }
                     }
                 }
             end
 
-            local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 20,
-                status = self.params.status,
-                search = self.params.search or self.params.q
-            }
+            -- Get single project linked to this chat channel
+            local project = KanbanProjectQueries.getByChannelUuid(chat_channel_uuid, user.uuid)
 
-            -- Get projects user is a member of
-            local result = KanbanProjectQueries.getByUser(user.uuid, self.namespace.id, params)
+            -- Return as array for consistency with list endpoint
+            local data = project and { project } or {}
 
-            -- Add permission context to response for frontend
             return {
                 status = 200,
                 json = {
                     success = true,
-                    data = result.data,
+                    data = data,
                     meta = {
-                        total = result.total,
-                        page = params.page,
-                        perPage = params.perPage,
-                        totalPages = math.ceil(result.total / params.perPage)
-                    },
-                    permissions = {
-                        can_create = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "create"),
-                        can_update = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "update"),
-                        can_delete = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "delete"),
-                        can_manage = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "manage")
+                        total = #data,
+                        page = 1,
+                        perPage = 1,
+                        totalPages = #data > 0 and 1 or 0
                     }
                 }
             }
-        end)
-    ))
+        end
+
+        -- For listing all projects, require projects.read permission
+        -- Platform admins (administrative role) have full access
+        local has_permission = NamespaceMiddleware.hasPermission(self, "projects", "read")
+        if not has_permission and not self.is_namespace_owner and not self.is_platform_admin then
+            return {
+                status = 403,
+                json = { success = false, error = "Permission denied: projects.read required" }
+            }
+        end
+
+        local params = {
+            page = tonumber(self.params.page) or 1,
+            perPage = tonumber(self.params.perPage) or 20,
+            status = self.params.status,
+            search = self.params.search or self.params.q
+        }
+
+        -- Get projects user is a member of
+        local result = KanbanProjectQueries.getByUser(user.uuid, self.namespace.id, params)
+
+        -- Add permission context to response for frontend
+        return {
+            status = 200,
+            json = {
+                success = true,
+                data = result.data,
+                meta = {
+                    total = result.total,
+                    page = params.page,
+                    perPage = params.perPage,
+                    totalPages = math.ceil(result.total / params.perPage)
+                },
+                permissions = {
+                    can_create = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "create"),
+                    can_update = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "update"),
+                    can_delete = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "delete"),
+                    can_manage = self.is_namespace_owner or NamespaceMiddleware.hasPermission(self, "projects", "manage")
+                }
+            }
+        }
+    end)))
 
     -- POST /api/v2/kanban/projects - Create project
     -- Requires: projects.create permission

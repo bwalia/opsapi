@@ -449,55 +449,32 @@ function KanbanTaskQueries.assignUser(task_id, user_uuid, assigned_by, namespace
         return nil, "Failed to create assignment"
     end
 
-    -- Create or get task chat channel
-    local chat_channel_uuid = task.chat_channel_uuid
+    -- Use the PROJECT's chat channel instead of creating task-specific channels
+    -- This keeps all task discussions in the project channel (avoids channel proliferation)
+    local chat_channel_uuid = project.chat_channel_uuid
 
-    if not chat_channel_uuid then
-        -- Create chat channel for the task
-        local channel_name = string.format("%s - #%d", project.name, task.task_number)
-        local channel = ChatChannelModel:create({
-            uuid = Global.generateUUID(),
-            name = channel_name,
-            description = task.title,
-            type = "private",
-            created_by = assigned_by,
-            namespace_id = namespace_id,
-            linked_task_uuid = task.uuid,
-            linked_task_id = task.id,
-            created_at = db.raw("NOW()"),
-            updated_at = db.raw("NOW()")
-        }, { returning = "*" })
-
-        if channel then
-            chat_channel_uuid = channel.uuid
-
-            -- Update task with chat channel
-            task:update({ chat_channel_uuid = chat_channel_uuid })
-
-            -- Add reporter to channel as admin
-            if task.reporter_user_uuid then
-                ChatChannelMemberModel:create({
-                    uuid = Global.generateUUID(),
-                    channel_uuid = chat_channel_uuid,
-                    user_uuid = task.reporter_user_uuid,
-                    role = "admin",
-                    joined_at = db.raw("NOW()"),
-                    created_at = db.raw("NOW()"),
-                    updated_at = db.raw("NOW()")
-                })
-            end
-        end
-    end
-
-    -- Add assignee to chat channel
+    -- Add assignee to project's chat channel (if they're not already a member)
     if chat_channel_uuid then
-        -- Check if already a member
+        -- Check if already a member (including soft-deleted members who left)
         local member_exists = db.query([[
-            SELECT id FROM chat_channel_members
-            WHERE channel_uuid = ? AND user_uuid = ? AND left_at IS NULL
+            SELECT id, left_at FROM chat_channel_members
+            WHERE channel_uuid = ? AND user_uuid = ?
         ]], chat_channel_uuid, user_uuid)
 
-        if not member_exists or #member_exists == 0 then
+        if member_exists and #member_exists > 0 then
+            -- User was previously a member
+            if member_exists[1].left_at then
+                -- Rejoin: clear left_at to make them active again
+                db.query([[
+                    UPDATE chat_channel_members
+                    SET left_at = NULL, updated_at = NOW()
+                    WHERE channel_uuid = ? AND user_uuid = ?
+                ]], chat_channel_uuid, user_uuid)
+                ngx.log(ngx.INFO, "[Kanban] Rejoined user ", user_uuid, " to project channel ", chat_channel_uuid)
+            end
+            -- If left_at is NULL, they're already an active member - nothing to do
+        else
+            -- New member - add them
             ChatChannelMemberModel:create({
                 uuid = Global.generateUUID(),
                 channel_uuid = chat_channel_uuid,
@@ -507,6 +484,7 @@ function KanbanTaskQueries.assignUser(task_id, user_uuid, assigned_by, namespace
                 created_at = db.raw("NOW()"),
                 updated_at = db.raw("NOW()")
             })
+            ngx.log(ngx.INFO, "[Kanban] Added user ", user_uuid, " to project channel ", chat_channel_uuid)
         end
     end
 
@@ -534,17 +512,9 @@ function KanbanTaskQueries.unassignUser(task_id, user_uuid, unassigned_by)
         return false, "Assignment not found"
     end
 
-    -- Get task for chat channel removal
-    local task = KanbanTaskModel:find({ id = task_id })
-
-    -- Remove from chat channel if exists
-    if task and task.chat_channel_uuid then
-        db.query([[
-            UPDATE chat_channel_members
-            SET left_at = NOW(), updated_at = NOW()
-            WHERE channel_uuid = ? AND user_uuid = ?
-        ]], task.chat_channel_uuid, user_uuid)
-    end
+    -- NOTE: We no longer remove users from the project channel when unassigning from a task
+    -- since tasks now use the project's channel. Users stay in the channel as long as they're
+    -- project members or assigned to other tasks.
 
     assignment:delete()
 

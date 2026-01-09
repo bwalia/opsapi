@@ -621,6 +621,7 @@ return {
     ['260_create_due_date_notification_function'] = kanban_enhancement_migrations[11],
     ['261_kanban_enhancements_complete'] = kanban_enhancement_migrations[12],
     ['262_fix_kanban_nullable_fk_defaults'] = kanban_enhancement_migrations[13],
+    ['271_add_duration_seconds_to_time_entries'] = kanban_enhancement_migrations[14],
 
     -- Menu System (Backend-driven navigation with Multi-Tenant support)
     ['263_create_menu_items_table'] = menu_system_migrations[1],
