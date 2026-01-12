@@ -47,7 +47,7 @@ on:
       PROTOCOL:
         type: choice
         description: "API protocol"
-        default: "http"
+        default: "https"
         required: true
         options:
           - https
@@ -107,7 +107,7 @@ jobs:
           if [ "${{ github.event_name }}" == "push" ]; then
             echo "Triggered by push to main branch"
             TARGET_ENV="remote"
-            PROTOCOL="http"
+            PROTOCOL="https"
             RESET_DB="false"
           else
             echo "Triggered manually via workflow_dispatch"
@@ -122,7 +122,7 @@ jobs:
               TARGET_ENV="remote"
               echo "Using default environment: $TARGET_ENV"
             fi
-            PROTOCOL="${{ github.event.inputs.PROTOCOL || 'http' }}"
+            PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
           fi
 
