@@ -16,9 +16,11 @@ function UserQueries.create(params)
     local role = params.role
     local namespace_id = params.namespace_id  -- Optional: specific namespace to add user to
     local namespace_role = params.namespace_role  -- Optional: role within namespace
+    -- Remove fields that are not columns in the users table
     userData.role = nil
     userData.namespace_id = nil
     userData.namespace_role = nil
+    userData.created_by = nil  -- Not a column in users table
     if userData.uuid == nil then
         userData.uuid = Global.generateUUID()
     end

@@ -81,29 +81,63 @@ function Global.removeBykey(table, key)
     return element
 end
 
-function Global.encryptSecret(secret)
+-- Validate encryption key and IV lengths for AES-128-CBC (requires 16 bytes each)
+local function validateEncryptionConfig()
     local secretKey = Global.getEnvVar("OPENSSL_SECRET_KEY")
     local secretIV = Global.getEnvVar("OPENSSL_SECRET_IV")
+
+    if not secretKey or #secretKey == 0 then
+        error("OPENSSL_SECRET_KEY environment variable is not set")
+    end
+
+    if not secretIV or #secretIV == 0 then
+        error("OPENSSL_SECRET_IV environment variable is not set")
+    end
+
+    -- AES-128 requires 16-byte key and IV
+    -- Keys can be provided as 16 raw bytes or 32 hex characters
+    if #secretKey < 16 then
+        ngx.log(ngx.WARN, "OPENSSL_SECRET_KEY is ", #secretKey, " bytes, AES-128 requires 16 bytes. Key will be padded.")
+    end
+
+    if #secretIV < 16 then
+        ngx.log(ngx.WARN, "OPENSSL_SECRET_IV is ", #secretIV, " bytes, AES-128 requires 16 bytes. IV will be padded.")
+    end
+
+    return secretKey, secretIV
+end
+
+function Global.encryptSecret(secret)
+    if not secret or secret == "" then
+        error("Cannot encrypt empty secret")
+    end
+
+    local secretKey, secretIV = validateEncryptionConfig()
     local AES = require("resty.aes")
     local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
         iv = secretIV
-    }))
+    }), "Failed to initialize AES encryption")
+
     local encrypted = aesInstance:encrypt(secret)
     if not encrypted then
-        error("Encryption failed")
+        error("Encryption failed - AES encrypt returned nil")
     end
+
     -- Use OpenResty's native base64 encoding for consistency
     return ngx.encode_base64(encrypted)
 end
 
 -- Function to decrypt data
 function Global.decryptSecret(encodedSecret)
-    local secretKey = Global.getEnvVar("OPENSSL_SECRET_KEY")
-    local secretIV = Global.getEnvVar("OPENSSL_SECRET_IV")
+    if not encodedSecret or encodedSecret == "" then
+        error("Cannot decrypt empty secret")
+    end
+
+    local secretKey, secretIV = validateEncryptionConfig()
     local AES = require("resty.aes")
     local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
         iv = secretIV
-    }))
+    }), "Failed to initialize AES decryption")
 
     -- Try OpenResty's native base64 decoding first
     local encrypted = ngx.decode_base64(encodedSecret)
@@ -124,7 +158,7 @@ function Global.decryptSecret(encodedSecret)
     local decrypted = aesInstance:decrypt(encrypted)
     if not decrypted then
         ngx.log(ngx.ERR, "AES decryption failed using ", decode_method, " base64 decode")
-        error("Decryption failed")
+        error("Decryption failed - secret may have been encrypted with different key")
     end
 
     ngx.log(ngx.DEBUG, "Decryption successful using ", decode_method, " method")
