@@ -26,26 +26,218 @@ local GithubIntegrations = Model:extend("namespace_github_integrations")
 local ServiceQueries = {}
 
 -- ============================================
+-- GitHub Token Validation
+-- ============================================
+
+--- Validate a GitHub token by making a test API call
+-- This verifies the token is authentic and has appropriate permissions
+-- @param github_token string The decrypted GitHub token to validate
+-- @return boolean Success status
+-- @return table|nil Token info (login, scopes) on success, error message on failure
+function ServiceQueries.validateGithubToken(github_token)
+    if not github_token or github_token == "" or github_token == "********" then
+        return false, "Invalid or empty token"
+    end
+
+    local http = require("resty.http")
+    local httpc = http.new()
+    httpc:set_timeout(15000)
+
+    local ssl_verify = os.getenv("OPSAPI_SSL_VERIFY") == "true"
+
+    -- Clean the token (remove any whitespace or control characters)
+    github_token = github_token:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%z", ""):gsub("%c", "")
+
+    -- Validate token format
+    local token_format = "unknown"
+    if github_token:match("^ghp_") then
+        token_format = "classic_pat"
+    elseif github_token:match("^github_pat_") then
+        token_format = "fine_grained_pat"
+    elseif github_token:match("^gho_") then
+        token_format = "oauth_token"
+    elseif github_token:match("^ghu_") then
+        token_format = "user_access_token"
+    elseif github_token:match("^ghs_") then
+        token_format = "installation_token"
+    elseif github_token:match("^ghr_") then
+        token_format = "refresh_token"
+    end
+
+    ngx.log(ngx.INFO, "[TokenValidation] Validating token with format: ", token_format, ", length: ", #github_token)
+
+    -- Use the /user endpoint to validate token and get user info
+    local res, err = httpc:request_uri("https://api.github.com/user", {
+        method = "GET",
+        headers = {
+            ["Accept"] = "application/vnd.github+json",
+            ["Authorization"] = "Bearer " .. github_token,
+            ["X-GitHub-Api-Version"] = "2022-11-28",
+            ["User-Agent"] = "OpsAPI-TokenValidator"
+        },
+        ssl_verify = ssl_verify
+    })
+
+    if not res then
+        ngx.log(ngx.ERR, "[TokenValidation] HTTP request failed: ", tostring(err))
+        return false, "Failed to connect to GitHub API: " .. tostring(err)
+    end
+
+    ngx.log(ngx.INFO, "[TokenValidation] Response status: ", res.status)
+
+    if res.status == 200 then
+        local user_data = cjson.decode(res.body)
+
+        if not user_data then
+            return false, "Failed to parse GitHub response"
+        end
+
+        -- Extract useful information
+        local token_info = {
+            valid = true,
+            login = user_data.login,
+            id = user_data.id,
+            name = user_data.name,
+            token_format = token_format,
+            -- Extract scopes from response headers (classic PATs only)
+            scopes = res.headers["x-oauth-scopes"] or "",
+            -- Rate limit info
+            rate_limit = res.headers["x-ratelimit-limit"],
+            rate_remaining = res.headers["x-ratelimit-remaining"]
+        }
+
+        ngx.log(ngx.INFO, "[TokenValidation] Token valid for user: ", token_info.login,
+            ", scopes: ", token_info.scopes)
+
+        return true, token_info
+    elseif res.status == 401 then
+        local error_data = cjson.decode(res.body) or {}
+        local error_msg = error_data.message or "Bad credentials"
+        ngx.log(ngx.WARN, "[TokenValidation] Token authentication failed: ", error_msg)
+        return false, "Invalid token: " .. error_msg
+    elseif res.status == 403 then
+        local error_data = cjson.decode(res.body) or {}
+        local error_msg = error_data.message or "Access forbidden"
+        ngx.log(ngx.WARN, "[TokenValidation] Token forbidden: ", error_msg)
+        return false, "Token access forbidden: " .. error_msg
+    else
+        ngx.log(ngx.WARN, "[TokenValidation] Unexpected response status: ", res.status)
+        return false, "GitHub API returned status " .. res.status
+    end
+end
+
+--- Validate a GitHub token and check if it has required workflow permissions
+-- @param github_token string The decrypted GitHub token
+-- @param owner string Optional: Repository owner to check specific repo access
+-- @param repo string Optional: Repository name to check specific repo access
+-- @return boolean Success
+-- @return table|nil Token info or error message
+function ServiceQueries.validateGithubTokenWithPermissions(github_token, owner, repo)
+    -- First, basic token validation
+    local valid, result = ServiceQueries.validateGithubToken(github_token)
+    if not valid then
+        return false, result
+    end
+
+    -- If no owner/repo specified, basic validation is sufficient
+    if not owner or not repo then
+        return true, result
+    end
+
+    -- Check specific repository access
+    local http = require("resty.http")
+    local httpc = http.new()
+    httpc:set_timeout(15000)
+
+    local ssl_verify = os.getenv("OPSAPI_SSL_VERIFY") == "true"
+    github_token = github_token:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%z", ""):gsub("%c", "")
+
+    -- Check if token can access the repo
+    local repo_url = string.format("https://api.github.com/repos/%s/%s", owner, repo)
+    local res, err = httpc:request_uri(repo_url, {
+        method = "GET",
+        headers = {
+            ["Accept"] = "application/vnd.github+json",
+            ["Authorization"] = "Bearer " .. github_token,
+            ["X-GitHub-Api-Version"] = "2022-11-28",
+            ["User-Agent"] = "OpsAPI-TokenValidator"
+        },
+        ssl_verify = ssl_verify
+    })
+
+    if not res then
+        ngx.log(ngx.WARN, "[TokenValidation] Failed to check repo access: ", tostring(err))
+        result.repo_access = false
+        result.repo_error = "Failed to connect: " .. tostring(err)
+        return true, result  -- Token is valid, but repo check failed
+    end
+
+    if res.status == 200 then
+        local repo_data = cjson.decode(res.body)
+        result.repo_access = true
+        result.repo_full_name = repo_data and repo_data.full_name
+        result.repo_permissions = repo_data and repo_data.permissions
+
+        -- Check if we have actions permission (needed for workflow_dispatch)
+        if repo_data and repo_data.permissions then
+            result.can_trigger_workflows = repo_data.permissions.push or repo_data.permissions.admin
+        end
+
+        ngx.log(ngx.INFO, "[TokenValidation] Repo access confirmed for: ", owner, "/", repo)
+    elseif res.status == 404 then
+        result.repo_access = false
+        result.repo_error = "Repository not found or no access"
+        ngx.log(ngx.WARN, "[TokenValidation] No access to repo: ", owner, "/", repo)
+    else
+        result.repo_access = false
+        result.repo_error = "GitHub API returned status " .. res.status
+    end
+
+    return true, result
+end
+
+-- ============================================
 -- GitHub Integration Management
 -- ============================================
 
 --- Create a GitHub integration for a namespace
+-- Validates the token before storing and sets last_validated_at
 -- @param namespace_id number The namespace ID
--- @param data table { name?, github_token, github_username?, created_by? }
+-- @param data table { name?, github_token, github_username?, created_by?, skip_validation? }
 -- @return table The created integration (token masked)
+-- @return string|nil Error message if validation failed
 function ServiceQueries.createGithubIntegration(namespace_id, data)
     local timestamp = Global.getCurrentTimestamp()
 
+    -- Validate the GitHub token before storing (unless explicitly skipped)
+    local token_info = nil
+    if not data.skip_validation then
+        local valid, result = ServiceQueries.validateGithubToken(data.github_token)
+        if not valid then
+            ngx.log(ngx.WARN, "[createGithubIntegration] Token validation failed: ", result)
+            return nil, "Token validation failed: " .. result
+        end
+        token_info = result
+        ngx.log(ngx.INFO, "[createGithubIntegration] Token validated for user: ", token_info.login)
+    end
+
     -- Encrypt the GitHub token
     local encrypted_token = Global.encryptSecret(data.github_token)
+
+    -- Use validated username if not provided
+    local github_username = data.github_username
+    if not github_username and token_info and token_info.login then
+        github_username = token_info.login
+    end
 
     local integration_data = {
         uuid = Global.generateUUID(),
         namespace_id = namespace_id,
         name = data.name or "default",
         github_token = encrypted_token,
-        github_username = data.github_username,
+        github_username = github_username,
         status = "active",
+        last_validated_at = timestamp,  -- Set validation timestamp
         created_by = data.created_by,
         created_at = timestamp,
         updated_at = timestamp
@@ -55,7 +247,17 @@ function ServiceQueries.createGithubIntegration(namespace_id, data)
 
     -- Never return the actual token
     integration.github_token = "********"
-    return integration
+
+    -- Include validation info in response
+    if token_info then
+        integration.validation_info = {
+            login = token_info.login,
+            token_format = token_info.token_format,
+            scopes = token_info.scopes
+        }
+    end
+
+    return integration, nil
 end
 
 --- Get GitHub integrations for a namespace
@@ -102,9 +304,11 @@ function ServiceQueries.getGithubIntegration(id, include_token)
 end
 
 --- Update GitHub integration
+-- Validates new token if provided and updates last_validated_at
 -- @param id string|number Integration ID or UUID
 -- @param data table Fields to update
 -- @return table|nil The updated integration
+-- @return string|nil Error message if token validation failed
 function ServiceQueries.updateGithubIntegration(id, data)
     local integration = GithubIntegrations:find({ uuid = tostring(id) })
     if not integration and tonumber(id) then
@@ -113,21 +317,143 @@ function ServiceQueries.updateGithubIntegration(id, data)
 
     if not integration then return nil end
 
-    local update_data = { updated_at = Global.getCurrentTimestamp() }
+    local timestamp = Global.getCurrentTimestamp()
+    local update_data = { updated_at = timestamp }
+    local token_info = nil
 
     if data.name then update_data.name = data.name end
     if data.github_username then update_data.github_username = data.github_username end
     if data.status then update_data.status = data.status end
-    if data.last_validated_at then update_data.last_validated_at = data.last_validated_at end
 
-    -- Encrypt new token if provided
+    -- Encrypt and validate new token if provided
     if data.github_token and data.github_token ~= "********" then
+        -- Validate the new token before storing (unless explicitly skipped)
+        if not data.skip_validation then
+            local valid, result = ServiceQueries.validateGithubToken(data.github_token)
+            if not valid then
+                ngx.log(ngx.WARN, "[updateGithubIntegration] Token validation failed: ", result)
+                return nil, "Token validation failed: " .. result
+            end
+            token_info = result
+            ngx.log(ngx.INFO, "[updateGithubIntegration] New token validated for user: ", token_info.login)
+
+            -- Update username from validated token if not explicitly provided
+            if not data.github_username and token_info.login then
+                update_data.github_username = token_info.login
+            end
+        end
+
         update_data.github_token = Global.encryptSecret(data.github_token)
+        update_data.last_validated_at = timestamp  -- Update validation timestamp
     end
 
     integration:update(update_data)
     integration.github_token = "********"
-    return integration
+
+    -- Include validation info in response
+    if token_info then
+        integration.validation_info = {
+            login = token_info.login,
+            token_format = token_info.token_format,
+            scopes = token_info.scopes
+        }
+    end
+
+    return integration, nil
+end
+
+--- Re-validate an existing GitHub integration's token
+-- Updates last_validated_at on success, marks status as invalid on failure
+-- @param id string|number Integration ID or UUID
+-- @return boolean Success status
+-- @return table|string Token info on success, error message on failure
+function ServiceQueries.revalidateGithubIntegration(id)
+    local integration = GithubIntegrations:find({ uuid = tostring(id) })
+    if not integration and tonumber(id) then
+        integration = GithubIntegrations:find({ id = tonumber(id) })
+    end
+
+    if not integration then
+        return false, "Integration not found"
+    end
+
+    -- Decrypt the token
+    local ok, decrypted_token = pcall(Global.decryptSecret, integration.github_token)
+    if not ok or not decrypted_token then
+        ngx.log(ngx.ERR, "[revalidateGithubIntegration] Failed to decrypt token for integration: ", id)
+        -- Mark as invalid since we can't even decrypt
+        integration:update({
+            status = "invalid",
+            updated_at = Global.getCurrentTimestamp()
+        })
+        return false, "Failed to decrypt token"
+    end
+
+    -- Validate the token
+    local valid, result = ServiceQueries.validateGithubToken(decrypted_token)
+    local timestamp = Global.getCurrentTimestamp()
+
+    if valid then
+        -- Update last_validated_at and ensure status is active
+        integration:update({
+            last_validated_at = timestamp,
+            status = "active",
+            github_username = result.login or integration.github_username,
+            updated_at = timestamp
+        })
+        ngx.log(ngx.INFO, "[revalidateGithubIntegration] Token validated successfully for integration: ", id)
+        return true, result
+    else
+        -- Mark the integration as having an invalid token
+        integration:update({
+            status = "invalid",
+            updated_at = timestamp
+        })
+        ngx.log(ngx.WARN, "[revalidateGithubIntegration] Token validation failed for integration: ", id, " - ", result)
+        return false, result
+    end
+end
+
+--- Revalidate all GitHub integrations for a namespace
+-- Useful for periodic token validation
+-- @param namespace_id number The namespace ID
+-- @return table Results summary { total, valid, invalid, errors }
+function ServiceQueries.revalidateAllGithubIntegrations(namespace_id)
+    local integrations = db.query([[
+        SELECT id, uuid FROM namespace_github_integrations
+        WHERE namespace_id = ? AND status != 'deleted'
+    ]], namespace_id)
+
+    local results = {
+        total = 0,
+        valid = 0,
+        invalid = 0,
+        errors = {}
+    }
+
+    if not integrations then
+        return results
+    end
+
+    results.total = #integrations
+
+    for _, integration in ipairs(integrations) do
+        local valid, err = ServiceQueries.revalidateGithubIntegration(integration.uuid)
+        if valid then
+            results.valid = results.valid + 1
+        else
+            results.invalid = results.invalid + 1
+            table.insert(results.errors, {
+                uuid = integration.uuid,
+                error = err
+            })
+        end
+    end
+
+    ngx.log(ngx.INFO, "[revalidateAllGithubIntegrations] Namespace ", namespace_id,
+        ": ", results.valid, " valid, ", results.invalid, " invalid out of ", results.total)
+
+    return results
 end
 
 --- Delete GitHub integration
@@ -811,7 +1137,11 @@ function ServiceQueries.triggerWorkflow(service_id, triggered_by, custom_inputs)
         })
     end
 
-    ngx.log(ngx.NOTICE, "Request Body: ", body)
+    -- SECURITY: Never log the request body as it contains decrypted secrets
+    -- Log only the count of inputs for debugging
+    local input_count = 0
+    for _ in pairs(inputs) do input_count = input_count + 1 end
+    ngx.log(ngx.NOTICE, "Request Body: [REDACTED - contains ", input_count, " inputs including secrets]")
 
     -- SSL verification: disable in development/Docker environments where CA certs may not be available
     -- Set OPSAPI_SSL_VERIFY=true in production with proper CA certificates installed
