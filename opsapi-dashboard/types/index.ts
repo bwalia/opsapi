@@ -563,7 +563,8 @@ export type NamespaceModule =
   | 'delivery'
   | 'reports'
   | 'services'
-  | 'projects';
+  | 'projects'
+  | 'vault';
 
 export type NamespacePermissions = Partial<Record<NamespaceModule, PermissionAction[]>>;
 
@@ -2092,4 +2093,333 @@ export interface MenuState {
   namespaceContext: MenuNamespaceContext | null;
   permissions: NamespacePermissions | null;
   isAdmin: boolean;
+}
+
+// ============================================
+// Secret Vault Types (User-Provided Encryption Keys)
+// ============================================
+
+export type VaultStatus = 'active' | 'locked' | 'suspended';
+export type VaultSecretType =
+  | 'generic'
+  | 'password'
+  | 'api_key'
+  | 'ssh_key'
+  | 'certificate'
+  | 'database'
+  | 'oauth_token'
+  | 'credit_card'
+  | 'credential'
+  | 'note'
+  | 'env_variable'
+  | 'license_key'
+  | 'webhook_secret'
+  | 'encryption_key'
+  | 'other';
+
+export type VaultSharePermission = 'read' | 'write';
+export type VaultShareStatus = 'active' | 'revoked' | 'expired';
+
+export type VaultAccessLogAction =
+  | 'vault_create'
+  | 'vault_unlock'
+  | 'vault_lock'
+  | 'vault_key_change'
+  | 'vault_delete'
+  | 'secret_create'
+  | 'secret_read'
+  | 'secret_update'
+  | 'secret_delete'
+  | 'secret_rotate'
+  | 'secret_share'
+  | 'share_accept'
+  | 'share_revoke'
+  | 'folder_create'
+  | 'folder_update'
+  | 'folder_delete'
+  | 'bulk_import'
+  | 'bulk_export'
+  | 'failed_unlock';
+
+export interface Vault {
+  id: string;
+  uuid: string;
+  namespace_id: number;
+  user_id: number;
+  name: string;
+  status: VaultStatus;
+  secrets_count: number;
+  failed_attempts: number;
+  last_accessed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VaultFolder {
+  id: string;
+  uuid: string;
+  vault_id: number;
+  parent_id?: string | null;
+  parent_folder_id?: string | null;
+  name: string;
+  icon?: string;
+  color?: string;
+  description?: string;
+  path?: string;
+  depth?: number;
+  secrets_count?: number;
+  secret_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VaultSecret {
+  id: string;
+  uuid: string;
+  vault_id: number;
+  folder_id?: string | null;
+  name: string;
+  secret_type: VaultSecretType;
+  description?: string;
+  icon?: string;
+  color?: string;
+  tags?: string[];
+  // Value is only populated when reading a specific secret with vault key
+  value?: string;
+  // Metadata is optional additional fields (JSON)
+  metadata?: Record<string, string | undefined>;
+  expires_at?: string;
+  rotation_reminder_at?: string;
+  is_shared?: boolean;
+  share_count?: number;
+  last_accessed_at?: string;
+  access_count?: number;
+  last_rotated_at?: string;
+  created_by?: number;
+  updated_by?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VaultShare {
+  id: string;
+  uuid: string;
+  source_secret_id: number;
+  source_vault_id: number;
+  shared_by_user_id: number;
+  target_secret_id: number;
+  target_vault_id: number;
+  shared_with_user_id: number;
+  permission: VaultSharePermission;
+  can_reshare?: boolean;
+  expires_at?: string;
+  status?: VaultShareStatus;
+  revoked_at?: string;
+  revoked_by?: number;
+  message?: string;
+  created_at: string;
+  updated_at: string;
+  // Populated fields
+  shared_with_email?: string;
+  shared_with_first_name?: string;
+  shared_with_last_name?: string;
+  shared_by_first_name?: string;
+  shared_by_last_name?: string;
+  secret_name?: string;
+  secret_type?: VaultSecretType;
+}
+
+export interface VaultAccessLog {
+  id: number;
+  uuid: string;
+  namespace_id: number;
+  vault_id?: number;
+  secret_id?: number;
+  folder_id?: number;
+  user_id?: number;
+  action: VaultAccessLogAction;
+  action_detail?: string;
+  details?: string;
+  resource_type?: string;
+  ip_address?: string;
+  user_agent?: string;
+  request_id?: string;
+  success: boolean;
+  error_message?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  // Populated fields
+  secret_name?: string;
+}
+
+export interface VaultStats {
+  total_secrets: number;
+  total_folders: number;
+  secrets_count: number;
+  last_accessed_at?: string;
+  folders_count: number;
+  outgoing_shares: number;
+  incoming_shares: number;
+  expired_secrets: number;
+  secrets_needing_rotation: number;
+}
+
+// Vault DTOs
+export interface CreateVaultDto {
+  vault_key: string; // 16-character key (NOT stored)
+  name?: string;
+}
+
+export interface UnlockVaultDto {
+  vault_key: string; // 16-character key
+}
+
+export interface ChangeVaultKeyDto {
+  old_vault_key: string;
+  new_vault_key: string;
+}
+
+export interface CreateVaultFolderDto {
+  name: string;
+  parent_id?: string;
+  parent_folder_id?: string;
+  icon?: string;
+  color?: string;
+  description?: string;
+}
+
+export interface UpdateVaultFolderDto {
+  name?: string;
+  icon?: string;
+  color?: string;
+  description?: string;
+}
+
+export interface CreateVaultSecretDto {
+  name: string;
+  value: string;
+  secret_type?: VaultSecretType;
+  folder_id?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  tags?: string[];
+  metadata?: Record<string, string | undefined>;
+  expires_at?: string;
+  rotation_reminder_at?: string;
+}
+
+export interface UpdateVaultSecretDto {
+  name?: string;
+  value?: string; // Provide to update the encrypted value
+  secret_type?: VaultSecretType;
+  folder_id?: string | null;
+  description?: string;
+  icon?: string;
+  color?: string;
+  tags?: string[];
+  metadata?: Record<string, string | undefined>;
+  expires_at?: string | null;
+  rotation_reminder_at?: string | null;
+}
+
+export interface ShareVaultSecretDto {
+  target_user_id?: number;
+  shared_with_email?: string;
+  target_vault_key?: string; // Target user's vault key (required for re-encryption)
+  permission?: VaultSharePermission;
+  can_reshare?: boolean;
+  expires_at?: string;
+  message?: string;
+}
+
+// Vault API Response Types
+export interface VaultResponse {
+  success: boolean;
+  data?: Vault;
+  message?: string;
+  error?: string;
+}
+
+export interface VaultUnlockResponse {
+  success: boolean;
+  data?: {
+    vault_id: number;
+    vault_uuid: string;
+    status: VaultStatus;
+    secrets_count: number;
+  };
+  message?: string;
+  error?: string;
+}
+
+export interface VaultSecretsResponse {
+  success: boolean;
+  data: {
+    data: VaultSecret[];
+    total: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  };
+}
+
+export interface VaultSecretResponse {
+  success: boolean;
+  data?: VaultSecret;
+  message?: string;
+  error?: string;
+}
+
+export interface VaultFoldersResponse {
+  success: boolean;
+  data: VaultFolder[];
+}
+
+export interface VaultStatsResponse {
+  success: boolean;
+  data: VaultStats;
+}
+
+export interface VaultSharesResponse {
+  success: boolean;
+  data: VaultShare[];
+}
+
+export interface VaultAccessLogsResponse {
+  success: boolean;
+  data: {
+    logs: VaultAccessLog[];
+    total: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  };
+}
+
+export interface VaultShareableUser {
+  id: number;
+  uuid: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  username: string;
+  full_name: string;
+  has_vault: boolean;
+}
+
+export interface VaultSecretListParams {
+  folder_id?: string;
+  secret_type?: VaultSecretType | 'all';
+  search?: string;
+  page?: number;
+  perPage?: number;
+}
+
+export interface VaultAccessLogParams {
+  page?: number;
+  perPage?: number;
+  action?: VaultAccessLogAction;
+  start_date?: string;
+  end_date?: string;
 }

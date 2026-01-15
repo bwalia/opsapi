@@ -311,6 +311,9 @@ safe_load_routes("routes.kanban-time-tracking") -- Time tracking, timers, timesh
 safe_load_routes("routes.kanban-notifications") -- Notifications, preferences
 safe_load_routes("routes.kanban-analytics")     -- Project analytics, activity feed, reports
 
+-- Secret Vault System (Secure secrets with user-provided encryption keys)
+safe_load_routes("routes.secret-vault") -- Vault, folders, secrets, sharing, audit logs
+
 -- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
 if custom_routes_dir then

@@ -444,4 +444,58 @@ return {
             end
         end
     end,
+
+    -- ========================================
+    -- [9] Add Secret Vault menu item
+    -- ========================================
+    [9] = function()
+        local MigrationUtils = require("helper.migration-utils")
+        local timestamp = MigrationUtils.getCurrentTimestamp()
+
+        -- Check if already exists
+        local existing = db.select("* FROM menu_items WHERE key = ?", "vault")
+        if #existing > 0 then return end
+
+        -- Add vault menu item
+        db.insert("menu_items", {
+            uuid = MigrationUtils.generateUUID(),
+            key = "vault",
+            name = "Secret Vault",
+            icon = "Shield",
+            path = "/dashboard/namespace/vault",
+            module = "vault",
+            required_action = "read",
+            priority = 3,  -- After My Workspace
+            is_active = true,
+            is_admin_only = false,
+            always_show = false,
+            settings = "{}",
+            created_at = timestamp,
+            updated_at = timestamp
+        })
+
+        -- Enable vault for all existing namespaces
+        local vault_menu = db.select("* FROM menu_items WHERE key = ?", "vault")
+        if #vault_menu > 0 then
+            local namespaces = db.select("* FROM namespaces")
+            for _, namespace in ipairs(namespaces) do
+                -- Check if config already exists
+                local config_exists = db.select([[
+                    * FROM namespace_menu_config
+                    WHERE namespace_id = ? AND menu_item_id = ?
+                ]], namespace.id, vault_menu[1].id)
+
+                if #config_exists == 0 then
+                    db.insert("namespace_menu_config", {
+                        uuid = MigrationUtils.generateUUID(),
+                        namespace_id = namespace.id,
+                        menu_item_id = vault_menu[1].id,
+                        is_enabled = true,
+                        created_at = timestamp,
+                        updated_at = timestamp
+                    })
+                end
+            end
+        end
+    end,
 }

@@ -27,6 +27,7 @@ local chat_production_migrations = require("migrations.chat-system-production")
 local kanban_project_migrations = require("migrations.kanban-project-system")
 local kanban_enhancement_migrations = require("migrations.kanban-enhancements")
 local menu_system_migrations = require("migrations.menu-system")
+local secret_vault_migrations = require("migrations.secret-vault")
 
 return {
     ['01_create_users'] = function()
@@ -632,6 +633,26 @@ return {
     ['268_add_new_modules_to_modules_table'] = menu_system_migrations[6],
     ['269_update_namespace_roles_default_permissions'] = menu_system_migrations[7],
     ['270_init_namespace_menu_configs'] = menu_system_migrations[8],
+    ['288_add_vault_menu_item'] = menu_system_migrations[9],
+
+    -- Secret Vault System (User-Provided Encryption Keys)
+    ['272_create_namespace_secret_vaults_table'] = secret_vault_migrations[1],
+    ['273_add_namespace_secret_vaults_indexes'] = secret_vault_migrations[2],
+    ['274_create_namespace_vault_folders_table'] = secret_vault_migrations[3],
+    ['275_add_namespace_vault_folders_indexes'] = secret_vault_migrations[4],
+    ['276_create_namespace_vault_secrets_table'] = secret_vault_migrations[5],
+    ['277_add_namespace_vault_secrets_indexes'] = secret_vault_migrations[6],
+    ['278_create_namespace_vault_shares_table'] = secret_vault_migrations[7],
+    ['279_add_namespace_vault_shares_indexes'] = secret_vault_migrations[8],
+    ['280_create_namespace_vault_access_logs_table'] = secret_vault_migrations[9],
+    ['281_add_namespace_vault_access_logs_indexes'] = secret_vault_migrations[10],
+    ['282_create_vault_secrets_count_trigger'] = secret_vault_migrations[11],
+    ['283_create_share_count_trigger'] = secret_vault_migrations[12],
+    ['284_add_vault_permissions_to_roles'] = secret_vault_migrations[13],
+    ['285_add_vault_module'] = secret_vault_migrations[14],
+    ['286_create_expired_shares_cleanup_function'] = secret_vault_migrations[15],
+    ['287_create_secret_rotation_reminder_view'] = secret_vault_migrations[16],
+    ['289_fix_vault_folder_id_default'] = secret_vault_migrations[17],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()
