@@ -50,7 +50,7 @@ const LoginForm: React.FC = () => {
         <p className="text-secondary-500 mt-2">Sign in to your account to continue</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-5" data-testid="login-form">
         <Input
           label="Username or Email"
           name="username"
@@ -61,6 +61,7 @@ const LoginForm: React.FC = () => {
           leftIcon={<User className="w-4 h-4" />}
           error={error && error.includes('username') ? error : undefined}
           autoComplete="username"
+          data-testid="login-username-input"
         />
 
         <Input
@@ -76,6 +77,7 @@ const LoginForm: React.FC = () => {
               type="button"
               onClick={() => setShowPassword(!showPassword)}
               className="focus:outline-none hover:text-secondary-600 transition-colors"
+              data-testid="login-toggle-password"
             >
               {showPassword ? (
                 <EyeOff className="w-4 h-4" />
@@ -86,10 +88,11 @@ const LoginForm: React.FC = () => {
           }
           error={error && !error.includes('username') ? error : undefined}
           autoComplete="current-password"
+          data-testid="login-password-input"
         />
 
         {error && (
-          <div className="p-3 bg-error-50 border border-error-200 rounded-lg">
+          <div className="p-3 bg-error-50 border border-error-200 rounded-lg" data-testid="login-error-message">
             <p className="text-sm text-error-600">{error}</p>
           </div>
         )}
@@ -99,6 +102,7 @@ const LoginForm: React.FC = () => {
           className="w-full"
           size="lg"
           isLoading={isLoading}
+          data-testid="login-submit-button"
         >
           Sign in
         </Button>
@@ -108,6 +112,7 @@ const LoginForm: React.FC = () => {
         <a
           href="/forgot-password"
           className="text-sm text-primary-500 hover:text-primary-600 font-medium"
+          data-testid="login-forgot-password-link"
         >
           Forgot your password?
         </a>
