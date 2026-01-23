@@ -28,6 +28,8 @@ local kanban_project_migrations = require("migrations.kanban-project-system")
 local kanban_enhancement_migrations = require("migrations.kanban-enhancements")
 local menu_system_migrations = require("migrations.menu-system")
 local secret_vault_migrations = require("migrations.secret-vault")
+local bank_transaction_migrations = require("migrations.bank-transactions")
+local push_notification_migrations = require("migrations.push-notifications")
 
 return {
     ['01_create_users'] = function()
@@ -653,6 +655,14 @@ return {
     ['286_create_expired_shares_cleanup_function'] = secret_vault_migrations[15],
     ['287_create_secret_rotation_reminder_view'] = secret_vault_migrations[16],
     ['289_fix_vault_folder_id_default'] = secret_vault_migrations[17],
+
+    -- Bank Transactions System
+    ['290_create_bank_transactions_table'] = bank_transaction_migrations[1],
+    ['291_add_bank_transactions_indexes'] = bank_transaction_migrations[2],
+
+    -- Push Notifications (FCM Device Tokens)
+    ['292_create_device_tokens_table'] = push_notification_migrations[1],
+    ['293_add_device_tokens_indexes'] = push_notification_migrations[2],
 
     -- Fetch Custom Migrations from OPSAPI_CUSTOM_MIGRATIONS_DIR if set
     ['custom_migrations'] = function()
