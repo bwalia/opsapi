@@ -10,6 +10,8 @@ local ChatMessageQueries = require "queries.ChatMessageQueries"
 local ChatChannelQueries = require "queries.ChatChannelQueries"
 local AuthMiddleware = require("middleware.auth")
 local Global = require "helper.global"
+local PushNotification = require "helper.push-notification"
+local db = require("lapis.db")
 
 return function(app)
     ----------------- Chat Message Routes --------------------
@@ -121,6 +123,46 @@ return function(app)
 
         -- Get full message with user info
         local full_message = ChatMessageQueries.show(message.uuid)
+
+        -- Send push notifications to other channel members
+        pcall(function()
+            -- Get channel info
+            local channel = ChatChannelQueries.show(channel_uuid)
+            local channel_name = channel and channel.name or "Chat"
+
+            -- Get sender name
+            local sender_name = user.first_name or user.username or "Someone"
+            if user.last_name and user.first_name then
+                sender_name = user.first_name .. " " .. user.last_name
+            end
+
+            -- Get other channel members (excluding sender)
+            local members = db.query([[
+                SELECT user_uuid FROM chat_channel_members
+                WHERE channel_uuid = ? AND user_uuid != ? AND left_at IS NULL
+            ]], channel_uuid, user.uuid)
+
+            if members and #members > 0 then
+                local recipient_uuids = {}
+                for _, member in ipairs(members) do
+                    table.insert(recipient_uuids, member.user_uuid)
+                end
+
+                -- Prepare notification
+                local title = channel_name .. " - " .. sender_name
+                local body = data.content or "[Attachment]"
+                if #body > 100 then
+                    body = string.sub(body, 1, 97) .. "..."
+                end
+
+                -- Send push notification
+                PushNotification.sendNotification(recipient_uuids, title, body, {
+                    type = "chat_message",
+                    channel_uuid = channel_uuid,
+                    message_uuid = message.uuid
+                })
+            end
+        end)
 
         return {
             status = 201,

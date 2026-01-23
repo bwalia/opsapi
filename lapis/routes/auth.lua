@@ -461,7 +461,73 @@ return function(app)
         }
     end)
 
-    -- OAuth token validation endpoint
+    -- Helper function to check if token is a Google ID token
+    local function is_google_id_token(token)
+        -- Google ID tokens are JWTs with specific issuers
+        local parts = {}
+        for part in string.gmatch(token, "[^%.]+") do
+            table.insert(parts, part)
+        end
+        if #parts ~= 3 then return false end
+
+        -- Decode payload (second part) - add padding if needed
+        local payload_b64 = parts[2]
+        local padding = 4 - (#payload_b64 % 4)
+        if padding ~= 4 then
+            payload_b64 = payload_b64 .. string.rep("=", padding)
+        end
+        -- Replace URL-safe characters
+        payload_b64 = payload_b64:gsub("-", "+"):gsub("_", "/")
+
+        local ok, payload_json = pcall(ngx.decode_base64, payload_b64)
+        if not ok or not payload_json then return false end
+
+        local ok2, payload = pcall(cJson.decode, payload_json)
+        if not ok2 or not payload then return false end
+
+        -- Check if issuer is Google
+        local iss = payload.iss
+        return iss == "accounts.google.com" or iss == "https://accounts.google.com"
+    end
+
+    -- Helper function to validate Google ID token
+    local function validate_google_token(token)
+        local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
+        if not google_client_id then
+            return nil, "Google OAuth not configured"
+        end
+
+        local httpc = http.new()
+        httpc:set_timeout(30000)
+
+        -- Validate token with Google's tokeninfo endpoint
+        local res, err = httpc:request_uri("https://oauth2.googleapis.com/tokeninfo?id_token=" .. token, {
+            method = "GET",
+            ssl_verify = false
+        })
+
+        if not res then
+            return nil, "Failed to validate token: " .. (err or "unknown")
+        end
+
+        if res.status ~= 200 then
+            return nil, "Invalid Google token"
+        end
+
+        local ok, token_info = pcall(cJson.decode, res.body)
+        if not ok or not token_info then
+            return nil, "Failed to parse Google response"
+        end
+
+        -- Verify audience matches our client ID
+        if token_info.aud ~= google_client_id then
+            return nil, "Token not issued for this app"
+        end
+
+        return token_info, nil
+    end
+
+    -- OAuth token validation endpoint (handles both Google ID tokens and app JWTs)
     app:post("/auth/oauth/validate", function(self)
         local token = self.params.token
         if not token then
@@ -473,6 +539,125 @@ return function(app)
             }
         end
 
+        -- Check if this is a Google ID token
+        if is_google_id_token(token) then
+            -- Validate Google token
+            local google_user, err = validate_google_token(token)
+            if not google_user then
+                return {
+                    status = 401,
+                    json = { error = err or "Invalid Google token" }
+                }
+            end
+
+            -- Find or create user by email
+            local user = UserQueries.findByEmail(google_user.email)
+            if not user then
+                -- Create new user (signup)
+                local names = {}
+                if google_user.name then
+                    names = Global.splitName(google_user.name)
+                end
+
+                user = UserQueries.createOAuthUser({
+                    uuid = Global.generateUUID(),
+                    email = google_user.email,
+                    username = google_user.email,
+                    first_name = names.first_name or google_user.given_name or "",
+                    last_name = names.last_name or google_user.family_name or "",
+                    password = Global.generateRandomPassword(),
+                    role = "buyer",
+                    oauth_provider = "google",
+                    oauth_id = google_user.sub,
+                    active = true
+                })
+
+                if not user then
+                    return {
+                        status = 500,
+                        json = { error = "Failed to create user" }
+                    }
+                end
+            end
+
+            -- Get user with roles
+            local userWithRoles = UserQueries.show(user.uuid)
+            if not userWithRoles then
+                return {
+                    status = 500,
+                    json = { error = "Failed to load user data" }
+                }
+            end
+
+            -- Build roles array
+            local rolesArray = {}
+            if userWithRoles.roles then
+                for _, role in ipairs(userWithRoles.roles) do
+                    table.insert(rolesArray, {
+                        id = role.id,
+                        role_id = role.role_id,
+                        role_name = role.name or role.role_name,
+                        name = role.name or role.role_name
+                    })
+                end
+            end
+
+            -- Get user's namespaces
+            local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
+            local default_namespace = nil
+            local namespace_membership = nil
+
+            -- Find first active namespace
+            for _, ns in ipairs(namespaces) do
+                if ns.status == "active" and ns.member_status == "active" then
+                    default_namespace = ns
+                    break
+                end
+            end
+
+            -- Get namespace membership if available
+            if default_namespace then
+                namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
+                    userWithRoles.uuid,
+                    default_namespace.id
+                )
+            end
+
+            -- Generate JWT token
+            local app_token
+            if default_namespace and namespace_membership then
+                local namespace_permissions = NamespaceMemberQueries.getPermissions(namespace_membership.id)
+                app_token = JWTHelper.generateNamespaceToken(userWithRoles, default_namespace, namespace_membership, {
+                    user_roles = rolesArray,
+                    namespace_permissions = namespace_permissions
+                })
+            else
+                app_token = JWTHelper.generateToken(userWithRoles, {
+                    roles = rolesArray
+                })
+            end
+
+            -- Return user data and token (matching login response format)
+            return {
+                status = 200,
+                json = {
+                    user = {
+                        id = userWithRoles.internal_id,
+                        uuid = userWithRoles.uuid,
+                        email = userWithRoles.email,
+                        username = userWithRoles.username,
+                        name = (userWithRoles.first_name or "") .. " " .. (userWithRoles.last_name or ""),
+                        first_name = userWithRoles.first_name or "",
+                        last_name = userWithRoles.last_name or "",
+                        active = userWithRoles.active,
+                        roles = rolesArray
+                    },
+                    token = app_token
+                }
+            }
+        end
+
+        -- Existing app JWT validation (unchanged)
         local result = JWTHelper.verifyToken(token)
 
         if not result.valid then

@@ -164,28 +164,23 @@ return function(app)
             local data = self.params
             local file = data.cover_image
 
+            -- Pass user UUID from JWT token for MinIO folder structure
+            if self.current_user and self.current_user.uuid then
+                data.user_uuid = self.current_user.uuid
+            end
+
             -- Validate input
             local valid, validation_err = validateDocumentInput(data, false)
             if not valid then
                 return apiResponse(400, nil, validation_err)
             end
 
-            -- Handle file upload if file is provided as table (uploaded file)
-            if file and type(file) == "table" and file.content then
-                local url, metadata, upload_err = handleFileUpload(file, "documents")
-
-                if not url then
-                    return apiResponse(400, nil, upload_err)
-                end
-
-                -- Replace file object with uploaded URL for storage
-                data._uploaded_url = url
-                data._file_metadata = metadata
-            elseif not file then
+            -- Validate file is provided (upload handled in DocumentQueries with custom path)
+            if not file or type(file) ~= "table" or not file.content then
                 return apiResponse(400, nil, "Cover image is required")
             end
 
-            -- Create document
+            -- Create document (handles file upload with path: {user_uuid}/{doc_uuid}.ext)
             local result = DocumentQueries.create(data)
 
             if not result then

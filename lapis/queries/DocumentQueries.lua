@@ -11,17 +11,25 @@ local db = require("lapis.db")
 local DocumentQueries = {}
 
 function DocumentQueries.create(data)
-    Validation.createDocument(data)
-    if data.uuid == nil then
-        data.uuid = Global.generateUUID()
+    -- Generate NEW document UUID
+    local doc_uuid = Global.generateUUID()
+    data.uuid = doc_uuid
+
+    -- Get user UUID from route (from JWT token) for MinIO folder structure
+    local user_uuid = data.user_uuid
+
+    -- Resolve user_id to internal ID (use user_uuid from JWT if user_id not provided)
+    local userUuid = data.user_id or user_uuid
+    local user = nil
+    if userUuid and userUuid ~= "" then
+        user = UserQueries.show(userUuid)
     end
-    local userUuid = data.user_id
-    local user = UserQueries.show(userUuid)
     if user ~= nil then
         data.user_id = user.internal_id
     else
         data.user_id = 1
     end
+
     local file = data.cover_image
     if not file then
         return {
@@ -32,8 +40,13 @@ function DocumentQueries.create(data)
         }
     end
 
-    local filename = file.filename or ("upload_" .. tostring(os.time()) .. ".bin")
-    local url, err = Global.uploadToMinio(file, filename)
+    -- Create custom MinIO path: {user_uuid}/{document_uuid}.{extension}
+    local ext = file.filename and file.filename:match("%.([^%.]+)$") or "bin"
+    local custom_key = (user_uuid or "unknown") .. "/" .. doc_uuid .. "." .. ext
+
+    local url, err = Global.uploadToMinio(file, file.filename, {
+        object_key = custom_key
+    })
 
     if not url then
         return {
@@ -49,12 +62,27 @@ function DocumentQueries.create(data)
     data.tags = nil
     data.tag_names = nil
     data.cover_image = nil
+    data.user_uuid = nil  -- Remove user_uuid from data before DB insert
+
+    -- Store MinIO URL in content column
+    data.content = url
+
+    -- Set title from filename if not provided
+    if not data.title or data.title == "" then
+        data.title = file.filename or ("Document_" .. doc_uuid)
+    end
+
+    -- Validate after content is set from MinIO URL
+    Validation.createDocument(data)
+
     if data.status == "true" then
         data.published_date = os.date("%Y-%m-%d %H:%M:%S")
     end
     local savedDocument = DocumentModel:create(data, {
         returning = "*"
     })
+
+    -- Also create ImageModel entry for backwards compatibility
     if savedDocument and coverImg then
         local imgUuid = Global.generateUUID()
         ImageModel:create({

@@ -23,9 +23,9 @@ config("development", {
     }
   },
   postgres = {
-    host = "172.71.0.10",
-    user = "pguser",
-    password = "pgpassword",
-    database = "opsapi"
+    host = os.getenv("DB_HOST") or "172.72.0.10",
+    user = os.getenv("DB_USER") or "pguser",
+    password = os.getenv("DB_PASSWORD") or "pgpassword",
+    database = os.getenv("DATABASE") or "opsapi"
   }
 })
