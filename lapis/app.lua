@@ -190,7 +190,8 @@ app:before_filter(function(self)
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
         uri == "/swagger/swagger.json" or uri == "/metrics" or uri:match("^/auth/") or
         uri:match("^/api/v2/public/") or
-        uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") then
+        uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
+        uri:match("^/api/v2/test%-notification") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
     end
@@ -313,6 +314,13 @@ safe_load_routes("routes.kanban-analytics")     -- Project analytics, activity f
 
 -- Secret Vault System (Secure secrets with user-provided encryption keys)
 safe_load_routes("routes.secret-vault") -- Vault, folders, secrets, sharing, audit logs
+
+-- Bank Transactions System
+safe_load_routes("routes.bank_transactions") -- Bank transaction management
+
+-- Push Notifications (Device Token Management)
+safe_load_routes("routes.device-tokens") -- FCM device token registration for push notifications
+safe_load_routes("routes.test-notification") -- Test endpoint for push notifications (remove in production)
 
 -- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")

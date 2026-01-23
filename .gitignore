@@ -20,3 +20,10 @@ temp.txt
 *.tar.gz
 nginx-lua-prometheus-0.*/**
 lapis/nginx.conf.compiled
+
+# Firebase Service Account (Push Notifications)
+*-firebase-adminsdk-*.json
+firebase-service-account.json
+
+# APNs Keys (Apple Push Notifications)
+AuthKey_*.p8
