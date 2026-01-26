@@ -4,9 +4,9 @@ services:
 
   gatus:
       image: twinproduction/gatus:latest
-      container_name: opsapi-main-gatus
+      container_name: opsapi-gatus
       ports:
-        - "8889:8080"
+        - "8888:8080"
       depends_on:
       - minio
       - adminer
@@ -14,11 +14,11 @@ services:
       volumes:
         - ./gatus/config:/config
       networks:
-        opsapi-main-network:
-          ipv4_address: 172.72.0.18
+        opsapi-network:
+          ipv4_address: 172.71.0.18
 
   lapis:
-    container_name: opsapi-main
+    container_name: opsapi
     build: .
     ports:
       - "4010:80"
@@ -29,35 +29,37 @@ services:
     depends_on:
       - postgres
       - minio
+    # DNS configuration for external API calls (GitHub, etc.)
     dns:
       - 8.8.8.8
       - 8.8.4.4
       - 1.1.1.1
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.12
+      opsapi-network:
+        ipv4_address: 172.71.0.12
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 20s
       retries: 3
 
+  # Next.js Dashboard
   dashboard:
-    container_name: opsapi-main-dashboard
+    container_name: opsapi-dashboard
     build:
       context: ../opsapi-dashboard
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4010}
     ports:
-      - "8040:8039"
+      - "8039:8039"
     environment:
       - NODE_ENV=production
     depends_on:
       - lapis
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.19
+      opsapi-network:
+        ipv4_address: 172.71.0.19
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8039"]
       interval: 30s
@@ -66,12 +68,12 @@ services:
     restart: unless-stopped
 
   postgres:
-    container_name: opsapi-main-postgres
+    container_name: opsapi-postgres-dev-db
     image: postgres:14-alpine
     ports:
-      - "5440:5432"
+      - "5439:5432"
     volumes:
-      - postgres_main_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     environment:
       PGDATA: /var/lib/postgresql/data
       POSTGRES_USER: pguser
@@ -79,37 +81,51 @@ services:
       POSTGRES_DB: opsapi
     command: ["postgres", "-c", "max_connections=200"]
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.10
+      opsapi-network:
+        ipv4_address: 172.71.0.10
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "pguser", "-d", "opsapi"]
+      test: ["CMD", "pg_isready", "-U", "pguser"]
       interval: 30s
       timeout: 20s
       retries: 3
+  # mariadb:
+  #   container_name: opsapi-dev-db
+  #   image: mariadb
+  #   ports:
+  #     - "3319:3306"
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: msroot
+  #     MYSQL_DATABASE: opsapi
+  #     MYSQL_USER: msuser
+  #     MYSQL_PASSWORD: mspassword
+  #   networks:
+  #     opsapi-network:
+  #       ipv4_address: 172.71.0.11
 
   adminer:
     image: adminer:latest
-    container_name: opsapi-main-adminer
+    container_name: adminer
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     ports:
-      - 7780:8080
+      - 7779:8080
     networks:
-      opsapi-main-network:
+      opsapi-network:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
       timeout: 20s
       retries: 3
 
+
   redis:
     image: redis:alpine
-    container_name: opsapi-main-redis
+    container_name: opsapi-redis
     ports:
-      - "6374:6379"
+      - "6373:6379"
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.13
+      opsapi-network:
+        ipv4_address: 172.71.0.13
     volumes:
       - ./session-data:/data
     command: ["redis-server", "--appendonly", "yes"]
@@ -121,7 +137,7 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: opsapi-main-minio
+    container_name: opsapi-minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -129,20 +145,21 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
     volumes:
-      - minio_main_data:/data
+      - minio_data:/data
     command: server /data --console-address ":9001"
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.17
+      opsapi-network:
+        ipv4_address: 172.71.0.17
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
 
+  # MinIO initialization - creates bucket and sets public policy
   minio-init:
     image: minio/mc:latest
-    container_name: opsapi-main-minio-init
+    container_name: opsapi-minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -155,17 +172,50 @@ services:
       exit 0;
       "
     networks:
-      opsapi-main-network:
+      opsapi-network:
 
+# Add Keycloak service
+  # keycloak:
+  #   container_name: ops_keycloak
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.keycloak
+  #   environment:
+  #     KEYCLOAK_ADMIN: admin
+  #     KEYCLOAK_ADMIN_PASSWORD: admin
+  #     # KEYCLOAK_IMPORT: /opt/keycloak/import/realm-config.json
+  #   ports:
+  #     - "1010:8080"
+  #   depends_on:
+  #     - postgres
+  #   volumes:
+  #     - ./keycloak_data:/opt/keycloak/data
+  #   networks:
+  #     opsapi-network:
+
+  # nodeapp:
+  #   container_name: opsapi-node
+  #   build:
+  #     context: ../node/opsapi-node
+  #   ports:
+  #     - "4011:3000"  # Host port : container port (adjust as needed)
+  #   networks:
+  #     opsapi-network:
+  #       ipv4_address: 172.71.0.14
+  #   volumes:
+  #     - ../node/opsapi-node:/usr/src/app
+  #   env_file: "../node/opsapi-node/.env"
+
+  # Prometheus - Metrics collection and alerting
   prometheus:
     image: prom/prometheus:latest
-    container_name: opsapi-main-prometheus
+    container_name: opsapi-prometheus
     ports:
-      - "9091:9090"
+      - "9090:9090"
     volumes:
       - ../devops/prometheus.yml:/etc/prometheus/prometheus.yml
       - ../devops/alert_rules.yml:/etc/prometheus/alert_rules.yml
-      - prometheus_main_data:/prometheus
+      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -173,18 +223,32 @@ services:
       - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--web.enable-lifecycle'
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.15
+      opsapi-network:
+        ipv4_address: 172.71.0.15
     depends_on:
       - lapis
 
+  # loki:
+  #     image: grafana/loki:2.8.2
+  #     container_name: opsapi-loki
+  #     ports:
+  #       - "3100:3100"
+  #     command: -config.file=/etc/loki/local-config.yaml
+  #     volumes:
+  #       - ./loki_data:/loki
+  #       - ../devops/loki-config.yaml:/etc/loki/local-config.yaml
+  #     networks:
+  #       opsapi-network:
+  #         ipv4_address: 172.71.0.9
+
+  # Grafana - Metrics visualization and dashboards
   grafana:
     image: grafana/grafana:latest
-    container_name: opsapi-main-grafana
+    container_name: opsapi-grafana
     ports:
-      - "3012:3000"
+      - "3011:3000"
     volumes:
-      - grafana_main_data:/var/lib/grafana
+      - grafana_data:/var/lib/grafana
       - ../devops/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
       - ../devops/grafana-dashboards-provisioning.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - ../devops/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/opsapi-dashboard.json
@@ -192,25 +256,25 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3012
+      - GF_SERVER_ROOT_URL=http://localhost:3011
       - GF_INSTALL_PLUGINS=
     networks:
-      opsapi-main-network:
-        ipv4_address: 172.72.0.16
+      opsapi-network:
+        ipv4_address: 172.71.0.16
     depends_on:
       - prometheus
 
 networks:
-  opsapi-main-network:
+  opsapi-network:
     driver: bridge
     ipam:
       driver: default
       config:
-        - subnet: 172.72.0.0/16
-          gateway: 172.72.0.1
+        - subnet: 172.71.0.0/16
+          gateway: 172.71.0.1
 
 volumes:
-  postgres_main_data:
-  prometheus_main_data:
-  grafana_main_data:
-  minio_main_data:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  minio_data:
