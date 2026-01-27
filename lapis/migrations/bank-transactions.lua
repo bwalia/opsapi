@@ -60,4 +60,19 @@ return {
             ]])
         end)
     end,
+
+    -- ========================================
+    -- [3] Add document_uuid foreign key
+    -- ========================================
+    [3] = function()
+        -- Add document_uuid column
+        pcall(function()
+            schema.add_column("bank_transactions", "document_uuid", "VARCHAR REFERENCES documents(uuid) ON DELETE SET NULL")
+        end)
+
+        -- Create index for document_uuid
+        pcall(function()
+            schema.create_index("bank_transactions", "document_uuid")
+        end)
+    end,
 }

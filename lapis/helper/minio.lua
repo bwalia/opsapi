@@ -32,7 +32,7 @@ MinioClient.__index = MinioClient
 
 -- Configuration defaults
 local DEFAULT_REGION = "us-east-1"
-local MAX_FILE_SIZE = 50 * 1024 * 1024  -- 50MB default max
+local MAX_FILE_SIZE = 10 * 1024 * 1024  -- 10MB default max
 local ALLOWED_MIME_TYPES = {
     -- Images
     ["image/jpeg"] = { extensions = { "jpg", "jpeg" }, category = "image" },
@@ -42,6 +42,8 @@ local ALLOWED_MIME_TYPES = {
     ["image/svg+xml"] = { extensions = { "svg" }, category = "image" },
     ["image/bmp"] = { extensions = { "bmp" }, category = "image" },
     ["image/tiff"] = { extensions = { "tiff", "tif" }, category = "image" },
+    ["image/heic"] = { extensions = { "heic" }, category = "image" },
+    ["image/heif"] = { extensions = { "heif" }, category = "image" },
 
     -- Documents
     ["application/pdf"] = { extensions = { "pdf" }, category = "document" },

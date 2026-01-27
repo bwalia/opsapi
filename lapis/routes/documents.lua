@@ -32,7 +32,7 @@ local MinioClient = require("helper.minio")
 local AuthMiddleware = require("middleware.auth")
 
 -- Configuration
-local MAX_FILE_SIZE = 50 * 1024 * 1024  -- 50MB
+local MAX_FILE_SIZE = 10 * 1024 * 1024  -- 10MB
 local ALLOWED_CATEGORIES = { "image", "document" }  -- Allowed file categories
 
 return function(app)
