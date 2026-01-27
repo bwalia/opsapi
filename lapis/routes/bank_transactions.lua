@@ -10,9 +10,17 @@ local AuthMiddleware = require("middleware.auth")
 
 return function(app)
     -- List all transactions for the current user (with pagination)
+    -- Add ?include=document to get document details
     app:get("/api/v2/bank-transactions", AuthMiddleware.requireAuth(function(self)
         local user_id = self.current_user.uuid
-        local transactions = BankTransactionQueries.all(self.params, user_id)
+        local transactions
+
+        if self.params.include == "document" then
+            transactions = BankTransactionQueries.allWithDocuments(self.params, user_id)
+        else
+            transactions = BankTransactionQueries.all(self.params, user_id)
+        end
+
         return {
             json = transactions,
             status = 200
@@ -52,9 +60,16 @@ return function(app)
     end))
 
     -- Get a single transaction by UUID
+    -- Add ?include=document to get document details
     app:get("/api/v2/bank-transactions/:id", AuthMiddleware.requireAuth(function(self)
         local user_id = self.current_user.uuid
-        local transaction = BankTransactionQueries.show(tostring(self.params.id), user_id)
+        local transaction
+
+        if self.params.include == "document" then
+            transaction = BankTransactionQueries.showWithDocument(tostring(self.params.id), user_id)
+        else
+            transaction = BankTransactionQueries.show(tostring(self.params.id), user_id)
+        end
 
         if not transaction then
             return {

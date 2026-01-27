@@ -659,6 +659,7 @@ return {
     -- Bank Transactions System
     ['290_create_bank_transactions_table'] = bank_transaction_migrations[1],
     ['291_add_bank_transactions_indexes'] = bank_transaction_migrations[2],
+    ['294_add_document_uuid_to_bank_transactions'] = bank_transaction_migrations[3],
 
     -- Push Notifications (FCM Device Tokens)
     ['292_create_device_tokens_table'] = push_notification_migrations[1],
