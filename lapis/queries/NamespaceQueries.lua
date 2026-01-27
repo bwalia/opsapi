@@ -17,11 +17,11 @@ local NamespaceQueries = {}
 -- @return string The generated slug
 local function generateSlug(name)
     local slug = name:lower()
-        :gsub("%s+", "-")      -- Replace spaces with hyphens
+        :gsub("%s+", "-")        -- Replace spaces with hyphens
         :gsub("[^a-z0-9%-]", "") -- Remove non-alphanumeric except hyphens
-        :gsub("%-+", "-")      -- Replace multiple hyphens with single
-        :gsub("^%-", "")       -- Remove leading hyphen
-        :gsub("%-$", "")       -- Remove trailing hyphen
+        :gsub("%-+", "-")        -- Replace multiple hyphens with single
+        :gsub("^%-", "")         -- Remove leading hyphen
+        :gsub("%-$", "")         -- Remove trailing hyphen
 
     -- Check if slug exists, append number if needed
     local base_slug = slug
@@ -83,8 +83,13 @@ function NamespaceQueries.all(params)
 
     -- Validate order_by to prevent SQL injection
     local valid_fields = {
-        id = true, name = true, slug = true, status = true,
-        plan = true, created_at = true, updated_at = true
+        id = true,
+        name = true,
+        slug = true,
+        status = true,
+        plan = true,
+        created_at = true,
+        updated_at = true
     }
     if not valid_fields[order_by] then
         order_by = "created_at"
@@ -115,7 +120,7 @@ function NamespaceQueries.all(params)
 
     -- Get total count
     local count_query = "SELECT COUNT(*) as total FROM namespaces " .. where_clause
-    local count_result = db.query(count_query, unpack(values))
+    local count_result = db.query(count_query, table.unpack(values))
     local total = count_result and count_result[1] and count_result[1].total or 0
 
     -- Get paginated data
@@ -133,7 +138,7 @@ function NamespaceQueries.all(params)
         LIMIT %d OFFSET %d
     ]], where_clause, order_by, order_dir, per_page, offset)
 
-    local data = db.query(data_query, unpack(values))
+    local data = db.query(data_query, table.unpack(values))
 
     return {
         data = data or {},
@@ -352,7 +357,7 @@ function NamespaceQueries.count(params)
         table.insert(values, params.status)
     end
 
-    local result = db.query("SELECT COUNT(*) as count FROM namespaces " .. where_clause, unpack(values))
+    local result = db.query("SELECT COUNT(*) as count FROM namespaces " .. where_clause, table.unpack(values))
     return result[1] and result[1].count or 0
 end
 
@@ -369,7 +374,7 @@ function NamespaceQueries.isSlugAvailable(slug, exclude_id)
         table.insert(values, exclude_id)
     end
 
-    local result = db.query(query, unpack(values))
+    local result = db.query(query, table.unpack(values))
     return not result or #result == 0
 end
 
@@ -390,7 +395,7 @@ function NamespaceQueries.isDomainAvailable(domain, exclude_id)
         table.insert(values, exclude_id)
     end
 
-    local result = db.query(query, unpack(values))
+    local result = db.query(query, table.unpack(values))
     return not result or #result == 0
 end
 
@@ -615,7 +620,8 @@ function NamespaceQueries.createWithOwner(user_id, data)
             role_name = "owner",
             display_name = "Owner",
             description = "Full control over the namespace",
-            permissions = '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["manage"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
+            permissions =
+            '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["manage"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
             is_system = true,
             is_default = false,
             priority = 100
@@ -624,7 +630,8 @@ function NamespaceQueries.createWithOwner(user_id, data)
             role_name = "admin",
             display_name = "Administrator",
             description = "Full administrative access except namespace ownership",
-            permissions = '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["read"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
+            permissions =
+            '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["read"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
             is_system = true,
             is_default = false,
             priority = 90
@@ -633,7 +640,8 @@ function NamespaceQueries.createWithOwner(user_id, data)
             role_name = "manager",
             display_name = "Manager",
             description = "Manage daily operations - stores, products, orders, and customers",
-            permissions = '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["read"],"namespace":[],"services":["read"],"chat":["manage"],"delivery":["manage"],"reports":["read"],"projects":["manage"]}',
+            permissions =
+            '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["read"],"namespace":[],"services":["read"],"chat":["manage"],"delivery":["manage"],"reports":["read"],"projects":["manage"]}',
             is_system = false,
             is_default = false,
             priority = 50
@@ -642,7 +650,8 @@ function NamespaceQueries.createWithOwner(user_id, data)
             role_name = "member",
             display_name = "Member",
             description = "Standard member access - view and participate in projects",
-            permissions = '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["read"],"products":["read"],"orders":["read"],"customers":["read"],"settings":[],"namespace":[],"services":["read"],"chat":["create","read"],"delivery":["read"],"reports":["read"],"projects":["create","read","update"]}',
+            permissions =
+            '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["read"],"products":["read"],"orders":["read"],"customers":["read"],"settings":[],"namespace":[],"services":["read"],"chat":["create","read"],"delivery":["read"],"reports":["read"],"projects":["create","read","update"]}',
             is_system = true,
             is_default = true,
             priority = 20
@@ -651,7 +660,8 @@ function NamespaceQueries.createWithOwner(user_id, data)
             role_name = "viewer",
             display_name = "Viewer",
             description = "Read-only access to all content",
-            permissions = '{"dashboard":["read"],"users":[],"roles":[],"stores":["read"],"products":["read"],"orders":["read"],"customers":[],"settings":[],"namespace":[],"services":["read"],"chat":["read"],"delivery":[],"reports":["read"],"projects":["read"]}',
+            permissions =
+            '{"dashboard":["read"],"users":[],"roles":[],"stores":["read"],"products":["read"],"orders":["read"],"customers":[],"settings":[],"namespace":[],"services":["read"],"chat":["read"],"delivery":[],"reports":["read"],"projects":["read"]}',
             is_system = false,
             is_default = false,
             priority = 10

@@ -357,9 +357,126 @@ function MinioClient:validateFile(file, options)
     return true
 end
 
+--- Check if a bucket exists
+-- @param bucket string The bucket name to check
+-- @return boolean True if bucket exists
+function MinioClient:bucketExists(bucket)
+    bucket = bucket or self.bucket
+
+    local valid, config_err = self:validate()
+    if not valid then
+        return false, config_err
+    end
+
+    local uri = "/" .. bucket
+    local headers = {
+        ["Host"] = self.host,
+        ["x-amz-content-sha256"] = sha256(""),
+        ["x-amz-date"] = getUtcTime().timestamp
+    }
+
+    local auth_header, timestamp, _ = generateAuthHeader(
+        self.access_key,
+        self.secret_key,
+        self.region,
+        "s3",
+        "HEAD",
+        uri,
+        "",
+        headers,
+        ""
+    )
+
+    headers["Authorization"] = auth_header
+    headers["x-amz-date"] = timestamp
+
+    local httpc = http.new()
+    httpc:set_timeout(5000)
+
+    local url = self.endpoint .. uri
+    local res, _ = httpc:request_uri(url, {
+        method = "HEAD",
+        headers = headers,
+        ssl_verify = false
+    })
+
+    return res and res.status == 200
+end
+
+--- Create a bucket if it doesn't exist
+-- @param bucket string The bucket name to create
+-- @return boolean Success status
+-- @return string|nil Error message if failed
+function MinioClient:createBucket(bucket)
+    bucket = bucket or self.bucket
+
+    local valid, config_err = self:validate()
+    if not valid then
+        return false, config_err
+    end
+
+    -- Check if bucket already exists
+    if self:bucketExists(bucket) then
+        ngx.log(ngx.DEBUG, "[MinIO] Bucket already exists: ", bucket)
+        return true
+    end
+
+    ngx.log(ngx.INFO, "[MinIO] Creating bucket: ", bucket)
+
+    local uri = "/" .. bucket
+    local headers = {
+        ["Host"] = self.host,
+        ["x-amz-content-sha256"] = sha256(""),
+        ["x-amz-date"] = getUtcTime().timestamp
+    }
+
+    local auth_header, timestamp, _ = generateAuthHeader(
+        self.access_key,
+        self.secret_key,
+        self.region,
+        "s3",
+        "PUT",
+        uri,
+        "",
+        headers,
+        ""
+    )
+
+    headers["Authorization"] = auth_header
+    headers["x-amz-date"] = timestamp
+
+    local httpc = http.new()
+    httpc:set_timeout(10000)
+
+    local url = self.endpoint .. uri
+    local res, err = httpc:request_uri(url, {
+        method = "PUT",
+        headers = headers,
+        ssl_verify = false
+    })
+
+    if not res then
+        ngx.log(ngx.ERR, "[MinIO] Create bucket request failed: ", err)
+        return false, "Create bucket request failed: " .. tostring(err)
+    end
+
+    if res.status >= 200 and res.status < 300 then
+        ngx.log(ngx.INFO, "[MinIO] Bucket created successfully: ", bucket)
+        return true
+    elseif res.status == 409 then
+        -- Bucket already exists (race condition)
+        ngx.log(ngx.DEBUG, "[MinIO] Bucket already exists: ", bucket)
+        return true
+    else
+        local error_body = res.body or "Unknown error"
+        ngx.log(ngx.ERR, "[MinIO] Create bucket failed [", res.status, "]: ", error_body)
+        return false, string.format("Create bucket failed (HTTP %d): %s", res.status, error_body)
+    end
+end
+
 --- Upload a file to MinIO
 -- @param file table File object with { content, filename, content_type? }
--- @param options table Optional settings { prefix?, bucket?, validate? }
+-- @param options table Optional settings { prefix?, bucket?, validate?, auto_create_bucket? }
 -- @return string|nil URL of uploaded file
 -- @return string|nil Error message if failed
 function MinioClient:upload(file, options)
@@ -381,6 +498,19 @@ function MinioClient:upload(file, options)
 
     -- Prepare upload parameters
     local bucket = options.bucket or self.bucket
+
+    -- Auto-create bucket if it doesn't exist (default: true)
+    local auto_create = options.auto_create_bucket
+    if auto_create == nil then
+        auto_create = true  -- Default to auto-create
+    end
+
+    if auto_create then
+        local bucket_ok, bucket_err = self:createBucket(bucket)
+        if not bucket_ok then
+            return nil, "Failed to create bucket: " .. (bucket_err or "Unknown error")
+        end
+    end
     local object_key = options.object_key or generateObjectKey(file.filename, options.prefix)
     local content_type = file.content_type or getContentType(file.filename)
     local content = file.content
@@ -631,6 +761,13 @@ function MinioClient:getPresignedUrl(object_key, expires_in, bucket)
     local signature = hmac_sha256_hex(signing_key, string_to_sign)
 
     return self.endpoint .. uri .. "?" .. query_string .. "&X-Amz-Signature=" .. signature
+end
+
+--- Get content type from filename (public method)
+--- @param filename string The filename to get content type for
+--- @return string The MIME type
+function MinioClient:getContentType(filename)
+    return getContentType(filename)
 end
 
 --------------------------------------------------------------------------------

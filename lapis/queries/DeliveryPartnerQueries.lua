@@ -145,7 +145,7 @@ end
 
 -- Search delivery partners
 function DeliveryPartnerQueries.search(params)
-    local conditions = {"dp.is_active = true"}
+    local conditions = { "dp.is_active = true" }
     local query_params = {}
 
     if params.city then
@@ -188,17 +188,19 @@ function DeliveryPartnerQueries.search(params)
     table.insert(query_params, params.limit or 20)
     table.insert(query_params, params.offset or 0)
 
-    return db.query(query, unpack(query_params))
+    return db.query(query, table.unpack(query_params))
 end
 
 -- Increment active orders count
 function DeliveryPartnerQueries.incrementActiveOrders(delivery_partner_id)
-    db.query("UPDATE delivery_partners SET current_active_orders = current_active_orders + 1 WHERE id = ?", delivery_partner_id)
+    db.query("UPDATE delivery_partners SET current_active_orders = current_active_orders + 1 WHERE id = ?",
+        delivery_partner_id)
 end
 
 -- Decrement active orders count
 function DeliveryPartnerQueries.decrementActiveOrders(delivery_partner_id)
-    db.query("UPDATE delivery_partners SET current_active_orders = GREATEST(0, current_active_orders - 1) WHERE id = ?", delivery_partner_id)
+    db.query("UPDATE delivery_partners SET current_active_orders = GREATEST(0, current_active_orders - 1) WHERE id = ?",
+        delivery_partner_id)
 end
 
 -- Update rating and delivery counts

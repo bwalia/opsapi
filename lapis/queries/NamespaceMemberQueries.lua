@@ -500,7 +500,7 @@ function NamespaceMemberQueries.count(namespace_id, status)
         table.insert(values, status)
     end
 
-    local result = db.query(query, unpack(values))
+    local result = db.query(query, table.unpack(values))
     return result[1] and result[1].count or 0
 end
 
