@@ -164,7 +164,7 @@ function OrderDeliveryAssignmentQueries.getPartnerStats(delivery_partner_id, fro
         WHERE delivery_partner_id = ?
     ]]
 
-    local params = {delivery_partner_id}
+    local params = { delivery_partner_id }
 
     if from_date then
         query = query .. " AND created_at >= ?"
@@ -176,7 +176,7 @@ function OrderDeliveryAssignmentQueries.getPartnerStats(delivery_partner_id, fro
         table.insert(params, to_date)
     end
 
-    local result = db.query(query, unpack(params))
+    local result = db.query(query, table.unpack(params))
     return result and result[1] or nil
 end
 

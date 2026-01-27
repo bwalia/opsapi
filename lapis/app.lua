@@ -185,10 +185,22 @@ end)
 app:before_filter(function(self)
     local uri = ngx.var.uri
 
+    -- Public auth routes (no authentication required)
+    -- Note: /auth/refresh handles its own token validation for refresh flow
+    local public_auth_routes = {
+        ["/auth/login"] = true,
+        ["/auth/register"] = true,
+        ["/auth/forgot-password"] = true,
+        ["/auth/reset-password"] = true,
+        ["/auth/verify-email"] = true,
+        ["/auth/resend-verification"] = true,
+        ["/auth/refresh"] = true,  -- Handles its own token validation
+    }
+
     -- Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
-        uri == "/swagger/swagger.json" or uri == "/metrics" or uri:match("^/auth/") or
+        uri == "/swagger/swagger.json" or uri == "/metrics" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
         uri:match("^/api/v2/test%-notification") then
@@ -200,6 +212,10 @@ app:before_filter(function(self)
     local ok, auth = pcall(require, "helper.auth")
     if ok then
         auth.authenticate()
+        -- Populate self.current_user from ngx.ctx.user for Lapis routes
+        if ngx.ctx.user then
+            self.current_user = ngx.ctx.user
+        end
     end
 end)
 

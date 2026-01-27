@@ -156,7 +156,7 @@ services:
       timeout: 20s
       retries: 3
 
-  # MinIO initialization - creates bucket and sets public policy
+  # MinIO initialization - creates buckets and sets public policy
   minio-init:
     image: minio/mc:latest
     container_name: opsapi-minio-init
@@ -166,9 +166,25 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin minioadmin123;
+
+      echo 'Creating buckets...';
       mc mb local/opsapi --ignore-existing;
+      mc mb local/documents --ignore-existing;
+      mc mb local/avatars --ignore-existing;
+      mc mb local/attachments --ignore-existing;
+      mc mb local/media --ignore-existing;
+      mc mb local/backups --ignore-existing;
+      mc mb local/temp --ignore-existing;
+
+      echo 'Setting bucket policies...';
       mc anonymous set public local/opsapi;
-      echo 'Bucket opsapi created and set to public';
+      mc anonymous set public local/documents;
+      mc anonymous set public local/avatars;
+      mc anonymous set public local/attachments;
+      mc anonymous set public local/media;
+
+      echo 'All buckets created successfully!';
+      mc ls local;
       exit 0;
       "
     networks:

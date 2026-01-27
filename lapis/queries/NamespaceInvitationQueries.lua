@@ -20,7 +20,7 @@ local DEFAULT_EXPIRATION_DAYS = 7
 -- @return string A unique 64-character token
 local function generateToken()
     -- Seed with multiple entropy sources for randomness
-    local time_seed = ngx.now() * 1000000  -- microseconds
+    local time_seed = ngx.now() * 1000000 -- microseconds
     local worker_pid = ngx.worker.pid() or 0
     local random_seed = math.random(1, 2147483647)
     math.randomseed(time_seed + worker_pid + random_seed)
@@ -36,7 +36,7 @@ local function generateToken()
 
     -- Expand to 64 characters using hash + random characters
     local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    local token = hash  -- 32 characters from MD5
+    local token = hash -- 32 characters from MD5
 
     -- Add 32 more random characters
     for _ = 1, 32 do
@@ -514,7 +514,7 @@ function NamespaceInvitationQueries.count(namespace_id, status)
         table.insert(values, status)
     end
 
-    local result = db.query(query, unpack(values))
+    local result = db.query(query, table.unpack(values))
     return result[1] and result[1].count or 0
 end
 

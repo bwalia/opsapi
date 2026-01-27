@@ -132,7 +132,7 @@ function KanbanTaskQueries.getByBoard(board_id, params)
     table.insert(where_values, perPage)
     table.insert(where_values, offset)
 
-    local tasks = db.query(sql, unpack(where_values))
+    local tasks = db.query(sql, table.unpack(where_values))
 
     -- Get assignees and labels for each task
     for _, task in ipairs(tasks) do
@@ -150,7 +150,7 @@ function KanbanTaskQueries.getByBoard(board_id, params)
         table.insert(count_values, where_values[i])
     end
 
-    local count_result = db.query(count_sql, unpack(count_values))
+    local count_result = db.query(count_sql, table.unpack(count_values))
     local total = count_result and count_result[1] and count_result[1].total or 0
 
     return {
@@ -663,7 +663,7 @@ function KanbanTaskQueries.addComment(params)
     -- Clean up parent_comment_id to avoid FK violation
     -- If it's 0, empty, or nil, set to nil so it's not included in INSERT
     if params.parent_comment_id == nil or params.parent_comment_id == ""
-       or params.parent_comment_id == 0 or params.parent_comment_id == "0" then
+        or params.parent_comment_id == 0 or params.parent_comment_id == "0" then
         params.parent_comment_id = nil
     end
 

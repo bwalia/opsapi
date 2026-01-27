@@ -107,7 +107,7 @@ function DeviceTokenQueries.getActiveTokensForUsers(user_uuids)
           AND is_active = true
     ]]
 
-    local tokens = db.query(sql, unpack(user_uuids))
+    local tokens = db.query(sql, table.unpack(user_uuids))
     return tokens or {}
 end
 

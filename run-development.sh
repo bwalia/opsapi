@@ -13,6 +13,7 @@ NC='\033[0m' # No Color
 # ============================================
 BASE_DOMAIN="wslcrm.com"
 ENV_FILE="lapis/.env"
+CONTAINER_NAME="opsapi"  # Must match container_name in docker-compose.yml
 
 # ============================================
 # Usage and Help
@@ -656,9 +657,9 @@ sleep 15
 
 # Run migrations - use -t flag only in non-CI mode (CI has no TTY)
 if $CI_MODE; then
-    docker exec opsapi lapis migrate
+    docker exec $CONTAINER_NAME lapis migrate
 else
-    docker exec -it opsapi lapis migrate
+    docker exec -it $CONTAINER_NAME lapis migrate
 fi
 
 sleep 5
