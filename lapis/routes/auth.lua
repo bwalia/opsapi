@@ -493,7 +493,9 @@ return function(app)
     -- Helper function to validate Google ID token
     local function validate_google_token(token)
         local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
-        if not google_client_id then
+        local google_client_ios_id = Global.getEnvVar("GOOGLE_CLIENT_IOS_ID")
+
+        if not google_client_id and not google_client_ios_id then
             return nil, "Google OAuth not configured"
         end
 
@@ -519,8 +521,11 @@ return function(app)
             return nil, "Failed to parse Google response"
         end
 
-        -- Verify audience matches our client ID
-        if token_info.aud ~= google_client_id then
+        -- Verify audience matches our web or iOS client ID
+        local valid_audience = (google_client_id and token_info.aud == google_client_id) or
+                               (google_client_ios_id and token_info.aud == google_client_ios_id)
+
+        if not valid_audience then
             return nil, "Token not issued for this app"
         end
 
