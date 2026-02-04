@@ -27,7 +27,7 @@ on:
         options:
           - build
           - deploy
-          - build-and-deploy          
+          - build-and-deploy
       PROJECT_NAME:
         type: choice
         description: "Please select the project name"
@@ -36,6 +36,15 @@ on:
         options:
           - opsapi
           - opsapi-kisaan
+      PROJECT_CODE:
+        type: choice
+        description: "Please select the project Code"
+        default: "opsapi"
+        required: true
+        options:
+          - opsapi
+          - kisaan
+          - tax-copilot
 
 env:
   PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}
@@ -83,14 +92,14 @@ jobs:
       - name: Run OpenResty Docker container
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
-              docker run -d -p 80:80 bwalia/opsapi:latest openresty -g "daemon off;"
+          docker run -d -p 80:80 bwalia/opsapi:latest openresty -g "daemon off;"
         shell: bash
 
       - name: Verify OpenResty is running
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
-              sleep 10 # Give 10s for OpenResty to start
-              curl -I http://localhost:80
+          sleep 10 # Give 10s for OpenResty to start
+          curl -I http://localhost:80
         shell: bash
   deploy:
     runs-on: self-hosted
@@ -112,18 +121,18 @@ jobs:
       - name: Kubeseal encrypt the env secrets file
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
-            export KUBECONFIG=$(pwd)/kubeconfig
-            if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
-            elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_TEST }}" "test" "test" ${{ env.PROJECT_NAME }}
-            elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_ACC }}" "acc" "acc" ${{ env.PROJECT_NAME }}
-            elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_PROD }}" "prod" "prod" ${{ env.PROJECT_NAME }}
-            else
-                ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_INT }}" "int" "int" ${{ env.PROJECT_NAME }}
-            fi
+          export KUBECONFIG=$(pwd)/kubeconfig
+          if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
+              ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_DEV }}" "dev" "dev" ${{ env.PROJECT_NAME }}
+          elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
+              ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_TEST }}" "test" "test" ${{ env.PROJECT_NAME }}
+          elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
+              ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_ACC }}" "acc" "acc" ${{ env.PROJECT_NAME }}
+          elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
+              ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_PROD }}" "prod" "prod" ${{ env.PROJECT_NAME }}
+          else
+              ./devops/kubeseal/kubeseal_automation.sh "${{ secrets.DOT_OPSAPI_ENV_CREDS_INT }}" "int" "int" ${{ env.PROJECT_NAME }}
+          fi
         shell: bash
 
       - name: Check and Install kubectl
@@ -168,19 +177,19 @@ jobs:
       - name: Kubeseal encrypt the env secrets file for node Helper app [Deactivated for now]
         if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
-            export KUBECONFIG=$(pwd)/kubeconfig
-            if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_DEV }} "dev"
-            elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_TEST }} "test"
-            elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_ACC }} "acc"
-            elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_PROD }} "prod"
-            else
-                ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_INT }} "int"
-            fi
-        shell: bash            
+          export KUBECONFIG=$(pwd)/kubeconfig
+          if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
+              ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_DEV }} "dev"
+          elif [ "${{ env.TARGET_ENV }}" == "test" ]; then
+              ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_TEST }} "test"
+          elif [ "${{ env.TARGET_ENV }}" == "acc" ]; then
+              ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_ACC }} "acc"
+          elif [ "${{ env.TARGET_ENV }}" == "prod" ]; then
+              ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_PROD }} "prod"
+          else
+              ./devops/kubeseal/kubeseal_automation_node.sh ${{ secrets.DOT_OPSAPI_NODE_ENV_CREDS_INT }} "int"
+          fi
+        shell: bash
 
       - name: Deploy Helm Chart for OPSAPI-NODE Helper app [Deactivated for now]
         if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}

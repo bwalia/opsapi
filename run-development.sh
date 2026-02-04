@@ -27,6 +27,7 @@ show_help() {
     echo -e "${BLUE}Options:${NC}"
     echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod|remote|<custom>)"
     echo "  -P, --protocol [PROTO] API protocol (http|https). Default: https for remote, http for local"
+    echo "  -j, --project [CODE]  Project code for conditional migrations (all|tax_copilot|ecommerce|...)"
     echo "  -s, --stash [y|n]     Git stash option (y=stash, n=skip)"
     echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
     echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
@@ -50,6 +51,14 @@ show_help() {
     echo "  Example: -e staging           -> https://staging-api.${BASE_DOMAIN}"
     echo "  Example: -e staging -P http   -> http://staging-api.${BASE_DOMAIN}"
     echo ""
+    echo -e "${BLUE}Project Codes (for conditional migrations):${NC}"
+    echo "  all          - All features (default, backward compatible)"
+    echo "  tax_copilot  - UK Tax Return AI Agent (core + tax tables only)"
+    echo "  ecommerce    - E-commerce platform (core + stores, products, orders)"
+    echo "  collaboration - Chat + Kanban + Services"
+    echo "  hospital     - Hospital CRM"
+    echo "  core_only    - Just authentication tables"
+    echo ""
     echo -e "${BLUE}Examples:${NC}"
     echo "  ./run-development.sh                    # Interactive mode (prompts)"
     echo "  ./run-development.sh -e local           # Local development environment"
@@ -61,6 +70,8 @@ show_help() {
     echo "  ./run-development.sh -c -e dev          # Just check/update .env for dev"
     echo "  ./run-development.sh -r                 # Reset database (fresh start)"
     echo "  ./run-development.sh -e remote -n -C    # CI/CD deployment (no dev mounts)"
+    echo "  ./run-development.sh -j tax_copilot     # Only create tax-related tables"
+    echo "  ./run-development.sh -e local -j tax_copilot -r  # Fresh tax_copilot setup"
     echo ""
 }
 
@@ -74,6 +85,7 @@ TARGET_ENV=""
 CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
+PROJECT_CODE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -129,6 +141,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --protocol=*)
             PROTOCOL="${1#*=}"
+            shift
+            ;;
+        -j|--project)
+            PROJECT_CODE="$2"
+            shift 2
+            ;;
+        --project=*)
+            PROJECT_CODE="${1#*=}"
             shift
             ;;
         -h|--help)
@@ -234,6 +254,61 @@ validate_protocol() {
         http|https) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# Function to validate project code
+validate_project_code() {
+    local code="$1"
+    case "$code" in
+        all|tax_copilot|ecommerce|ecommerce_chat|collaboration|hospital|core_only) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Function to prompt for project code selection
+prompt_project_code() {
+    echo -e "${CYAN}Select project code for conditional migrations:${NC}"
+    echo "  1) all          - All features (default, backward compatible)"
+    echo "  2) tax_copilot  - UK Tax Return AI Agent (core + tax tables only)"
+    echo "  3) ecommerce    - E-commerce platform (core + stores, products, orders)"
+    echo "  4) collaboration - Chat + Kanban + Services"
+    echo "  5) hospital     - Hospital CRM"
+    echo "  6) core_only    - Just authentication tables"
+    echo ""
+
+    local choice
+    while true; do
+        read -p "Enter choice [1-6] or press Enter for default (all): " choice
+        case "$choice" in
+            ""|1|all)
+                echo "all"
+                return 0
+                ;;
+            2|tax_copilot)
+                echo "tax_copilot"
+                return 0
+                ;;
+            3|ecommerce)
+                echo "ecommerce"
+                return 0
+                ;;
+            4|collaboration)
+                echo "collaboration"
+                return 0
+                ;;
+            5|hospital)
+                echo "hospital"
+                return 0
+                ;;
+            6|core_only)
+                echo "core_only"
+                return 0
+                ;;
+            *)
+                echo -e "${YELLOW}Invalid choice. Please enter 1-6 or a valid project code.${NC}" >&2
+                ;;
+        esac
+    done
 }
 
 # Function to prompt for protocol selection
@@ -529,6 +604,38 @@ API_URL_PREVIEW=$(get_api_url "$TARGET_ENV" "$PROTOCOL")
 echo -e "${BLUE}[i] API URL will be: ${CYAN}${API_URL_PREVIEW}${NC}"
 echo ""
 
+# ============================================
+# Project Code Selection
+# ============================================
+echo -e "${GREEN}[+] Project Code Configuration${NC}"
+echo ""
+
+# Determine project code
+if [[ -n "$PROJECT_CODE" ]]; then
+    # Project code provided via argument
+    if validate_project_code "$PROJECT_CODE"; then
+        echo -e "${BLUE}[i] Project code from argument: ${CYAN}${PROJECT_CODE}${NC}"
+    else
+        echo -e "${RED}[!] Invalid project code: '$PROJECT_CODE'${NC}"
+        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, core_only${NC}"
+        exit 1
+    fi
+else
+    # Interactive mode - prompt for project code (unless non-interactive flags are set)
+    if [[ -n "$STASH_ARG" ]] || [[ -n "$PULL_ARG" ]]; then
+        # Non-interactive mode - use default project code
+        PROJECT_CODE="all"
+        echo -e "${BLUE}[i] Project code (default): ${CYAN}${PROJECT_CODE}${NC}"
+    else
+        # Interactive mode - prompt for project code
+        PROJECT_CODE=$(prompt_project_code)
+        echo ""
+    fi
+fi
+
+echo -e "${BLUE}[i] Migrations will run with PROJECT_CODE=${CYAN}${PROJECT_CODE}${NC}"
+echo ""
+
 # Check and update .env file
 check_and_update_env "$TARGET_ENV" "$PROTOCOL"
 if [[ $? -ne 0 ]]; then
@@ -656,10 +763,12 @@ $COMPOSE_CMD up --build -d
 sleep 15
 
 # Run migrations - use -t flag only in non-CI mode (CI has no TTY)
+# Pass PROJECT_CODE environment variable to control which tables are created
+echo -e "${GREEN}[+] Running migrations with PROJECT_CODE=${PROJECT_CODE}...${NC}"
 if $CI_MODE; then
-    docker exec $CONTAINER_NAME lapis migrate
+    docker exec -e PROJECT_CODE=$PROJECT_CODE $CONTAINER_NAME lapis migrate
 else
-    docker exec -it $CONTAINER_NAME lapis migrate
+    docker exec -e PROJECT_CODE=$PROJECT_CODE -it $CONTAINER_NAME lapis migrate
 fi
 
 sleep 5
