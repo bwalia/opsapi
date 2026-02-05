@@ -334,6 +334,12 @@ safe_load_routes("routes.secret-vault") -- Vault, folders, secrets, sharing, aud
 -- Bank Transactions System
 safe_load_routes("routes.bank_transactions") -- Bank transaction management
 
+-- Tax Copilot System (UK Tax Return AI)
+safe_load_routes("routes.tax-bank-accounts")  -- Tax bank account management
+safe_load_routes("routes.tax-statements")     -- Tax statement management (upload, workflow)
+safe_load_routes("routes.tax-transactions")   -- Tax transaction management (from AI extraction)
+safe_load_routes("routes.tax-upload")         -- Tax statement file upload (MinIO storage)
+
 -- Push Notifications (Device Token Management)
 safe_load_routes("routes.device-tokens") -- FCM device token registration for push notifications
 safe_load_routes("routes.test-notification") -- Test endpoint for push notifications (remove in production)
