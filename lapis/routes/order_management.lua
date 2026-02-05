@@ -30,14 +30,16 @@ return function(app)
                 local stores = db.select("id, uuid, name from stores where user_id = ?", user_id)
 
                 if not stores or #stores == 0 then
-                    return { json = {
-                        total_stores = 0,
-                        total_products = 0,
-                        total_orders = 0,
-                        pending_orders = 0,
-                        total_revenue = 0,
-                        recent_orders = {}
-                    } }
+                    return {
+                        json = {
+                            total_stores = 0,
+                            total_products = 0,
+                            total_orders = 0,
+                            pending_orders = 0,
+                            total_revenue = 0,
+                            recent_orders = {}
+                        }
+                    }
                 end
 
                 local store_ids = {}
@@ -85,17 +87,19 @@ return function(app)
                     LIMIT 10
                 ]])
 
-                return { json = {
-                    total_stores = #stores,
-                    total_products = tonumber(product_count),
-                    total_orders = tonumber(order_stats.total_orders) or 0,
-                    pending_orders = tonumber(order_stats.pending_orders) or 0,
-                    processing_orders = tonumber(order_stats.processing_orders) or 0,
-                    shipped_orders = tonumber(order_stats.shipped_orders) or 0,
-                    delivered_orders = tonumber(order_stats.delivered_orders) or 0,
-                    total_revenue = tonumber(order_stats.total_revenue) or 0,
-                    recent_orders = recent_orders or {}
-                } }
+                return {
+                    json = {
+                        total_stores = #stores,
+                        total_products = tonumber(product_count),
+                        total_orders = tonumber(order_stats.total_orders) or 0,
+                        pending_orders = tonumber(order_stats.pending_orders) or 0,
+                        processing_orders = tonumber(order_stats.processing_orders) or 0,
+                        shipped_orders = tonumber(order_stats.shipped_orders) or 0,
+                        delivered_orders = tonumber(order_stats.delivered_orders) or 0,
+                        total_revenue = tonumber(order_stats.total_revenue) or 0,
+                        recent_orders = recent_orders or {}
+                    }
+                }
             end)(self)
         end)
     }))
@@ -126,8 +130,8 @@ return function(app)
                 local search_query = self.params.search
 
                 -- Build WHERE clause
-                local where_conditions = {"s.user_id = ?"}
-                local where_params = {user_id}
+                local where_conditions = { "s.user_id = ?" }
+                local where_params = { user_id }
 
                 -- Add status filter
                 if status_filter and status_filter ~= "" then
@@ -149,7 +153,8 @@ return function(app)
                 -- Add search filter (order number or customer)
                 if search_query and search_query ~= "" then
                     local search_safe = Sanitizer.sanitizeText(search_query, 100)
-                    table.insert(where_conditions, "(o.order_number LIKE ? OR c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ?)")
+                    table.insert(where_conditions,
+                        "(o.order_number LIKE ? OR c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ?)")
                     local search_pattern = "%" .. search_safe .. "%"
                     table.insert(where_params, search_pattern)
                     table.insert(where_params, search_pattern)
@@ -167,7 +172,7 @@ return function(app)
                     LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE ]] .. where_clause
 
-                local total_result = db.select(count_query, unpack(where_params))
+                local total_result = db.select(count_query, table.unpack(where_params))
                 local total = total_result[1].total or 0
 
                 -- Get orders
@@ -201,7 +206,7 @@ return function(app)
                 table.insert(where_params, limit)
                 table.insert(where_params, offset)
 
-                local orders = db.select(orders_query, unpack(where_params))
+                local orders = db.select(orders_query, table.unpack(where_params))
 
                 -- Get item counts for each order
                 for _, order in ipairs(orders) do
@@ -214,15 +219,17 @@ return function(app)
                     order.item_count = tonumber(item_count)
                 end
 
-                return { json = {
-                    data = orders,
-                    pagination = {
-                        page = page,
-                        limit = limit,
-                        total = tonumber(total),
-                        total_pages = math.ceil(tonumber(total) / limit)
+                return {
+                    json = {
+                        data = orders,
+                        pagination = {
+                            page = page,
+                            limit = limit,
+                            total = tonumber(total),
+                            total_pages = math.ceil(tonumber(total) / limit)
+                        }
                     }
-                } }
+                }
             end)(self)
         end)
     }))
@@ -414,17 +421,17 @@ return function(app)
                 -- Validate status transitions
                 local function isValidTransition(from_status, to_status)
                     local transitions = {
-                        pending = {confirmed = true, cancelled = true},
-                        confirmed = {processing = true, cancelled = true},
-                        processing = {shipped = true, cancelled = true},
-                        shipped = {delivered = true},
-                        delivered = {refunded = true},
-                        cancelled = {},  -- Cannot transition from cancelled
-                        refunded = {}    -- Cannot transition from refunded
+                        pending = { confirmed = true, cancelled = true },
+                        confirmed = { processing = true, cancelled = true },
+                        processing = { shipped = true, cancelled = true },
+                        shipped = { delivered = true },
+                        delivered = { refunded = true },
+                        cancelled = {}, -- Cannot transition from cancelled
+                        refunded = {}   -- Cannot transition from refunded
                     }
 
                     if not from_status or not to_status then return true end
-                    if from_status == to_status then return true end  -- No change
+                    if from_status == to_status then return true end -- No change
 
                     local allowed = transitions[from_status]
                     return allowed and allowed[to_status] or false
@@ -472,13 +479,15 @@ return function(app)
                     db.insert("order_history", history_entry)
                 end)
 
-                return { json = {
-                    message = "Order status updated successfully",
-                    order_uuid = order_uuid,
-                    status = new_status or order.status,
-                    financial_status = new_financial_status or order.financial_status,
-                    fulfillment_status = new_fulfillment_status or order.fulfillment_status
-                } }
+                return {
+                    json = {
+                        message = "Order status updated successfully",
+                        order_uuid = order_uuid,
+                        status = new_status or order.status,
+                        financial_status = new_financial_status or order.financial_status,
+                        fulfillment_status = new_fulfillment_status or order.fulfillment_status
+                    }
+                }
             end)(self)
         end)
     }))

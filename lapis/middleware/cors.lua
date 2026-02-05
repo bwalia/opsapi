@@ -7,11 +7,13 @@ local CORS_CONFIG = {
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3033",
+        "http://localhost:3847",
         "http://localhost:4000",
         "http://localhost:8039",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3033",
+        "http://127.0.0.1:3847",
         "http://127.0.0.1:4000",
         "http://127.0.0.1:8039",
         -- Workstation development servers

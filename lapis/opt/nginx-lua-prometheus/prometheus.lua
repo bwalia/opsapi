@@ -55,73 +55,73 @@
 
 -- This library provides per-worker counters used to store counter metric
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
-local resty_counter_lib = require("prometheus_resty_counter")
-local key_index_lib = require("prometheus_keys")
-local ngx = ngx
-local ngx_re_match = ngx.re.match
-local ngx_re_gsub = ngx.re.gsub
-local error = error
-local type = type
-local get_phase = ngx.get_phase
-local ngx_sleep = ngx.sleep
-local select = select
+local resty_counter_lib               = require("prometheus_resty_counter")
+local key_index_lib                   = require("prometheus_keys")
+local ngx                             = ngx
+local ngx_re_match                    = ngx.re.match
+local ngx_re_gsub                     = ngx.re.gsub
+local error                           = error
+local type                            = type
+local get_phase                       = ngx.get_phase
+local ngx_sleep                       = ngx.sleep
+local select                          = select
 
-local YIELD_ITERATIONS = 200
+local YIELD_ITERATIONS                = 200
 
-local Prometheus = {}
-local mt = { __index = Prometheus }
+local Prometheus                      = {}
+local mt                              = { __index = Prometheus }
 
-local TYPE_COUNTER    = 0x1
-local TYPE_GAUGE      = 0x2
-local TYPE_HISTOGRAM  = 0x4
-local TYPE_LITERAL = {
+local TYPE_COUNTER                    = 0x1
+local TYPE_GAUGE                      = 0x2
+local TYPE_HISTOGRAM                  = 0x4
+local TYPE_LITERAL                    = {
   [TYPE_COUNTER]   = "counter",
   [TYPE_GAUGE]     = "gauge",
   [TYPE_HISTOGRAM] = "histogram",
 }
 
-local can_yield_phases = {
-    rewrite = true,
-    access = true,
-    content = true,
-    timer = true
+local can_yield_phases                = {
+  rewrite = true,
+  access = true,
+  content = true,
+  timer = true
 }
 
 -- Default name for error metric incremented by this library.
-local DEFAULT_ERROR_METRIC_NAME = "nginx_metric_errors_total"
+local DEFAULT_ERROR_METRIC_NAME       = "nginx_metric_errors_total"
 
 -- Default value for per-worker counter sync interval (seconds).
-local DEFAULT_SYNC_INTERVAL = 1
+local DEFAULT_SYNC_INTERVAL           = 1
 
 -- Default set of latency buckets, 5ms to 10s:
-local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
-                         0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
+local DEFAULT_BUCKETS                 = { 0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
+  0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10 }
 
 -- Prefix for internal shared dictionary items.
-local KEY_INDEX_PREFIX = "__ngx_prom__"
+local KEY_INDEX_PREFIX                = "__ngx_prom__"
 
-local METRICS_KEY_REGEX = [[(.*[,{]le=")(.*)(".*)]]
+local METRICS_KEY_REGEX               = [[(.*[,{]le=")(.*)(".*)]]
 
 local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
-  "Have you called Prometheus:init() from the " ..
-  "init_worker_by_lua_block nginx phase?"
+    "Have you called Prometheus:init() from the " ..
+    "init_worker_by_lua_block nginx phase?"
 
 -- Error message that gets logged when the shared dictionary gets full.
-local ERR_MSG_LRU_EVICTION = "Shared dictionary used for prometheus metrics " ..
-  "is full. REPORTED METRIC DATA MIGHT BE INCOMPLETE. Please increase the " ..
-  "size of the dictionary or reduce metric cardinality."
+local ERR_MSG_LRU_EVICTION            = "Shared dictionary used for prometheus metrics " ..
+    "is full. REPORTED METRIC DATA MIGHT BE INCOMPLETE. Please increase the " ..
+    "size of the dictionary or reduce metric cardinality."
 
 -- Accepted range of byte values for tailing bytes of utf8 strings.
 -- This is defined outside of the validate_utf8_string function as a const
 -- variable to avoid creating and destroying table frequently.
 -- Values in this table (and in validate_utf8_string) are from table 3-7 of
 -- www.unicode.org/versions/Unicode6.2.0/UnicodeStandard-6.2.pdf
-local accept_range = {
-  {lo = 0x80, hi = 0xBF},
-  {lo = 0xA0, hi = 0xBF},
-  {lo = 0x80, hi = 0x9F},
-  {lo = 0x90, hi = 0xBF},
-  {lo = 0x80, hi = 0x8F}
+local accept_range                    = {
+  { lo = 0x80, hi = 0xBF },
+  { lo = 0xA0, hi = 0xBF },
+  { lo = 0x80, hi = 0x9F },
+  { lo = 0x90, hi = 0xBF },
+  { lo = 0x80, hi = 0x8F }
 }
 
 -- Validate utf8 string for label values.
@@ -139,7 +139,7 @@ local function validate_utf8_string(str)
     first = string.byte(str, i)
     if first >= 0x80 then
       range_idx = 1
-      if first >= 0xC2 and first <= 0xDF then -- 2 bytes
+      if first >= 0xC2 and first <= 0xDF then     -- 2 bytes
         left_size = 1
       elseif first >= 0xE0 and first <= 0xEF then -- 3 bytes
         left_size = 2
@@ -179,13 +179,13 @@ end
 
 -- copy form https://github.com/apache/apisix/blob/release/2.13/apisix/core/table.lua#L50-L58
 local function table_insert_tail(tab, ...)
-    local idx = #tab
-    for i = 1, select('#', ...) do
-        idx = idx + 1
-        tab[idx] = select(i, ...)
-    end
+  local idx = #tab
+  for i = 1, select('#', ...) do
+    idx = idx + 1
+    tab[idx] = select(i, ...)
+  end
 
-    return idx
+  return idx
 end
 
 -- Return table as a string. Nested tables are not expanded.
@@ -226,14 +226,14 @@ local function full_metric_name(name, label_names, label_values)
       local valid, pos = validate_utf8_string(label_values[idx])
       if not valid then
         label_value = string.sub(label_values[idx], 1, pos - 1)
-                        :gsub("\\", "\\\\")
-                        :gsub('"', '\\"')
-                        :gsub("\n", "\\n")
+            :gsub("\\", "\\\\")
+            :gsub('"', '\\"')
+            :gsub("\n", "\\n")
       else
         label_value = label_values[idx]
-                        :gsub("\\", "\\\\")
-                        :gsub('"', '\\"')
-                        :gsub("\n", "\\n")
+            :gsub("\\", "\\\\")
+            :gsub('"', '\\"')
+            :gsub("\n", "\\n")
       end
     else
       label_value = tostring(label_values[idx])
@@ -294,7 +294,7 @@ local function check_metric_and_label_names(metric_name, label_names)
     end
     if not label_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
       return "Metric '" .. metric_name .. "' label name '" .. label_name ..
-             "' is invalid"
+          "' is invalid"
     end
   end
 end
@@ -350,9 +350,9 @@ local function fix_histogram_bucket_labels(key)
   end
 
   if match[2] == "Inf" then
-    return table.concat({match[1], "+Inf", match[3]})
+    return table.concat({ match[1], "+Inf", match[3] })
   else
-    return table.concat({match[1], tostring(tonumber(match[2])), match[3]})
+    return table.concat({ match[1], tostring(tonumber(match[2])), match[3] })
   end
 end
 
@@ -389,7 +389,7 @@ local function lookup_or_create(self, label_values)
     -- for outer loop will be aborted. By not using ipairs, we will be able to
     -- compile longer traces as possible.
     local label
-    for i=1, self.label_count do
+    for i = 1, self.label_count do
       label = label_values[i]
       if label == nil then
         return nil, string.format("unexpected nil value for label %s of %s",
@@ -420,19 +420,19 @@ local function lookup_or_create(self, label_values)
     local bucket_pref
     if self.label_count > 0 then
       -- strip last }
-      bucket_pref = self.name .. "_bucket" .. string.sub(labels, 1, #labels-1) .. ","
+      bucket_pref = self.name .. "_bucket" .. string.sub(labels, 1, #labels - 1) .. ","
     else
       bucket_pref = self.name .. "_bucket{"
     end
 
     for i, buc in ipairs(self.buckets) do
-      full_name[i+2] = string.format("%sle=\"%s\"}", bucket_pref, self.bucket_format:format(buc))
+      full_name[i + 2] = string.format("%sle=\"%s\"}", bucket_pref, self.bucket_format:format(buc))
     end
     -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
     -- required by Prometheus. This is necessary for this bucket to be the last
     -- one when all metrics are lexicographically sorted. "Inf" will get replaced
     -- by "+Inf" in Prometheus:metric_data().
-    full_name[self.bucket_count+3] = string.format("%sle=\"Inf\"}", bucket_pref)
+    full_name[self.bucket_count + 3] = string.format("%sle=\"Inf\"}", bucket_pref)
   else
     full_name = full_metric_name(self.name, self.label_names, label_values)
   end
@@ -536,7 +536,7 @@ local function del(self, label_values)
 
   _, err = self._dict:delete(k)
   if err then
-    self._log_error("Error deleting key: ".. k .. ": " .. err)
+    self._log_error("Error deleting key: " .. k .. ": " .. err)
   end
 
   -- Clean up the full metric name lookup table as well.
@@ -602,14 +602,14 @@ local function observe(self, value, label_values)
   c:incr(keys[2], value)
 
   -- the last bucket (le="Inf").
-  c:incr(keys[self.bucket_count+3], 1)
+  c:incr(keys[self.bucket_count + 3], 1)
 
   local seen = false
   -- check in reverse order, otherwise we will always
   -- need to traverse the whole table.
-  for i=self.bucket_count, 1, -1 do
+  for i = self.bucket_count, 1, -1 do
     if value <= self.buckets[i] then
-      c:incr(keys[2+i], 1)
+      c:incr(keys[2 + i], 1)
       seen = true
     elseif seen then
       break
@@ -719,9 +719,9 @@ function Prometheus.init(dict_name, options_or_prefix)
   if type(options_or_prefix) == "table" then
     self.prefix = options_or_prefix.prefix or ''
     self.error_metric_name = options_or_prefix.error_metric_name or
-      DEFAULT_ERROR_METRIC_NAME
+        DEFAULT_ERROR_METRIC_NAME
     self.sync_interval = options_or_prefix.sync_interval or
-      DEFAULT_SYNC_INTERVAL
+        DEFAULT_SYNC_INTERVAL
   else
     self.prefix = options_or_prefix or ''
     self.error_metric_name = DEFAULT_ERROR_METRIC_NAME
@@ -783,13 +783,13 @@ function Prometheus:init_worker(sync_interval)
   end
   self.sync_interval = sync_interval or DEFAULT_SYNC_INTERVAL
   local counter_instance, err = resty_counter_lib.new(
-      self.dict_name, self.sync_interval, self.error_metric_name)
+    self.dict_name, self.sync_interval, self.error_metric_name)
   if err then
     error(err, 2)
   end
   self._counter = counter_instance
 
-  ngx.timer.every(self.sync_interval, function (_)
+  ngx.timer.every(self.sync_interval, function(_)
     self.key_index:sync()
   end)
 end
@@ -825,14 +825,13 @@ local function register(self, name, help, label_names, buckets, typ)
   local name_maybe_historgram = ngx_re_gsub(gsub_b, "_sum$", "", "jo")
 
   if (typ ~= TYPE_HISTOGRAM and (
-      self.registry[name] or self.registry[name_maybe_historgram]
-    )) or
-    (typ == TYPE_HISTOGRAM and (
-      self.registry[name] or
-      self.registry[name .. "_count"] or
-      self.registry[name .. "_sum"] or self.registry[name .. "_bucket"]
-    )) then
-
+        self.registry[name] or self.registry[name_maybe_historgram]
+      )) or
+      (typ == TYPE_HISTOGRAM and (
+        self.registry[name] or
+        self.registry[name .. "_count"] or
+        self.registry[name .. "_sum"] or self.registry[name .. "_bucket"]
+      )) then
     self:log_error("Duplicate metric " .. name)
     return
   end
@@ -947,7 +946,7 @@ function Prometheus:metric_data()
         if m then
           if m.help then
             table_insert_tail(output, string.format("# HELP %s%s %s\n",
-            self.prefix, short_name, m.help))
+              self.prefix, short_name, m.help))
           end
           if m.typ then
             table_insert_tail(output, string.format("# TYPE %s%s %s\n",
