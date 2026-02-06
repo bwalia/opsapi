@@ -188,11 +188,20 @@ return function(app)
         end
 
         local redirect_from = self.params.from or "/"
+        local frontend_url = self.params.frontend_url
+
+        -- Encode state as JSON if frontend_url is provided, otherwise plain string for backward compatibility
+        local state
+        if frontend_url then
+            state = cJson.encode({ from = redirect_from, frontend_url = frontend_url })
+        else
+            state = redirect_from
+        end
 
         local auth_url = string.format(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s" ..
-            "&response_type=code&scope=openid+profile+email&state=%s",
-            google_client_id, ngx.escape_uri(google_redirect_uri), ngx.escape_uri(redirect_from)
+            "&response_type=code&scope=openid+profile+email&prompt=select_account&state=%s",
+            google_client_id, ngx.escape_uri(google_redirect_uri), ngx.escape_uri(state)
         )
 
         return {
@@ -202,7 +211,18 @@ return function(app)
 
     app:get("/auth/google/callback", function(self)
         local code = self.params.code
-        local redirect_from = self.params.state or "/"
+        local raw_state = self.params.state or "/"
+
+        -- Decode state: may be JSON (new format) or plain string (legacy)
+        local redirect_from = "/"
+        local state_frontend_url = nil
+        local ok_state, state_data = pcall(cJson.decode, raw_state)
+        if ok_state and type(state_data) == "table" then
+            redirect_from = state_data.from or "/"
+            state_frontend_url = state_data.frontend_url
+        else
+            redirect_from = raw_state
+        end
 
         if not code then
             return {
@@ -217,31 +237,12 @@ return function(app)
         local google_client_secret = Global.getEnvVar("GOOGLE_CLIENT_SECRET")
         local google_redirect_uri = Global.getEnvVar("GOOGLE_REDIRECT_URI")
 
-        local httpc = http.new()
-        httpc:set_timeout(30000) -- 30 second timeout for OAuth requests
-
-        -- Connect with explicit resolver for DNS resolution
-        local connect_ok, connect_err = httpc:connect({
-            scheme = "https",
-            host = "oauth2.googleapis.com",
-            port = 443,
-            ssl_verify = false,
-            ssl_server_name = "oauth2.googleapis.com"
-        })
-
-        if not connect_ok then
-            return {
-                status = 500,
-                json = {
-                    error = "Failed to connect to Google OAuth: " .. (connect_err or "unknown")
-                }
-            }
-        end
-
         -- Exchange code for access token
-        local token_res, token_err = httpc:request({
+        local httpc = http.new()
+        httpc:set_timeout(30000)
+
+        local token_res, token_err = httpc:request_uri("https://oauth2.googleapis.com/token", {
             method = "POST",
-            path = "/token",
             body = ngx.encode_args({
                 client_id = google_client_id,
                 client_secret = google_client_secret,
@@ -251,12 +252,11 @@ return function(app)
             }),
             headers = {
                 ["Content-Type"] = "application/x-www-form-urlencoded",
-                ["Host"] = "oauth2.googleapis.com"
-            }
+            },
+            ssl_verify = false,
         })
 
         if not token_res then
-            httpc:close()
             return {
                 status = 500,
                 json = {
@@ -265,11 +265,7 @@ return function(app)
             }
         end
 
-        -- Read response body
-        local token_body = token_res:read_body()
-        httpc:set_keepalive()
-
-        local token_data = cJson.decode(token_body)
+        local token_data = cJson.decode(token_res.body)
         if not token_data.access_token then
             return {
                 status = 500,
@@ -279,38 +275,19 @@ return function(app)
             }
         end
 
-        -- Get user info from Google (new connection)
+        -- Get user info from Google
         local httpc2 = http.new()
         httpc2:set_timeout(30000)
 
-        local connect_ok2, connect_err2 = httpc2:connect({
-            scheme = "https",
-            host = "www.googleapis.com",
-            port = 443,
-            ssl_verify = false,
-            ssl_server_name = "www.googleapis.com"
-        })
-
-        if not connect_ok2 then
-            return {
-                status = 500,
-                json = {
-                    error = "Failed to connect to Google API: " .. (connect_err2 or "unknown")
-                }
-            }
-        end
-
-        local user_res, user_err = httpc2:request({
+        local user_res, user_err = httpc2:request_uri("https://www.googleapis.com/oauth2/v2/userinfo", {
             method = "GET",
-            path = "/oauth2/v2/userinfo",
             headers = {
                 ["Authorization"] = "Bearer " .. token_data.access_token,
-                ["Host"] = "www.googleapis.com"
-            }
+            },
+            ssl_verify = false,
         })
 
         if not user_res then
-            httpc2:close()
             return {
                 status = 500,
                 json = {
@@ -319,8 +296,7 @@ return function(app)
             }
         end
 
-        local user_body = user_res:read_body()
-        httpc2:set_keepalive()
+        local user_body = user_res.body
 
         local google_user = cJson.decode(user_body)
         if not google_user.email then
@@ -416,15 +392,16 @@ return function(app)
         -- Determine redirect URL based on client type
         -- If redirect_from contains 'desktop' or 'electron', use custom protocol
         -- Otherwise, use web frontend URL
-        local is_desktop = redirect_from:find("desktop") or redirect_from:find("electron") or redirect_from:find("wsl%-chat")
+        local is_desktop = redirect_from:find("desktop") or redirect_from:find("electron") or
+        redirect_from:find("wsl%-chat")
         local final_url
 
         if is_desktop then
             -- Desktop app: use custom protocol
             final_url = string.format("wsl-chat://auth/callback?token=%s", ngx.escape_uri(token))
         else
-            -- Web app: use FRONTEND_URL
-            local frontend_url = Global.getEnvVar("FRONTEND_URL") or "http://localhost:3033"
+            -- Web app: use frontend_url from state (passed by frontend), fall back to env var
+            local frontend_url = state_frontend_url or Global.getEnvVar("FRONTEND_URL") or "http://localhost:3033"
             final_url = string.format("%s/auth/callback?token=%s&redirect=%s",
                 frontend_url, ngx.escape_uri(token), ngx.escape_uri(redirect_from))
         end
@@ -523,7 +500,7 @@ return function(app)
 
         -- Verify audience matches our web or iOS client ID
         local valid_audience = (google_client_id and token_info.aud == google_client_id) or
-                               (google_client_ios_id and token_info.aud == google_client_ios_id)
+            (google_client_ios_id and token_info.aud == google_client_ios_id)
 
         if not valid_audience then
             return nil, "Token not issued for this app"

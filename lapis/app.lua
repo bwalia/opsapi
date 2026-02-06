@@ -195,6 +195,9 @@ app:before_filter(function(self)
         ["/auth/verify-email"] = true,
         ["/auth/resend-verification"] = true,
         ["/auth/refresh"] = true,  -- Handles its own token validation
+        ["/auth/google"] = true,  -- Google OAuth initiation
+        ["/auth/google/callback"] = true,  -- Google OAuth callback
+        ["/auth/oauth/validate"] = true,  -- OAuth token validation
     }
 
     -- Skip auth for public routes
