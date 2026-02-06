@@ -53,6 +53,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.VAULT,
         ProjectConfig.FEATURES.SERVICES,
         ProjectConfig.FEATURES.BANK_TRANSACTIONS,
+        ProjectConfig.FEATURES.TAX_COPILOT,
     },
 
     -- Tax Copilot - UK Tax Return AI Agent
