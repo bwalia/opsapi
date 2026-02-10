@@ -172,11 +172,13 @@ function TaxStatementQueries.all(params, user)
     table.insert(where_values, perPage)
     table.insert(where_values, offset)
 
-    local statements = db.query(query, unpack(where_values))
+    local statements = db.query(query, table.unpack(where_values))
 
     -- Get total count
-    local count_query = "SELECT COUNT(*) as total FROM tax_statements s JOIN tax_bank_accounts ba ON s.bank_account_id = ba.id WHERE " .. where_clause
-    local count_result = db.query(count_query, unpack(where_values, 1, #where_values - 2))
+    local count_query =
+        "SELECT COUNT(*) as total FROM tax_statements s JOIN tax_bank_accounts ba ON s.bank_account_id = ba.id WHERE " ..
+        where_clause
+    local count_result = db.query(count_query, table.unpack(where_values, 1, #where_values - 2))
 
     return {
         data = statements,

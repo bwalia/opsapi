@@ -543,4 +543,20 @@ return {
         print("Roles created: tax_admin, tax_accountant, tax_client, tax_viewer")
         print("Module created: tax")
     end,
+
+    -- 24. Rename account_number_last4 to account_number and expand to VARCHAR(20)
+    [24] = function()
+        -- Idempotent: check if old column exists before renaming
+        local col_check = db.query([[
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'tax_bank_accounts' AND column_name = 'account_number_last4'
+        ]])
+        if col_check and #col_check > 0 then
+            db.query("ALTER TABLE tax_bank_accounts RENAME COLUMN account_number_last4 TO account_number")
+            print("[Tax Copilot] Renamed account_number_last4 -> account_number")
+        end
+        -- Expand column size to hold full account number (up to 20 chars)
+        db.query("ALTER TABLE tax_bank_accounts ALTER COLUMN account_number TYPE varchar(20)")
+        print("[Tax Copilot] account_number column expanded to VARCHAR(20)")
+    end,
 }

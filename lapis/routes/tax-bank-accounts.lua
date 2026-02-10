@@ -10,6 +10,75 @@ local cjson = require("cjson")
 local TaxBankAccountQueries = require "queries.TaxBankAccountQueries"
 local AuthMiddleware = require("middleware.auth")
 
+-- Valid account types (lowercase and uppercase accepted)
+local VALID_ACCOUNT_TYPES = {
+    current = true, savings = true, business = true,
+    CURRENT = true, SAVINGS = true, BUSINESS = true,
+}
+
+-- Valid currencies
+local VALID_CURRENCIES = { GBP = true, EUR = true, USD = true }
+
+-- Validate bank account input fields
+local function validate_bank_account_params(params, is_create)
+    -- bank_name: required on create, 1-100 chars
+    if is_create then
+        if not params.bank_name or type(params.bank_name) ~= "string" or params.bank_name:match("^%s*$") then
+            return false, "bank_name is required and must not be empty"
+        end
+    end
+    if params.bank_name then
+        if type(params.bank_name) ~= "string" or #params.bank_name > 100 or params.bank_name:match("^%s*$") then
+            return false, "bank_name must be a non-empty string (max 100 characters)"
+        end
+        params.bank_name = params.bank_name:match("^%s*(.-)%s*$")  -- trim
+    end
+
+    -- account_name: optional on create, 1-100 chars
+    if params.account_name then
+        if type(params.account_name) ~= "string" or #params.account_name > 100 then
+            return false, "account_name must be a string (max 100 characters)"
+        end
+        params.account_name = params.account_name:match("^%s*(.-)%s*$")  -- trim
+    end
+
+    -- account_number: optional, 6-20 digits only
+    if params.account_number and params.account_number ~= "" then
+        local trimmed = params.account_number:match("^%s*(.-)%s*$")
+        if not trimmed:match("^%d+$") or #trimmed < 6 or #trimmed > 20 then
+            return false, "account_number must be 6-20 digits (numbers only)"
+        end
+        params.account_number = trimmed
+    end
+
+    -- sort_code: optional, must be XX-XX-XX format
+    if params.sort_code and params.sort_code ~= "" then
+        local trimmed = params.sort_code:match("^%s*(.-)%s*$")
+        if not trimmed:match("^%d%d%-%d%d%-%d%d$") then
+            return false, "sort_code must be in XX-XX-XX format (e.g. 20-00-00)"
+        end
+        params.sort_code = trimmed
+    end
+
+    -- account_type: must be a valid type
+    if params.account_type then
+        if not VALID_ACCOUNT_TYPES[params.account_type] then
+            return false, "account_type must be one of: current, savings, business"
+        end
+    end
+
+    -- currency: must be a valid currency
+    if params.currency then
+        local upper_currency = params.currency:upper()
+        if not VALID_CURRENCIES[upper_currency] then
+            return false, "currency must be one of: GBP, EUR, USD"
+        end
+        params.currency = upper_currency
+    end
+
+    return true
+end
+
 -- Parse request body (supports both JSON and form-urlencoded)
 local function parse_request_body()
     ngx.req.read_body()
@@ -66,9 +135,10 @@ return function(app)
     app:post("/api/v2/tax/bank-accounts", AuthMiddleware.requireAuth(function(self)
         merge_params(self)
 
-        if not self.params.bank_name then
+        local valid, validation_err = validate_bank_account_params(self.params, true)
+        if not valid then
             return {
-                json = { error = "bank_name is required" },
+                json = { error = validation_err },
                 status = 400
             }
         end
@@ -108,6 +178,14 @@ return function(app)
     -- Update a bank account
     app:put("/api/v2/tax/bank-accounts/:id", AuthMiddleware.requireAuth(function(self)
         merge_params(self)
+
+        local valid, validation_err = validate_bank_account_params(self.params, false)
+        if not valid then
+            return {
+                json = { error = validation_err },
+                status = 400
+            }
+        end
 
         local account = TaxBankAccountQueries.update(tostring(self.params.id), self.params, self.current_user)
 
