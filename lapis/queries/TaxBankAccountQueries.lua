@@ -50,7 +50,7 @@ function TaxBankAccountQueries.create(data, user)
         namespace_id = data.namespace_id,
         bank_name = data.bank_name,
         account_name = data.account_name,
-        account_number_last4 = data.account_number_last4,
+        account_number = data.account_number,
         sort_code = data.sort_code,
         account_type = data.account_type or "BUSINESS",
         currency = data.currency or "GBP",
@@ -98,7 +98,7 @@ function TaxBankAccountQueries.all(params, user)
         user_id,
         {
             per_page = perPage,
-            fields = 'id as internal_id, uuid as id, user_id, bank_name, account_name, account_number_last4, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
+            fields = 'id as internal_id, uuid as id, user_id, bank_name, account_name, account_number, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
         }
     )
 
@@ -136,7 +136,7 @@ function TaxBankAccountQueries.show(uuid, user)
 
     local result = db.query([[
         SELECT id as internal_id, uuid as id, user_id, bank_name, account_name,
-               account_number_last4, sort_code, account_type, currency,
+               account_number, sort_code, account_type, currency,
                is_primary, is_active, created_at, updated_at
         FROM tax_bank_accounts
         WHERE uuid = ? AND user_id = ?
@@ -182,7 +182,7 @@ function TaxBankAccountQueries.update(uuid, params, user)
     local old_values = cjson.encode({
         bank_name = bank_account.bank_name,
         account_name = bank_account.account_name,
-        account_number_last4 = bank_account.account_number_last4,
+        account_number = bank_account.account_number,
         sort_code = bank_account.sort_code,
         account_type = bank_account.account_type,
         currency = bank_account.currency,
@@ -199,7 +199,7 @@ function TaxBankAccountQueries.update(uuid, params, user)
     local update_data = {}
     if params.bank_name then update_data.bank_name = params.bank_name end
     if params.account_name then update_data.account_name = params.account_name end
-    if params.account_number_last4 then update_data.account_number_last4 = params.account_number_last4 end
+    if params.account_number then update_data.account_number = params.account_number end
     if params.sort_code then update_data.sort_code = params.sort_code end
     if params.account_type then update_data.account_type = params.account_type end
     if params.currency then update_data.currency = params.currency end

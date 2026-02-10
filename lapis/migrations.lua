@@ -819,6 +819,7 @@ return {
     ['320_tax_create_roles'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 21),
     ['321_tax_add_module'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 22),
     ['322_tax_migration_complete'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 23),
+    ['323_tax_rename_account_number'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 24),
 
     -- Custom migrations
     ['custom_migrations'] = function()
