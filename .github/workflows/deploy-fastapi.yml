@@ -53,12 +53,12 @@ jobs:
           docker pull ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
           docker stop ${{ env.IMAGE_NAME }}-test || true
           docker rm ${{ env.IMAGE_NAME }}-test || true
-          docker run -d --name ${{ env.IMAGE_NAME }}-test -p 8080:8000 ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
+          docker run -d --name ${{ env.IMAGE_NAME }}-test -p 8090:8000 ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
           
       - name: Check health
         run: |
           sleep 10
-          curl -f http://localhost:8080/health || (docker logs ${{ env.IMAGE_NAME }}-test && exit 1)
+          curl -f http://localhost:8090/health || (docker logs ${{ env.IMAGE_NAME }}-test && exit 1)
           
       - name: Cleanup Test Container
         run: docker rm -f ${{ env.IMAGE_NAME }}-test
