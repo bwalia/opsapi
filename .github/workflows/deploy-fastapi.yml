@@ -44,8 +44,8 @@ jobs:
   smoke-test:
     name: Smoke Test on POP0
     needs: build-and-push
-    # On utilise le runner auto-hébergé sur POP0
-    runs-on: [self-hosted]
+    # On utilise spécifiquement le runner de POP0 pour les tests de container
+    runs-on: [self-hosted, pop0]
     if: github.event.inputs.SKIP_SMOKE_TEST != 'true'
     steps:
       - name: Clean up Workspace
@@ -73,7 +73,8 @@ jobs:
     name: Deploy to K3s Cluster
     needs: smoke-test
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true')
-    runs-on: [self-hosted]
+    # On utilise le Mac Mini car il a un accès direct au cluster via son IP privée
+    runs-on: [self-hosted, macmini-deploy]
     steps:
       - name: Clean up Workspace
         run: |

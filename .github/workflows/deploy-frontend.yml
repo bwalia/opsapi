@@ -46,7 +46,7 @@ jobs:
   smoke-test:
     name: Smoke Test on POP0
     needs: build-and-push
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, pop0]
     if: github.event.inputs.SKIP_SMOKE_TEST != 'true'
     steps:
       - name: Clean up Workspace
@@ -74,7 +74,7 @@ jobs:
     name: Deploy to K3s Cluster
     needs: smoke-test
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true')
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, macmini-deploy]
     steps:
       - name: Clean up Workspace
         run: |
