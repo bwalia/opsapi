@@ -68,7 +68,7 @@ jobs:
     name: Deploy to K3s Cluster
     needs: smoke-test
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
