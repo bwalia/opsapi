@@ -48,6 +48,12 @@ jobs:
     runs-on: [self-hosted]
     if: github.event.inputs.SKIP_SMOKE_TEST != 'true'
     steps:
+      - name: Clean up Workspace
+        run: |
+          echo "Cleaning up Docker-owned files that cause permission issues..."
+          sudo rm -rf ${{ github.workspace }}/* || true
+        shell: bash
+
       - name: Run container for testing
         run: |
           docker pull ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
@@ -69,6 +75,12 @@ jobs:
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true')
     runs-on: [self-hosted]
     steps:
+      - name: Clean up Workspace
+        run: |
+          echo "Cleaning up Docker-owned files that cause permission issues..."
+          sudo rm -rf ${{ github.workspace }}/* || true
+        shell: bash
+
       - name: Checkout code
         uses: actions/checkout@v4
 
