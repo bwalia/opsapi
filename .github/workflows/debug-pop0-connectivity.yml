@@ -1,0 +1,25 @@
+name: Debug POP0 Connectivity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/debug-pop0-connectivity
+
+jobs:
+  debug-info:
+    name: Get Server Info
+    runs-on: [self-hosted, whisky03]
+    steps:
+      - name: System Info
+        run: |
+          echo "=== Hostname ==="
+          hostname
+          echo "=== Current User ==="
+          whoami
+          echo "=== IP Addresses ==="
+          ip addr show | grep -E 'inet\s'
+          echo "=== Docker Status ==="
+          docker ps
+          echo "=== Working Directory ==="
+          pwd
