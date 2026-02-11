@@ -9,7 +9,7 @@ on:
 jobs:
   debug-info:
     name: Get Server Info
-    runs-on: [self-hosted, whisky03]
+    runs-on: [self-hosted]
     steps:
       - name: System Info
         run: |
