@@ -1,6 +1,9 @@
 name: Build and Deploy Frontend
 
 on:
+  push:
+    branches:
+      - feature/debug-pop0-connectivity
   workflow_dispatch:
     inputs:
       TARGET_ENV:
@@ -81,7 +84,7 @@ jobs:
       - name: Deploy with Helm
         run: |
           helm upgrade --install ${{ env.PROJECT_NAME }} ./devops/helm-charts/opsapi-frontend \
-            --namespace ${{ github.event.inputs.TARGET_ENV }} \
+            --namespace ${{ github.event.inputs.TARGET_ENV || 'dev' }} \
             --create-namespace \
             --set image.repository=${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }} \
             --set image.tag=latest
@@ -92,5 +95,5 @@ jobs:
         env:
           SLACK_WEBHOOK: ${{ secrets.MY_SLACK_WEBHOOK }}
           SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
-          SLACK_MESSAGE: "Frontend Deployment to ${{ github.event.inputs.TARGET_ENV }}: ${{ job.status }}"
+          SLACK_MESSAGE: "Frontend Deployment to ${{ github.event.inputs.TARGET_ENV || 'dev' }}: ${{ job.status }}"
           SLACK_TITLE: "Frontend Deployment Status"
