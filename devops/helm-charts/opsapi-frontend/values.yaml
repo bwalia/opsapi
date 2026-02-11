@@ -1,0 +1,36 @@
+replicaCount: 1
+
+image:
+  repository: bwalia/opsapi-dashboard
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: dashboard.diytaxreturn.co.uk
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+resources:
+  limits:
+    cpu: 400m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+env:
+  - name: NEXT_PUBLIC_API_URL
+    value: "https://api.diytaxreturn.co.uk"
+  - name: NODE_ENV
+    value: "production"

@@ -1,0 +1,95 @@
+name: Build and Deploy FastAPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: 'Environment to deploy (dev, test, prod)'
+        required: true
+        default: 'dev'
+      SKIP_SMOKE_TEST:
+        description: 'Skip smoke test on POP0?'
+        type: boolean
+        default: false
+
+env:
+  IMAGE_NAME: fastapi-app
+  DOCKER_HUB_USER: bwalia
+  PROJECT_NAME: fastapi-app
+
+jobs:
+  build-and-push:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./fastapi-backend
+          push: true
+          tags: ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
+
+  smoke-test:
+    name: Smoke Test on POP0
+    needs: build-and-push
+    # On utilise le runner auto-hébergé sur POP0
+    runs-on: [self-hosted]
+    if: github.event.inputs.SKIP_SMOKE_TEST != 'true'
+    steps:
+      - name: Run container for testing
+        run: |
+          docker pull ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
+          docker stop ${{ env.IMAGE_NAME }}-test || true
+          docker rm ${{ env.IMAGE_NAME }}-test || true
+          docker run -d --name ${{ env.IMAGE_NAME }}-test -p 8080:8000 ${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }}:latest
+          
+      - name: Check health
+        run: |
+          sleep 10
+          curl -f http://localhost:8080/health || (docker logs ${{ env.IMAGE_NAME }}-test && exit 1)
+          
+      - name: Cleanup Test Container
+        run: docker rm -f ${{ env.IMAGE_NAME }}-test
+
+  deploy-to-k3s:
+    name: Deploy to K3s Cluster
+    needs: smoke-test
+    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.MY_K3S_CONFIG }}" | base64 -d > ~/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install ${{ env.PROJECT_NAME }} ./devops/helm-charts/fastapi-app \
+            --namespace ${{ github.event.inputs.TARGET_ENV }} \
+            --create-namespace \
+            --set image.repository=${{ env.DOCKER_HUB_USER }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=latest
+
+      - name: Slack Notification
+        if: always()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.MY_SLACK_WEBHOOK }}
+          SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
+          SLACK_MESSAGE: "FastAPI Deployment to ${{ github.event.inputs.TARGET_ENV }}: ${{ job.status }}"
+          SLACK_TITLE: "FastAPI Deployment Status"

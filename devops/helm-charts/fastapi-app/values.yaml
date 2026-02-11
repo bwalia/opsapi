@@ -1,0 +1,44 @@
+replicaCount: 1
+
+image:
+  repository: bwalia/fastapi-app
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: fastapi.diytaxreturn.co.uk
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Database connection details (Zalando Postgres)
+database:
+  host: "postgres-post-fastapi.default.svc.cluster.local"
+  port: 5432
+  name: "fastapi_db"
+  user: "fastapi_user"
+  passwordSecretName: "fastapi-db-credentials"
+
+env:
+  - name: APP_ENV
+    value: "production"
+  - name: MINIO_ENDPOINT
+    value: "minio.default.svc.cluster.local:9000"
