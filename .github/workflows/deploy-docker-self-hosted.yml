@@ -4,7 +4,7 @@ name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 # It uses the run-development.sh script to ensure consistency with local deployments
 #
 # TRIGGERS:
-# - Automatically on push to main branch (deploys to 'remote' environment)
+# - Automatically on push to main branch (deploys to 'test' environment)
 # - Manually via workflow_dispatch with custom options
 #
 # REQUIREMENTS:
@@ -29,7 +29,7 @@ on:
       TARGET_ENV:
         type: choice
         description: "Target environment"
-        default: "remote"
+        default: "test"
         required: true
         options:
           - local
@@ -74,7 +74,7 @@ on:
       PROJECT_CODE:
         type: choice
         description: "Project code for conditional migrations"
-        default: "all"
+        default: "tax_copilot"
         required: true
         options:
           - all
@@ -92,11 +92,11 @@ on:
 
 env:
   BASE_DOMAIN: "wslcrm.com"
-  SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/.env"
+  SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/${{ github.event.inputs.TARGET_ENV || 'test' }}/${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}/.env"
 
 jobs:
   deploy:
-    name: Deploy to ${{ github.event.inputs.CUSTOM_ENV || github.event.inputs.TARGET_ENV || 'remote' }}
+    name: Deploy to ${{ github.event.inputs.CUSTOM_ENV || github.event.inputs.TARGET_ENV || 'test' }}
     runs-on: ${{ github.event.inputs.RUNNER_LABEL || 'self-hosted' }}
 
     steps:
@@ -125,10 +125,10 @@ jobs:
           # Determine trigger type and set defaults
           if [ "${{ github.event_name }}" == "push" ]; then
             echo "Triggered by push to main branch"
-            TARGET_ENV="remote"
+            TARGET_ENV="test"
             PROTOCOL="https"
             RESET_DB="false"
-            PROJECT_CODE="all"
+            PROJECT_CODE="tax_copilot"
             APEX_DOMAIN="${{ env.BASE_DOMAIN }}"
           else
             echo "Triggered manually via workflow_dispatch"
@@ -140,12 +140,12 @@ jobs:
               TARGET_ENV="${{ github.event.inputs.TARGET_ENV }}"
               echo "Using preset environment: $TARGET_ENV"
             else
-              TARGET_ENV="remote"
+              TARGET_ENV="test"
               echo "Using default environment: $TARGET_ENV"
             fi
             PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
-            PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'all' }}"
+            PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
             APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'wslcrm.com' }}"
           fi
 
