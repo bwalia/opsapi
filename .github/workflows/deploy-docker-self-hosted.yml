@@ -47,7 +47,7 @@ on:
       APEX_DOMAIN:
         type: string
         description: "Apex domain (default: wslcrm.com). e.g., kisaan.com, myapp.co.uk"
-        default: "wslcrm.com"
+        default: "diytaxreturn.co.uk"
         required: false
 
       PROTOCOL:
