@@ -44,6 +44,12 @@ on:
         description: "Custom environment name (overrides TARGET_ENV if provided)"
         required: false
 
+      APEX_DOMAIN:
+        type: string
+        description: "Apex domain (default: wslcrm.com). e.g., kisaan.com, myapp.co.uk"
+        default: "wslcrm.com"
+        required: false
+
       PROTOCOL:
         type: choice
         description: "API protocol"
@@ -123,6 +129,7 @@ jobs:
             PROTOCOL="https"
             RESET_DB="false"
             PROJECT_CODE="all"
+            APEX_DOMAIN="${{ env.BASE_DOMAIN }}"
           else
             echo "Triggered manually via workflow_dispatch"
             # Determine target environment
@@ -139,9 +146,10 @@ jobs:
             PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
             PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'all' }}"
+            APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'wslcrm.com' }}"
           fi
 
-          BASE_DOMAIN="${{ env.BASE_DOMAIN }}"
+          BASE_DOMAIN="$APEX_DOMAIN"
 
           # Generate API URL based on environment and protocol
           case "$TARGET_ENV" in
@@ -161,12 +169,14 @@ jobs:
           echo "PROTOCOL=$PROTOCOL" >> $GITHUB_OUTPUT
           echo "RESET_DB=$RESET_DB" >> $GITHUB_OUTPUT
           echo "PROJECT_CODE=$PROJECT_CODE" >> $GITHUB_OUTPUT
+          echo "APEX_DOMAIN=$APEX_DOMAIN" >> $GITHUB_OUTPUT
           echo "TRIGGER=${{ github.event_name }}" >> $GITHUB_OUTPUT
 
           echo "=========================================="
           echo "Deployment Configuration:"
           echo "  Trigger: ${{ github.event_name }}"
           echo "  Environment: $TARGET_ENV"
+          echo "  Apex Domain: $APEX_DOMAIN"
           echo "  Protocol: $PROTOCOL"
           echo "  API URL: $API_URL"
           echo "  Project Code: $PROJECT_CODE"
@@ -208,6 +218,7 @@ jobs:
 
           # Build the command arguments
           ARGS="-e ${{ steps.env-setup.outputs.TARGET_ENV }}"
+          ARGS="$ARGS -d ${{ steps.env-setup.outputs.APEX_DOMAIN }}"
           ARGS="$ARGS -P ${{ steps.env-setup.outputs.PROTOCOL }}"
           ARGS="$ARGS -j ${{ steps.env-setup.outputs.PROJECT_CODE }}"
           ARGS="$ARGS -n"  # No git operations (already checked out)
@@ -252,6 +263,7 @@ jobs:
           echo "=========================================="
           echo "Trigger: ${{ steps.env-setup.outputs.TRIGGER }}"
           echo "Environment: ${{ steps.env-setup.outputs.TARGET_ENV }}"
+          echo "Apex Domain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}"
           echo "API URL: ${{ steps.env-setup.outputs.API_URL }}"
           echo "Protocol: ${{ steps.env-setup.outputs.PROTOCOL }}"
           echo "Project Code: ${{ steps.env-setup.outputs.PROJECT_CODE }}"
@@ -274,7 +286,7 @@ jobs:
           SLACK_CHANNEL: github-updates
           SLACK_COLOR: ${{ job.status }}
           SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI deployed successfully to ${{ steps.env-setup.outputs.TARGET_ENV }} environment :rocket:\nAPI URL: ${{ steps.env-setup.outputs.API_URL }}\nProject: ${{ steps.env-setup.outputs.PROJECT_CODE }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}"
+          SLACK_MESSAGE: "OPSAPI deployed successfully to ${{ steps.env-setup.outputs.TARGET_ENV }} environment :rocket:\nAPI URL: ${{ steps.env-setup.outputs.API_URL }}\nDomain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}\nProject: ${{ steps.env-setup.outputs.PROJECT_CODE }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}"
           SLACK_TITLE: OPSAPI Deployment Success
           SLACK_USERNAME: rtCamp
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
@@ -286,7 +298,7 @@ jobs:
           SLACK_CHANNEL: github-updates
           SLACK_COLOR: ${{ job.status }}
           SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI deployment FAILED for ${{ steps.env-setup.outputs.TARGET_ENV }} environment :x:\nProject: ${{ steps.env-setup.outputs.PROJECT_CODE }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}\nCheck workflow logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_MESSAGE: "OPSAPI deployment FAILED for ${{ steps.env-setup.outputs.TARGET_ENV }} environment :x:\nDomain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}\nProject: ${{ steps.env-setup.outputs.PROJECT_CODE }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}\nCheck workflow logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           SLACK_TITLE: OPSAPI Deployment Failed
           SLACK_USERNAME: rtCamp
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
