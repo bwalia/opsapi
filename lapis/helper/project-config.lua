@@ -61,6 +61,7 @@ ProjectConfig.PROJECT_FEATURES = {
     tax_copilot = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.TAX_COPILOT,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
     },
 
     -- Ecommerce platform
