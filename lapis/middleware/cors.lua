@@ -29,6 +29,8 @@ local CORS_CONFIG = {
         "^https?://.*%.wslcrm%.com$",
         "^https?://opsapi%.com$",
         "^https?://.*%.opsapi%.com$",
+        "^https?://diytaxreturn%.co%.uk$",
+        "^https?://.*%.diytaxreturn%.co%.uk$",
         "^https?://workstation%.co%.uk$",
         "^https?://.*%.workstation%.co%.uk$",
         "^https?://.*%.workstation%.co%.uk:%d+$"  -- Allow any port on workstation.co.uk subdomains
