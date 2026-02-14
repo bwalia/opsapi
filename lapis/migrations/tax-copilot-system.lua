@@ -546,6 +546,17 @@ return {
 
     -- 24. Rename account_number_last4 to account_number and expand to VARCHAR(20)
     [24] = function()
+        -- Check if table exists first (it may not if earlier migrations ran as no-ops)
+        local table_check = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'tax_bank_accounts'
+        ]])
+        if not table_check or #table_check == 0 then
+            print("[Tax Copilot] tax_bank_accounts table does not exist - skipping rename migration")
+            print("[Tax Copilot] You may need to reset the database (-r) and re-run migrations with PROJECT_CODE=tax_copilot")
+            return
+        end
+
         -- Idempotent: check if old column exists before renaming
         local col_check = db.query([[
             SELECT column_name FROM information_schema.columns
