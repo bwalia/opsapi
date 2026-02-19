@@ -1,48 +1,37 @@
 --[[
     Unified Push Notification Helper
 
-    Routes push notifications to the correct service based on device type:
-    - iOS: APNs (Apple Push Notification service)
-    - Android: FCM (Firebase Cloud Messaging)
+    Routes all push notifications through FCM (Firebase Cloud Messaging).
+
+    The Flutter mobile app registers FCM tokens via FirebaseMessaging.getToken()
+    for ALL platforms including iOS. FCM tokens are NOT raw APNs device tokens —
+    they can only be used with the FCM HTTP v1 API, which handles APNs delivery
+    internally for iOS devices.
+
+    The APNs helper (helper/apns-push.lua) is kept for future use if we ever
+    switch to registering raw APNs device tokens via getAPNSToken() on the
+    client side.
 ]]
 
 local DeviceTokenQueries = require("queries.DeviceTokenQueries")
 
 local PushNotification = {}
 
--- Lazy load platform-specific modules to avoid errors if not configured
-local function get_apns()
-    local ok, apns = pcall(require, "helper.apns-push")
-    if ok then return apns end
-    ngx.log(ngx.WARN, "[Push] APNs module not available")
-    return nil
-end
-
+-- Lazy load FCM module
 local function get_fcm()
     local ok, fcm = pcall(require, "helper.fcm-push")
     if ok then return fcm end
-    ngx.log(ngx.WARN, "[Push] FCM module not available")
+    ngx.log(ngx.ERR, "[Push] FCM module not available")
     return nil
 end
 
--- Send notification to a single device
+-- Send notification to a single device (always via FCM)
 function PushNotification.sendToDevice(device_token, device_type, notification, data)
-    if device_type == "ios" then
-        local apns = get_apns()
-        if apns then
-            return apns.sendToDevice(device_token, notification, data)
-        end
-        return false, "APNs not configured"
-    elseif device_type == "android" then
-        local fcm = get_fcm()
-        if fcm then
-            return fcm.sendToDevice(device_token, notification, data)
-        end
-        return false, "FCM not configured"
-    else
-        ngx.log(ngx.WARN, "[Push] Unknown device type: ", device_type)
-        return false, "Unknown device type"
+    local fcm = get_fcm()
+    if fcm then
+        return fcm.sendToDevice(device_token, notification, data)
     end
+    return false, "FCM not configured"
 end
 
 -- Send notification to multiple users
@@ -58,61 +47,33 @@ function PushNotification.sendToUsers(user_uuids, notification, data)
         return true, { success = 0, failure = 0, message = "No active devices" }
     end
 
-    -- Separate tokens by platform
-    local ios_tokens = {}
-    local android_tokens = {}
-
+    local fcm_tokens = {}
     for _, token in ipairs(tokens) do
-        if token.device_type == "ios" then
-            table.insert(ios_tokens, token.fcm_token)
-        elseif token.device_type == "android" then
-            table.insert(android_tokens, token.fcm_token)
-        else
-            -- Default to FCM for unknown types (legacy behavior)
-            table.insert(android_tokens, token.fcm_token)
-        end
+        table.insert(fcm_tokens, token.fcm_token)
     end
 
     local total_success = 0
     local total_failure = 0
 
-    -- Send to iOS devices via APNs
-    if #ios_tokens > 0 then
-        local apns = get_apns()
-        if apns then
-            local ok, result = apns.sendToDevices(ios_tokens, notification, data)
-            if result then
-                total_success = total_success + (result.success or 0)
-                total_failure = total_failure + (result.failure or 0)
-            end
-            ngx.log(ngx.DEBUG, "[Push] APNs: sent to ", #ios_tokens, " iOS devices")
-        else
-            total_failure = total_failure + #ios_tokens
-            ngx.log(ngx.WARN, "[Push] APNs not configured, skipping ", #ios_tokens, " iOS devices")
-        end
-    end
-
-    -- Send to Android devices via FCM
-    if #android_tokens > 0 then
+    if #fcm_tokens > 0 then
         local fcm = get_fcm()
         if fcm then
-            local ok, result = fcm.sendToDevices(android_tokens, notification, data)
+            local ok, result = fcm.sendToDevices(fcm_tokens, notification, data)
             if result then
                 total_success = total_success + (result.success or 0)
                 total_failure = total_failure + (result.failure or 0)
             end
-            ngx.log(ngx.DEBUG, "[Push] FCM: sent to ", #android_tokens, " Android devices")
+            ngx.log(ngx.NOTICE, "[Push] FCM: sent to ", #fcm_tokens, " devices (success=", total_success, ", failure=", total_failure, ")")
         else
-            total_failure = total_failure + #android_tokens
-            ngx.log(ngx.WARN, "[Push] FCM not configured, skipping ", #android_tokens, " Android devices")
+            total_failure = total_failure + #fcm_tokens
+            ngx.log(ngx.ERR, "[Push] FCM module not available, cannot send to ", #fcm_tokens, " devices")
         end
     end
 
     return total_success > 0, {
         success = total_success,
         failure = total_failure,
-        ios_count = #ios_tokens,
-        android_count = #android_tokens
+        total_devices = #fcm_tokens
     }
 end
 
