@@ -430,13 +430,10 @@ return function(app)
                 db.delete("cart_items", "user_id = ?", user_result[1].id)
             end
 
-            -- Deactivate all FCM device tokens so stale tokens don't linger
-            local ok, err = pcall(function()
-                DeviceTokenQueries.deactivateAll(user_uuid)
-            end)
-            if not ok then
-                ngx.log(ngx.WARN, "Failed to deactivate device tokens on logout: " .. tostring(err))
-            end
+            -- Device token cleanup is handled by the iOS app calling
+            -- DELETE /api/v2/device-tokens with the specific fcm_token
+            -- before this endpoint. We don't delete all tokens here
+            -- because the user may be logged in on other devices.
         end
 
         return {
