@@ -14,6 +14,21 @@ local cjson = require("cjson")
 
 local TaxTransactionQueries = {}
 
+-- Roles that can access any user's transactions
+local ADMIN_ROLES = {
+    administrative = true,
+    admin = true,
+    tax_admin = true,
+    tax_accountant = true,
+    accountant = true,
+}
+
+-- Check if user has admin/accountant privileges
+local function isAdminOrAccountant(user)
+    local role = user.roles or user.role or ""
+    return ADMIN_ROLES[role] == true
+end
+
 -- Helper to get user's internal ID
 local function getUserId(user)
     local user_uuid = user.uuid or user.id
@@ -173,41 +188,82 @@ function TaxTransactionQueries.show(uuid, user)
         return nil
     end
 
-    local result = db.query([[
-        SELECT
-            t.id as internal_id,
-            t.uuid as id,
-            s.uuid as statement_id,
-            t.transaction_date,
-            t.description,
-            t.amount,
-            t.balance,
-            t.transaction_type,
-            t.category,
-            t.hmrc_category,
-            t.confidence_score,
-            t.classified_by,
-            t.is_tax_deductible,
-            t.is_vat_applicable,
-            t.vat_rate,
-            t.llm_response,
-            t.confirmation_status,
-            t.confirmed_at,
-            t.confirmed_by,
-            t.classification_status,
-            t.classification_confirmed_at,
-            t.classification_confirmed_by,
-            t.is_manually_reviewed,
-            t.reviewed_by,
-            t.reviewed_at,
-            t.user_notes,
-            t.created_at,
-            t.updated_at
-        FROM tax_transactions t
-        JOIN tax_statements s ON t.statement_id = s.id
-        WHERE t.uuid = ? AND t.user_id = ?
-        LIMIT 1
-    ]], uuid, user_id)
+    local result
+    if isAdminOrAccountant(user) then
+        -- Admin/accountant can view any transaction
+        result = db.query([[
+            SELECT
+                t.id as internal_id,
+                t.uuid as id,
+                s.uuid as statement_id,
+                t.transaction_date,
+                t.description,
+                t.amount,
+                t.balance,
+                t.transaction_type,
+                t.category,
+                t.hmrc_category,
+                t.confidence_score,
+                t.classified_by,
+                t.is_tax_deductible,
+                t.is_vat_applicable,
+                t.vat_rate,
+                t.llm_response,
+                t.confirmation_status,
+                t.confirmed_at,
+                t.confirmed_by,
+                t.classification_status,
+                t.classification_confirmed_at,
+                t.classification_confirmed_by,
+                t.is_manually_reviewed,
+                t.reviewed_by,
+                t.reviewed_at,
+                t.user_notes,
+                t.created_at,
+                t.updated_at
+            FROM tax_transactions t
+            JOIN tax_statements s ON t.statement_id = s.id
+            WHERE t.uuid = ?
+            LIMIT 1
+        ]], uuid)
+    else
+        -- Regular users can only view their own transactions
+        result = db.query([[
+            SELECT
+                t.id as internal_id,
+                t.uuid as id,
+                s.uuid as statement_id,
+                t.transaction_date,
+                t.description,
+                t.amount,
+                t.balance,
+                t.transaction_type,
+                t.category,
+                t.hmrc_category,
+                t.confidence_score,
+                t.classified_by,
+                t.is_tax_deductible,
+                t.is_vat_applicable,
+                t.vat_rate,
+                t.llm_response,
+                t.confirmation_status,
+                t.confirmed_at,
+                t.confirmed_by,
+                t.classification_status,
+                t.classification_confirmed_at,
+                t.classification_confirmed_by,
+                t.is_manually_reviewed,
+                t.reviewed_by,
+                t.reviewed_at,
+                t.user_notes,
+                t.created_at,
+                t.updated_at
+            FROM tax_transactions t
+            JOIN tax_statements s ON t.statement_id = s.id
+            WHERE t.uuid = ? AND t.user_id = ?
+            LIMIT 1
+        ]], uuid, user_id)
+    end
 
     return result and result[1] or nil
 end
@@ -219,10 +275,12 @@ function TaxTransactionQueries.update(uuid, params, user)
         return nil
     end
 
-    local transaction = TaxTransactions:find({
-        uuid = uuid,
-        user_id = user_id
-    })
+    local transaction
+    if isAdminOrAccountant(user) then
+        transaction = TaxTransactions:find({ uuid = uuid })
+    else
+        transaction = TaxTransactions:find({ uuid = uuid, user_id = user_id })
+    end
 
     if not transaction then
         return nil
@@ -291,10 +349,12 @@ function TaxTransactionQueries.confirm(uuid, params, user)
         return nil
     end
 
-    local transaction = TaxTransactions:find({
-        uuid = uuid,
-        user_id = user_id
-    })
+    local transaction
+    if isAdminOrAccountant(user) then
+        transaction = TaxTransactions:find({ uuid = uuid })
+    else
+        transaction = TaxTransactions:find({ uuid = uuid, user_id = user_id })
+    end
 
     if not transaction then
         return nil
@@ -337,10 +397,12 @@ function TaxTransactionQueries.confirmClassification(uuid, params, user)
         return nil
     end
 
-    local transaction = TaxTransactions:find({
-        uuid = uuid,
-        user_id = user_id
-    })
+    local transaction
+    if isAdminOrAccountant(user) then
+        transaction = TaxTransactions:find({ uuid = uuid })
+    else
+        transaction = TaxTransactions:find({ uuid = uuid, user_id = user_id })
+    end
 
     if not transaction then
         return nil
