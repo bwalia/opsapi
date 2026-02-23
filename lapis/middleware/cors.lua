@@ -75,7 +75,7 @@ local function isOriginAllowed(origin)
         end
     end
 
-    return false, "http://localhost:5173" -- fallback for unmatched origins
+    return false, "" -- empty value; browser will reject the cross-origin request
 end
 
 function CorsMiddleware.enable(app)
