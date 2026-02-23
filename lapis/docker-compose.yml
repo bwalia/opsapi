@@ -61,7 +61,7 @@ services:
       opsapi-network:
         ipv4_address: 172.71.0.19
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8039"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8039"]
       interval: 30s
       timeout: 20s
       retries: 3
