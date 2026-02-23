@@ -5,6 +5,7 @@ local Global = require "helper.global"
 local JWTHelper = require "helper.jwt-helper"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
+local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 
 return function(app)
     ----------------- Auth Routes --------------------
@@ -420,7 +421,7 @@ return function(app)
             end
         end
 
-        -- Clear user's cart from database
+        -- Clear user's cart and deactivate device tokens
         local user_uuid = ngx.var.http_x_user_id
         if user_uuid and user_uuid ~= "guest" then
             local db = require("lapis.db")
@@ -428,6 +429,11 @@ return function(app)
             if user_result and #user_result > 0 then
                 db.delete("cart_items", "user_id = ?", user_result[1].id)
             end
+
+            -- Device token cleanup is handled by the iOS app calling
+            -- DELETE /api/v2/device-tokens with the specific fcm_token
+            -- before this endpoint. We don't delete all tokens here
+            -- because the user may be logged in on other devices.
         end
 
         return {

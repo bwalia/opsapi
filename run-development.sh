@@ -26,6 +26,7 @@ show_help() {
     echo ""
     echo -e "${BLUE}Options:${NC}"
     echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod|remote|<custom>)"
+    echo "  -d, --domain [DOMAIN] Apex domain (default: ${BASE_DOMAIN})"
     echo "  -P, --protocol [PROTO] API protocol (http|https). Default: https for remote, http for local"
     echo "  -j, --project [CODE]  Project code for conditional migrations (all|tax_copilot|ecommerce|...)"
     echo "  -s, --stash [y|n]     Git stash option (y=stash, n=skip)"
@@ -72,6 +73,8 @@ show_help() {
     echo "  ./run-development.sh -e remote -n -C    # CI/CD deployment (no dev mounts)"
     echo "  ./run-development.sh -j tax_copilot     # Only create tax-related tables"
     echo "  ./run-development.sh -e local -j tax_copilot -r  # Fresh tax_copilot setup"
+    echo "  ./run-development.sh -d myapp.com -e prod -n  # Deploy with custom apex domain"
+    echo "  ./run-development.sh -d kisaan.com -e dev -a  # Dev environment on kisaan.com"
     echo ""
 }
 
@@ -86,6 +89,7 @@ CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
 PROJECT_CODE=""
+APEX_DOMAIN=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -133,6 +137,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -C|--ci)
             CI_MODE=true
+            shift
+            ;;
+        -d|--domain)
+            APEX_DOMAIN="$2"
+            shift 2
+            ;;
+        --domain=*)
+            APEX_DOMAIN="${1#*=}"
             shift
             ;;
         -P|--protocol)
@@ -241,6 +253,20 @@ validate_environment() {
 
     # Check if environment name contains only valid characters (alphanumeric, hyphen, underscore)
     if [[ "$env" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to validate apex domain
+validate_domain() {
+    local domain="$1"
+    if [[ -z "$domain" ]]; then
+        return 1
+    fi
+    # Must be a valid domain format (e.g., example.com, my-app.co.uk)
+    if [[ "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]; then
         return 0
     else
         return 1
@@ -570,6 +596,24 @@ else
     TARGET_ENV=$(prompt_environment)
     echo ""
 fi
+
+# ============================================
+# Apex Domain Selection
+# ============================================
+if [[ -n "$APEX_DOMAIN" ]]; then
+    # Apex domain provided via argument
+    if validate_domain "$APEX_DOMAIN"; then
+        BASE_DOMAIN="$APEX_DOMAIN"
+        echo -e "${BLUE}[i] Apex domain from argument: ${CYAN}${BASE_DOMAIN}${NC}"
+    else
+        echo -e "${RED}[!] Invalid apex domain: '$APEX_DOMAIN'${NC}"
+        echo -e "${YELLOW}[!] Domain must be a valid format (e.g., example.com, my-app.co.uk)${NC}"
+        exit 1
+    fi
+else
+    echo -e "${BLUE}[i] Apex domain (default): ${CYAN}${BASE_DOMAIN}${NC}"
+fi
+echo ""
 
 # Determine protocol
 if [[ -n "$PROTOCOL" ]]; then

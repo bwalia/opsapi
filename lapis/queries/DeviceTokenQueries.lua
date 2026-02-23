@@ -29,7 +29,7 @@ function DeviceTokenQueries.register(data, user_uuid)
         -- Update existing token
         db.query([[
             UPDATE device_tokens
-            SET is_active = true,
+            SET is_active = TRUE,
                 device_type = COALESCE(?, device_type),
                 device_name = COALESCE(?, device_name),
                 updated_at = NOW()
@@ -55,7 +55,7 @@ function DeviceTokenQueries.register(data, user_uuid)
         fcm_token = data.fcm_token,
         device_type = device_type,
         device_name = device_name,
-        is_active = true
+        is_active = db.TRUE
     }
 
     local token = DeviceTokens:create(token_data, { returning = "*" })
@@ -111,11 +111,10 @@ function DeviceTokenQueries.getActiveTokensForUsers(user_uuids)
     return tokens or {}
 end
 
--- Deactivate a token (logout)
+-- Delete a token (logout)
 function DeviceTokenQueries.deactivate(fcm_token, user_uuid)
     local result = db.query([[
-        UPDATE device_tokens
-        SET is_active = false, updated_at = NOW()
+        DELETE FROM device_tokens
         WHERE fcm_token = ? AND user_uuid = ?
         RETURNING *
     ]], fcm_token, user_uuid)
@@ -123,11 +122,10 @@ function DeviceTokenQueries.deactivate(fcm_token, user_uuid)
     return result and #result > 0
 end
 
--- Deactivate all tokens for a user (logout from all devices)
+-- Delete all tokens for a user (logout from all devices)
 function DeviceTokenQueries.deactivateAll(user_uuid)
-    local result = db.query([[
-        UPDATE device_tokens
-        SET is_active = false, updated_at = NOW()
+    db.query([[
+        DELETE FROM device_tokens
         WHERE user_uuid = ?
     ]], user_uuid)
 
