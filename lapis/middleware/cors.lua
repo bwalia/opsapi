@@ -1,5 +1,27 @@
 local CorsMiddleware = {}
 
+-- Build domain patterns from CORS_ALLOWED_DOMAINS env variable
+-- Format: comma-separated domain names, e.g. "diytaxreturn.co.uk,kisaan.com,opsapi.com"
+local function buildDomainPatterns()
+    local patterns = {}
+    local domains_env = os.getenv("CORS_ALLOWED_DOMAINS") or ""
+
+    for domain in domains_env:gmatch("[^,]+") do
+        domain = domain:match("^%s*(.-)%s*$") -- trim whitespace
+        if domain ~= "" then
+            -- Escape dots for Lua pattern matching
+            local escaped = domain:gsub("%.", "%%.")
+            -- Allow the domain itself and all subdomains, with or without port
+            table.insert(patterns, "^https?://" .. escaped .. "$")
+            table.insert(patterns, "^https?://.*%." .. escaped .. "$")
+            table.insert(patterns, "^https?://" .. escaped .. ":%d+$")
+            table.insert(patterns, "^https?://.*%." .. escaped .. ":%d+$")
+        end
+    end
+
+    return patterns
+end
+
 -- Professional CORS configuration for development and production
 local CORS_CONFIG = {
     -- Development origins
@@ -21,18 +43,8 @@ local CORS_CONFIG = {
         "http://pop0.workstation.co.uk:3000",
         "http://pop0.workstation.co.uk:3001"
     },
-    -- Production domain patterns (add your production domains here)
-    domain_patterns = {
-        "^https?://kisaan%.com$",
-        "^https?://.*%.kisaan%.com$",
-        "^https?://wslcrm%.com$",
-        "^https?://.*%.wslcrm%.com$",
-        "^https?://opsapi%.com$",
-        "^https?://.*%.opsapi%.com$",
-        "^https?://workstation%.co%.uk$",
-        "^https?://.*%.workstation%.co%.uk$",
-        "^https?://.*%.workstation%.co%.uk:%d+$"  -- Allow any port on workstation.co.uk subdomains
-    },
+    -- Production domain patterns loaded from CORS_ALLOWED_DOMAINS env variable
+    domain_patterns = buildDomainPatterns(),
     -- CORS headers - include all custom headers used by the frontend
     headers = {
         methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
@@ -86,4 +98,3 @@ function CorsMiddleware.enable(app)
 end
 
 return CorsMiddleware
--- CORS middleware for Lapis with professional configuration
