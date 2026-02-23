@@ -293,14 +293,14 @@ validate_project_code() {
 
 # Function to prompt for project code selection
 prompt_project_code() {
-    echo -e "${CYAN}Select project code for conditional migrations:${NC}"
-    echo "  1) all          - All features (default, backward compatible)"
-    echo "  2) tax_copilot  - UK Tax Return AI Agent (core + tax tables only)"
-    echo "  3) ecommerce    - E-commerce platform (core + stores, products, orders)"
-    echo "  4) collaboration - Chat + Kanban + Services"
-    echo "  5) hospital     - Hospital CRM"
-    echo "  6) core_only    - Just authentication tables"
-    echo ""
+    echo -e "${CYAN}Select project code for conditional migrations:${NC}" >&2
+    echo "  1) all          - All features (default, backward compatible)" >&2
+    echo "  2) tax_copilot  - UK Tax Return AI Agent (core + tax tables only)" >&2
+    echo "  3) ecommerce    - E-commerce platform (core + stores, products, orders)" >&2
+    echo "  4) collaboration - Chat + Kanban + Services" >&2
+    echo "  5) hospital     - Hospital CRM" >&2
+    echo "  6) core_only    - Just authentication tables" >&2
+    echo "" >&2
 
     local choice
     while true; do
@@ -349,12 +349,12 @@ prompt_protocol() {
         default_proto="https"
     fi
 
-    echo -e "${CYAN}Select API protocol:${NC}"
-    echo "  1) https - Secure connection (recommended for remote environments)"
-    echo "  2) http  - Non-secure connection (typical for local development)"
-    echo ""
-    echo -e "${BLUE}[i] Default for '$env' environment: ${CYAN}${default_proto}${NC}"
-    echo ""
+    echo -e "${CYAN}Select API protocol:${NC}" >&2
+    echo "  1) https - Secure connection (recommended for remote environments)" >&2
+    echo "  2) http  - Non-secure connection (typical for local development)" >&2
+    echo "" >&2
+    echo -e "${BLUE}[i] Default for '$env' environment: ${CYAN}${default_proto}${NC}" >&2
+    echo "" >&2
 
     local choice
     while true; do
@@ -381,16 +381,16 @@ prompt_protocol() {
 
 # Function to prompt for environment selection
 prompt_environment() {
-    echo -e "${CYAN}Select target environment:${NC}"
-    echo "  1) local   - http://localhost:4010"
-    echo "  2) dev     - https://dev-api.${BASE_DOMAIN}"
-    echo "  3) test    - https://test-api.${BASE_DOMAIN}"
-    echo "  4) acc     - https://acc-api.${BASE_DOMAIN}"
-    echo "  5) prod    - https://api.${BASE_DOMAIN}"
-    echo "  6) remote  - https://remote-api.${BASE_DOMAIN}"
-    echo ""
-    echo -e "${CYAN}Or enter a custom environment name (e.g., staging, demo, etc.)${NC}"
-    echo ""
+    echo -e "${CYAN}Select target environment:${NC}" >&2
+    echo "  1) local   - http://localhost:4010" >&2
+    echo "  2) dev     - https://dev-api.${BASE_DOMAIN}" >&2
+    echo "  3) test    - https://test-api.${BASE_DOMAIN}" >&2
+    echo "  4) acc     - https://acc-api.${BASE_DOMAIN}" >&2
+    echo "  5) prod    - https://api.${BASE_DOMAIN}" >&2
+    echo "  6) remote  - https://remote-api.${BASE_DOMAIN}" >&2
+    echo "" >&2
+    echo -e "${CYAN}Or enter a custom environment name (e.g., staging, demo, etc.)${NC}" >&2
+    echo "" >&2
 
     local choice
     while true; do
@@ -810,9 +810,9 @@ sleep 15
 # Pass PROJECT_CODE environment variable to control which tables are created
 echo -e "${GREEN}[+] Running migrations with PROJECT_CODE=${PROJECT_CODE}...${NC}"
 if $CI_MODE; then
-    docker exec -e PROJECT_CODE=$PROJECT_CODE $CONTAINER_NAME lapis migrate
+    docker exec -e "PROJECT_CODE=$PROJECT_CODE" "$CONTAINER_NAME" lapis migrate
 else
-    docker exec -e PROJECT_CODE=$PROJECT_CODE -it $CONTAINER_NAME lapis migrate
+    docker exec -e "PROJECT_CODE=$PROJECT_CODE" -it "$CONTAINER_NAME" lapis migrate
 fi
 
 sleep 5
