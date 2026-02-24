@@ -38,7 +38,7 @@ services:
       opsapi-network:
         ipv4_address: 172.71.0.12
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1/health"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -51,7 +51,7 @@ services:
       context: ../opsapi-dashboard
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4010}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://127.0.0.1:4010}
     ports:
       - "8039:8039"
     environment:
@@ -113,7 +113,7 @@ services:
     networks:
       opsapi-network:
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -152,7 +152,7 @@ services:
       opsapi-network:
         ipv4_address: 172.71.0.17
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -273,7 +273,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3011
+      - GF_SERVER_ROOT_URL=http://127.0.0.1:3011
       - GF_INSTALL_PLUGINS=
     networks:
       opsapi-network:

@@ -214,10 +214,10 @@ groups:
 **Step 1: Identify the attack vector**
 ```bash
 # Check top attacking IPs
-curl -s http://localhost:4010/metrics | grep requests_by_ip | sort -t'=' -k2 -nr | head -20
+curl -s http://127.0.0.1:4010/metrics | grep requests_by_ip | sort -t'=' -k2 -nr | head -20
 
 # Check attack pattern
-curl -s http://localhost:4010/metrics | grep suspicious
+curl -s http://127.0.0.1:4010/metrics | grep suspicious
 ```
 
 **Step 2: Implement immediate mitigation**
@@ -296,17 +296,17 @@ while true; do
     echo ""
     
     echo "Top 10 IPs by request count:"
-    curl -s http://localhost:4010/metrics | \
+    curl -s http://127.0.0.1:4010/metrics | \
         grep 'nginx_http_requests_by_ip_total' | \
         sort -t'=' -k2 -nr | head -10
     
     echo ""
     echo "Suspicious requests:"
-    curl -s http://localhost:4010/metrics | grep 'suspicious_requests_total'
+    curl -s http://127.0.0.1:4010/metrics | grep 'suspicious_requests_total'
     
     echo ""
     echo "Error rates:"
-    curl -s http://localhost:4010/metrics | \
+    curl -s http://127.0.0.1:4010/metrics | \
         grep -E '4xx_errors_total|5xx_errors_total' | tail -5
     
     sleep 5
@@ -406,13 +406,13 @@ limit_conn addr 10;
 ### Simulate high traffic:
 ```bash
 # Use Apache Bench
-ab -n 10000 -c 100 http://localhost:4010/
+ab -n 10000 -c 100 http://127.0.0.1:4010/
 
 # Use wrk
-wrk -t12 -c400 -d30s http://localhost:4010/
+wrk -t12 -c400 -d30s http://127.0.0.1:4010/
 
 # Monitor metrics during test
-watch -n1 'curl -s http://localhost:4010/metrics | grep requests_by_ip'
+watch -n1 'curl -s http://127.0.0.1:4010/metrics | grep requests_by_ip'
 ```
 
 ## Further Reading

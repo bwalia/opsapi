@@ -19,8 +19,8 @@ var (
 	testDuration = flag.Duration("duration", 10*time.Second, "duration of the test")
 )
 
-const healthURL = "http://localhost:18000/health"
-const metricsURL = "http://localhost:18000/metrics"
+const healthURL = "http://127.0.0.1:18000/health"
+const metricsURL = "http://127.0.0.1:18000/metrics"
 
 type testRunner struct {
 	ctx        context.Context

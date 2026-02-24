@@ -30,7 +30,7 @@ Created a dedicated metrics module (`/app/lib/prometheus_metrics.lua`) that:
 ## Testing
 With `code_cache = "on"`:
 ```bash
-curl http://localhost:4010/metrics
+curl http://127.0.0.1:4010/metrics
 ```
 
 Returns proper Prometheus metrics:
@@ -45,7 +45,7 @@ nginx_http_connections{state="writing"} 1
 ...
 # HELP nginx_http_requests_total Number of HTTP requests
 # TYPE nginx_http_requests_total counter
-nginx_http_requests_total{host="localhost",status="200"} 4
+nginx_http_requests_total{host="127.0.0.1",status="200"} 4
 ```
 
 ## Files Modified

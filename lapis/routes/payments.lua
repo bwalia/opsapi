@@ -50,8 +50,8 @@ return function(app)
                             quantity = 1
                         }
                     },
-                    success_url = "http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
-                    cancel_url = "http://localhost:3000/checkout"
+                    success_url = "http://127.0.0.1:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
+                    cancel_url = "http://127.0.0.1:3000/checkout"
                 })
 
                 if not session then
@@ -307,8 +307,8 @@ return function(app)
                 local session, err = stripe:create_checkout_session({
                     mode = "payment",
                     line_items = line_items,
-                    success_url = params.success_url or "http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
-                    cancel_url = params.cancel_url or "http://localhost:3000/checkout",
+                    success_url = params.success_url or "http://127.0.0.1:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
+                    cancel_url = params.cancel_url or "http://127.0.0.1:3000/checkout",
                     customer = stripe_customer_id,  -- Use Stripe customer ID
                     customer_email = not stripe_customer_id and params.customer_email or nil,  -- Only if no customer
                     billing_address_collection = "required",

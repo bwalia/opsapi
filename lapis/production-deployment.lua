@@ -16,7 +16,7 @@ local config = require("lapis.config").get()
 local migrations = require("lapis.db.migrations")
 
 print("🚀 Starting Production Database Schema Upgrade...")
-print("Database: " .. (config.database or "localhost"))
+print("Database: " .. (config.database or "127.0.0.1"))
 print()
 
 -- List of production migrations to apply

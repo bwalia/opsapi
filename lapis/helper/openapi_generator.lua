@@ -20,7 +20,7 @@ function _M.generate()
         },
         servers = {
             {
-                url = "http://localhost:4010",
+                url = "http://127.0.0.1:4010",
                 description = "Local Development"
             },
             {

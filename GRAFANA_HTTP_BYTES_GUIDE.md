@@ -46,7 +46,7 @@ Your Grafana dashboard now includes **2 new panels** to monitor HTTP response by
 
 ### Access the Dashboard
 
-1. **Open Grafana**: http://localhost:3000
+1. **Open Grafana**: http://127.0.0.1:3000
 2. **Login**: 
    - Username: `admin`
    - Password: `admin`
@@ -209,21 +209,21 @@ sum by (endpoint, status) (rate(nginx_http_response_size_bytes_sum[5m]))
 ```bash
 # Generate traffic to see metrics populate
 for i in {1..100}; do 
-  curl -s http://localhost:4010/ > /dev/null
-  curl -s http://localhost:4010/api/v2/products > /dev/null
+  curl -s http://127.0.0.1:4010/ > /dev/null
+  curl -s http://127.0.0.1:4010/api/v2/products > /dev/null
 done
 ```
 
 ### Check Raw Metrics
 ```bash
 # View current byte counts
-curl -s http://localhost:4010/metrics | grep "nginx_http_response_size_bytes_sum"
+curl -s http://127.0.0.1:4010/metrics | grep "nginx_http_response_size_bytes_sum"
 ```
 
 ### Query Prometheus Directly
 ```bash
 # Test the query
-curl -s 'http://localhost:9090/api/v1/query?query=sum%20by%20(status)%20(nginx_http_response_size_bytes_sum)' | python3 -m json.tool
+curl -s 'http://127.0.0.1:9090/api/v1/query?query=sum%20by%20(status)%20(nginx_http_response_size_bytes_sum)' | python3 -m json.tool
 ```
 
 ### Export Dashboard
@@ -283,14 +283,14 @@ curl -s 'http://localhost:9090/api/v1/query?query=sum%20by%20(status)%20(nginx_h
 ### Panel Shows "No Data"
 **Solution:**
 1. Check time range (set to last 5-15 minutes)
-2. Generate traffic: `curl http://localhost:4010/`
-3. Verify metrics: `curl http://localhost:4010/metrics | grep response_size`
-4. Check Prometheus targets: http://localhost:9090/targets
+2. Generate traffic: `curl http://127.0.0.1:4010/`
+3. Verify metrics: `curl http://127.0.0.1:4010/metrics | grep response_size`
+4. Check Prometheus targets: http://127.0.0.1:9090/targets
 
 ### Panel Shows Error
 **Solution:**
 1. Verify Prometheus datasource is connected
-2. Test query in Prometheus: http://localhost:9090/graph
+2. Test query in Prometheus: http://127.0.0.1:9090/graph
 3. Check Grafana logs: `docker logs opsapi-grafana`
 
 ### Values Look Wrong
@@ -302,6 +302,6 @@ curl -s 'http://localhost:9090/api/v1/query?query=sum%20by%20(status)%20(nginx_h
 ---
 
 **Dashboard Ready!** 🎉  
-Access it now: http://localhost:3000
+Access it now: http://127.0.0.1:3000
 
 Your new panels are actively monitoring HTTP response byte transfers!

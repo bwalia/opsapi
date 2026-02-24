@@ -154,7 +154,7 @@ jobs:
           # Generate API URL based on environment and protocol
           case "$TARGET_ENV" in
             local)
-              API_URL="${PROTOCOL}://localhost:4010"
+              API_URL="${PROTOCOL}://127.0.0.1:4010"
               ;;
             prod)
               API_URL="${PROTOCOL}://api.${BASE_DOMAIN}"
@@ -245,7 +245,7 @@ jobs:
           echo ""
           echo "Performing health check..."
 
-          HEALTH_URL="http://localhost:4010/health"
+          HEALTH_URL="http://127.0.0.1:4010/health"
 
           # Retry health check up to 5 times
           for i in {1..5}; do
@@ -322,7 +322,7 @@ jobs:
           echo "Verifying API endpoints..."
 
           # Test health endpoint
-          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:4010/health")
+          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/health")
           if [ "$HEALTH_RESPONSE" == "200" ]; then
             echo "✓ Health endpoint: OK (HTTP $HEALTH_RESPONSE)"
           else
@@ -331,7 +331,7 @@ jobs:
           fi
 
           # Test root endpoint
-          ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:4010/")
+          ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/")
           if [ "$ROOT_RESPONSE" == "200" ]; then
             echo "✓ Root endpoint: OK (HTTP $ROOT_RESPONSE)"
           else

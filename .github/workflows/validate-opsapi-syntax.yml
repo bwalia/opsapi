@@ -94,4 +94,4 @@ jobs:
       - name: Verify OpenResty is running
         run: |
           sleep 10 # Give some time for the server to start
-          curl -I http://localhost:80
+          curl -I http://127.0.0.1:80

@@ -246,14 +246,14 @@ docker restart opsapi
 
 # Generate traffic
 for i in {1..100}; do
-  curl -s http://localhost:4010/api/v2/products > /dev/null
+  curl -s http://127.0.0.1:4010/api/v2/products > /dev/null
 done
 
 # View metrics
-curl http://localhost:4010/metrics | less
+curl http://127.0.0.1:4010/metrics | less
 
 # Check DDoS metrics
-curl -s http://localhost:4010/metrics | grep requests_by_ip
+curl -s http://127.0.0.1:4010/metrics | grep requests_by_ip
 ```
 
 ## Next Steps

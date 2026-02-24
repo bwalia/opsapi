@@ -9,13 +9,13 @@ This setup provides comprehensive monitoring for OpsAPI using Prometheus (metric
 - **Port**: 9090
 - **Container**: opsapi-prometheus
 - **Purpose**: Metrics collection, storage, and alerting
-- **Access**: http://localhost:9090
+- **Access**: http://127.0.0.1:9090
 
 ### Grafana
 - **Port**: 3000
 - **Container**: opsapi-grafana
 - **Purpose**: Metrics visualization and dashboards
-- **Access**: http://localhost:3000
+- **Access**: http://127.0.0.1:3000
 - **Default Login**: admin / admin
 
 ## Quick Start
@@ -46,22 +46,22 @@ docker-compose ps
 **Check Prometheus is scraping metrics:**
 ```bash
 # Should see metrics
-curl http://localhost:4010/metrics
+curl http://127.0.0.1:4010/metrics
 
 # Check Prometheus targets
-open http://localhost:9090/targets
+open http://127.0.0.1:9090/targets
 ```
 
 **Access Grafana:**
 ```bash
-open http://localhost:3000
+open http://127.0.0.1:3000
 ```
 - Username: `admin`
 - Password: `admin`
 
 ### 4. View Pre-configured Dashboard
 
-1. Login to Grafana (http://localhost:3000)
+1. Login to Grafana (http://127.0.0.1:3000)
 2. Go to **Dashboards** → **Browse**
 3. Open **OpsAPI - Complete Monitoring Dashboard**
 
@@ -146,7 +146,7 @@ Alerts are pre-configured in `devops/alert_rules.yml`:
 - **Slow Queries**: Database P95 >1s
 
 ### View Active Alerts
-1. Go to http://localhost:9090/alerts
+1. Go to http://127.0.0.1:9090/alerts
 2. Or in Grafana: **Alerting** → **Alert Rules**
 
 ## Configuration Files
@@ -193,7 +193,7 @@ Automatically configures Prometheus as the default datasource.
 ### Reload Prometheus Configuration
 ```bash
 # After editing prometheus.yml or alert_rules.yml
-curl -X POST http://localhost:9090/-/reload
+curl -X POST http://127.0.0.1:9090/-/reload
 ```
 
 ### Create Custom Dashboard
@@ -262,7 +262,7 @@ receivers:
 
 **Check OpsAPI metrics endpoint:**
 ```bash
-curl http://localhost:4010/metrics
+curl http://127.0.0.1:4010/metrics
 ```
 
 If you see "Prometheus metrics not available":
@@ -272,7 +272,7 @@ If you see "Prometheus metrics not available":
 
 **Check Prometheus targets:**
 ```bash
-open http://localhost:9090/targets
+open http://127.0.0.1:9090/targets
 ```
 
 Target should be **UP**. If DOWN:
@@ -386,7 +386,7 @@ docker-compose restart prometheus grafana
 4. **Restrict network access**:
    ```yaml
    ports:
-     - "127.0.0.1:9090:9090"  # Only localhost
+     - "127.0.0.1:9090:9090"  # Only 127.0.0.1
    ```
 
 5. **Enable Grafana auth**:
@@ -414,9 +414,9 @@ docker-compose restart prometheus grafana
 
 ## Useful Links
 
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3000
-- **OpsAPI Metrics**: http://localhost:4010/metrics
+- **Prometheus**: http://127.0.0.1:9090
+- **Grafana**: http://127.0.0.1:3000
+- **OpsAPI Metrics**: http://127.0.0.1:4010/metrics
 - **Prometheus Docs**: https://prometheus.io/docs/
 - **Grafana Docs**: https://grafana.com/docs/
 - **PromQL Guide**: https://prometheus.io/docs/prometheus/latest/querying/basics/
@@ -438,10 +438,10 @@ docker logs opsapi-grafana
 docker-compose restart prometheus
 
 # Check metrics endpoint
-curl http://localhost:4010/metrics | head -50
+curl http://127.0.0.1:4010/metrics | head -50
 
 # Reload Prometheus config
-curl -X POST http://localhost:9090/-/reload
+curl -X POST http://127.0.0.1:9090/-/reload
 
 # Clean up (WARNING: deletes data)
 docker-compose down -v

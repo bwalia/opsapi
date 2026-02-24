@@ -274,7 +274,7 @@ function MinioClient.new(config)
 
     -- Public URL for browser access (different from internal endpoint)
     -- MINIO_PUBLIC_URL should be set to the externally accessible URL
-    -- e.g., http://localhost:9000 or https://s3.yourdomain.com
+    -- e.g., http://127.0.0.1:9000 or https://s3.yourdomain.com
     self.public_url = config.public_url or getEnv("MINIO_PUBLIC_URL") or self.endpoint
 
     -- Parse endpoint to get host
