@@ -73,7 +73,7 @@ jobs:
       #   if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
       #   run: |
       #         sleep 10 # Give some time for the server to start
-      #         curl -I http://localhost:80
+      #         curl -I http://127.0.0.1:80
 
       - name: Slack Notification for OPSAPI release
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}

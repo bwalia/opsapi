@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Build argument for API URL (passed from docker-compose)
-ARG NEXT_PUBLIC_API_URL=http://localhost:4010
+ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Copy package files

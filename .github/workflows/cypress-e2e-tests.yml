@@ -23,7 +23,7 @@ on:
       environment:
         description: "Test environment URL"
         required: false
-        default: "http://localhost:8039"
+        default: "http://127.0.0.1:8039"
       run_integration:
         description: "Run integration tests with real API"
         required: false
@@ -66,7 +66,7 @@ jobs:
         working-directory: ${{ env.WORKING_DIRECTORY }}
         run: npm run build
         env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'http://localhost:8080' }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8080' }}
 
       - name: Run Cypress tests
         id: cypress
@@ -75,16 +75,16 @@ jobs:
         with:
           working-directory: ${{ env.WORKING_DIRECTORY }}
           start: npm run start
-          wait-on: "http://localhost:8039"
+          wait-on: "http://127.0.0.1:8039"
           wait-on-timeout: 120
           browser: ${{ matrix.browser }}
           spec: cypress/e2e/login.cy.ts
           config: video=true,screenshotOnRunFailure=true
         env:
-          CYPRESS_BASE_URL: http://localhost:8039
+          CYPRESS_BASE_URL: http://127.0.0.1:8039
           CYPRESS_TEST_USERNAME: ${{ secrets.CYPRESS_TEST_USERNAME }}
           CYPRESS_TEST_PASSWORD: ${{ secrets.CYPRESS_TEST_PASSWORD }}
-          CYPRESS_API_URL: ${{ secrets.CYPRESS_API_URL || 'http://localhost:8080' }}
+          CYPRESS_API_URL: ${{ secrets.CYPRESS_API_URL || 'http://127.0.0.1:8080' }}
           CYPRESS_SKIP_INTEGRATION: ${{ github.event.inputs.run_integration != 'true' }}
 
       - name: Upload Cypress screenshots

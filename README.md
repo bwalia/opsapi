@@ -16,7 +16,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
 ## Status by Gatus
 
-### Check `http://localhost:8888/`
+### Check `http://127.0.0.1:8888/`
 
 ## Components
 
@@ -77,7 +77,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    | Environment | API URL |
    |-------------|---------|
-   | `local` | `http://localhost:4010` |
+   | `local` | `http://127.0.0.1:4010` |
    | `dev` | `https://dev-api.wslcrm.com` |
    | `test` | `https://test-api.wslcrm.com` |
    | `acc` | `https://acc-api.wslcrm.com` |
@@ -109,7 +109,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    ./run-development.sh
 
    # Specify preset environment directly
-   ./run-development.sh -e local           # Local development (http://localhost:4010)
+   ./run-development.sh -e local           # Local development (http://127.0.0.1:4010)
    ./run-development.sh -e dev             # Dev environment (https://dev-api.wslcrm.com)
    ./run-development.sh -e test            # Test environment
    ./run-development.sh -e acc             # Acceptance environment
@@ -125,7 +125,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    # Specify protocol (http or https)
    ./run-development.sh -e dev -P http     # Dev env with HTTP: http://dev-api.wslcrm.com
    ./run-development.sh -e dev -P https    # Dev env with HTTPS (default)
-   ./run-development.sh -e local -P https  # Local with HTTPS: https://localhost:4010
+   ./run-development.sh -e local -P https  # Local with HTTPS: https://127.0.0.1:4010
    ./run-development.sh --protocol=http    # Alternative syntax
 
    # Combined with git options
@@ -173,13 +173,13 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
    | `-h` / `--help` | Show help |
 
 4. **Access the application:**
-   - **Backend API**: http://localhost:4010
-   - **Dashboard**: http://localhost:8039
-   - **Adminer (DB UI)**: http://localhost:7779
-   - **Grafana**: http://localhost:3011
-   - **Prometheus**: http://localhost:9090
-   - **MinIO Console**: http://localhost:9001
-   - **Gatus (Status)**: http://localhost:8888
+   - **Backend API**: http://127.0.0.1:4010
+   - **Dashboard**: http://127.0.0.1:8039
+   - **Adminer (DB UI)**: http://127.0.0.1:7779
+   - **Grafana**: http://127.0.0.1:3011
+   - **Prometheus**: http://127.0.0.1:9090
+   - **MinIO Console**: http://127.0.0.1:9001
+   - **Gatus (Status)**: http://127.0.0.1:8888
 
 ### Default Login Credentials
 
@@ -228,9 +228,9 @@ These URLs are environment-specific and are automatically configured by `run-dev
 
 ```bash
 # For local development
-NEXT_PUBLIC_API_URL=http://localhost:4010
-GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
-KEYCLOAK_REDIRECT_URI=http://localhost:4010/auth/callback
+NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
+GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
+KEYCLOAK_REDIRECT_URI=http://127.0.0.1:4010/auth/callback
 
 # For dev environment
 NEXT_PUBLIC_API_URL=https://dev-api.wslcrm.com
@@ -263,7 +263,7 @@ KEYCLOAK_REDIRECT_URI=https://staging-api.wslcrm.com/auth/callback
 **Protocol Customization:** By default, `local` uses `http://` and all other environments use `https://`. You can override this with the `-P` option:
 ```bash
 ./run-development.sh -e dev -P http    # Use HTTP for dev: http://dev-api.wslcrm.com
-./run-development.sh -e local -P https # Use HTTPS for local: https://localhost:4010
+./run-development.sh -e local -P https # Use HTTPS for local: https://127.0.0.1:4010
 ```
 
 **Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
@@ -286,7 +286,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ```bash
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
 ```
 
 ### Keycloak SSO (Optional)
@@ -297,7 +297,7 @@ KEYCLOAK_TOKEN_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/t
 KEYCLOAK_USERINFO_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/userinfo
 KEYCLOAK_CLIENT_ID=opsapi
 KEYCLOAK_CLIENT_SECRET=your-client-secret
-KEYCLOAK_REDIRECT_URI=http://localhost:4010/auth/callback
+KEYCLOAK_REDIRECT_URI=http://127.0.0.1:4010/auth/callback
 ```
 
 ### Node API
@@ -326,7 +326,7 @@ docker exec -i opsapi tail -50 /var/log/nginx/error.log
 ### Test login
 
 ```bash
-docker exec -i opsapi curl -s -X POST 'http://localhost/auth/login' \
+docker exec -i opsapi curl -s -X POST 'http://127.0.0.1/auth/login' \
   -H 'Content-Type: application/json' \
   -d '{"username":"administrative@admin.com","password":"Admin@123"}'
 ```
@@ -334,13 +334,13 @@ docker exec -i opsapi curl -s -X POST 'http://localhost/auth/login' \
 ### Test API with token
 
 ```bash
-TOKEN=$(docker exec -i opsapi curl -s -X POST 'http://localhost/auth/login' \
+TOKEN=$(docker exec -i opsapi curl -s -X POST 'http://127.0.0.1/auth/login' \
   -H 'Content-Type: application/json' \
   -d '{"username":"administrative@admin.com","password":"Admin@123"}' | jq -r '.token')
 
 # Test endpoints
-docker exec -i opsapi curl -s "http://localhost/api/v2/users" -H "Authorization: Bearer $TOKEN"
-docker exec -i opsapi curl -s "http://localhost/api/v2/roles" -H "Authorization: Bearer $TOKEN"
+docker exec -i opsapi curl -s "http://127.0.0.1/api/v2/users" -H "Authorization: Bearer $TOKEN"
+docker exec -i opsapi curl -s "http://127.0.0.1/api/v2/roles" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Check database connectivity
@@ -581,12 +581,12 @@ To enable Google OAuth authentication:
 2. Create a new project or select existing
 3. Enable Google+ API
 4. Create OAuth 2.0 credentials
-5. Add authorized redirect URI: `http://localhost:4010/auth/google/callback`
+5. Add authorized redirect URI: `http://127.0.0.1:4010/auth/google/callback`
 6. Update environment variables in `lapis/.env`:
    ```bash
    GOOGLE_CLIENT_ID=your-client-id
    GOOGLE_CLIENT_SECRET=your-client-secret
-   GOOGLE_REDIRECT_URI=http://localhost:4010/auth/google/callback
+   GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
    ```
 
 ---
@@ -595,8 +595,8 @@ To enable Google OAuth authentication:
 
 Access the OpenAPI specification at:
 
-- Swagger UI: http://localhost:4010/swagger
-- OpenAPI JSON: http://localhost:4010/openapi.json
+- Swagger UI: http://127.0.0.1:4010/swagger
+- OpenAPI JSON: http://127.0.0.1:4010/openapi.json
 
 ### Public Endpoints (No Auth Required)
 

@@ -36,9 +36,9 @@ const (
 // - 'slow' waits for 10ms and returns "ok" with a 200 response code;
 // - 'error' returns a 500.
 var urls = map[requestType]string{
-	reqFast:  "http://localhost:18001/fast",
-	reqSlow:  "http://localhost:18001/slow",
-	reqError: "http://localhost:18001/error",
+	reqFast:  "http://127.0.0.1:18001/fast",
+	reqSlow:  "http://127.0.0.1:18001/slow",
+	reqError: "http://127.0.0.1:18001/error",
 }
 
 // Expected bucket boundaries. This should match the buckets defined in nginx.conf.
@@ -48,7 +48,7 @@ var buckets = []float64{0.08, 0.089991, 0.1, 0.2, 0.75, 1, 1.5, 3.123232001, 5, 
 // endpoints and verify that request counters and latency measurements are
 // accurate.
 func registerBasicTest(tr *testRunner) {
-	tr.healthURLs = append(tr.healthURLs, "http://localhost:18001/health")
+	tr.healthURLs = append(tr.healthURLs, "http://127.0.0.1:18001/health")
 	results := make(chan map[requestType]int64, *concurrency)
 	tr.tests = append(tr.tests, func() error {
 		log.Printf("Running basic test with %d concurrent clients for %v", *concurrency, *testDuration)

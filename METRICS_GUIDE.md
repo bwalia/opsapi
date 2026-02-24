@@ -359,7 +359,7 @@ config("development", {
 
 View metrics:
 ```bash
-curl http://localhost:4010/metrics
+curl http://127.0.0.1:4010/metrics
 ```
 
 ## Performance Impact
@@ -372,7 +372,7 @@ curl http://localhost:4010/metrics
 ## Security Considerations
 
 1. **Metrics Endpoint Access**: Currently restricted to:
-   - localhost (127.0.0.1)
+   - 127.0.0.1 (127.0.0.1)
    - Private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
    
 2. **Sensitive Data**: Metrics do NOT include:

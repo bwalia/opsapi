@@ -110,11 +110,11 @@ echo ""
 echo "Step 6: Verifying metrics endpoint..."
 sleep 5  # Give OpsAPI a moment to initialize
 
-if curl -s http://localhost:4010/metrics | head -1 | grep -q "HELP"; then
+if curl -s http://127.0.0.1:4010/metrics | head -1 | grep -q "HELP"; then
     echo -e "${GREEN}✓ Metrics endpoint is responding${NC}"
 else
     echo -e "${YELLOW}⚠ Metrics endpoint may not be ready yet${NC}"
-    echo "  Check: curl http://localhost:4010/metrics"
+    echo "  Check: curl http://127.0.0.1:4010/metrics"
 fi
 
 echo ""
@@ -122,7 +122,7 @@ echo "Step 7: Checking Prometheus targets..."
 sleep 3
 
 # Check if Prometheus is scraping
-if curl -s http://localhost:9090/api/v1/targets | grep -q "opsapi"; then
+if curl -s http://127.0.0.1:9090/api/v1/targets | grep -q "opsapi"; then
     echo -e "${GREEN}✓ Prometheus is configured to scrape OpsAPI${NC}"
 else
     echo -e "${YELLOW}⚠ Prometheus may not be ready yet${NC}"
@@ -135,9 +135,9 @@ echo "================================================"
 echo ""
 echo "Access your monitoring stack:"
 echo ""
-echo -e "  ${GREEN}OpsAPI Metrics:${NC}    http://localhost:4010/metrics"
-echo -e "  ${GREEN}Prometheus:${NC}        http://localhost:9090"
-echo -e "  ${GREEN}Grafana:${NC}           http://localhost:3000"
+echo -e "  ${GREEN}OpsAPI Metrics:${NC}    http://127.0.0.1:4010/metrics"
+echo -e "  ${GREEN}Prometheus:${NC}        http://127.0.0.1:9090"
+echo -e "  ${GREEN}Grafana:${NC}           http://127.0.0.1:3000"
 echo ""
 echo "Grafana credentials:"
 echo "  Username: admin"
@@ -149,7 +149,7 @@ echo "  Open: 'OpsAPI - Complete Monitoring Dashboard'"
 echo ""
 echo "Useful commands:"
 echo "  View logs:          docker-compose logs -f"
-echo "  View metrics:       curl http://localhost:4010/metrics"
+echo "  View metrics:       curl http://127.0.0.1:4010/metrics"
 echo "  Restart services:   docker-compose restart"
 echo "  Stop services:      docker-compose down"
 echo ""

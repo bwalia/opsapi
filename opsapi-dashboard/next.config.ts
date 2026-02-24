@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
 
   // Environment variables that will be available at runtime
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:4010",
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:4010",
   },
 
   // Experimental features for better performance

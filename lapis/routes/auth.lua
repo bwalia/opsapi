@@ -402,7 +402,7 @@ return function(app)
             final_url = string.format("wsl-chat://auth/callback?token=%s", ngx.escape_uri(token))
         else
             -- Web app: use frontend_url from state (passed by frontend), fall back to env var
-            local frontend_url = state_frontend_url or Global.getEnvVar("FRONTEND_URL") or "http://localhost:3033"
+            local frontend_url = state_frontend_url or Global.getEnvVar("FRONTEND_URL") or "http://127.0.0.1:3033"
             final_url = string.format("%s/auth/callback?token=%s&redirect=%s",
                 frontend_url, ngx.escape_uri(token), ngx.escape_uri(redirect_from))
         end

@@ -88,7 +88,7 @@ local function extractNamespaceIdentifier(self)
         local subdomain = host:match("^([^.]+)%.")
         -- Skip common non-namespace subdomains
         if subdomain and subdomain ~= "www" and subdomain ~= "api" and
-           subdomain ~= "localhost" and subdomain ~= "dashboard" then
+           subdomain ~= "127.0.0.1" and subdomain ~= "dashboard" then
             return subdomain
         end
     end
