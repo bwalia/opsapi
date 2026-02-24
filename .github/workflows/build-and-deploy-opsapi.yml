@@ -3,7 +3,7 @@ name: ->OPSAPI Build/Push Docker Image and Deploy to K3S
 on:
   push:
     branches:
-      - main
+      - dummy
 
   workflow_dispatch:
     inputs:
