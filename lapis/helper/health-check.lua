@@ -3,6 +3,7 @@
 
 local db = require("lapis.db")
 local redis = require("resty.redis")
+local http = require("resty.http")
 
 local HealthCheck = {}
 
@@ -42,12 +43,20 @@ function HealthCheck.checkDatabase()
         test_query = "passed"
     }
 
+    -- Get database version
+    local ver_success, ver_result = pcall(function()
+        return db.query("SELECT version() as version, current_database() as db_name")
+    end)
+
+    if ver_success and ver_result and ver_result[1] then
+        status.details.version = ver_result[1].version
+        status.details.database_name = ver_result[1].db_name
+    end
+
     -- Get database statistics
     local stats_success, stats_result = pcall(function()
         local db_stats = db.query([[
             SELECT
-                (SELECT COUNT(*) FROM orders) as total_orders,
-                (SELECT COUNT(*) FROM stores) as total_stores,
                 (SELECT COUNT(*) FROM users) as total_users,
                 pg_database_size(current_database()) as database_size
         ]])
@@ -55,10 +64,17 @@ function HealthCheck.checkDatabase()
     end)
 
     if stats_success and stats_result then
-        status.details.total_orders = stats_result.total_orders or 0
-        status.details.total_stores = stats_result.total_stores or 0
         status.details.total_users = stats_result.total_users or 0
         status.details.database_size_bytes = stats_result.database_size or 0
+        -- Human-readable size
+        local size = tonumber(stats_result.database_size) or 0
+        if size > 1073741824 then
+            status.details.database_size = string.format("%.1f GB", size / 1073741824)
+        elseif size > 1048576 then
+            status.details.database_size = string.format("%.1f MB", size / 1048576)
+        else
+            status.details.database_size = string.format("%.1f KB", size / 1024)
+        end
     end
 
     return status
@@ -111,6 +127,56 @@ function HealthCheck.checkRedis()
     end
 
     status.details = result
+    return status
+end
+
+-- Check MinIO connectivity
+function HealthCheck.checkMinio()
+    local start_time = ngx.now()
+    local status = {
+        name = "minio",
+        status = "healthy",
+        response_time_ms = 0,
+        details = {}
+    }
+
+    local minio_endpoint = os.getenv("MINIO_ENDPOINT") or "http://localhost:9000"
+    status.details.endpoint = minio_endpoint
+
+    local success, result = pcall(function()
+        local httpc = http.new()
+        httpc:set_timeout(5000) -- 5 second timeout
+
+        local res, err = httpc:request_uri(minio_endpoint .. "/minio/health/live", {
+            method = "GET",
+        })
+
+        if not res then
+            error("Connection failed: " .. tostring(err))
+        end
+
+        return {
+            connected = true,
+            http_code = res.status,
+        }
+    end)
+
+    status.response_time_ms = math.floor((ngx.now() - start_time) * 1000)
+
+    if not success then
+        status.status = "degraded"
+        status.error = "MinIO not available: " .. tostring(result)
+        status.details.connected = false
+        return status
+    end
+
+    if result.http_code ~= 200 then
+        status.status = "degraded"
+        status.error = "MinIO returned HTTP " .. tostring(result.http_code)
+    end
+
+    status.details.connected = result.connected
+    status.details.http_code = result.http_code
     return status
 end
 
@@ -234,6 +300,7 @@ function HealthCheck.getFullStatus()
 
     local checks = {
         HealthCheck.checkDatabase(),
+        HealthCheck.checkMinio(),
         HealthCheck.checkRedis(),
         HealthCheck.checkFileSystem(),
         HealthCheck.checkMigrations(),
@@ -273,17 +340,37 @@ function HealthCheck.getFullStatus()
     }
 end
 
--- Quick health check (just database)
+-- Quick health check (database + minio)
 function HealthCheck.getQuickStatus()
     local db_check = HealthCheck.checkDatabase()
+    local minio_check = HealthCheck.checkMinio()
+
+    local overall = "healthy"
+    if db_check.status == "unhealthy" then
+        overall = "unhealthy"
+    elseif db_check.status == "degraded" or minio_check.status == "degraded" then
+        overall = "degraded"
+    end
 
     return {
-        status = db_check.status,
+        status = overall,
         timestamp = ngx.time(),
+        timestamp_iso = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         version = "1.0.0",
-        database = {
-            status = db_check.status,
-            response_time_ms = db_check.response_time_ms
+        environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+        services = {
+            database = {
+                status = db_check.status,
+                response_time_ms = db_check.response_time_ms,
+                version = db_check.details and db_check.details.version or nil,
+                database_name = db_check.details and db_check.details.database_name or nil,
+                database_size = db_check.details and db_check.details.database_size or nil,
+            },
+            minio = {
+                status = minio_check.status,
+                response_time_ms = minio_check.response_time_ms,
+                endpoint = minio_check.details and minio_check.details.endpoint or nil,
+            }
         }
     }
 end
