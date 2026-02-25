@@ -22,7 +22,7 @@ show_help() {
     echo -e "${GREEN}OpsAPI Development Environment Setup${NC}"
     echo ""
     echo -e "${BLUE}Usage:${NC}"
-    echo "  ./run-development.sh [OPTIONS]"
+    echo "  ./start.sh [OPTIONS]"
     echo ""
     echo -e "${BLUE}Options:${NC}"
     echo "  -e, --env [ENV]       Target environment (local|dev|test|acc|prod|remote|<custom>)"
@@ -61,20 +61,20 @@ show_help() {
     echo "  core_only    - Just authentication tables"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
-    echo "  ./run-development.sh                    # Interactive mode (prompts)"
-    echo "  ./run-development.sh -e local           # Local development environment"
-    echo "  ./run-development.sh -e dev -a          # Dev environment, auto git (https)"
-    echo "  ./run-development.sh -e dev -P http     # Dev environment with HTTP"
-    echo "  ./run-development.sh -e remote -n       # Remote environment, no git ops"
-    echo "  ./run-development.sh -e staging -a      # Custom 'staging' environment"
-    echo "  ./run-development.sh --env=prod -a      # Prod environment, auto mode"
-    echo "  ./run-development.sh -c -e dev          # Just check/update .env for dev"
-    echo "  ./run-development.sh -r                 # Reset database (fresh start)"
-    echo "  ./run-development.sh -e remote -n -C    # CI/CD deployment (no dev mounts)"
-    echo "  ./run-development.sh -j tax_copilot     # Only create tax-related tables"
-    echo "  ./run-development.sh -e local -j tax_copilot -r  # Fresh tax_copilot setup"
-    echo "  ./run-development.sh -d myapp.com -e prod -n  # Deploy with custom apex domain"
-    echo "  ./run-development.sh -d kisaan.com -e dev -a  # Dev environment on kisaan.com"
+    echo "  ./start.sh                    # Interactive mode (prompts)"
+    echo "  ./start.sh -e local           # Local development environment"
+    echo "  ./start.sh -e dev -a          # Dev environment, auto git (https)"
+    echo "  ./start.sh -e dev -P http     # Dev environment with HTTP"
+    echo "  ./start.sh -e remote -n       # Remote environment, no git ops"
+    echo "  ./start.sh -e staging -a      # Custom 'staging' environment"
+    echo "  ./start.sh --env=prod -a      # Prod environment, auto mode"
+    echo "  ./start.sh -c -e dev          # Just check/update .env for dev"
+    echo "  ./start.sh -r                 # Reset database (fresh start)"
+    echo "  ./start.sh -e remote -n -C    # CI/CD deployment (no dev mounts)"
+    echo "  ./start.sh -j tax_copilot     # Only create tax-related tables"
+    echo "  ./start.sh -e local -j tax_copilot -r  # Fresh tax_copilot setup"
+    echo "  ./start.sh -d myapp.com -e prod -n  # Deploy with custom apex domain"
+    echo "  ./start.sh -d kisaan.com -e dev -a  # Dev environment on kisaan.com"
     echo ""
 }
 
@@ -293,14 +293,14 @@ validate_project_code() {
 
 # Function to prompt for project code selection
 prompt_project_code() {
-    echo -e "${CYAN}Select project code for conditional migrations:${NC}"
-    echo "  1) all          - All features (default, backward compatible)"
-    echo "  2) tax_copilot  - UK Tax Return AI Agent (core + tax tables only)"
-    echo "  3) ecommerce    - E-commerce platform (core + stores, products, orders)"
-    echo "  4) collaboration - Chat + Kanban + Services"
-    echo "  5) hospital     - Hospital CRM"
-    echo "  6) core_only    - Just authentication tables"
-    echo ""
+    echo -e "${CYAN}Select project code for conditional migrations:${NC}" >&2
+    echo "  1) all          - All features (default, backward compatible)" >&2
+    echo "  2) tax_copilot  - UK Tax Return AI Agent (core + tax tables only)" >&2
+    echo "  3) ecommerce    - E-commerce platform (core + stores, products, orders)" >&2
+    echo "  4) collaboration - Chat + Kanban + Services" >&2
+    echo "  5) hospital     - Hospital CRM" >&2
+    echo "  6) core_only    - Just authentication tables" >&2
+    echo "" >&2
 
     local choice
     while true; do
@@ -349,12 +349,12 @@ prompt_protocol() {
         default_proto="https"
     fi
 
-    echo -e "${CYAN}Select API protocol:${NC}"
-    echo "  1) https - Secure connection (recommended for remote environments)"
-    echo "  2) http  - Non-secure connection (typical for local development)"
-    echo ""
-    echo -e "${BLUE}[i] Default for '$env' environment: ${CYAN}${default_proto}${NC}"
-    echo ""
+    echo -e "${CYAN}Select API protocol:${NC}" >&2
+    echo "  1) https - Secure connection (recommended for remote environments)" >&2
+    echo "  2) http  - Non-secure connection (typical for local development)" >&2
+    echo "" >&2
+    echo -e "${BLUE}[i] Default for '$env' environment: ${CYAN}${default_proto}${NC}" >&2
+    echo "" >&2
 
     local choice
     while true; do
@@ -381,16 +381,16 @@ prompt_protocol() {
 
 # Function to prompt for environment selection
 prompt_environment() {
-    echo -e "${CYAN}Select target environment:${NC}"
-    echo "  1) local   - http://127.0.0.1:4010"
-    echo "  2) dev     - https://dev-api.${BASE_DOMAIN}"
-    echo "  3) test    - https://test-api.${BASE_DOMAIN}"
-    echo "  4) acc     - https://acc-api.${BASE_DOMAIN}"
-    echo "  5) prod    - https://api.${BASE_DOMAIN}"
-    echo "  6) remote  - https://remote-api.${BASE_DOMAIN}"
-    echo ""
-    echo -e "${CYAN}Or enter a custom environment name (e.g., staging, demo, etc.)${NC}"
-    echo ""
+    echo -e "${CYAN}Select target environment:${NC}" >&2
+    echo "  1) local   - http://127.0.0.1:4010" >&2
+    echo "  2) dev     - https://dev-api.${BASE_DOMAIN}" >&2
+    echo "  3) test    - https://test-api.${BASE_DOMAIN}" >&2
+    echo "  4) acc     - https://acc-api.${BASE_DOMAIN}" >&2
+    echo "  5) prod    - https://api.${BASE_DOMAIN}" >&2
+    echo "  6) remote  - https://remote-api.${BASE_DOMAIN}" >&2
+    echo "" >&2
+    echo -e "${CYAN}Or enter a custom environment name (e.g., staging, demo, etc.)${NC}" >&2
+    echo "" >&2
 
     local choice
     while true; do
@@ -810,9 +810,9 @@ sleep 15
 # Pass PROJECT_CODE environment variable to control which tables are created
 echo -e "${GREEN}[+] Running migrations with PROJECT_CODE=${PROJECT_CODE}...${NC}"
 if $CI_MODE; then
-    docker exec -e PROJECT_CODE=$PROJECT_CODE $CONTAINER_NAME lapis migrate
+    docker exec -e "PROJECT_CODE=$PROJECT_CODE" "$CONTAINER_NAME" lapis migrate
 else
-    docker exec -e PROJECT_CODE=$PROJECT_CODE -it $CONTAINER_NAME lapis migrate
+    docker exec -e "PROJECT_CODE=$PROJECT_CODE" -it "$CONTAINER_NAME" lapis migrate
 fi
 
 sleep 5

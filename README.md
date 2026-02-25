@@ -54,7 +54,7 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 3. **Run the development script:**
 
    ```bash
-   ./run-development.sh
+   ./start.sh
    ```
 
    This script will:
@@ -106,56 +106,56 @@ Opsapi API is built on the top of Opneresty Nginx / Lua for increased performanc
 
    ```bash
    # Interactive mode (default - prompts for environment, protocol, and git options)
-   ./run-development.sh
+   ./start.sh
 
    # Specify preset environment directly
-   ./run-development.sh -e local           # Local development (http://127.0.0.1:4010)
-   ./run-development.sh -e dev             # Dev environment (https://dev-api.wslcrm.com)
-   ./run-development.sh -e test            # Test environment
-   ./run-development.sh -e acc             # Acceptance environment
-   ./run-development.sh -e prod            # Production environment
-   ./run-development.sh -e remote          # Remote environment
-   ./run-development.sh --env=dev          # Alternative syntax
+   ./start.sh -e local           # Local development (http://127.0.0.1:4010)
+   ./start.sh -e dev             # Dev environment (https://dev-api.wslcrm.com)
+   ./start.sh -e test            # Test environment
+   ./start.sh -e acc             # Acceptance environment
+   ./start.sh -e prod            # Production environment
+   ./start.sh -e remote          # Remote environment
+   ./start.sh --env=dev          # Alternative syntax
 
    # Use custom/dynamic environments
-   ./run-development.sh -e staging         # https://staging-api.wslcrm.com
-   ./run-development.sh -e demo            # https://demo-api.wslcrm.com
-   ./run-development.sh -e feature-x       # https://feature-x-api.wslcrm.com
+   ./start.sh -e staging         # https://staging-api.wslcrm.com
+   ./start.sh -e demo            # https://demo-api.wslcrm.com
+   ./start.sh -e feature-x       # https://feature-x-api.wslcrm.com
 
    # Specify protocol (http or https)
-   ./run-development.sh -e dev -P http     # Dev env with HTTP: http://dev-api.wslcrm.com
-   ./run-development.sh -e dev -P https    # Dev env with HTTPS (default)
-   ./run-development.sh -e local -P https  # Local with HTTPS: https://127.0.0.1:4010
-   ./run-development.sh --protocol=http    # Alternative syntax
+   ./start.sh -e dev -P http     # Dev env with HTTP: http://dev-api.wslcrm.com
+   ./start.sh -e dev -P https    # Dev env with HTTPS (default)
+   ./start.sh -e local -P https  # Local with HTTPS: https://127.0.0.1:4010
+   ./start.sh --protocol=http    # Alternative syntax
 
    # Combined with git options
-   ./run-development.sh -e dev -a          # Dev env, auto git (stash + pull)
-   ./run-development.sh -e remote -n       # Remote env, no git operations
-   ./run-development.sh -e staging -a      # Custom staging env, auto git
-   ./run-development.sh -e dev -P http -a  # Dev with HTTP, auto git
+   ./start.sh -e dev -a          # Dev env, auto git (stash + pull)
+   ./start.sh -e remote -n       # Remote env, no git operations
+   ./start.sh -e staging -a      # Custom staging env, auto git
+   ./start.sh -e dev -P http -a  # Dev with HTTP, auto git
 
    # Check/update .env only (don't start containers)
-   ./run-development.sh -c -e dev          # Just validate .env for dev
-   ./run-development.sh -c -e dev -P http  # Validate with HTTP protocol
+   ./start.sh -c -e dev          # Just validate .env for dev
+   ./start.sh -c -e dev -P http  # Validate with HTTP protocol
 
    # Reset database (removes volumes)
-   ./run-development.sh -e local -r        # Local with fresh database
+   ./start.sh -e local -r        # Local with fresh database
 
    # Auto mode - stash and pull without prompts
-   ./run-development.sh -a
-   ./run-development.sh --auto
+   ./start.sh -a
+   ./start.sh --auto
 
    # Skip all git operations
-   ./run-development.sh -n
-   ./run-development.sh --no-git
+   ./start.sh -n
+   ./start.sh --no-git
 
    # Specify git options individually
-   ./run-development.sh -s y -p y          # Stash: yes, Pull: yes
-   ./run-development.sh -s n -p y          # No stash, Pull: yes
-   ./run-development.sh --stash=y --pull=n
+   ./start.sh -s y -p y          # Stash: yes, Pull: yes
+   ./start.sh -s n -p y          # No stash, Pull: yes
+   ./start.sh --stash=y --pull=n
 
    # Show help
-   ./run-development.sh -h
+   ./start.sh -h
    ```
 
    | Option | Description |
@@ -224,7 +224,7 @@ MINIO_REGION=your-region
 
 ### Dashboard & Authentication URLs
 
-These URLs are environment-specific and are automatically configured by `run-development.sh`:
+These URLs are environment-specific and are automatically configured by `start.sh`:
 
 ```bash
 # For local development
@@ -258,12 +258,12 @@ GOOGLE_REDIRECT_URI=https://staging-api.wslcrm.com/auth/google/callback
 KEYCLOAK_REDIRECT_URI=https://staging-api.wslcrm.com/auth/callback
 ```
 
-**Tip:** Use `./run-development.sh -c -e <env>` to check and update these URLs without starting containers. Works with both preset environments (local, dev, test, acc, prod, remote) and custom environment names (staging, demo, etc.).
+**Tip:** Use `./start.sh -c -e <env>` to check and update these URLs without starting containers. Works with both preset environments (local, dev, test, acc, prod, remote) and custom environment names (staging, demo, etc.).
 
 **Protocol Customization:** By default, `local` uses `http://` and all other environments use `https://`. You can override this with the `-P` option:
 ```bash
-./run-development.sh -e dev -P http    # Use HTTP for dev: http://dev-api.wslcrm.com
-./run-development.sh -e local -P https # Use HTTPS for local: https://127.0.0.1:4010
+./start.sh -e dev -P http    # Use HTTP for dev: http://dev-api.wslcrm.com
+./start.sh -e local -P https # Use HTTPS for local: https://127.0.0.1:4010
 ```
 
 **Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
@@ -380,7 +380,7 @@ docker exec -it opsapi lapis migrate
 
 ## Deploy via GitHub Actions (Self-Hosted Runner)
 
-Deploy OPSAPI to a self-hosted runner using Docker Compose. This mirrors the `run-development.sh` script functionality for automated CI/CD deployments.
+Deploy OPSAPI to a self-hosted runner using Docker Compose. This mirrors the `start.sh` script functionality for automated CI/CD deployments.
 
 ### Prerequisites
 
