@@ -1,7 +1,7 @@
 name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 
 # This workflow deploys OPSAPI to self-hosted runners using Docker Compose
-# It uses the run-development.sh script to ensure consistency with local deployments
+# It uses the start.sh script to ensure consistency with local deployments
 #
 # TRIGGERS:
 # - Automatically on push to main branch (deploys to 'test' environment)
@@ -208,13 +208,13 @@ jobs:
           fi
         shell: bash
 
-      - name: Make run-development.sh executable
-        run: chmod +x ./run-development.sh
+      - name: Make start.sh executable
+        run: chmod +x ./start.sh
         shell: bash
 
-      - name: Deploy using run-development.sh
+      - name: Deploy using start.sh
         run: |
-          echo "Running deployment using run-development.sh..."
+          echo "Running deployment using start.sh..."
 
           # Build the command arguments
           ARGS="-e ${{ steps.env-setup.outputs.TARGET_ENV }}"
@@ -229,8 +229,8 @@ jobs:
             ARGS="$ARGS -r"
           fi
 
-          echo "Executing: ./run-development.sh $ARGS"
-          ./run-development.sh $ARGS
+          echo "Executing: ./start.sh $ARGS"
+          ./start.sh $ARGS
         shell: bash
 
       - name: Verify deployment
