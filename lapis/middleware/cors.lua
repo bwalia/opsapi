@@ -1,7 +1,30 @@
 local CorsMiddleware = {}
 
--- Build domain patterns from CORS_ALLOWED_DOMAINS env variable
+-- Tier 1: Check if origin is a localhost/loopback address (any port)
+-- Covers: http(s)://localhost, http(s)://localhost:PORT,
+--         http(s)://127.0.0.1, http(s)://127.0.0.1:PORT,
+--         http(s)://[::1], http(s)://[::1]:PORT
+-- Safe in production: the Origin header reflects the browser's page origin,
+-- not the server. A remote attacker's browser sends their actual origin, not localhost.
+local function isLocalhostOrigin(origin)
+    if not origin then
+        return false
+    end
+    if origin:match("^https?://localhost$") or origin:match("^https?://localhost:%d+$") then
+        return true
+    end
+    if origin:match("^https?://127%.0%.0%.1$") or origin:match("^https?://127%.0%.0%.1:%d+$") then
+        return true
+    end
+    if origin:match("^https?://%[::1%]$") or origin:match("^https?://%[::1%]:%d+$") then
+        return true
+    end
+    return false
+end
+
+-- Tier 2: Build domain patterns from CORS_ALLOWED_DOMAINS env variable
 -- Format: comma-separated domain names, e.g. "diytaxreturn.co.uk,kisaan.com,opsapi.com"
+-- Each domain generates patterns for: the domain itself, all subdomains, with or without port
 local function buildDomainPatterns()
     local patterns = {}
     local domains_env = os.getenv("CORS_ALLOWED_DOMAINS") or ""
@@ -9,9 +32,7 @@ local function buildDomainPatterns()
     for domain in domains_env:gmatch("[^,]+") do
         domain = domain:match("^%s*(.-)%s*$") -- trim whitespace
         if domain ~= "" then
-            -- Escape dots for Lua pattern matching
             local escaped = domain:gsub("%.", "%%.")
-            -- Allow the domain itself and all subdomains, with or without port
             table.insert(patterns, "^https?://" .. escaped .. "$")
             table.insert(patterns, "^https?://.*%." .. escaped .. "$")
             table.insert(patterns, "^https?://" .. escaped .. ":%d+$")
@@ -22,30 +43,27 @@ local function buildDomainPatterns()
     return patterns
 end
 
--- Professional CORS configuration for development and production
+-- Tier 3: Build explicit origin list from CORS_ALLOWED_ORIGINS env variable
+-- Format: comma-separated full origin URLs,
+-- e.g. "http://pop0.workstation.co.uk:8039,https://app.example.com"
+local function buildAllowedOrigins()
+    local origins = {}
+    local origins_env = os.getenv("CORS_ALLOWED_ORIGINS") or ""
+
+    for origin in origins_env:gmatch("[^,]+") do
+        origin = origin:match("^%s*(.-)%s*$") -- trim whitespace
+        if origin ~= "" then
+            origins[origin] = true -- hash table for O(1) lookup
+        end
+    end
+
+    return origins
+end
+
+-- Build configuration once at module load time
 local CORS_CONFIG = {
-    -- Development origins
-    allowed_origins = {
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3033",
-        "http://127.0.0.1:3847",
-        "http://127.0.0.1:4000",
-        "http://127.0.0.1:8039",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3033",
-        "http://127.0.0.1:3847",
-        "http://127.0.0.1:4000",
-        "http://127.0.0.1:8039",
-        -- Workstation development servers
-        "http://pop0.workstation.co.uk:8039",
-        "http://pop0.workstation.co.uk:3000",
-        "http://pop0.workstation.co.uk:3001"
-    },
-    -- Production domain patterns loaded from CORS_ALLOWED_DOMAINS env variable
     domain_patterns = buildDomainPatterns(),
-    -- CORS headers - include all custom headers used by the frontend
+    allowed_origins = buildAllowedOrigins(),
     headers = {
         methods = "GET, POST, PUT, DELETE, OPTIONS, PATCH",
         headers = "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-User-Email, X-Public-Browse, X-User-Id, X-Business-Id, X-Namespace-Id, X-Namespace-Slug, X-Vault-Key",
@@ -54,34 +72,37 @@ local CORS_CONFIG = {
     }
 }
 
--- Check if origin is allowed
+-- Check if origin is allowed using the three-tier system
 local function isOriginAllowed(origin)
     if not origin then
-        -- Allow requests without origin (like Electron apps, curl, Postman, etc.)
+        -- Allow requests without Origin header (curl, Postman, Electron, server-to-server)
         return true, "*"
     end
 
-    -- Check exact matches for development origins
-    for _, allowed in ipairs(CORS_CONFIG.allowed_origins) do
-        if origin == allowed then
-            return true, origin
-        end
+    -- Tier 1: Always allow localhost/loopback on any port
+    if isLocalhostOrigin(origin) then
+        return true, origin
     end
 
-    -- Check domain patterns for production
+    -- Tier 2: Check domain patterns from CORS_ALLOWED_DOMAINS
     for _, pattern in ipairs(CORS_CONFIG.domain_patterns) do
         if origin:match(pattern) then
             return true, origin
         end
     end
 
-    return false, "" -- empty value; browser will reject the cross-origin request
+    -- Tier 3: Check explicit origins from CORS_ALLOWED_ORIGINS
+    if CORS_CONFIG.allowed_origins[origin] then
+        return true, origin
+    end
+
+    return false, ""
 end
 
 function CorsMiddleware.enable(app)
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]
-        local is_allowed, allowed_origin = isOriginAllowed(origin)
+        local _, allowed_origin = isOriginAllowed(origin)
 
         -- Set CORS headers for all requests
         self.res.headers["Access-Control-Allow-Origin"] = allowed_origin
