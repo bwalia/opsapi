@@ -75,8 +75,9 @@ local CORS_CONFIG = {
 -- Check if origin is allowed using the three-tier system
 local function isOriginAllowed(origin)
     if not origin then
-        -- Allow requests without Origin header (curl, Postman, Electron, server-to-server)
-        return true, "*"
+        -- No Origin header: non-browser clients (curl, Postman, server-to-server)
+        -- Return nil to signal "no CORS headers needed" (not a CORS request)
+        return true, nil
     end
 
     -- Tier 1: Always allow localhost/loopback on any port
@@ -96,20 +97,28 @@ local function isOriginAllowed(origin)
         return true, origin
     end
 
-    return false, ""
+    return false, nil
 end
 
 function CorsMiddleware.enable(app)
     app:before_filter(function(self)
         local origin = self.req.headers["origin"] or self.req.headers["Origin"]
-        local _, allowed_origin = isOriginAllowed(origin)
+        local allowed, allowed_origin = isOriginAllowed(origin)
 
-        -- Set CORS headers for all requests
-        self.res.headers["Access-Control-Allow-Origin"] = allowed_origin
-        self.res.headers["Access-Control-Allow-Credentials"] = CORS_CONFIG.headers.credentials
-        self.res.headers["Access-Control-Allow-Methods"] = CORS_CONFIG.headers.methods
-        self.res.headers["Access-Control-Allow-Headers"] = CORS_CONFIG.headers.headers
-        self.res.headers["Access-Control-Max-Age"] = CORS_CONFIG.headers.max_age
+        -- Always set Vary: Origin so CDNs/proxies don't serve cached CORS
+        -- headers from one origin to a different origin
+        self.res.headers["Vary"] = "Origin"
+
+        if allowed and allowed_origin then
+            -- Origin is allowed: set full CORS headers with the specific origin
+            self.res.headers["Access-Control-Allow-Origin"] = allowed_origin
+            self.res.headers["Access-Control-Allow-Credentials"] = CORS_CONFIG.headers.credentials
+            self.res.headers["Access-Control-Allow-Methods"] = CORS_CONFIG.headers.methods
+            self.res.headers["Access-Control-Allow-Headers"] = CORS_CONFIG.headers.headers
+            self.res.headers["Access-Control-Max-Age"] = CORS_CONFIG.headers.max_age
+        end
+        -- If not allowed or no origin (non-browser client): no CORS headers set,
+        -- browser will block the cross-origin request naturally
 
         -- Handle preflight OPTIONS requests
         if self.req.method == "OPTIONS" then
