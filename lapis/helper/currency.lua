@@ -194,13 +194,35 @@ end
 -- Detect currency from country code (ISO 3166-1 alpha-2)
 function CurrencyHelper.detectFromCountry(country_code)
     local country_to_currency = {
-        US = "USD", GB = "GBP", IN = "INR", CA = "CAD", AU = "AUD",
-        JP = "JPY", CN = "CNY", CH = "CHF", SG = "SGD",
+        US = "USD",
+        GB = "GBP",
+        IN = "INR",
+        CA = "CAD",
+        AU = "AUD",
+        JP = "JPY",
+        CN = "CNY",
+        CH = "CHF",
+        SG = "SGD",
         -- European Union countries
-        DE = "EUR", FR = "EUR", IT = "EUR", ES = "EUR", NL = "EUR",
-        BE = "EUR", AT = "EUR", PT = "EUR", IE = "EUR", FI = "EUR",
-        GR = "EUR", LU = "EUR", SI = "EUR", CY = "EUR", MT = "EUR",
-        SK = "EUR", EE = "EUR", LV = "EUR", LT = "EUR",
+        DE = "EUR",
+        FR = "EUR",
+        IT = "EUR",
+        ES = "EUR",
+        NL = "EUR",
+        BE = "EUR",
+        AT = "EUR",
+        PT = "EUR",
+        IE = "EUR",
+        FI = "EUR",
+        GR = "EUR",
+        LU = "EUR",
+        SI = "EUR",
+        CY = "EUR",
+        MT = "EUR",
+        SK = "EUR",
+        EE = "EUR",
+        LV = "EUR",
+        LT = "EUR",
     }
 
     return country_to_currency[country_code:upper()] or "USD"
