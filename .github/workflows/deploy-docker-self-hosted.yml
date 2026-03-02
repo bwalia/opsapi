@@ -91,7 +91,7 @@ on:
         required: false
 
 env:
-  BASE_DOMAIN: "wslcrm.com"
+  BASE_DOMAIN: "diytaxreturn.co.uk"
   SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/${{ github.event.inputs.TARGET_ENV || 'test' }}/${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}/.env"
 
 jobs:
@@ -146,7 +146,7 @@ jobs:
             PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
             PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
-            APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'wslcrm.com' }}"
+            APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
           fi
 
           BASE_DOMAIN="$APEX_DOMAIN"
