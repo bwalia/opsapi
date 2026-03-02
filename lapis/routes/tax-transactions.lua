@@ -6,6 +6,7 @@
     Users can only access their own transactions.
 ]]
 
+local respond_to = require("lapis.application").respond_to
 local TaxTransactionQueries = require "queries.TaxTransactionQueries"
 local TaxAuditLogQueries = require "queries.TaxAuditLogQueries"
 local AuthMiddleware = require("middleware.auth")
@@ -229,60 +230,58 @@ return function(app)
         }
     end))
 
-    -- Get a single transaction
-    app:get("/api/v2/tax/transactions/:id", AuthMiddleware.requireAuth(function(self)
-        local transaction = TaxTransactionQueries.show(tostring(self.params.id), self.current_user)
+    -- Get, update, or patch a single transaction
+    app:match("/api/v2/tax/transactions/:id", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            local transaction = TaxTransactionQueries.show(tostring(self.params.id), self.current_user)
 
-        if not transaction then
+            if not transaction then
+                return {
+                    json = { error = "Transaction not found" },
+                    status = 404
+                }
+            end
+
             return {
-                json = { error = "Transaction not found" },
-                status = 404
+                json = { data = transaction },
+                status = 200
             }
-        end
+        end),
+        PUT = AuthMiddleware.requireAuth(function(self)
+            merge_params(self)
 
-        return {
-            json = { data = transaction },
-            status = 200
-        }
-    end))
+            local transaction = TaxTransactionQueries.update(tostring(self.params.id), self.params, self.current_user)
 
-    -- Update a transaction
-    app:put("/api/v2/tax/transactions/:id", AuthMiddleware.requireAuth(function(self)
-        merge_params(self)
+            if not transaction then
+                return {
+                    json = { error = "Transaction not found" },
+                    status = 404
+                }
+            end
 
-        local transaction = TaxTransactionQueries.update(tostring(self.params.id), self.params, self.current_user)
-
-        if not transaction then
             return {
-                json = { error = "Transaction not found" },
-                status = 404
+                json = { data = transaction },
+                status = 200
             }
-        end
+        end),
+        PATCH = AuthMiddleware.requireAuth(function(self)
+            merge_params(self)
 
-        return {
-            json = { data = transaction },
-            status = 200
-        }
-    end))
+            local transaction = TaxTransactionQueries.update(tostring(self.params.id), self.params, self.current_user)
 
-    -- PATCH update a transaction (same as PUT)
-    app:match("/api/v2/tax/transactions/:id", { "PATCH" }, AuthMiddleware.requireAuth(function(self)
-        merge_params(self)
+            if not transaction then
+                return {
+                    json = { error = "Transaction not found" },
+                    status = 404
+                }
+            end
 
-        local transaction = TaxTransactionQueries.update(tostring(self.params.id), self.params, self.current_user)
-
-        if not transaction then
             return {
-                json = { error = "Transaction not found" },
-                status = 404
+                json = { data = transaction },
+                status = 200
             }
-        end
-
-        return {
-            json = { data = transaction },
-            status = 200
-        }
-    end))
+        end)
+    }))
 
     -- Confirm a single transaction
     app:post("/api/v2/tax/transactions/:id/confirm", AuthMiddleware.requireAuth(function(self)

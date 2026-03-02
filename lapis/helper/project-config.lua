@@ -57,11 +57,12 @@ ProjectConfig.PROJECT_FEATURES = {
     },
 
     -- Tax Copilot - UK Tax Return AI Agent
-    -- Minimal footprint: only core auth + tax-specific tables
+    -- Core auth + tax-specific tables + menu (required for dashboard navigation)
     tax_copilot = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.TAX_COPILOT,
         ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
     },
 
     -- Ecommerce platform
@@ -104,9 +105,10 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.MENU,
     },
 
-    -- Minimal core only (just auth system)
+    -- Minimal core only (just auth system + menu for dashboard)
     core_only = {
         ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.MENU,
     },
 }
 
@@ -255,6 +257,105 @@ end
 -- Reset cache (useful for testing)
 function ProjectConfig.resetCache()
     _enabled_features = nil
+end
+
+-- =============================================================================
+-- RBAC MODULE DEFINITIONS PER FEATURE
+-- =============================================================================
+-- Maps feature names to their RBAC modules (for the modules DB table).
+-- When a project is set up, only modules relevant to its enabled features are seeded.
+
+ProjectConfig.PROJECT_MODULES = {
+    -- Core modules (always included for any project)
+    core = {
+        { machine_name = "dashboard", name = "Dashboard", description = "Main dashboard and analytics", category = "Core", is_system = true },
+        { machine_name = "users", name = "Users", description = "User management within namespace", category = "Core", is_system = true },
+        { machine_name = "roles", name = "Roles", description = "Role management within namespace", category = "Core", is_system = true },
+        { machine_name = "settings", name = "Settings", description = "Namespace settings", category = "Core", is_system = true },
+        { machine_name = "namespace", name = "Namespace", description = "Namespace administration", category = "Core", is_system = true },
+        { machine_name = "reports", name = "Reports", description = "Analytics and reports", category = "Core" },
+    },
+
+    -- Ecommerce modules
+    ecommerce = {
+        { machine_name = "stores", name = "Stores", description = "Store management", category = "Commerce" },
+        { machine_name = "products", name = "Products", description = "Product catalog management", category = "Commerce" },
+        { machine_name = "orders", name = "Orders", description = "Order processing", category = "Commerce" },
+        { machine_name = "customers", name = "Customers", description = "Customer management", category = "Commerce" },
+    },
+
+    -- Delivery modules
+    delivery = {
+        { machine_name = "delivery", name = "Delivery", description = "Delivery partners management", category = "Commerce" },
+    },
+
+    -- Chat modules
+    chat = {
+        { machine_name = "chat", name = "Chat", description = "Chat and messaging", category = "Communication" },
+    },
+
+    -- Kanban modules
+    kanban = {
+        { machine_name = "projects", name = "Projects", description = "Kanban projects and tasks", category = "Productivity" },
+    },
+
+    -- Services modules
+    services = {
+        { machine_name = "services", name = "Services", description = "Service deployment and management", category = "Infrastructure" },
+    },
+
+    -- Hospital modules
+    hospital = {
+        { machine_name = "hospital_patients", name = "Patients", description = "Patient management", category = "Hospital" },
+        { machine_name = "hospital_appointments", name = "Appointments", description = "Appointment scheduling", category = "Hospital" },
+        { machine_name = "hospital_records", name = "Medical Records", description = "Medical records management", category = "Hospital" },
+    },
+
+    -- Tax Copilot modules
+    tax_copilot = {
+        { machine_name = "tax_support", name = "Support Chat", description = "Tax support chat", category = "Tax" },
+        { machine_name = "tax_transactions", name = "Transactions", description = "Bank transaction tracking", category = "Tax" },
+        { machine_name = "tax_categories", name = "Categories", description = "Transaction categories", category = "Tax" },
+        { machine_name = "tax_bank_accounts", name = "Bank Accounts", description = "Bank account management", category = "Tax" },
+        { machine_name = "tax_statements", name = "Statements", description = "Bank statement uploads", category = "Tax" },
+        { machine_name = "tax_extract", name = "Extract", description = "AI data extraction", category = "Tax - AI" },
+        { machine_name = "tax_classify", name = "Classify", description = "AI transaction classification", category = "Tax - AI" },
+        { machine_name = "tax_reconcile", name = "Reconcile", description = "AI reconciliation", category = "Tax - AI" },
+        { machine_name = "tax_calculate", name = "Calculate", description = "AI tax calculation", category = "Tax - AI" },
+        { machine_name = "tax_file", name = "HMRC Filing", description = "HMRC tax filing", category = "Tax - AI" },
+        { machine_name = "tax_admin", name = "Admin Dashboard", description = "Tax admin dashboard", category = "Tax" },
+    },
+}
+
+--- Get RBAC modules for current PROJECT_CODE (core + project-specific features)
+-- @return table List of module definitions
+function ProjectConfig.getProjectModules()
+    local modules = {}
+    local seen = {}
+
+    -- Always include core modules
+    for _, m in ipairs(ProjectConfig.PROJECT_MODULES.core) do
+        if not seen[m.machine_name] then
+            seen[m.machine_name] = true
+            table.insert(modules, m)
+        end
+    end
+
+    -- Add modules for each enabled feature
+    local features = ProjectConfig.getEnabledFeatures()
+    for _, feature in ipairs(features) do
+        local feature_modules = ProjectConfig.PROJECT_MODULES[feature]
+        if feature_modules then
+            for _, m in ipairs(feature_modules) do
+                if not seen[m.machine_name] then
+                    seen[m.machine_name] = true
+                    table.insert(modules, m)
+                end
+            end
+        end
+    end
+
+    return modules
 end
 
 return ProjectConfig

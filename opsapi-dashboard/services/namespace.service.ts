@@ -8,6 +8,7 @@ import type {
   NamespaceSwitchResponse,
   NamespaceStats,
   NamespaceInvitation,
+  AuditLog,
   CreateNamespaceDto,
   UpdateNamespaceDto,
   CreateNamespaceRoleDto,
@@ -15,6 +16,7 @@ import type {
   InviteMemberDto,
   PaginatedResponse,
   PaginationParams,
+  PermissionAction,
   NamespaceModuleMeta,
   NamespaceActionMeta,
   UserNamespaceSettings,
@@ -386,6 +388,21 @@ export const namespaceService = {
   },
 
   /**
+   * Get audit logs for current namespace with filters
+   */
+  async getAuditLogs(params?: PaginationParams & {
+    entity_type?: string;
+    action?: string;
+    user_id?: number;
+    from_date?: string;
+    to_date?: string;
+  }): Promise<{ data: AuditLog[]; total: number; page: number; per_page: number; total_pages: number }> {
+    const queryString = buildQueryString((params || {}) as Record<string, unknown>);
+    const response = await apiClient.get(`/api/v2/namespace/audit-logs${queryString}`);
+    return response.data;
+  },
+
+  /**
    * Get all roles for a specific namespace (admin context)
    * Uses namespace ID from URL parameter
    * @param namespaceId The namespace UUID or ID
@@ -456,7 +473,10 @@ export const namespaceService = {
     const response = await apiClient.get<{ modules: NamespaceModuleMeta[]; actions: NamespaceActionMeta[] }>(
       '/api/v2/namespace/roles/meta/permissions'
     );
-    return response.data;
+    // Guard against Lua cjson encoding empty tables as {} instead of []
+    const modules = Array.isArray(response.data?.modules) ? response.data.modules : [];
+    const actions = Array.isArray(response.data?.actions) ? response.data.actions : [];
+    return { modules, actions };
   },
 
   // ============================================
@@ -558,13 +578,13 @@ export const namespaceService = {
    */
   hasPermission(
     permissions: NamespacePermissions | undefined,
-    module: keyof NamespacePermissions,
-    action: string
+    module: string,
+    action: PermissionAction
   ): boolean {
     if (!permissions) return false;
     const modulePerms = permissions[module];
     if (!modulePerms || !Array.isArray(modulePerms)) return false;
-    return modulePerms.includes(action as never) || modulePerms.includes('manage' as never);
+    return modulePerms.includes(action) || modulePerms.includes('manage');
   },
 
   // ============================================

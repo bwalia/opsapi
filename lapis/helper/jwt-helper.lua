@@ -183,41 +183,88 @@ function JWTHelper.hasNamespace(token)
 end
 
 --- Refresh a token with extended expiration
+-- Re-validates user and roles from DB to prevent stale/revoked access
 -- @param token string The JWT token
 -- @param expiration number|nil New expiration in seconds
--- @return string|nil New token or nil if original is invalid
+-- @return string|nil New token or nil if invalid/deactivated
 function JWTHelper.refreshToken(token, expiration)
+    local db = require("lapis.db")
+
     local result = JWTHelper.verifyToken(token)
     if not result.valid then
         return nil
     end
 
     local userinfo = result.payload.userinfo
-    if not userinfo then
+    if not userinfo or not userinfo.uuid then
         return nil
     end
 
-    -- Reconstruct user object from userinfo
+    -- Re-validate user from DB (catches deactivated users, deleted accounts)
+    local db_user = db.select("* FROM users WHERE uuid = ? AND active = true", userinfo.uuid)
+    if not db_user or #db_user == 0 then
+        return nil
+    end
+    db_user = db_user[1]
+
+    -- Re-fetch platform roles from DB (catches role changes)
+    local platform_roles = db.query([[
+        SELECT r.id, r.role_name, r.role_name as name FROM roles r
+        JOIN user__roles ur ON r.id = ur.role_id
+        WHERE ur.user_id = ?
+    ]], db_user.id)
+
     local user = {
-        uuid = userinfo.uuid,
-        email = userinfo.email,
-        first_name = userinfo.first_name,
-        last_name = userinfo.last_name,
-        roles = userinfo.user_roles or userinfo.roles
+        uuid = db_user.uuid,
+        email = db_user.email,
+        first_name = db_user.first_name,
+        last_name = db_user.last_name
     }
 
-    -- Reconstruct options
     local options = {
-        roles = userinfo.user_roles or userinfo.roles,
+        roles = platform_roles,
         expiration = expiration or DEFAULT_EXPIRATION
     }
 
-    -- Preserve namespace context
-    if userinfo.namespace then
-        options.namespace = userinfo.namespace
-        options.namespace_role = userinfo.namespace.role
-        options.namespace_permissions = userinfo.namespace.permissions
-        options.is_namespace_owner = userinfo.namespace.is_owner
+    -- Re-fetch namespace context if present
+    if userinfo.namespace and userinfo.namespace.uuid then
+        local ns = db.select("* FROM namespaces WHERE uuid = ? AND status = 'active'", userinfo.namespace.uuid)
+        if ns and #ns > 0 then
+            options.namespace = ns[1]
+
+            -- Re-fetch membership and permissions
+            local membership = db.query([[
+                SELECT nm.* FROM namespace_members nm
+                JOIN namespaces n ON nm.namespace_id = n.id
+                WHERE nm.user_id = ? AND n.uuid = ? AND nm.status = 'active'
+            ]], db_user.id, userinfo.namespace.uuid)
+
+            if membership and #membership > 0 then
+                local raw_is_owner = membership[1].is_owner
+                options.is_namespace_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
+
+                -- Re-fetch namespace permissions via member's roles
+                local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
+                local permissions = NamespaceMemberQueries.getPermissions(membership[1].id)
+                options.namespace_permissions = permissions
+
+                -- Get namespace role name
+                local member_details = NamespaceMemberQueries.getWithDetails(membership[1].id)
+                if member_details and member_details.roles then
+                    local roles = member_details.roles
+                    if type(roles) == "string" then
+                        local ok, parsed = pcall(cjson.decode, roles)
+                        if ok then roles = parsed end
+                    end
+                    if type(roles) == "table" and #roles > 0 then
+                        options.namespace_role = roles[1].role_name
+                    end
+                end
+            else
+                -- User lost membership — issue token without namespace context
+                options.namespace = nil
+            end
+        end
     end
 
     return JWTHelper.generateToken(user, options)

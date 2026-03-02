@@ -97,26 +97,27 @@ function NamespaceMemberQueries.all(namespace_id, params)
         return { data = {}, total = 0, page = page, per_page = per_page, total_pages = 0 }
     end
 
-    -- Build conditions
-    local conditions = { "nm.namespace_id = " .. ns_id }
+    -- Build parameterized conditions
+    local conditions = { "nm.namespace_id = ?" }
+    local values = { ns_id }
 
     if params.status and params.status ~= "" and params.status ~= "all" then
-        table.insert(conditions, "nm.status = " .. db.escape_literal(params.status))
+        table.insert(conditions, "nm.status = ?")
+        table.insert(values, params.status)
     end
 
     if params.search and params.search ~= "" then
-        local search_term = db.escape_literal("%" .. params.search .. "%")
-        table.insert(conditions, string.format(
-            "(u.email ILIKE %s OR u.first_name ILIKE %s OR u.last_name ILIKE %s OR CONCAT(u.first_name, ' ', u.last_name) ILIKE %s)",
-            search_term, search_term, search_term, search_term
-        ))
+        local search_term = "%" .. params.search .. "%"
+        table.insert(conditions, "(u.email ILIKE ? OR u.first_name ILIKE ? OR u.last_name ILIKE ? OR CONCAT(u.first_name, ' ', u.last_name) ILIKE ?)")
+        table.insert(values, search_term)
+        table.insert(values, search_term)
+        table.insert(values, search_term)
+        table.insert(values, search_term)
     end
 
     if params.role_id then
-        table.insert(conditions, string.format(
-            "EXISTS (SELECT 1 FROM namespace_user_roles nur WHERE nur.namespace_member_id = nm.id AND nur.namespace_role_id = %d)",
-            tonumber(params.role_id)
-        ))
+        table.insert(conditions, "EXISTS (SELECT 1 FROM namespace_user_roles nur WHERE nur.namespace_member_id = nm.id AND nur.namespace_role_id = ?)")
+        table.insert(values, tonumber(params.role_id))
     end
 
     local where_clause = "WHERE " .. table.concat(conditions, " AND ")
@@ -129,10 +130,15 @@ function NamespaceMemberQueries.all(namespace_id, params)
         %s
     ]], where_clause)
 
-    local count_result = db.query(count_query)
+    local count_result = db.query(count_query, table.unpack(values))
     local total = count_result and count_result[1] and count_result[1].total or 0
 
-    -- Get paginated data with roles
+    -- Get paginated data with roles — append LIMIT/OFFSET to values
+    local data_values = {}
+    for _, v in ipairs(values) do table.insert(data_values, v) end
+    table.insert(data_values, per_page)
+    table.insert(data_values, offset)
+
     local data_query = string.format([[
         SELECT
             nm.id, nm.uuid, nm.namespace_id, nm.user_id, nm.status,
@@ -156,10 +162,10 @@ function NamespaceMemberQueries.all(namespace_id, params)
         LEFT JOIN users iu ON nm.invited_by = iu.id
         %s
         ORDER BY nm.is_owner DESC, nm.created_at DESC
-        LIMIT %d OFFSET %d
-    ]], where_clause, per_page, offset)
+        LIMIT ? OFFSET ?
+    ]], where_clause)
 
-    local data = db.query(data_query)
+    local data = db.query(data_query, table.unpack(data_values))
 
     -- Structure the response
     for _, member in ipairs(data or {}) do
@@ -352,18 +358,30 @@ function NamespaceMemberQueries.removeRole(member_id, role_id)
 end
 
 --- Set member roles (replace all existing roles)
+-- Uses transaction to prevent partial state if assignment fails
 -- @param member_id number Member ID
 -- @param role_ids table List of role IDs
 -- @return boolean Success status
 function NamespaceMemberQueries.setRoles(member_id, role_ids)
-    -- Remove all existing roles
-    db.delete("namespace_user_roles", { namespace_member_id = member_id })
+    role_ids = role_ids or {}
 
-    -- Add new roles
-    for _, role_id in ipairs(role_ids or {}) do
-        NamespaceMemberQueries.assignRole(member_id, role_id)
+    db.query("BEGIN")
+    local ok, err = pcall(function()
+        -- Remove all existing roles
+        db.delete("namespace_user_roles", { namespace_member_id = member_id })
+
+        -- Add new roles
+        for _, role_id in ipairs(role_ids) do
+            NamespaceMemberQueries.assignRole(member_id, role_id)
+        end
+    end)
+
+    if not ok then
+        pcall(db.query, "ROLLBACK")
+        error("Failed to set roles: " .. tostring(err))
     end
 
+    db.query("COMMIT")
     return true
 end
 
@@ -437,6 +455,7 @@ function NamespaceMemberQueries.hasPermission(member_id, module, action)
 end
 
 --- Transfer ownership
+-- Uses transaction to prevent partial ownership state
 -- @param namespace_id number Namespace ID
 -- @param from_user_id number Current owner user ID
 -- @param to_member_id number New owner member ID
@@ -456,7 +475,7 @@ function NamespaceMemberQueries.transferOwnership(namespace_id, from_user_id, to
 
     -- Find new owner
     local new_owner = db.select([[
-        id FROM namespace_members
+        id, user_id FROM namespace_members
         WHERE id = ? AND namespace_id = ?
     ]], to_member_id, namespace_id)
 
@@ -464,26 +483,31 @@ function NamespaceMemberQueries.transferOwnership(namespace_id, from_user_id, to
         error("Target member not found in namespace")
     end
 
-    -- Transfer ownership
-    db.update("namespace_members", {
-        is_owner = false,
-        updated_at = timestamp
-    }, { id = current_owner[1].id })
+    -- Transfer ownership in a transaction
+    db.query("BEGIN")
+    local ok, err = pcall(function()
+        db.update("namespace_members", {
+            is_owner = false,
+            updated_at = timestamp
+        }, { id = current_owner[1].id })
 
-    db.update("namespace_members", {
-        is_owner = true,
-        updated_at = timestamp
-    }, { id = to_member_id })
+        db.update("namespace_members", {
+            is_owner = true,
+            updated_at = timestamp
+        }, { id = to_member_id })
 
-    -- Update namespace owner_user_id
-    local new_owner_details = NamespaceMemberQueries.show(to_member_id)
-    if new_owner_details then
         db.update("namespaces", {
-            owner_user_id = new_owner_details.user_id,
+            owner_user_id = new_owner[1].user_id,
             updated_at = timestamp
         }, { id = namespace_id })
+    end)
+
+    if not ok then
+        pcall(db.query, "ROLLBACK")
+        error("Failed to transfer ownership: " .. tostring(err))
     end
 
+    db.query("COMMIT")
     return true
 end
 

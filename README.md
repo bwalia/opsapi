@@ -1,334 +1,317 @@
-# OPSAPI
+# OpsAPI
 
-Opsapi API is built on the top of Opneresty Nginx / Lua for increased performance and reliability
-
-## Opneresty Nginx / Lua / Postgres - or you may refer it as `OLP Stack`
-
-## Avoids Nginx to CGI resource consumption as lua is compiled to work directly with Nginx Workers
-
-## OpsAPI is Simple and allows Developers to create Database API right from the begining (Batteries included)
-
-## Nginx is highly scalable and reliable and idea of OPSAPI is to make OLP stack nginx/lua/postgres to work together think Unix sockets to have very high performance
-
-## Native applications can just run on a single instance linux OS recommended using Unix sockets (highly recommended for production and securing database api)
-
-## If run as containerised stack the Dockerfile is highly optimised for performance
-
-## Status by Gatus
-
-### Check `http://127.0.0.1:8888/`
+Multi-tenant API platform built on OpenResty Nginx/Lua/PostgreSQL (OLP Stack). Lua runs directly inside Nginx workers — no CGI overhead, Unix-socket-grade performance.
 
 ## Components
 
-- **OPSAPI (Backend)**: Lua-based API server with authentication and ecommerce functionality
-- **OPSAPI Dashboard**: Next.js admin dashboard for managing the platform
-- **OPSAPI Node**: Node.js service for file uploads and additional features
+- **OpsAPI (Backend)** — Lapis/Lua API server with JWT auth, RBAC, multi-tenancy
+- **OpsAPI Dashboard** — Next.js admin dashboard (port 8039)
+- **OpsAPI Node** — Node.js service for file uploads (optional)
 
 ---
 
-## Run OPSAPI Locally (Quick Start)
+## Quick Start (Local Development)
 
-### Requirements
+### Prerequisites
 
-- Docker
-- Docker Compose
+1. **Docker Desktop** — Download and install from https://www.docker.com/products/docker-desktop/
+   - After installing, **open Docker Desktop** and wait until it shows "Docker Desktop is running" (green icon in the system tray/menu bar)
+   - Docker Compose is included with Docker Desktop
+2. **Git** — Download from https://git-scm.com/downloads
 
-### Installation
+### Step 1: Clone the repository
 
-1. **Clone the repository and navigate to the project root:**
+```bash
+git clone https://github.com/bwalia/opsapi.git
+cd opsapi
+```
 
-   ```bash
-   cd opsapi
-   ```
+### Step 2: Create the environment file
 
-2. **Configure environment variables:**
+```bash
+cp lapis/.sample.env lapis/.env
+```
 
-   Copy the sample environment file and update with your values:
+This copies a pre-configured environment file with working defaults. **No editing needed** — it works out of the box for local development.
 
-   ```bash
-   cp lapis/.sample.env lapis/.env
-   ```
+### Step 3: Make the start script executable
 
-   Edit `lapis/.env` with your configuration. See [Environment Variables](#environment-variables) section for details.
+```bash
+chmod +x start.sh
+```
 
-3. **Run the development script:**
+### Step 4: Start everything
 
-   ```bash
-   ./start.sh
-   ```
+```bash
+./start.sh -e local -n -j all
+```
 
-   This script will:
+**What this does:**
+- `-e local` — sets up for local development (http://127.0.0.1:4010)
+- `-n` — skips git operations (stash/pull) since you just cloned
+- `-j all` — creates all database tables
 
-   - Prompt for target environment (or use `-e` flag)
-   - Validate and update environment-specific URLs in `.env`
-   - Optionally stash uncommitted changes
-   - Optionally pull latest changes from git
-   - Create necessary directories (logs, pgdata, keycloak_data)
-   - Start all Docker services with fresh volumes
-   - Wait for services to be ready
-   - Run database migrations
-   - Configure local hostname (opsapi-dev.local)
+**The first run takes 3-5 minutes** as Docker downloads images and builds containers. Subsequent runs are much faster.
 
-   **Environment Selection:**
+**Note:** Near the end, the script updates your `/etc/hosts` file and will ask for your **computer password** (sudo). This is safe — it just adds `127.0.0.1 opsapi-dev.local` so you can access the API at http://opsapi-dev.local:4010.
 
-   The script supports multiple deployment environments with automatic URL configuration:
+### Step 5: Verify it's working
 
-   **Preset Environments:**
+Once the script finishes, open these URLs in your browser:
 
-   | Environment | API URL |
-   |-------------|---------|
-   | `local` | `http://127.0.0.1:4010` |
-   | `dev` | `https://dev-api.wslcrm.com` |
-   | `test` | `https://test-api.wslcrm.com` |
-   | `acc` | `https://acc-api.wslcrm.com` |
-   | `prod` | `https://api.wslcrm.com` |
-   | `remote` | `https://remote-api.wslcrm.com` |
+| Service | URL |
+|---------|-----|
+| **Backend API** | http://127.0.0.1:4010/health |
+| **Dashboard** | http://127.0.0.1:8039 |
+| **API Docs (Swagger)** | http://127.0.0.1:4010/swagger |
 
-   **Dynamic Environments:**
+You should see the health check return `{"status":"ok"}` and the dashboard load a login page.
 
-   You can also use any custom environment name. The script will automatically generate the API URL using the pattern `https://<name>-api.wslcrm.com`:
+### Step 6: Log in
 
-   | Custom Environment | Generated API URL |
-   |-------------------|-------------------|
-   | `staging` | `https://staging-api.wslcrm.com` |
-   | `demo` | `https://demo-api.wslcrm.com` |
-   | `feature-x` | `https://feature-x-api.wslcrm.com` |
-   | `my_custom_env` | `https://my_custom_env-api.wslcrm.com` |
-
-   Environment names must start with a letter and can contain letters, numbers, hyphens, or underscores.
-
-   The script automatically validates and updates these environment variables in `lapis/.env`:
-   - `NEXT_PUBLIC_API_URL` - API base URL
-   - `GOOGLE_REDIRECT_URI` - Google OAuth callback URL
-   - `KEYCLOAK_REDIRECT_URI` - Keycloak SSO callback URL
-
-   **Command-line options:**
-
-   ```bash
-   # Interactive mode (default - prompts for environment, protocol, and git options)
-   ./start.sh
-
-   # Specify preset environment directly
-   ./start.sh -e local           # Local development (http://127.0.0.1:4010)
-   ./start.sh -e dev             # Dev environment (https://dev-api.wslcrm.com)
-   ./start.sh -e test            # Test environment
-   ./start.sh -e acc             # Acceptance environment
-   ./start.sh -e prod            # Production environment
-   ./start.sh -e remote          # Remote environment
-   ./start.sh --env=dev          # Alternative syntax
-
-   # Use custom/dynamic environments
-   ./start.sh -e staging         # https://staging-api.wslcrm.com
-   ./start.sh -e demo            # https://demo-api.wslcrm.com
-   ./start.sh -e feature-x       # https://feature-x-api.wslcrm.com
-
-   # Specify protocol (http or https)
-   ./start.sh -e dev -P http     # Dev env with HTTP: http://dev-api.wslcrm.com
-   ./start.sh -e dev -P https    # Dev env with HTTPS (default)
-   ./start.sh -e local -P https  # Local with HTTPS: https://127.0.0.1:4010
-   ./start.sh --protocol=http    # Alternative syntax
-
-   # Combined with git options
-   ./start.sh -e dev -a          # Dev env, auto git (stash + pull)
-   ./start.sh -e remote -n       # Remote env, no git operations
-   ./start.sh -e staging -a      # Custom staging env, auto git
-   ./start.sh -e dev -P http -a  # Dev with HTTP, auto git
-
-   # Check/update .env only (don't start containers)
-   ./start.sh -c -e dev          # Just validate .env for dev
-   ./start.sh -c -e dev -P http  # Validate with HTTP protocol
-
-   # Reset database (removes volumes)
-   ./start.sh -e local -r        # Local with fresh database
-
-   # Auto mode - stash and pull without prompts
-   ./start.sh -a
-   ./start.sh --auto
-
-   # Skip all git operations
-   ./start.sh -n
-   ./start.sh --no-git
-
-   # Specify git options individually
-   ./start.sh -s y -p y          # Stash: yes, Pull: yes
-   ./start.sh -s n -p y          # No stash, Pull: yes
-   ./start.sh --stash=y --pull=n
-
-   # Show help
-   ./start.sh -h
-   ```
-
-   | Option | Description |
-   |--------|-------------|
-   | `-e ENV` / `--env ENV` | Target environment (local/dev/test/acc/prod/remote or any custom name) |
-   | `-P PROTO` / `--protocol PROTO` | API protocol (http or https). Default: http for local, https for others |
-   | `-c` / `--check-env` | Only check/update .env, don't start containers |
-   | `-s y` / `--stash y` | Stash uncommitted changes |
-   | `-s n` / `--stash n` | Skip stashing |
-   | `-p y` / `--pull y` | Pull latest from git |
-   | `-p n` / `--pull n` | Skip pull |
-   | `-a` / `--auto` | Auto mode (stash=y, pull=y) |
-   | `-n` / `--no-git` | No git operations |
-   | `-r` / `--reset-db` | Reset database (removes volumes) |
-   | `-h` / `--help` | Show help |
-
-4. **Access the application:**
-   - **Backend API**: http://127.0.0.1:4010
-   - **Dashboard**: http://127.0.0.1:8039
-   - **Adminer (DB UI)**: http://127.0.0.1:7779
-   - **Grafana**: http://127.0.0.1:3011
-   - **Prometheus**: http://127.0.0.1:9090
-   - **MinIO Console**: http://127.0.0.1:9001
-   - **Gatus (Status)**: http://127.0.0.1:8888
-
-### Default Login Credentials
+Use these credentials on the Dashboard (http://127.0.0.1:8039) or for API calls:
 
 ```
-Email: administrative@admin.com
+Email:    admin@opsapi.com
 Password: Admin@123
 ```
+
+These are the defaults created by `start.sh`. You can customise them — see [Custom Admin Credentials](#custom-admin-credentials) below.
+
+### All Service URLs and Logins
+
+| Service | URL | Login |
+|---------|-----|-------|
+| **Backend API** | http://127.0.0.1:4010 | See above |
+| **Dashboard** | http://127.0.0.1:8039 | See above |
+| **Swagger Docs** | http://127.0.0.1:4010/swagger | No login needed |
+| **Adminer (DB browser)** | http://127.0.0.1:7779 | System: `PostgreSQL`, Server: `postgres`, User: `pguser`, Password: `pgpassword`, Database: `opsapi` |
+| **MinIO Console (files)** | http://127.0.0.1:9001 | User: `minioadmin`, Password: `minioadmin123` |
+| **Grafana (monitoring)** | http://127.0.0.1:3011 | User: `admin`, Password: `admin` |
+| **Prometheus (metrics)** | http://127.0.0.1:9090 | No login needed |
+| **Gatus (health status)** | http://127.0.0.1:8888 | No login needed |
+
+### Common Issues
+
+**"Permission denied" when running start.sh:**
+```bash
+chmod +x start.sh
+```
+
+**"Cannot connect to the Docker daemon":**
+Open Docker Desktop and wait for it to fully start (green icon).
+
+**Port already in use (e.g. port 4010, 5439, 9000):**
+Another application is using that port. Stop it, or change the port in `lapis/docker-compose.yml`.
+
+**Script asks for password:**
+This is your computer password (sudo) — it's adding a hostname entry to `/etc/hosts`. This is normal and safe.
+
+### Custom Admin Credentials
+
+```bash
+./start.sh -e local -n -j all \
+  -A admin@mycompany.com -W MySecurePassword123
+```
+
+### Project-Specific Setup
+
+If you're working on a specific project, use its project code to only create the tables you need:
+
+```bash
+# UK Tax Return project
+./start.sh -e local -n -j tax_copilot
+
+# E-commerce project
+./start.sh -e local -n -j ecommerce
+```
+
+### Stopping and Restarting
+
+```bash
+# Stop all containers
+cd lapis && docker compose down
+
+# Restart (fast — no rebuild)
+cd lapis && docker compose up -d
+
+# Restart with rebuild (after code changes)
+./start.sh -e local -n -j all
+
+# Full reset — wipes database and starts fresh
+./start.sh -e local -n -j all -r
+```
+
+---
+
+## start.sh Reference
+
+The `start.sh` script handles the full setup: environment config, Docker build, migrations, namespace seeding, and /etc/hosts entry.
+
+### All Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-e, --env ENV` | Target environment (`local`/`dev`/`test`/`acc`/`prod`/`remote` or any custom name) | Interactive prompt |
+| `-d, --domain DOMAIN` | Apex domain | `wslcrm.com` |
+| `-P, --protocol PROTO` | API protocol (`http`/`https`) | `http` for local, `https` for others |
+| `-j, --project CODE` | Project code for conditional migrations | `all` |
+| `-A, --admin-email EMAIL` | Super admin email for namespace setup | `admin@opsapi.com` |
+| `-W, --admin-password PWD` | Super admin password | `Admin@123` |
+| `-N, --namespace-name NAME` | Custom namespace name | Derived from project code |
+| `-S, --namespace-slug SLUG` | Custom namespace slug | Derived from project code |
+| `-s, --stash y/n` | Git stash option | Interactive prompt |
+| `-p, --pull y/n` | Git pull option | Interactive prompt |
+| `-a, --auto` | Auto mode: stash=y, pull=y (no prompts) | — |
+| `-n, --no-git` | Skip all git operations | — |
+| `-r, --reset-db` | Reset database (removes Docker volumes — **destructive**) | `false` |
+| `-c, --check-env` | Only check/update `.env`, don't start containers | — |
+| `-C, --ci` | CI/CD mode: uses `docker-compose.ci.yml` (no dev volume mounts) | — |
+| `-h, --help` | Show help | — |
+
+### Project Codes
+
+| Code | Description |
+|------|-------------|
+| `all` | All features (default, backward compatible) |
+| `tax_copilot` | UK Tax Return AI Agent (core + tax tables) |
+| `ecommerce` | E-commerce platform (core + stores, products, orders) |
+| `collaboration` | Chat + Kanban + Services |
+| `hospital` | Hospital CRM |
+| `core_only` | Just authentication tables |
+
+### Environments
+
+**Preset:**
+
+| Environment | API URL |
+|-------------|---------|
+| `local` | `http://127.0.0.1:4010` |
+| `dev` | `https://dev-api.{domain}` |
+| `test` | `https://test-api.{domain}` |
+| `acc` | `https://acc-api.{domain}` |
+| `prod` | `https://api.{domain}` |
+| `remote` | `https://remote-api.{domain}` |
+
+**Custom:** Any name generates `https://{name}-api.{domain}` (e.g. `-e staging` → `https://staging-api.wslcrm.com`).
+
+### Examples
+
+```bash
+# Local dev, no git ops, all features
+./start.sh -e local -n
+
+# Local dev, tax project, fresh database
+./start.sh -e local -n -j tax_copilot -r
+
+# Local dev, custom admin + namespace
+./start.sh -e local -n -j tax_copilot \
+  -A admin@mycompany.com -W SecurePass123 \
+  -N "My Company" -S my-company
+
+# Dev environment, auto git (stash + pull)
+./start.sh -e dev -a -j all
+
+# Custom domain
+./start.sh -e dev -d myapp.com -a
+
+# Just check .env URLs (don't start containers)
+./start.sh -c -e dev
+
+# CI/CD deployment
+./start.sh -e remote -n -C -j all
+
+# Full reset — wipes database
+./start.sh -e local -n -r
+```
+
+### What start.sh Does
+
+1. Selects environment and configures API URLs in `lapis/.env`
+2. Optionally stashes/pulls git changes
+3. Creates required directories (`lapis/logs`, `lapis/pgdata`, `lapis/keycloak_data`)
+4. Builds and starts Docker containers (`docker compose up --build -d`)
+5. Waits for PostgreSQL and OpsAPI to be healthy
+6. Runs database migrations (`lapis migrate`) with project code
+7. Runs namespace setup script (creates admin user, namespace, default roles, modules)
+8. Adds `opsapi-dev.local` to `/etc/hosts` (requires sudo)
 
 ---
 
 ## Environment Variables
 
-All environment variables are configured in `lapis/.env`. Here are the key variables:
+All environment variables are in `lapis/.env`. The `.sample.env` file has working defaults for local dev.
 
-### Database
+### Required
 
-```bash
-DB_HOST=172.71.0.10           # Docker network IP for postgres
-DB_PORT=5432
-DB_USER=pguser
-DB_PASSWORD=pgpassword
-DATABASE=opsapi
-```
+| Variable | Description | Local Default |
+|----------|-------------|---------------|
+| `DB_HOST` | PostgreSQL host | `172.71.0.10` |
+| `DB_PORT` | PostgreSQL port | `5432` |
+| `DB_USER` | Database user | `pguser` |
+| `DB_PASSWORD` | Database password | `pgpassword` |
+| `DATABASE` | Database name | `opsapi` |
+| `JWT_SECRET_KEY` | JWT signing secret | Set in `.sample.env` |
+| `OPENSSL_SECRET_KEY` | AES-128 encryption key (32 hex chars) | Set in `.sample.env` |
+| `OPENSSL_SECRET_IV` | AES-128 encryption IV (32 hex chars) | Set in `.sample.env` |
+| `MINIO_ENDPOINT` | MinIO S3 endpoint | `http://172.71.0.17:9000` |
+| `MINIO_ACCESS_KEY` | MinIO access key | `minioadmin` |
+| `MINIO_SECRET_KEY` | MinIO secret key | `minioadmin123` |
+| `MINIO_BUCKET` | Default bucket | `opsapi` |
+| `NEXT_PUBLIC_API_URL` | API URL (auto-set by `start.sh`) | `http://127.0.0.1:4010` |
 
-### JWT & Encryption
+### Optional
 
-```bash
-JWT_SECRET_KEY=your-jwt-secret-key
-OPENSSL_SECRET_KEY=your-16-char-key
-OPENSSL_SECRET_IV=your-16-char-iv
-```
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials |
+| `GOOGLE_REDIRECT_URI` | Google OAuth callback (auto-set by `start.sh`) |
+| `KEYCLOAK_*` | Keycloak SSO configuration |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe payments |
+| `CORS_ALLOWED_DOMAINS` | Comma-separated domains (allows subdomains + any port) |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated explicit origin URLs |
+| `NODE_API_URL` | Node.js service URL |
+| `OPSAPI_SSL_VERIFY` | SSL verification for external calls (`true`/`false`) |
 
-### MinIO (S3-compatible Storage)
-
-```bash
-MINIO_ENDPOINT=your-minio-endpoint
-MINIO_ACCESS_KEY=your-access-key
-MINIO_SECRET_KEY=your-secret-key
-MINIO_BUCKET=your-bucket
-MINIO_REGION=your-region
-```
-
-### Dashboard & Authentication URLs
-
-These URLs are environment-specific and are automatically configured by `start.sh`:
-
-```bash
-# For local development
-NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
-GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
-KEYCLOAK_REDIRECT_URI=http://127.0.0.1:4010/auth/callback
-
-# For dev environment
-NEXT_PUBLIC_API_URL=https://dev-api.wslcrm.com
-GOOGLE_REDIRECT_URI=https://dev-api.wslcrm.com/auth/google/callback
-KEYCLOAK_REDIRECT_URI=https://dev-api.wslcrm.com/auth/callback
-
-# For test environment
-NEXT_PUBLIC_API_URL=https://test-api.wslcrm.com
-GOOGLE_REDIRECT_URI=https://test-api.wslcrm.com/auth/google/callback
-KEYCLOAK_REDIRECT_URI=https://test-api.wslcrm.com/auth/callback
-
-# For production
-NEXT_PUBLIC_API_URL=https://api.wslcrm.com
-GOOGLE_REDIRECT_URI=https://api.wslcrm.com/auth/google/callback
-KEYCLOAK_REDIRECT_URI=https://api.wslcrm.com/auth/callback
-
-# For remote environment
-NEXT_PUBLIC_API_URL=https://remote-api.wslcrm.com
-GOOGLE_REDIRECT_URI=https://remote-api.wslcrm.com/auth/google/callback
-KEYCLOAK_REDIRECT_URI=https://remote-api.wslcrm.com/auth/callback
-
-# For custom environments (e.g., staging)
-NEXT_PUBLIC_API_URL=https://staging-api.wslcrm.com
-GOOGLE_REDIRECT_URI=https://staging-api.wslcrm.com/auth/google/callback
-KEYCLOAK_REDIRECT_URI=https://staging-api.wslcrm.com/auth/callback
-```
-
-**Tip:** Use `./start.sh -c -e <env>` to check and update these URLs without starting containers. Works with both preset environments (local, dev, test, acc, prod, remote) and custom environment names (staging, demo, etc.).
-
-**Protocol Customization:** By default, `local` uses `http://` and all other environments use `https://`. You can override this with the `-P` option:
-```bash
-./start.sh -e dev -P http    # Use HTTP for dev: http://dev-api.wslcrm.com
-./start.sh -e local -P https # Use HTTPS for local: https://127.0.0.1:4010
-```
-
-**Important:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If you change this value, you must rebuild the dashboard with:
+**Note:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If changed after initial build, rebuild with:
 
 ```bash
-docker compose build --no-cache dashboard
-docker compose up -d dashboard
-```
-
-### Stripe (Optional)
-
-```bash
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-```
-
-### Google OAuth (Optional)
-
-```bash
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
-```
-
-### Keycloak SSO (Optional)
-
-```bash
-KEYCLOAK_AUTH_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/auth
-KEYCLOAK_TOKEN_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/token
-KEYCLOAK_USERINFO_URL=https://your-keycloak/realms/opsapi/protocol/openid-connect/userinfo
-KEYCLOAK_CLIENT_ID=opsapi
-KEYCLOAK_CLIENT_SECRET=your-client-secret
-KEYCLOAK_REDIRECT_URI=http://127.0.0.1:4010/auth/callback
-```
-
-### Node API
-
-```bash
-NODE_API_URL=http://172.71.0.14/api
+cd lapis && docker compose build --no-cache dashboard && docker compose up -d dashboard
 ```
 
 ---
 
 ## Troubleshooting
 
-### Restart the API container
+### Check container logs
 
 ```bash
-cd lapis
-docker compose restart lapis
-```
-
-### Check logs
-
-```bash
+# API error logs
 docker exec -i opsapi tail -50 /var/log/nginx/error.log
+
+# Container logs
+docker logs opsapi
+docker logs opsapi-postgres-dev-db
 ```
 
-### Test login
+### Restart the API
+
+```bash
+cd lapis && docker compose restart lapis
+```
+
+### Re-run migrations
+
+```bash
+docker exec -e "PROJECT_CODE=all" -it opsapi lapis migrate
+```
+
+### Test login from inside the container
 
 ```bash
 docker exec -i opsapi curl -s -X POST 'http://127.0.0.1/auth/login' \
   -H 'Content-Type: application/json' \
-  -d '{"username":"administrative@admin.com","password":"Admin@123"}'
+  -d '{"username":"admin@opsapi.com","password":"Admin@123"}'
 ```
 
 ### Test API with token
@@ -336,306 +319,151 @@ docker exec -i opsapi curl -s -X POST 'http://127.0.0.1/auth/login' \
 ```bash
 TOKEN=$(docker exec -i opsapi curl -s -X POST 'http://127.0.0.1/auth/login' \
   -H 'Content-Type: application/json' \
-  -d '{"username":"administrative@admin.com","password":"Admin@123"}' | jq -r '.token')
+  -d '{"username":"admin@opsapi.com","password":"Admin@123"}' | jq -r '.token')
 
-# Test endpoints
 docker exec -i opsapi curl -s "http://127.0.0.1/api/v2/users" -H "Authorization: Bearer $TOKEN"
-docker exec -i opsapi curl -s "http://127.0.0.1/api/v2/roles" -H "Authorization: Bearer $TOKEN"
 ```
 
-### Check database connectivity
+### Check database
 
 ```bash
-docker exec -i opsapi psql -h 172.71.0.10 -U pguser -d opsapi -c "\dt"
-# Password: pgpassword
+docker exec -i opsapi-postgres-dev-db psql -U pguser -d opsapi -c "\dt"
 ```
 
-### Dashboard not reflecting API URL changes
-
-If you changed `NEXT_PUBLIC_API_URL` in `.env` but the dashboard still uses the old value:
+### Dashboard not updating after API URL change
 
 ```bash
-cd lapis
-docker compose build --no-cache dashboard
-docker compose up -d dashboard
+cd lapis && docker compose build --no-cache dashboard && docker compose up -d dashboard
 ```
 
-### Re-run migrations
+### Full reset (wipes all data)
 
 ```bash
-docker exec -it opsapi lapis migrate
+./start.sh -e local -n -r
 ```
 
-### Full reset (fresh start)
+Or manually:
 
 ```bash
-cd lapis
-docker compose down --volumes
-docker compose up --build -d
+cd lapis && docker compose down --volumes && docker compose up --build -d
 sleep 15
-docker exec -it opsapi lapis migrate
+docker exec -e "PROJECT_CODE=all" -it opsapi lapis migrate
 ```
-
----
-
-## Deploy via GitHub Actions (Self-Hosted Runner)
-
-Deploy OPSAPI to a self-hosted runner using Docker Compose. This mirrors the `start.sh` script functionality for automated CI/CD deployments.
-
-### Prerequisites
-
-1. Self-hosted GitHub Actions runner configured
-2. Docker and Docker Compose installed on the runner
-3. `.env` file pre-configured on the runner (or pass via workflow input)
-
-### Triggering the Workflow
-
-Go to **Actions** → **Deploy OPSAPI via Docker Compose (Self-Hosted)** → **Run workflow**
-
-### Workflow Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `TARGET_ENV` | Preset environment (local/dev/test/acc/prod/remote) | `remote` |
-| `CUSTOM_ENV` | Custom environment name (overrides TARGET_ENV) | - |
-| `PROTOCOL` | API protocol (http/https) | `https` |
-| `RESET_DB` | Reset database (removes volumes) | `false` |
-| `RUN_MIGRATIONS` | Run database migrations after deployment | `true` |
-| `PULL_LATEST` | Pull latest code before deploying | `true` |
-| `RUNNER_LABEL` | Self-hosted runner label | `self-hosted` |
-| `ENV_FILE_CONTENT` | Base64 encoded .env file content (optional) | - |
-| `SLACK_WEBHOOK_URL` | Slack webhook for notifications (optional) | - |
-
-### Example Usage
-
-**Deploy to remote environment (default):**
-```
-TARGET_ENV: remote
-PROTOCOL: https
-```
-
-**Deploy to custom staging environment:**
-```
-CUSTOM_ENV: staging
-PROTOCOL: https
-```
-This generates API URL: `https://staging-api.wslcrm.com`
-
-**Deploy with database reset (use with caution):**
-```
-TARGET_ENV: dev
-RESET_DB: true
-RUN_MIGRATIONS: true
-```
-
-**Deploy with custom .env file:**
-```bash
-# Encode your .env file
-cat lapis/.env | base64 -w0
-
-# Paste the output in ENV_FILE_CONTENT input
-```
-
-### What the Workflow Does
-
-1. Checks out the repository code
-2. Optionally pulls latest changes
-3. Updates `.env` file with environment-specific URLs
-4. Creates required directories (logs, pgdata, keycloak_data)
-5. Stops existing Docker containers
-6. Builds and starts containers with `docker compose up --build -d`
-7. Runs database migrations (if enabled)
-8. Verifies deployment health
-9. Sends Slack notification (if configured)
-
-### Setting Up a Self-Hosted Runner
-
-1. Go to **Settings** → **Actions** → **Runners** → **New self-hosted runner**
-2. Follow the instructions to install the runner on your server
-3. Add labels to your runner (e.g., `remote`, `production`, `staging`)
-4. Use the `RUNNER_LABEL` input to target specific runners
-
----
-
-## Deploy on Kubernetes
-
-To deploy OPSAPI on Kubernetes, please follow the instructions.
-
-### Requirements
-
-1. kubectl
-2. kubeseal
-3. helm
-
-### Installation
-
-1. Encode the env variables to base64. Sample variables:
-
-   ```
-   DATABASE:
-   DB_HOST:
-   DB_PASSWORD:
-   DB_PORT:
-   DB_USER:
-   JWT_SECRET_KEY:
-   OPENSSL_SECRET_IV:
-   OPENSSL_SECRET_KEY:
-   MINIO_ENDPOINT:
-   MINIO_ACCESS_KEY:
-   MINIO_SECRET_KEY:
-   MINIO_BUCKET:
-   MINIO_REGION:
-   NODE_API_URL:
-   GOOGLE_CLIENT_ID:
-   GOOGLE_CLIENT_SECRET:
-   GOOGLE_REDIRECT_URI:
-   FRONTEND_URL:
-   ```
-
-2. Create a secret.yaml file with encoded env variables:
-
-   ```yaml
-   apiVersion: v1
-   data:
-     DATABASE:
-     DB_HOST:
-     DB_PASSWORD:
-     # ... other variables
-   kind: Secret
-   metadata:
-     creationTimestamp: null
-     name: opsapi-secrets
-     namespace: <namespace>
-   ```
-
-3. Generate the sealed secret:
-
-   ```bash
-   kubeseal --format=yaml < secret.yaml > sealed-secret.yaml
-   ```
-
-4. Copy the content from `encryptedData` in sealed-secret.yaml to your values file under `app_secrets`
-
-5. Deploy OPSAPI using helm:
-   ```bash
-   helm upgrade --install opsapi ./devops/helm-charts/opsapi \
-     -f ./devops/helm-charts/opsapi/values-<namespace>.yaml \
-     --set image.repository=bwalia/opsapi \
-     --set image.tag=latest \
-     --namespace <namespace> --create-namespace
-   ```
-
----
-
-## Deploy OPSAPI Node on Kubernetes
-
-### Requirements
-
-1. kubectl
-2. kubeseal
-3. helm
-
-### Installation
-
-1. Encode the .env file to base64. Sample .env:
-
-   ```
-   PORT=3000
-   MINIO_ENDPOINT=
-   MINIO_PORT=
-   MINIO_ACCESS_KEY=
-   MINIO_SECRET_KEY=
-   MINIO_BUCKET=
-   MINIO_REGION=
-   JWT_SECRET=
-   ```
-
-   **Note:** `JWT_SECRET` must match the OPSAPI `JWT_SECRET_KEY`
-
-2. Generate sealed secrets:
-
-   ```bash
-   cat node/opsapi-node/.env | kubectl create secret generic node-app-env \
-     --dry-run=client --from-file=.env=/dev/stdin -o json \
-     | kubeseal --format yaml --namespace <namespace>
-   ```
-
-3. Copy the content from `encryptedData -> .env` to your values file under `secrets -> env_file`
-
-4. Deploy OPSAPI Node:
-   ```bash
-   helm upgrade --install opsapi-node ./devops/helm-charts/opsapi-node \
-     -f ./devops/helm-charts/opsapi-node/values-<namespace>.yaml \
-     --set image.repository=bwalia/opsapi-node \
-     --set image.tag=latest \
-     --namespace <namespace> --create-namespace
-   ```
-
----
-
-## Google OAuth Setup
-
-To enable Google OAuth authentication:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing
-3. Enable Google+ API
-4. Create OAuth 2.0 credentials
-5. Add authorized redirect URI: `http://127.0.0.1:4010/auth/google/callback`
-6. Update environment variables in `lapis/.env`:
-   ```bash
-   GOOGLE_CLIENT_ID=your-client-id
-   GOOGLE_CLIENT_SECRET=your-client-secret
-   GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
-   ```
 
 ---
 
 ## API Documentation
 
-Access the OpenAPI specification at:
+- **Swagger UI:** http://127.0.0.1:4010/swagger
+- **OpenAPI JSON:** http://127.0.0.1:4010/openapi.json
 
-- Swagger UI: http://127.0.0.1:4010/swagger
-- OpenAPI JSON: http://127.0.0.1:4010/openapi.json
+### Public Endpoints (No Auth)
 
-### Public Endpoints (No Auth Required)
-
-- `/` - Health check
-- `/health` - Health status
-- `/swagger` - API documentation
-- `/openapi.json` - OpenAPI spec
-- `/metrics` - Prometheus metrics
-- `/auth/login` - Login
-- `/auth/register` - Registration
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /swagger` | API documentation |
+| `GET /metrics` | Prometheus metrics |
+| `POST /auth/login` | Login (returns JWT) |
+| `POST /api/v2/register` | User registration |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Docker Network                        │
-│                      (172.71.0.0/16)                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
-│  │   OPSAPI    │    │  Dashboard  │    │  PostgreSQL │    │
-│  │  (Lapis)    │    │  (Next.js)  │    │             │    │
-│  │ 172.71.0.12 │    │ 172.71.0.19 │    │ 172.71.0.10 │    │
-│  │   :4010     │    │   :8039     │    │   :5439     │    │
-│  └─────────────┘    └─────────────┘    └─────────────┘    │
-│                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
-│  │    Redis    │    │    MinIO    │    │   Grafana   │    │
-│  │ 172.71.0.13 │    │ 172.71.0.17 │    │ 172.71.0.16 │    │
-│  │   :6373     │    │ :9000/:9001 │    │   :3011     │    │
-│  └─────────────┘    └─────────────┘    └─────────────┘    │
-│                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
-│  │ Prometheus  │    │   Adminer   │    │   Gatus     │    │
-│  │ 172.71.0.15 │    │             │    │ 172.71.0.18 │    │
-│  │   :9090     │    │   :7779     │    │   :8888     │    │
-│  └─────────────┘    └─────────────┘    └─────────────┘    │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    Docker Network (172.71.0.0/16)             │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│  │   OpsAPI    │    │  Dashboard  │    │  PostgreSQL │     │
+│  │   (Lapis)   │    │  (Next.js)  │    │  (pgvector) │     │
+│  │ 172.71.0.12 │    │ 172.71.0.19 │    │ 172.71.0.10 │     │
+│  │   :4010     │    │   :8039     │    │   :5439     │     │
+│  └─────────────┘    └─────────────┘    └─────────────┘     │
+│                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│  │    Redis    │    │    MinIO    │    │   Grafana   │     │
+│  │ 172.71.0.13 │    │ 172.71.0.17 │    │ 172.71.0.16 │     │
+│  │   :6373     │    │ :9000/:9001 │    │   :3011     │     │
+│  └─────────────┘    └─────────────┘    └─────────────┘     │
+│                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│  │ Prometheus  │    │   Adminer   │    │   Gatus     │     │
+│  │ 172.71.0.15 │    │             │    │ 172.71.0.18 │     │
+│  │   :9090     │    │   :7779     │    │   :8888     │     │
+│  └─────────────┘    └─────────────┘    └─────────────┘     │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Deployment
+
+### GitHub Actions (Self-Hosted Runner)
+
+Deploy using Docker Compose on a self-hosted runner.
+
+**Trigger:** Actions → Deploy OpsAPI via Docker Compose (Self-Hosted) → Run workflow
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `TARGET_ENV` | Preset environment | `remote` |
+| `CUSTOM_ENV` | Custom environment name (overrides TARGET_ENV) | — |
+| `PROTOCOL` | API protocol | `https` |
+| `RESET_DB` | Reset database | `false` |
+| `RUN_MIGRATIONS` | Run migrations after deploy | `true` |
+| `PULL_LATEST` | Pull latest code | `true` |
+| `RUNNER_LABEL` | Self-hosted runner label | `self-hosted` |
+| `ENV_FILE_CONTENT` | Base64-encoded `.env` content | — |
+| `SLACK_WEBHOOK_URL` | Slack webhook for notifications | — |
+
+### Kubernetes
+
+#### OpsAPI
+
+```bash
+# 1. Create sealed secret from env vars
+kubeseal --format=yaml < secret.yaml > sealed-secret.yaml
+
+# 2. Deploy with Helm
+helm upgrade --install opsapi ./devops/helm-charts/opsapi \
+  -f ./devops/helm-charts/opsapi/values-<namespace>.yaml \
+  --set image.repository=bwalia/opsapi \
+  --set image.tag=latest \
+  --namespace <namespace> --create-namespace
+```
+
+#### OpsAPI Node
+
+```bash
+# 1. Create sealed secret
+cat node/opsapi-node/.env | kubectl create secret generic node-app-env \
+  --dry-run=client --from-file=.env=/dev/stdin -o json \
+  | kubeseal --format yaml --namespace <namespace>
+
+# 2. Deploy with Helm
+helm upgrade --install opsapi-node ./devops/helm-charts/opsapi-node \
+  -f ./devops/helm-charts/opsapi-node/values-<namespace>.yaml \
+  --set image.repository=bwalia/opsapi-node \
+  --set image.tag=latest \
+  --namespace <namespace> --create-namespace
+```
+
+---
+
+## Google OAuth Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create/select a project → Enable Google+ API
+3. Create OAuth 2.0 credentials
+4. Add authorized redirect URI: `http://127.0.0.1:4010/auth/google/callback`
+5. Update `lapis/.env`:
+
+```bash
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URI=http://127.0.0.1:4010/auth/google/callback
 ```

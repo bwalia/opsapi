@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 # ============================================
 # Configuration
 # ============================================
-BASE_DOMAIN="wslcrm.com"
+BASE_DOMAIN="diytaxreturn.co.uk"
 ENV_FILE="lapis/.env"
 CONTAINER_NAME="opsapi"  # Must match container_name in docker-compose.yml
 
@@ -33,6 +33,10 @@ show_help() {
     echo "  -p, --pull [y|n]      Git pull option (y=pull, n=skip)"
     echo "  -a, --auto            Auto mode: stash=y, pull=y (no prompts)"
     echo "  -n, --no-git          Skip all git operations (stash=n, pull=n)"
+    echo "  -A, --admin-email EMAIL   Super admin email for namespace setup (default: admin@opsapi.com)"
+    echo "  -W, --admin-password PWD  Super admin password for namespace setup (default: Admin@123)"
+    echo "  -N, --namespace-name NAME Custom namespace name (default: derived from project code)"
+    echo "  -S, --namespace-slug SLUG Custom namespace slug (default: derived from project code)"
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
@@ -90,6 +94,10 @@ PROTOCOL=""
 CI_MODE=false
 PROJECT_CODE=""
 APEX_DOMAIN=""
+ADMIN_EMAIL=""
+ADMIN_PASSWORD=""
+NAMESPACE_NAME=""
+NAMESPACE_SLUG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -161,6 +169,38 @@ while [[ $# -gt 0 ]]; do
             ;;
         --project=*)
             PROJECT_CODE="${1#*=}"
+            shift
+            ;;
+        -A|--admin-email)
+            ADMIN_EMAIL="$2"
+            shift 2
+            ;;
+        --admin-email=*)
+            ADMIN_EMAIL="${1#*=}"
+            shift
+            ;;
+        -W|--admin-password)
+            ADMIN_PASSWORD="$2"
+            shift 2
+            ;;
+        --admin-password=*)
+            ADMIN_PASSWORD="${1#*=}"
+            shift
+            ;;
+        -N|--namespace-name)
+            NAMESPACE_NAME="$2"
+            shift 2
+            ;;
+        --namespace-name=*)
+            NAMESPACE_NAME="${1#*=}"
+            shift
+            ;;
+        -S|--namespace-slug)
+            NAMESPACE_SLUG="$2"
+            shift 2
+            ;;
+        --namespace-slug=*)
+            NAMESPACE_SLUG="${1#*=}"
             shift
             ;;
         -h|--help)
@@ -680,6 +720,83 @@ fi
 echo -e "${BLUE}[i] Migrations will run with PROJECT_CODE=${CYAN}${PROJECT_CODE}${NC}"
 echo ""
 
+# ============================================
+# Admin Credentials for Namespace Setup
+# ============================================
+echo -e "${GREEN}[+] Admin Credentials${NC}"
+echo ""
+
+if [[ -n "$ADMIN_EMAIL" ]]; then
+    echo -e "${BLUE}[i] Admin email from argument: ${CYAN}${ADMIN_EMAIL}${NC}"
+else
+    # Interactive mode - prompt for admin email
+    if [[ -n "$STASH_ARG" ]] || [[ -n "$PULL_ARG" ]]; then
+        # Non-interactive mode - use defaults
+        ADMIN_EMAIL="admin@opsapi.com"
+        echo -e "${BLUE}[i] Admin email (default): ${CYAN}${ADMIN_EMAIL}${NC}"
+    else
+        read -p "Enter super admin email [admin@opsapi.com]: " ADMIN_EMAIL
+        ADMIN_EMAIL="${ADMIN_EMAIL:-admin@opsapi.com}"
+    fi
+fi
+
+if [[ -n "$ADMIN_PASSWORD" ]]; then
+    echo -e "${BLUE}[i] Admin password: ${CYAN}(provided via argument)${NC}"
+else
+    if [[ -n "$STASH_ARG" ]] || [[ -n "$PULL_ARG" ]]; then
+        ADMIN_PASSWORD="Admin@123"
+        echo -e "${BLUE}[i] Admin password (default): ${CYAN}Admin@123${NC}"
+    else
+        read -sp "Enter super admin password [Admin@123]: " ADMIN_PASSWORD
+        echo ""
+        ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin@123}"
+    fi
+fi
+
+# ============================================
+# Namespace Customization
+# ============================================
+echo -e "${GREEN}[+] Namespace Configuration${NC}"
+echo ""
+
+# Derive defaults from project code
+DEFAULT_NS_SLUG=$(echo "$PROJECT_CODE" | sed 's/_/-/g')
+DEFAULT_NS_NAME=$(echo "$PROJECT_CODE" | sed 's/_/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
+
+# For "all" project code, use "system" namespace
+if [[ "$PROJECT_CODE" == "all" ]]; then
+    DEFAULT_NS_SLUG="system"
+    DEFAULT_NS_NAME="System"
+fi
+
+if [[ -n "$NAMESPACE_NAME" ]]; then
+    echo -e "${BLUE}[i] Namespace name from argument: ${CYAN}${NAMESPACE_NAME}${NC}"
+else
+    if [[ -n "$STASH_ARG" ]] || [[ -n "$PULL_ARG" ]]; then
+        NAMESPACE_NAME="$DEFAULT_NS_NAME"
+        echo -e "${BLUE}[i] Namespace name (default): ${CYAN}${NAMESPACE_NAME}${NC}"
+    else
+        read -p "Enter namespace name [${DEFAULT_NS_NAME}]: " NAMESPACE_NAME
+        NAMESPACE_NAME="${NAMESPACE_NAME:-$DEFAULT_NS_NAME}"
+    fi
+fi
+
+if [[ -n "$NAMESPACE_SLUG" ]]; then
+    echo -e "${BLUE}[i] Namespace slug from argument: ${CYAN}${NAMESPACE_SLUG}${NC}"
+else
+    if [[ -n "$STASH_ARG" ]] || [[ -n "$PULL_ARG" ]]; then
+        NAMESPACE_SLUG="$DEFAULT_NS_SLUG"
+        echo -e "${BLUE}[i] Namespace slug (default): ${CYAN}${NAMESPACE_SLUG}${NC}"
+    else
+        read -p "Enter namespace slug [${DEFAULT_NS_SLUG}]: " NAMESPACE_SLUG
+        NAMESPACE_SLUG="${NAMESPACE_SLUG:-$DEFAULT_NS_SLUG}"
+    fi
+fi
+
+echo -e "${BLUE}[i] Namespace: ${CYAN}${NAMESPACE_NAME}${NC} (${CYAN}${NAMESPACE_SLUG}${NC})"
+echo -e "${BLUE}[i] Admin: ${CYAN}${ADMIN_EMAIL}${NC}"
+echo ""
+
 # Check and update .env file
 check_and_update_env "$TARGET_ENV" "$PROTOCOL"
 if [[ $? -ne 0 ]]; then
@@ -802,9 +919,52 @@ else
     $COMPOSE_CMD down
 fi
 
+# Export PROJECT_CODE so docker-compose.yml can substitute it into the lapis container environment
+# This ensures nginx workers have PROJECT_CODE for feature-gated route loading
+export PROJECT_CODE
+
 $COMPOSE_CMD up --build -d
 
-sleep 15
+# Wait for PostgreSQL to be ready (healthcheck-based)
+echo -e "${GREEN}[+] Waiting for PostgreSQL to be ready...${NC}"
+MAX_RETRIES=30
+RETRY_COUNT=0
+PG_CONTAINER="opsapi-postgres-dev-db"
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if docker exec "$PG_CONTAINER" pg_isready -U pguser > /dev/null 2>&1; then
+        echo -e "${GREEN}[+] PostgreSQL is ready!${NC}"
+        break
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo -e "${YELLOW}  Waiting for PostgreSQL... (${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+    sleep 2
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo -e "${RED}[!] PostgreSQL failed to start after ${MAX_RETRIES} attempts. Exiting.${NC}"
+    echo -e "${YELLOW}[!] Check logs: docker logs ${PG_CONTAINER}${NC}"
+    exit 1
+fi
+
+# Also wait for the opsapi container (nginx/lapis) to be ready
+echo -e "${GREEN}[+] Waiting for OpsAPI container to be ready...${NC}"
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if docker exec "$CONTAINER_NAME" curl -sf http://127.0.0.1/health > /dev/null 2>&1; then
+        echo -e "${GREEN}[+] OpsAPI container is ready!${NC}"
+        break
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo -e "${YELLOW}  Waiting for OpsAPI... (${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+    sleep 2
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo -e "${RED}[!] OpsAPI container failed to start after ${MAX_RETRIES} attempts. Exiting.${NC}"
+    echo -e "${YELLOW}[!] Check logs: docker logs ${CONTAINER_NAME}${NC}"
+    exit 1
+fi
 
 # Run migrations - use -t flag only in non-CI mode (CI has no TTY)
 # Pass PROJECT_CODE environment variable to control which tables are created
@@ -813,6 +973,33 @@ if $CI_MODE; then
     docker exec -e "PROJECT_CODE=$PROJECT_CODE" "$CONTAINER_NAME" lapis migrate
 else
     docker exec -e "PROJECT_CODE=$PROJECT_CODE" -it "$CONTAINER_NAME" lapis migrate
+fi
+
+# Run namespace setup - creates namespace with admin user
+# Seeds project-specific modules and creates default roles
+# Note: config is passed inline as a Lua table because lapis exec runs inside
+# an nginx worker process which does not inherit docker exec -e environment vars.
+echo -e "${GREEN}[+] Setting up namespace '${NAMESPACE_NAME}' (${NAMESPACE_SLUG}) for ${PROJECT_CODE}...${NC}"
+
+# Escape single quotes in password for safe Lua string embedding
+ESCAPED_PASSWORD=$(echo "$ADMIN_PASSWORD" | sed "s/'/\\\\'/g")
+
+SETUP_LUA_CMD="require('scripts.setup-namespace').run({ \
+  project_code='${PROJECT_CODE}', \
+  admin_email='${ADMIN_EMAIL}', \
+  admin_password='${ESCAPED_PASSWORD}', \
+  namespace_name='${NAMESPACE_NAME}', \
+  namespace_slug='${NAMESPACE_SLUG}' \
+})"
+
+if $CI_MODE; then
+    docker exec \
+        -e PROJECT_CODE=$PROJECT_CODE \
+        $CONTAINER_NAME lapis exec "$SETUP_LUA_CMD"
+else
+    docker exec \
+        -e PROJECT_CODE=$PROJECT_CODE \
+        -it $CONTAINER_NAME lapis exec "$SETUP_LUA_CMD"
 fi
 
 sleep 5

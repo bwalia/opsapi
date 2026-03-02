@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Sidebar Component (Backend-Driven Navigation)
@@ -16,14 +16,21 @@
  * @module components/layout/Sidebar
  */
 
-import React, { memo, useCallback } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { LogOut, X, ChevronLeft, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/store/auth.store';
-import { useMenu, type MenuItemWithIcon } from '@/hooks';
-import { RoleBadge } from '@/components/permissions';
+import React, { memo, useCallback } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LogOut,
+  X,
+  ChevronLeft,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/auth.store";
+import { useMenu, type MenuItemWithIcon } from "@/hooks";
+import { RoleBadge } from "@/components/permissions";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -52,15 +59,17 @@ const NavItemLink = memo(function NavItemLink({
       onClick={onClick}
       prefetch={false}
       className={cn(
-        'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
-        isCollapsed && 'justify-center px-2',
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+        isCollapsed && "justify-center px-2",
         isActive
-          ? 'bg-primary-500/10 text-primary-500 border-l-4 border-primary-500 ml-0 pl-2'
-          : 'text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900'
+          ? "bg-primary-500/10 text-primary-500 border-l-4 border-primary-500 ml-0 pl-2"
+          : "text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900",
       )}
       title={isCollapsed ? item.name : undefined}
     >
-      <Icon className={cn('w-5 h-5 flex-shrink-0', isActive && 'text-primary-500')} />
+      <Icon
+        className={cn("w-5 h-5 shrink-0", isActive && "text-primary-500")}
+      />
       {!isCollapsed && (
         <>
           <span className="flex-1 truncate">{item.name}</span>
@@ -77,19 +86,25 @@ const NavItemLink = memo(function NavItemLink({
 });
 
 // Loading skeleton for menu items
-const MenuSkeleton = memo(function MenuSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
+const MenuSkeleton = memo(function MenuSkeleton({
+  isCollapsed,
+}: {
+  isCollapsed: boolean;
+}) {
   return (
     <div className="space-y-2">
       {[1, 2, 3, 4, 5].map((i) => (
         <div
           key={i}
           className={cn(
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg animate-pulse',
-            isCollapsed && 'justify-center px-2'
+            "flex items-center gap-3 px-3 py-2.5 rounded-lg animate-pulse",
+            isCollapsed && "justify-center px-2",
           )}
         >
           <div className="w-5 h-5 bg-secondary-200 rounded" />
-          {!isCollapsed && <div className="flex-1 h-4 bg-secondary-200 rounded" />}
+          {!isCollapsed && (
+            <div className="flex-1 h-4 bg-secondary-200 rounded" />
+          )}
         </div>
       ))}
     </div>
@@ -157,12 +172,12 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
 
   // Get user role from namespace context or fall back to platform role
   const userRole = namespaceContext?.is_owner
-    ? 'owner'
-    : user?.roles?.[0]?.role_name || 'member';
+    ? "owner"
+    : user?.roles?.[0]?.role_name || "member";
 
   const handleLogout = useCallback(async () => {
     await logout();
-    window.location.href = '/login';
+    window.location.href = "/login";
   }, [logout]);
 
   const handleNavClick = useCallback(() => {
@@ -185,8 +200,8 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
       {/* Mobile Overlay */}
       <div
         className={cn(
-          'fixed inset-0 bg-secondary-900/50 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300',
-          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          "fixed inset-0 bg-secondary-900/50 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300",
+          isOpen ? "opacity-100" : "opacity-0 pointer-events-none",
         )}
         onClick={onClose}
         aria-hidden="true"
@@ -195,31 +210,40 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 z-50 h-screen bg-white border-r border-secondary-200 transition-all duration-300 flex flex-col',
+          "fixed left-0 top-0 z-50 h-screen bg-white border-r border-secondary-200 transition-all duration-300 flex flex-col",
           // Mobile: slide in/out
-          'lg:translate-x-0',
-          isOpen ? 'translate-x-0' : '-translate-x-full',
+          "lg:translate-x-0",
+          isOpen ? "translate-x-0" : "-translate-x-full",
           // Desktop: collapsed or expanded
-          isCollapsed ? 'lg:w-20' : 'lg:w-64',
+          isCollapsed ? "lg:w-20" : "lg:w-64",
           // Mobile always full width sidebar
-          'w-72'
+          "w-72",
         )}
       >
         {/* Logo Header */}
-        <div className="flex items-center justify-between h-16 px-4 border-b border-secondary-200 flex-shrink-0">
-          <Link href="/dashboard" className="flex items-center gap-3" onClick={handleNavClick} prefetch={false}>
-            <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25 flex-shrink-0">
+        <div className="flex items-center justify-between h-16 px-4 border-b border-secondary-200 shrink-0">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-3"
+            onClick={handleNavClick}
+            prefetch={false}
+          >
+            <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25 shrink-0">
               <span className="text-white font-bold text-xl">O</span>
             </div>
             {!isCollapsed && (
               <div className="hidden lg:block">
-                <span className="text-lg font-bold text-secondary-900">OpsAPI</span>
+                <span className="text-lg font-bold text-secondary-900">
+                  OpsAPI
+                </span>
                 <p className="text-xs text-secondary-400">Dashboard</p>
               </div>
             )}
             {/* Always show title on mobile */}
             <div className="lg:hidden">
-              <span className="text-lg font-bold text-secondary-900">OpsAPI</span>
+              <span className="text-lg font-bold text-secondary-900">
+                OpsAPI
+              </span>
               <p className="text-xs text-secondary-400">Dashboard</p>
             </div>
           </Link>
@@ -237,10 +261,13 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
           <button
             onClick={onToggleCollapse}
             className="hidden lg:flex p-1.5 text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100 rounded-lg transition-colors"
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             <ChevronLeft
-              className={cn('w-4 h-4 transition-transform duration-300', isCollapsed && 'rotate-180')}
+              className={cn(
+                "w-4 h-4 transition-transform duration-300",
+                isCollapsed && "rotate-180",
+              )}
             />
           </button>
         </div>
@@ -250,7 +277,8 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
           <div className="px-4 py-3 border-b border-secondary-100">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 gradient-primary rounded-lg flex items-center justify-center text-white text-xs font-semibold">
-                {user?.first_name?.[0]}{user?.last_name?.[0]}
+                {user?.first_name?.[0]}
+                {user?.last_name?.[0]}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-secondary-900 truncate">
@@ -282,26 +310,34 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
 
             {/* Error State */}
             {error && !showLoading && (
-              <MenuError error={error} onRetry={handleRetry} isCollapsed={isCollapsed} />
+              <MenuError
+                error={error}
+                onRetry={handleRetry}
+                isCollapsed={isCollapsed}
+              />
             )}
 
             {/* Menu Items */}
-            {!showLoading && !error && mainMenu.map((item) => (
-              <NavItemLink
-                key={item.key}
-                item={item}
-                isActive={pathname === item.path}
-                isCollapsed={isCollapsed}
-                onClick={handleNavClick}
-              />
-            ))}
+            {!showLoading &&
+              !error &&
+              mainMenu.map((item) => (
+                <NavItemLink
+                  key={item.key}
+                  item={item}
+                  isActive={pathname === item.path}
+                  isCollapsed={isCollapsed}
+                  onClick={handleNavClick}
+                />
+              ))}
 
             {/* Loading indicator when refreshing (not initial load) */}
             {isLoading && mainMenu.length > 0 && (
-              <div className={cn(
-                'flex items-center gap-2 px-3 py-2 text-secondary-400',
-                isCollapsed && 'justify-center'
-              )}>
+              <div
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 text-secondary-400",
+                  isCollapsed && "justify-center",
+                )}
+              >
                 <Loader2 className="w-4 h-4 animate-spin" />
                 {!isCollapsed && <span className="text-xs">Updating...</span>}
               </div>
@@ -309,7 +345,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
           </div>
 
           {/* Secondary Navigation */}
-          <div className="pt-4 mt-4 border-t border-secondary-200 space-y-1 flex-shrink-0">
+          <div className="pt-4 mt-4 border-t border-secondary-200 space-y-1 shrink-0">
             {!isCollapsed && secondaryMenu.length > 0 && (
               <p className="px-3 mb-2 text-xs font-semibold text-secondary-400 uppercase tracking-wider">
                 Settings
@@ -317,26 +353,28 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
             )}
 
             {/* Secondary Menu Items */}
-            {!showLoading && !error && secondaryMenu.map((item) => (
-              <NavItemLink
-                key={item.key}
-                item={item}
-                isActive={pathname === item.path}
-                isCollapsed={isCollapsed}
-                onClick={handleNavClick}
-              />
-            ))}
+            {!showLoading &&
+              !error &&
+              secondaryMenu.map((item) => (
+                <NavItemLink
+                  key={item.key}
+                  item={item}
+                  isActive={pathname === item.path}
+                  isCollapsed={isCollapsed}
+                  onClick={handleNavClick}
+                />
+              ))}
 
             <button
               onClick={handleLogout}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 w-full',
-                'text-secondary-600 hover:bg-error-50 hover:text-error-600',
-                isCollapsed && 'justify-center px-2'
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 w-full",
+                "text-secondary-600 hover:bg-error-50 hover:text-error-600",
+                isCollapsed && "justify-center px-2",
               )}
-              title={isCollapsed ? 'Logout' : undefined}
+              title={isCollapsed ? "Logout" : undefined}
             >
-              <LogOut className="w-5 h-5 flex-shrink-0" />
+              <LogOut className="w-5 h-5 shrink-0" />
               {!isCollapsed && <span>Logout</span>}
             </button>
           </div>

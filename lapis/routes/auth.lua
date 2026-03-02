@@ -6,6 +6,13 @@ local JWTHelper = require "helper.jwt-helper"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
+local RateLimit = require("middleware.rate-limit")
+
+-- Rate limit configs
+local LOGIN_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:login" }     -- 10/min per IP
+local REFRESH_LIMIT  = { rate = 30,  window = 60,  prefix = "auth:refresh" }   -- 30/min per IP
+local OAUTH_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:oauth" }     -- 10/min per IP
+local VALIDATE_LIMIT = { rate = 20,  window = 60,  prefix = "auth:validate" }  -- 20/min per IP
 
 return function(app)
     ----------------- Auth Routes --------------------
@@ -27,7 +34,7 @@ return function(app)
         return {}
     end
 
-    app:post("/auth/login", function(self)
+    app:post("/auth/login", RateLimit.wrap(LOGIN_LIMIT, function(self)
         local identifier = self.params.username or self.params.identifier
         local password = self.params.password
 
@@ -172,10 +179,10 @@ return function(app)
                 } or nil
             }
         }
-    end)
+    end))
 
     -- Google OAuth Routes
-    app:get("/auth/google", function(self)
+    app:get("/auth/google", RateLimit.wrap(OAUTH_LIMIT, function(self)
         local google_client_id = Global.getEnvVar("GOOGLE_CLIENT_ID")
         local google_redirect_uri = Global.getEnvVar("GOOGLE_REDIRECT_URI")
 
@@ -208,9 +215,9 @@ return function(app)
         return {
             redirect_to = auth_url
         }
-    end)
+    end))
 
-    app:get("/auth/google/callback", function(self)
+    app:get("/auth/google/callback", RateLimit.wrap(OAUTH_LIMIT, function(self)
         local code = self.params.code
         local raw_state = self.params.state or "/"
 
@@ -410,7 +417,7 @@ return function(app)
         return {
             redirect_to = final_url
         }
-    end)
+    end))
 
     -- Logout endpoint
     app:post("/auth/logout", function(self)
@@ -516,7 +523,7 @@ return function(app)
     end
 
     -- OAuth token validation endpoint (handles both Google ID tokens and app JWTs)
-    app:post("/auth/oauth/validate", function(self)
+    app:post("/auth/oauth/validate", RateLimit.wrap(VALIDATE_LIMIT, function(self)
         local token = self.params.token
         if not token then
             return {
@@ -671,10 +678,10 @@ return function(app)
                 token = token
             }
         }
-    end)
+    end))
 
     -- Token refresh endpoint with namespace support
-    app:post("/auth/refresh", function(self)
+    app:post("/auth/refresh", RateLimit.wrap(REFRESH_LIMIT, function(self)
         local auth_header = self.req.headers["authorization"]
         if not auth_header then
             return {
@@ -706,7 +713,7 @@ return function(app)
                 message = "Token refreshed successfully"
             }
         }
-    end)
+    end))
 
     -- Get current user info (includes namespace)
     app:get("/auth/me", function(self)

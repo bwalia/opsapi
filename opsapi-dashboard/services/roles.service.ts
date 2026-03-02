@@ -1,44 +1,21 @@
 import apiClient from '@/lib/api-client';
-import type { PaginatedResponse, PaginationParams } from '@/types';
+import type {
+  PaginatedResponse,
+  PaginationParams,
+  NamespaceRole,
+  CreateNamespaceRoleDto,
+  UpdateNamespaceRoleDto,
+} from '@/types';
 
-// Namespace Role type (different from legacy global Role)
-export interface NamespaceRole {
-  id: number;
-  uuid: string;
-  namespace_id: number;
-  role_name: string;
-  display_name: string;
-  description?: string;
-  permissions?: Record<string, string[]> | string;
-  is_system: boolean;
-  is_default: boolean;
-  priority: number;
-  member_count?: number;
-  created_at?: string;
-  updated_at?: string;
-}
+export type { NamespaceRole };
 
 export interface RoleFilters extends PaginationParams {
   search?: string;
 }
 
-export interface CreateRoleData {
-  role_name: string;
-  display_name?: string;
-  description?: string;
-  permissions?: Record<string, string[]>;
-  is_default?: boolean;
-  priority?: number;
-}
-
-export interface UpdateRoleData {
-  role_name?: string;
-  display_name?: string;
-  description?: string;
-  permissions?: Record<string, string[]>;
-  is_default?: boolean;
-  priority?: number;
-}
+// Re-export DTOs with simpler aliases for backward compatibility
+export type CreateRoleData = CreateNamespaceRoleDto;
+export type UpdateRoleData = UpdateNamespaceRoleDto;
 
 export const rolesService = {
   /**

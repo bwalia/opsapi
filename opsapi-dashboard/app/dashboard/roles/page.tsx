@@ -13,7 +13,8 @@ import {
 import { RoleBadge, ProtectedPage } from "@/components/permissions";
 import { AddRoleModal, EditRolePermissionsModal } from "@/components/roles";
 import { usePermissions } from "@/contexts/PermissionsContext";
-import { rolesService, type NamespaceRole } from "@/services";
+import { rolesService } from "@/services";
+import type { NamespaceRole } from "@/types";
 import { formatDate } from "@/lib/utils";
 import type { TableColumn, PaginatedResponse } from "@/types";
 import toast from "react-hot-toast";

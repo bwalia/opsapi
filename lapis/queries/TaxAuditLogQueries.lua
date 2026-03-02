@@ -40,7 +40,7 @@ function TaxAuditLogQueries.getByEntity(entity_type, entity_id, params)
         entity_type, entity_id,
         {
             per_page = perPage,
-            fields = 'id as internal_id, uuid as id, user_id, user_email, entity_type, entity_id, parent_entity_type, parent_entity_id, action, old_values, new_values, change_reason, ip_address, created_at'
+            fields = 'uuid as id, user_email, entity_type, entity_id, parent_entity_type, parent_entity_id, action, old_values, new_values, change_reason, ip_address, created_at'
         }
     )
 
@@ -59,7 +59,7 @@ function TaxAuditLogQueries.getByStatement(statement_uuid, params)
     local offset = (page - 1) * perPage
 
     local results = db.query([[
-        SELECT id as internal_id, uuid as id, user_id, user_email, entity_type, entity_id,
+        SELECT uuid as id, user_email, entity_type, entity_id,
                parent_entity_type, parent_entity_id, action, old_values, new_values,
                change_reason, ip_address, created_at
         FROM tax_audit_logs
@@ -92,7 +92,7 @@ function TaxAuditLogQueries.getByUser(user_id, params)
         user_id,
         {
             per_page = perPage,
-            fields = 'id as internal_id, uuid as id, user_id, user_email, entity_type, entity_id, parent_entity_type, parent_entity_id, action, old_values, new_values, change_reason, ip_address, created_at'
+            fields = 'uuid as id, user_email, entity_type, entity_id, parent_entity_type, parent_entity_id, action, old_values, new_values, change_reason, ip_address, created_at'
         }
     )
 
