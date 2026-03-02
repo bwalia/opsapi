@@ -15,46 +15,17 @@
 
 local NamespaceQueries = require("queries.NamespaceQueries")
 local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
+local AdminCheck = require("helper.admin-check")
 local cjson = require("cjson")
 
 local NamespaceMiddleware = {}
 
 --- Check if user is platform admin (administrative role)
--- Platform admins have access to all namespaces without membership
+-- Delegates to centralized AdminCheck module
 -- @param user table User object from JWT
 -- @return boolean
 local function isPlatformAdmin(user)
-    if not user then return false end
-
-    -- Check primary role (string - userinfo.roles)
-    if user.roles then
-        if type(user.roles) == "string" then
-            if user.roles:lower():find("admin") then
-                return true
-            end
-        elseif type(user.roles) == "table" then
-            for _, role in ipairs(user.roles) do
-                local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
-                if role_name:lower():find("admin") then
-                    return true
-                end
-            end
-        end
-    end
-
-    -- Also check user_roles array (userinfo.user_roles)
-    if user.user_roles then
-        if type(user.user_roles) == "table" then
-            for _, role in ipairs(user.user_roles) do
-                local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
-                if role_name:lower():find("admin") then
-                    return true
-                end
-            end
-        end
-    end
-
-    return false
+    return AdminCheck.isPlatformAdmin(user)
 end
 
 --- Extract namespace identifier from request
@@ -298,7 +269,8 @@ function NamespaceMiddleware.requirePermission(module, action, handler)
         end
 
         if not has_permission then
-            ngx.log(ngx.WARN, "Permission denied: ", module, ".", action, " for user ", self.current_user.uuid)
+            ngx.log(ngx.WARN, "Permission denied: ", module, ".", action,
+                " for user ", (self.current_user and self.current_user.uuid or "unknown"))
             return {
                 json = {
                     error = "Permission denied",

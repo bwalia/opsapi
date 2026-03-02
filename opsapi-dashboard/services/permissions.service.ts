@@ -3,7 +3,6 @@ import type {
   Permission,
   PaginatedResponse,
   PaginationParams,
-  DashboardModule,
   PermissionAction,
   UserPermissions,
 } from '@/types';
@@ -13,56 +12,35 @@ export interface PermissionFilters extends PaginationParams {
   module?: string;
 }
 
-// Default permissions for each role
-const DEFAULT_ROLE_PERMISSIONS: Record<string, UserPermissions> = {
-  administrative: {
-    dashboard: ['read', 'manage'],
-    users: ['create', 'read', 'update', 'delete', 'manage'],
-    roles: ['create', 'read', 'update', 'delete', 'manage'],
-    stores: ['create', 'read', 'update', 'delete', 'manage'],
-    products: ['create', 'read', 'update', 'delete', 'manage'],
-    orders: ['create', 'read', 'update', 'delete', 'manage'],
-    customers: ['create', 'read', 'update', 'delete', 'manage'],
-    settings: ['read', 'update', 'manage'],
-    namespaces: ['create', 'read', 'update', 'delete', 'manage'],
-    services: ['create', 'read', 'update', 'delete', 'manage'],
-  },
-  seller: {
-    dashboard: ['read'],
-    users: [],
-    roles: [],
-    stores: ['create', 'read', 'update'],
-    products: ['create', 'read', 'update', 'delete'],
-    orders: ['read', 'update'],
-    customers: ['read'],
-    settings: ['read', 'update'],
-    namespaces: [],
-    services: ['read'],
-  },
-  buyer: {
-    dashboard: ['read'],
-    users: [],
-    roles: [],
-    stores: ['read'],
-    products: ['read'],
-    orders: ['read'],
-    customers: [],
-    settings: ['read', 'update'],
-    namespaces: [],
-    services: [],
-  },
-  delivery_partner: {
-    dashboard: ['read'],
-    users: [],
-    roles: [],
-    stores: [],
-    products: [],
-    orders: ['read', 'update'],
-    customers: [],
-    settings: ['read', 'update'],
-    namespaces: [],
-    services: [],
-  },
+// Module metadata from API
+export interface ModuleMeta {
+  value: string;
+  label: string;
+  icon: string;
+  description?: string;
+  category?: string;
+}
+
+// Default icon mapping for common modules (fallback when API doesn't provide one)
+const DEFAULT_MODULE_ICONS: Record<string, string> = {
+  dashboard: 'LayoutDashboard',
+  users: 'Users',
+  roles: 'Shield',
+  stores: 'Store',
+  products: 'Package',
+  orders: 'ShoppingCart',
+  customers: 'UserCheck',
+  settings: 'Settings',
+  namespaces: 'Building2',
+  namespace: 'Building2',
+  services: 'Rocket',
+  chat: 'MessageCircle',
+  delivery: 'Truck',
+  reports: 'BarChart',
+  projects: 'Kanban',
+  vault: 'Lock',
+  notifications: 'Bell',
+  media: 'Image',
 };
 
 export const permissionsService = {
@@ -146,28 +124,19 @@ export const permissionsService = {
   },
 
   /**
-   * Get permissions for a specific role from the API or defaults
+   * Get permissions for a specific role from the API
    */
   async getPermissionsForRole(roleName: string): Promise<UserPermissions> {
-    // Try to get permissions from API first
     try {
       const response = await this.getPermissions({ role: roleName, perPage: 100 });
       if (response.data.length > 0) {
         return parsePermissionsFromAPI(response.data);
       }
     } catch {
-      // Fall back to defaults if API fails
+      // Fall back to empty permissions if API fails
     }
 
-    // Return default permissions for the role
-    return DEFAULT_ROLE_PERMISSIONS[roleName.toLowerCase()] || getEmptyPermissions();
-  },
-
-  /**
-   * Get default permissions for a role (no API call)
-   */
-  getDefaultPermissions(roleName: string): UserPermissions {
-    return DEFAULT_ROLE_PERMISSIONS[roleName.toLowerCase()] || getEmptyPermissions();
+    return getEmptyPermissions();
   },
 
   /**
@@ -175,32 +144,78 @@ export const permissionsService = {
    */
   hasPermission(
     permissions: UserPermissions,
-    module: DashboardModule,
+    module: string,
     action: PermissionAction
   ): boolean {
-    const modulePermissions = permissions[module] || [];
+    const raw = permissions[module];
+    const modulePermissions = Array.isArray(raw) ? raw : [];
     return modulePermissions.includes(action) || modulePermissions.includes('manage');
   },
 
   /**
    * Check if a role can access a module (has any permission)
    */
-  canAccessModule(permissions: UserPermissions, module: DashboardModule): boolean {
-    const modulePermissions = permissions[module] || [];
+  canAccessModule(permissions: UserPermissions, module: string): boolean {
+    const raw = permissions[module];
+    const modulePermissions = Array.isArray(raw) ? raw : [];
     return modulePermissions.length > 0;
+  },
+
+  /**
+   * Fetch available modules from API (for permission UIs)
+   */
+  async fetchAvailableModules(): Promise<ModuleMeta[]> {
+    try {
+      const response = await apiClient.get('/api/v2/modules/available');
+      const modules = response.data?.modules || [];
+      return modules.map((m: { machine_name: string; name: string; description?: string; category?: string }) => ({
+        value: m.machine_name,
+        label: m.name,
+        icon: DEFAULT_MODULE_ICONS[m.machine_name] || 'Box',
+        description: m.description || '',
+        category: m.category || 'General',
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Fetch namespace-scoped modules from permissions meta API
+   */
+  async fetchNamespaceModules(): Promise<ModuleMeta[]> {
+    try {
+      const response = await apiClient.get('/api/v2/namespace/roles/meta/permissions');
+      const modules = response.data?.modules || [];
+      return modules.map((m: { name: string; display_name: string; description?: string; category?: string }) => ({
+        value: m.name,
+        label: m.display_name,
+        icon: DEFAULT_MODULE_ICONS[m.name] || 'Box',
+        description: m.description || '',
+        category: m.category || 'General',
+      }));
+    } catch {
+      return [];
+    }
   },
 };
 
 /**
  * Parse permissions from API response into UserPermissions map
+ * Accepts all modules — no filtering against hardcoded list
  */
+const VALID_ACTIONS: readonly string[] = ['create', 'read', 'update', 'delete', 'manage'];
+
 function parsePermissionsFromAPI(permissions: Permission[]): UserPermissions {
-  const result = getEmptyPermissions();
+  const result: UserPermissions = {};
 
   for (const perm of permissions) {
-    const module = perm.module_machine_name as DashboardModule;
-    if (module && result[module] !== undefined) {
-      const actions = perm.permissions.split(',').map((a) => a.trim()) as PermissionAction[];
+    const module = perm.module_machine_name;
+    if (module) {
+      const actions = perm.permissions
+        .split(',')
+        .map((a) => a.trim())
+        .filter((a) => VALID_ACTIONS.includes(a)) as PermissionAction[];
       result[module] = actions;
     }
   }
@@ -209,61 +224,21 @@ function parsePermissionsFromAPI(permissions: Permission[]): UserPermissions {
 }
 
 /**
- * Get empty permissions object
+ * Get empty permissions object (dynamic — no hardcoded modules)
+ * Optionally accepts a module list to pre-populate keys
  */
-function getEmptyPermissions(): UserPermissions {
-  return {
-    dashboard: [],
-    users: [],
-    roles: [],
-    stores: [],
-    products: [],
-    orders: [],
-    customers: [],
-    settings: [],
-    namespaces: [],
-    services: [],
-  };
+function getEmptyPermissions(modules?: string[]): UserPermissions {
+  const result: UserPermissions = {};
+  if (modules) {
+    for (const mod of modules) {
+      result[mod] = [];
+    }
+  }
+  return result;
 }
 
 /**
- * All available modules for permission configuration
- */
-export const DASHBOARD_MODULES: { value: DashboardModule; label: string; icon: string }[] = [
-  { value: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },
-  { value: 'users', label: 'Users', icon: 'Users' },
-  { value: 'roles', label: 'Roles', icon: 'Shield' },
-  { value: 'stores', label: 'Stores', icon: 'Store' },
-  { value: 'products', label: 'Products', icon: 'Package' },
-  { value: 'orders', label: 'Orders', icon: 'ShoppingCart' },
-  { value: 'customers', label: 'Customers', icon: 'UserCheck' },
-  { value: 'settings', label: 'Settings', icon: 'Settings' },
-  { value: 'namespaces', label: 'Namespaces', icon: 'Building2' },
-  { value: 'services', label: 'Services', icon: 'Rocket' },
-];
-
-/**
- * Namespace-specific modules for permission configuration
- */
-export const NAMESPACE_MODULES: { value: string; label: string; icon: string; description: string }[] = [
-  { value: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', description: 'Main dashboard and analytics' },
-  { value: 'users', label: 'Users', icon: 'Users', description: 'User management within namespace' },
-  { value: 'roles', label: 'Roles', icon: 'Shield', description: 'Role management within namespace' },
-  { value: 'stores', label: 'Stores', icon: 'Store', description: 'Store management' },
-  { value: 'products', label: 'Products', icon: 'Package', description: 'Product catalog management' },
-  { value: 'orders', label: 'Orders', icon: 'ShoppingCart', description: 'Order processing' },
-  { value: 'customers', label: 'Customers', icon: 'UserCheck', description: 'Customer management' },
-  { value: 'settings', label: 'Settings', icon: 'Settings', description: 'Namespace settings' },
-  { value: 'namespace', label: 'Namespace', icon: 'Building2', description: 'Namespace administration' },
-  { value: 'services', label: 'Services', icon: 'Rocket', description: 'Service deployment and management' },
-  { value: 'chat', label: 'Chat', icon: 'MessageCircle', description: 'Chat and messaging' },
-  { value: 'delivery', label: 'Delivery', icon: 'Truck', description: 'Delivery partners management' },
-  { value: 'reports', label: 'Reports', icon: 'BarChart', description: 'Analytics and reports' },
-  { value: 'projects', label: 'Projects', icon: 'Kanban', description: 'Kanban projects and tasks' },
-];
-
-/**
- * All available permission actions
+ * All available permission actions (these are truly fixed)
  */
 export const PERMISSION_ACTIONS: { value: PermissionAction; label: string }[] = [
   { value: 'create', label: 'Create' },
@@ -273,4 +248,5 @@ export const PERMISSION_ACTIONS: { value: PermissionAction; label: string }[] = 
   { value: 'manage', label: 'Full Access' },
 ];
 
+export { getEmptyPermissions };
 export default permissionsService;

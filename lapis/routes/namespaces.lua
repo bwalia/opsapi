@@ -14,12 +14,20 @@ local NamespaceQueries = require("queries.NamespaceQueries")
 local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
 local NamespaceRoleQueries = require("queries.NamespaceRoleQueries")
 local NamespaceInvitationQueries = require("queries.NamespaceInvitationQueries")
+local AuditLog = require("queries.NamespaceAuditLogQueries")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local RequestParser = require("helper.request_parser")
 local Global = require("helper.global")
 local db = require("lapis.db")
 local cjson = require("cjson")
+local RateLimit = require("middleware.rate-limit")
+
+-- Rate limit configs for sensitive namespace operations
+local NS_SWITCH_LIMIT = { rate = 20, window = 60, prefix = "ns:switch" }   -- 20/min per IP
+local NS_CREATE_LIMIT = { rate = 5,  window = 60, prefix = "ns:create" }   -- 5/min per IP
+local NS_INVITE_LIMIT = { rate = 15, window = 60, prefix = "ns:invite" }   -- 15/min per IP
+local NS_INVITE_PUBLIC_LIMIT = { rate = 10, window = 60, prefix = "ns:invite:pub" }  -- 10/min per IP (public endpoints)
 
 -- Configure cjson
 cjson.encode_empty_table_as_object(false)
@@ -45,19 +53,35 @@ return function(app)
     end
 
     -- Helper function to check platform admin access
+    -- Delegates to centralized AdminCheck module
+    local AdminCheck = require("helper.admin-check")
     local function check_platform_admin(current_user)
-        if not current_user then
-            return false
-        end
+        return AdminCheck.isPlatformAdmin(current_user)
+    end
 
-        local admin_check = db.query([[
-            SELECT ur.id FROM user__roles ur
-            JOIN roles r ON ur.role_id = r.id
-            JOIN users u ON ur.user_id = u.id
-            WHERE u.uuid = ? AND LOWER(r.role_name) = 'administrative'
-        ]], current_user.uuid)
+    -- Resolve user numeric ID from JWT uuid (JWT does not include numeric id)
+    local function resolve_user_id(current_user)
+        if not current_user then return nil end
+        if current_user.id then return current_user.id end
+        if not current_user.uuid then return nil end
+        local ok, result = pcall(db.select, "id FROM users WHERE uuid = ?", current_user.uuid)
+        if ok and result and result[1] then return result[1].id end
+        return nil
+    end
 
-        return admin_check and #admin_check > 0
+    -- Audit log helper — wrapped in pcall so audit never breaks primary operations
+    local function audit(self, action, entity_type, entity_id, old_values, new_values)
+        pcall(AuditLog.log, {
+            namespace_id = self.namespace and self.namespace.id or nil,
+            user_id = resolve_user_id(self.current_user),
+            action = action,
+            entity_type = entity_type,
+            entity_id = entity_id,
+            old_values = old_values,
+            new_values = new_values,
+            ip_address = self.req and ngx.var.remote_addr or nil,
+            user_agent = self.req and self.req.headers["user-agent"] or nil
+        })
     end
 
     -- Helper function to check namespace create permission
@@ -167,7 +191,7 @@ return function(app)
 
     -- Switch active namespace (generates new token with namespace context)
     -- USER-FIRST: Updates user's last active namespace setting
-    app:post("/api/v2/user/namespaces/:id/switch", AuthMiddleware.requireAuth(function(self)
+    app:post("/api/v2/user/namespaces/:id/switch", RateLimit.wrap(NS_SWITCH_LIMIT, AuthMiddleware.requireAuth(function(self)
         local namespace_id = self.params.id
 
         -- Check user is member
@@ -198,46 +222,42 @@ return function(app)
         local member_details = membership and NamespaceMemberQueries.getWithDetails(membership.id)
         local permissions = membership and NamespaceMemberQueries.getPermissions(membership.id)
 
-        -- Generate new JWT with namespace context
-        local jwt = require("resty.jwt")
-        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
-
-        -- Get primary role
-        local primary_role = nil
-        if member_details and member_details.roles then
-            local roles = member_details.roles
-            if type(roles) == "string" then
-                local ok, parsed = pcall(cjson.decode, roles)
-                if ok then roles = parsed end
-            end
-            if type(roles) == "table" and #roles > 0 then
-                primary_role = roles[1].role_name
-            end
-        end
-
         -- Ensure is_owner is a proper boolean (PostgreSQL might return 't'/'f' or other formats)
         local raw_is_owner = membership and membership.is_owner
         local is_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
 
-        local payload = {
-            userinfo = {
-                uuid = self.current_user.uuid,
-                email = self.current_user.email,
-                name = self.current_user.name
-            },
-            namespace = {
-                uuid = namespace.uuid,
-                slug = namespace.slug,
-                name = namespace.name,
-                role = primary_role,
-                is_owner = is_owner
-            },
-            exp = os.time() + 86400 -- 24 hours
+        -- Fetch platform roles from DB for accurate JWT
+        local platform_roles = db.query([[
+            SELECT r.id, r.role_name, r.role_name as name FROM roles r
+            JOIN user__roles ur ON r.id = ur.role_id
+            WHERE ur.user_id = ?
+        ]], user[1].id)
+
+        -- Parse namespace roles from member_details
+        local ns_roles = nil
+        if member_details and member_details.roles then
+            ns_roles = member_details.roles
+            if type(ns_roles) == "string" then
+                local ok, parsed = pcall(cjson.decode, ns_roles)
+                if ok then ns_roles = parsed end
+            end
+        end
+
+        -- Generate proper JWT via centralized helper
+        local JWTHelper = require("helper.jwt-helper")
+        local user_obj = {
+            uuid = self.current_user.uuid,
+            email = self.current_user.email,
+            first_name = self.current_user.first_name or self.current_user.name,
+            last_name = self.current_user.last_name or ""
         }
 
-        local token = jwt:sign(JWT_SECRET_KEY, {
-            header = { typ = "JWT", alg = "HS256" },
-            payload = payload
+        local token = JWTHelper.generateNamespaceToken(user_obj, namespace, {
+            is_owner = is_owner
+        }, {
+            user_roles = platform_roles,
+            namespace_roles = ns_roles,
+            namespace_permissions = permissions
         })
 
         return success_response({
@@ -255,11 +275,11 @@ return function(app)
                 permissions = permissions
             }
         })
-    end))
+    end)))
 
     -- Create a new namespace (any authenticated user can create)
     -- USER-FIRST: Creates namespace with user as owner, sets up default roles
-    app:post("/api/v2/user/namespaces", AuthMiddleware.requireAuth(function(self)
+    app:post("/api/v2/user/namespaces", RateLimit.wrap(NS_CREATE_LIMIT, AuthMiddleware.requireAuth(function(self)
         local params = RequestParser.parse_request(self)
 
         if not params.name or params.name == "" then
@@ -292,29 +312,27 @@ return function(app)
             return error_response(500, "Failed to create namespace", err)
         end
 
-        -- Generate JWT with namespace context
-        local jwt = require("resty.jwt")
-        local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
+        -- Fetch platform roles from DB for accurate JWT
+        local platform_roles = db.query([[
+            SELECT r.id, r.role_name, r.role_name as name FROM roles r
+            JOIN user__roles ur ON r.id = ur.role_id
+            WHERE ur.user_id = ?
+        ]], user[1].id)
 
-        local payload = {
-            userinfo = {
-                uuid = self.current_user.uuid,
-                email = self.current_user.email,
-                name = self.current_user.name
-            },
-            namespace = {
-                uuid = result.namespace.uuid,
-                slug = result.namespace.slug,
-                name = result.namespace.name,
-                role = "owner",
-                is_owner = true
-            },
-            exp = os.time() + 86400
+        -- Generate proper JWT via centralized helper
+        local JWTHelper = require("helper.jwt-helper")
+        local user_obj = {
+            uuid = self.current_user.uuid,
+            email = self.current_user.email,
+            first_name = self.current_user.first_name or self.current_user.name,
+            last_name = self.current_user.last_name or ""
         }
 
-        local token = jwt:sign(JWT_SECRET_KEY, {
-            header = { typ = "JWT", alg = "HS256" },
-            payload = payload
+        local token = JWTHelper.generateNamespaceToken(user_obj, result.namespace, {
+            is_owner = true
+        }, {
+            user_roles = platform_roles,
+            namespace_permissions = {}
         })
 
         return success_response({
@@ -323,7 +341,7 @@ return function(app)
             membership = result.membership,
             token = token
         }, 201)
-    end))
+    end)))
 
     -- Get user's namespace settings
     app:get("/api/v2/user/namespace-settings", AuthMiddleware.requireAuth(function(self)
@@ -505,75 +523,29 @@ return function(app)
     -- Add user to multiple namespaces with different roles
     -- ============================================================
 
-    -- Add user to a namespace with a specific role (from user context)
-    -- POST /api/v2/user/namespaces/:id/join
-    -- Body: { role_name?: string } - defaults to "member"
+    -- DEPRECATED: Self-join endpoint removed for security.
+    -- Users must be invited via POST /api/v2/namespace/invitations and accept via token.
     app:post("/api/v2/user/add-to-namespace", AuthMiddleware.requireAuth(function(self)
-        local params = RequestParser.parse_request(self)
-
-        if not params.namespace_id then
-            return error_response(400, "namespace_id is required")
-        end
-
-        -- Get user
-        local user = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
-        if not user or #user == 0 then
-            return error_response(404, "User not found")
-        end
-
-        -- Validate namespace exists
-        local namespace = NamespaceQueries.show(params.namespace_id)
-        if not namespace then
-            return error_response(404, "Namespace not found")
-        end
-
-        -- Check if already a member
-        local existing = NamespaceMemberQueries.findByUserAndNamespace(self.current_user.uuid, namespace.id)
-        if existing then
-            return error_response(400, "You are already a member of this namespace")
-        end
-
-        -- Check namespace member limit
-        local member_count = NamespaceMemberQueries.count(namespace.id, "active")
-        if member_count >= (namespace.max_users or 10) then
-            return error_response(400, "Namespace has reached maximum member limit")
-        end
-
-        -- Get the role (default to "member")
-        local role_name = params.role_name or "member"
-        local ns_role = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", namespace.id, role_name)
-
-        local role_ids = {}
-        if ns_role and #ns_role > 0 then
-            table.insert(role_ids, ns_role[1].id)
-        end
-
-        -- Add as member
-        local ok, member = pcall(NamespaceMemberQueries.create, {
-            namespace_id = namespace.id,
-            user_id = user[1].id,
-            status = "active",
-            role_ids = role_ids
-        })
-
-        if not ok then
-            return error_response(500, "Failed to join namespace", member)
-        end
-
-        return success_response({
-            message = "Successfully joined namespace: " .. namespace.name,
-            membership = NamespaceMemberQueries.getWithDetails(member.id),
-            namespace = {
-                uuid = namespace.uuid,
-                name = namespace.name,
-                slug = namespace.slug
+        return {
+            status = 410,
+            json = {
+                error = "This endpoint has been removed",
+                message = "Namespace membership is now managed via invitations. "
+                    .. "Use POST /api/v2/namespace/invitations to invite users, "
+                    .. "then accept via the invitation token."
             }
-        }, 201)
+        }
     end))
 
     -- Get all namespaces a user belongs to with their roles
+    -- Security: users can only view their own memberships unless platform admin
     app:get("/api/v2/user/:user_uuid/namespace-memberships", AuthMiddleware.requireAuth(function(self)
         local user_uuid = self.params.user_uuid
+
+        -- Only allow viewing own memberships or platform admin
+        if user_uuid ~= self.current_user.uuid and not check_platform_admin(self.current_user) then
+            return error_response(403, "You can only view your own namespace memberships")
+        end
 
         -- Get user
         local user = db.select("id, uuid, email, first_name, last_name FROM users WHERE uuid = ?", user_uuid)
@@ -831,6 +803,10 @@ return function(app)
                 return error_response(500, "Failed to add member", member)
             end
 
+            audit(self, "member.added", "namespace_member", member.id, nil, {
+                user_id = user_id, role_ids = params.role_ids
+            })
+
             return success_response({
                 message = "Member added successfully",
                 member = NamespaceMemberQueries.getWithDetails(member.id)
@@ -866,6 +842,9 @@ return function(app)
                 -- Update roles if provided
                 if params.role_ids then
                     NamespaceMemberQueries.setRoles(member.id, params.role_ids)
+                    audit(self, "member.role_changed", "namespace_member", member.id,
+                        nil, { role_ids = params.role_ids }
+                    )
                 end
 
                 return success_response({
@@ -891,11 +870,17 @@ return function(app)
                     return error_response(400, "Use the leave endpoint to remove yourself")
                 end
 
+                local member_id = member.id
+                local member_user_id = member.user_id
                 local ok, result = pcall(NamespaceMemberQueries.destroy, member.id)
 
                 if not ok then
                     return error_response(500, "Failed to remove member", result)
                 end
+
+                audit(self, "member.removed", "namespace_member", member_id,
+                    { user_id = member_user_id }, nil
+                )
 
                 return success_response({
                     message = "Member removed successfully"
@@ -924,6 +909,11 @@ return function(app)
             if not ok then
                 return error_response(500, "Failed to transfer ownership", result)
             end
+
+            audit(self, "namespace.ownership_transferred", "namespace", self.namespace.id,
+                { owner_user_id = current_user[1].id },
+                { owner_user_id = target_member.user_id }
+            )
 
             return success_response({
                 message = "Ownership transferred successfully"
@@ -994,7 +984,7 @@ return function(app)
     ))
 
     -- Create invitation (invite member by email)
-    app:post("/api/v2/namespace/invitations", AuthMiddleware.requireAuth(
+    app:post("/api/v2/namespace/invitations", RateLimit.wrap(NS_INVITE_LIMIT, AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("users", "create", function(self)
             local params = RequestParser.parse_request(self)
 
@@ -1012,6 +1002,15 @@ return function(app)
             local pending_count = NamespaceInvitationQueries.count(self.namespace.id, "pending")
             if (member_count + pending_count) >= (self.namespace.max_users or 10) then
                 return error_response(400, "Namespace has reached maximum member limit")
+            end
+
+            -- Validate role_id belongs to this namespace (prevent cross-namespace role injection)
+            if params.role_id then
+                local role_check = db.select("id FROM namespace_roles WHERE id = ? AND namespace_id = ?",
+                    tonumber(params.role_id), self.namespace.id)
+                if not role_check or #role_check == 0 then
+                    return error_response(400, "Invalid role for this namespace")
+                end
             end
 
             -- Get inviter's user id
@@ -1047,7 +1046,7 @@ return function(app)
                 invitation = invitation
             }, 201)
         end)
-    ))
+    )))
 
     -- Resend invitation
     app:post("/api/v2/namespace/invitations/:id/resend", AuthMiddleware.requireAuth(
@@ -1114,7 +1113,7 @@ return function(app)
     -- ============================================================
 
     -- Get invitation details by token (public - for invitation landing page)
-    app:get("/api/v2/invitations/:token", function(self)
+    app:get("/api/v2/invitations/:token", RateLimit.wrap(NS_INVITE_PUBLIC_LIMIT, function(self)
         local invitation = NamespaceInvitationQueries.findByToken(self.params.token)
 
         if not invitation then
@@ -1154,10 +1153,10 @@ return function(app)
                 inviter = invitation.inviter
             }
         })
-    end)
+    end))
 
     -- Accept invitation (requires authentication)
-    app:post("/api/v2/invitations/:token/accept", AuthMiddleware.requireAuth(function(self)
+    app:post("/api/v2/invitations/:token/accept", RateLimit.wrap(NS_INVITE_PUBLIC_LIMIT, AuthMiddleware.requireAuth(function(self)
         local result = NamespaceInvitationQueries.accept(self.params.token, self.current_user.uuid)
 
         if not result.success then
@@ -1177,10 +1176,10 @@ return function(app)
                 slug = namespace.slug
             }
         })
-    end))
+    end)))
 
-    -- Decline invitation (can be done without auth if token is valid)
-    app:post("/api/v2/invitations/:token/decline", function(self)
+    -- Decline invitation (rate limited, no auth required — token acts as proof)
+    app:post("/api/v2/invitations/:token/decline", RateLimit.wrap(NS_INVITE_PUBLIC_LIMIT, function(self)
         local result = NamespaceInvitationQueries.decline(self.params.token)
 
         if not result.success then
@@ -1190,7 +1189,7 @@ return function(app)
         return success_response({
             message = "Invitation declined"
         })
-    end)
+    end))
 
     -- ============================================================
     -- NAMESPACE ROLES ROUTES
@@ -1233,6 +1232,10 @@ return function(app)
                 return error_response(500, "Failed to create role", role)
             end
 
+            audit(self, "role.created", "namespace_role", role.id, nil, {
+                role_name = role.role_name, display_name = role.display_name
+            })
+
             return success_response({
                 message = "Role created successfully",
                 role = role
@@ -1272,12 +1275,18 @@ return function(app)
                 end
 
                 local params = RequestParser.parse_request(self)
+                local old_permissions = role.permissions
 
                 local ok, updated = pcall(NamespaceRoleQueries.update, role.id, params)
 
                 if not ok then
                     return error_response(500, "Failed to update role", updated)
                 end
+
+                audit(self, "role.permissions_updated", "namespace_role", role.id,
+                    { permissions = old_permissions },
+                    { permissions = updated and updated.permissions }
+                )
 
                 return success_response({
                     message = "Role updated successfully",
@@ -1294,11 +1303,16 @@ return function(app)
                     return error_response(404, "Role not found")
                 end
 
+                local role_name = role.role_name
                 local ok, result = pcall(NamespaceRoleQueries.destroy, role.id)
 
                 if not ok then
                     return error_response(500, "Failed to delete role", result)
                 end
+
+                audit(self, "role.deleted", "namespace_role", role.id,
+                    { role_name = role_name }, nil
+                )
 
                 return success_response({
                     message = "Role deleted successfully"
@@ -1308,12 +1322,35 @@ return function(app)
     }))
 
     -- Get available modules and actions for permissions
+    -- Filters modules by the namespace's project_code (e.g. tax_copilot only sees tax modules)
     app:get("/api/v2/namespace/roles/meta/permissions", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("roles", "read", function(self)
+            local project_code = self.namespace and self.namespace.project_code or nil
             return success_response({
-                modules = NamespaceRoleQueries.getAvailableModules(),
+                modules = NamespaceRoleQueries.getAvailableModules(project_code),
                 actions = NamespaceRoleQueries.getAvailableActions()
             })
+        end)
+    ))
+
+    -- ============================================================
+    -- NAMESPACE AUDIT LOG
+    -- ============================================================
+
+    -- Get audit logs for current namespace
+    app:get("/api/v2/namespace/audit-logs", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("namespace", "read", function(self)
+            local result = AuditLog.getByNamespace(self.namespace.id, {
+                page = self.params.page,
+                per_page = self.params.per_page or self.params.limit,
+                entity_type = self.params.entity_type,
+                action = self.params.action,
+                user_id = self.params.user_id,
+                from_date = self.params.from_date,
+                to_date = self.params.to_date
+            })
+
+            return success_response(result)
         end)
     ))
 
@@ -1350,20 +1387,13 @@ return function(app)
             return error_response(404, "Namespace not found")
         end
 
-        -- Get member count
+        -- Get member count (core table, always exists)
         local member_count = db.query([[
             SELECT COUNT(*) as count FROM namespace_members
             WHERE namespace_id = ? AND status = 'active'
         ]], namespace.id)
 
-        -- Get store count
-        local store_count = db.query([[
-            SELECT COUNT(*) as count FROM stores
-            WHERE namespace_id = ?
-        ]], namespace.id)
-
         namespace.member_count = member_count and member_count[1] and member_count[1].count or 0
-        namespace.store_count = store_count and store_count[1] and store_count[1].count or 0
 
         return success_response({ namespace = namespace })
     end))
@@ -1535,20 +1565,35 @@ return function(app)
             total_revenue = 0
         }
 
-        -- Get counts
+        -- Core counts (tables always exist)
         local members = db.query("SELECT COUNT(*) as count FROM namespace_members WHERE namespace_id = ? AND status = 'active'", namespace.id)
-        local stores = db.query("SELECT COUNT(*) as count FROM stores WHERE namespace_id = ?", namespace.id)
-        local products = db.query("SELECT COUNT(*) as count FROM store_products sp JOIN stores s ON sp.store_uuid = s.uuid WHERE s.namespace_id = ?", namespace.id)
-        local orders = db.query("SELECT COUNT(*) as count FROM orders o JOIN stores s ON o.store_uuid = s.uuid WHERE s.namespace_id = ?", namespace.id)
-        local customers = db.query("SELECT COUNT(DISTINCT customer_uuid) as count FROM orders o JOIN stores s ON o.store_uuid = s.uuid WHERE s.namespace_id = ?", namespace.id)
-        local revenue = db.query("SELECT COALESCE(SUM(total), 0) as total FROM orders o JOIN stores s ON o.store_uuid = s.uuid WHERE s.namespace_id = ? AND o.payment_status = 'paid'", namespace.id)
-
         stats.total_members = members and members[1] and members[1].count or 0
-        stats.total_stores = stores and stores[1] and stores[1].count or 0
-        stats.total_products = products and products[1] and products[1].count or 0
-        stats.total_orders = orders and orders[1] and orders[1].count or 0
-        stats.total_customers = customers and customers[1] and customers[1].count or 0
-        stats.total_revenue = revenue and revenue[1] and tonumber(revenue[1].total) or 0
+
+        -- Ecommerce counts (only if feature is enabled, tables may not exist)
+        local ProjectConfig = require("helper.project-config")
+        if ProjectConfig.isEcommerceEnabled() then
+            local ok, ecom = pcall(function()
+                local stores = db.query("SELECT COUNT(*) as count FROM stores WHERE namespace_id = ?", namespace.id)
+                local products = db.query("SELECT COUNT(*) as count FROM store_products sp JOIN stores s ON sp.store_uuid = s.uuid WHERE s.namespace_id = ?", namespace.id)
+                local orders = db.query("SELECT COUNT(*) as count FROM orders o JOIN stores s ON o.store_uuid = s.uuid WHERE s.namespace_id = ?", namespace.id)
+                local customers = db.query("SELECT COUNT(DISTINCT customer_uuid) as count FROM orders o JOIN stores s ON o.store_uuid = s.uuid WHERE s.namespace_id = ?", namespace.id)
+                local revenue = db.query("SELECT COALESCE(SUM(total), 0) as total FROM orders o JOIN stores s ON o.store_uuid = s.uuid WHERE s.namespace_id = ? AND o.payment_status = 'paid'", namespace.id)
+                return {
+                    stores = stores and stores[1] and stores[1].count or 0,
+                    products = products and products[1] and products[1].count or 0,
+                    orders = orders and orders[1] and orders[1].count or 0,
+                    customers = customers and customers[1] and customers[1].count or 0,
+                    revenue = revenue and revenue[1] and tonumber(revenue[1].total) or 0
+                }
+            end)
+            if ok and ecom then
+                stats.total_stores = ecom.stores
+                stats.total_products = ecom.products
+                stats.total_orders = ecom.orders
+                stats.total_customers = ecom.customers
+                stats.total_revenue = ecom.revenue
+            end
+        end
 
         return success_response({ stats = stats })
     end))
@@ -1693,27 +1738,39 @@ return function(app)
             return error_response(400, "New owner must be a member of the namespace")
         end
 
-        -- Remove current owner flag
-        db.update("namespace_members", {
-            is_owner = false
-        }, {
-            namespace_id = namespace.id,
-            is_owner = true
-        })
+        -- Wrap in transaction to prevent partial ownership state
+        local ok, err = pcall(function()
+            db.query("BEGIN")
 
-        -- Set new owner
-        db.update("namespace_members", {
-            is_owner = true
-        }, {
-            id = membership[1].id
-        })
+            -- Remove current owner flag
+            db.update("namespace_members", {
+                is_owner = false
+            }, {
+                namespace_id = namespace.id,
+                is_owner = true
+            })
 
-        -- Update namespace owner_user_id
-        db.update("namespaces", {
-            owner_user_id = new_owner[1].id
-        }, {
-            id = namespace.id
-        })
+            -- Set new owner
+            db.update("namespace_members", {
+                is_owner = true
+            }, {
+                id = membership[1].id
+            })
+
+            -- Update namespace owner_user_id
+            db.update("namespaces", {
+                owner_user_id = new_owner[1].id
+            }, {
+                id = namespace.id
+            })
+
+            db.query("COMMIT")
+        end)
+
+        if not ok then
+            pcall(db.query, "ROLLBACK")
+            return error_response(500, "Failed to transfer ownership: " .. tostring(err))
+        end
 
         return success_response({
             message = "Ownership transferred successfully"

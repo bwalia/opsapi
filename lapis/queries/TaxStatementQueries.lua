@@ -91,10 +91,10 @@ function TaxStatementQueries.create(data, user)
         })
     })
 
-    -- Return with uuid as id
-    statement.internal_id = statement.id
+    -- Return with uuid as id (never expose numeric PKs)
     statement.id = statement.uuid
     statement.bank_account_uuid = bank_account.uuid
+    statement.user_id = nil
     return { data = statement }
 end
 
@@ -133,9 +133,7 @@ function TaxStatementQueries.all(params, user)
     -- Get statements with bank account info
     local query = [[
         SELECT
-            s.id as internal_id,
             s.uuid as id,
-            s.user_id,
             ba.uuid as bank_account_id,
             ba.bank_name,
             ba.account_name,
@@ -197,9 +195,7 @@ function TaxStatementQueries.show(uuid, user)
 
     local result = db.query([[
         SELECT
-            s.id as internal_id,
             s.uuid as id,
-            s.user_id,
             ba.uuid as bank_account_id,
             ba.bank_name,
             ba.account_name,

@@ -14,8 +14,28 @@ import {
 import { Button, Card, Badge, ConfirmDialog } from '@/components/ui';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
-import type { NamespaceRole, NamespacePermissions, NamespaceModuleMeta, NamespaceActionMeta } from '@/types';
+import type { NamespaceRole, NamespacePermissions, NamespaceModuleMeta, NamespaceActionMeta, PermissionAction } from '@/types';
 import toast from 'react-hot-toast';
+
+/**
+ * Safely parse and normalize permissions from API response.
+ * The API may return permission values as objects {} instead of arrays []
+ * (due to cjson encoding empty Lua tables as objects), so we ensure
+ * every value is always an array.
+ */
+function normalizePermissions(raw: unknown): NamespacePermissions {
+  let parsed: Record<string, unknown> = {};
+  if (typeof raw === 'string') {
+    try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+  } else if (raw && typeof raw === 'object') {
+    parsed = raw as Record<string, unknown>;
+  }
+  const result: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    result[key] = Array.isArray(value) ? value : [];
+  }
+  return result as NamespacePermissions;
+}
 
 export default function NamespaceRolesPage() {
   const { currentNamespace, isNamespaceOwner, hasPermission } = useNamespace();
@@ -201,9 +221,7 @@ function RoleCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const permissions = typeof role.permissions === 'string'
-    ? JSON.parse(role.permissions || '{}')
-    : role.permissions || {};
+  const permissions = normalizePermissions(role.permissions);
 
   const permissionCount = Object.values(permissions).reduce(
     (acc: number, perms: unknown) => acc + (Array.isArray(perms) ? perms.length : 0),
@@ -295,19 +313,14 @@ function RoleModal({
     priority: role?.priority || 0,
   });
   const [permissions, setPermissions] = useState<NamespacePermissions>(() => {
-    if (role?.permissions) {
-      return typeof role.permissions === 'string'
-        ? JSON.parse(role.permissions)
-        : role.permissions;
-    }
-    return {} as NamespacePermissions;
+    return normalizePermissions(role?.permissions);
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handlePermissionToggle = (module: string, action: string) => {
+  const handlePermissionToggle = (module: string, action: PermissionAction) => {
     setPermissions((prev) => {
-      const modulePerms = prev[module as keyof NamespacePermissions] || [];
-      const newPerms = modulePerms.includes(action as never)
+      const modulePerms = prev[module] || [];
+      const newPerms = modulePerms.includes(action)
         ? modulePerms.filter((p) => p !== action)
         : [...modulePerms, action];
       return { ...prev, [module]: newPerms };
@@ -449,9 +462,8 @@ function RoleModal({
                         <p className="text-xs text-secondary-500">{module.description}</p>
                       </td>
                       {actions.map((action) => {
-                        const modulePerms =
-                          permissions[module.name as keyof NamespacePermissions] || [];
-                        const isChecked = modulePerms.includes(action.name as never);
+                        const modulePerms = permissions[module.name] || [];
+                        const isChecked = modulePerms.includes(action.name);
                         return (
                           <td key={action.name} className="px-2 py-3 text-center">
                             <input

@@ -13,18 +13,47 @@ local cjson = require("cjson")
 local NamespaceRoles = Model:extend("namespace_roles")
 local NamespaceRoleQueries = {}
 
--- Default permissions structure
-local DEFAULT_PERMISSIONS = {
-    dashboard = { "read" },
-    users = {},
-    roles = {},
-    stores = {},
-    products = {},
-    orders = {},
-    customers = {},
-    settings = {},
-    namespace = {}
+-- Valid permission actions — reject anything not in this set
+local VALID_ACTIONS = {
+    create = true, read = true, update = true, delete = true, manage = true
 }
+
+--- Validate permissions object: check actions are valid and modules exist in DB
+-- @param permissions table The permissions object { module_name = { actions } }
+-- @return boolean, string|nil true if valid, or false with error message
+local function validatePermissions(permissions)
+    if type(permissions) ~= "table" then
+        return true -- will be handled elsewhere
+    end
+
+    -- Load valid module names from DB
+    local valid_modules = {}
+    local db_modules = db.query("SELECT machine_name FROM modules WHERE is_active = true")
+    for _, m in ipairs(db_modules or {}) do
+        valid_modules[m.machine_name] = true
+    end
+
+    for module_name, actions in pairs(permissions) do
+        -- Validate module exists
+        if not valid_modules[module_name] then
+            return false, "Unknown module: " .. tostring(module_name)
+        end
+
+        -- Validate actions
+        if type(actions) ~= "table" then
+            return false, "Actions for module '" .. module_name .. "' must be an array"
+        end
+
+        for _, action in ipairs(actions) do
+            if not VALID_ACTIONS[action] then
+                return false, "Invalid action '" .. tostring(action) .. "' for module '" .. module_name
+                    .. "'. Valid actions: create, read, update, delete, manage"
+            end
+        end
+    end
+
+    return true
+end
 
 --- Create a new namespace role
 -- @param data table { namespace_id, role_name, display_name?, description?, permissions?, is_default?, priority? }
@@ -52,12 +81,16 @@ function NamespaceRoleQueries.create(data)
         error("Role name already exists in this namespace")
     end
 
-    -- Encode permissions if table
+    -- Validate and encode permissions
     local permissions = data.permissions
     if type(permissions) == "table" then
+        local valid, err = validatePermissions(permissions)
+        if not valid then
+            error(err)
+        end
         permissions = cjson.encode(permissions)
     elseif not permissions then
-        permissions = cjson.encode(DEFAULT_PERMISSIONS)
+        permissions = cjson.encode(NamespaceRoleQueries.getEmptyPermissions())
     end
 
     local role_data = {
@@ -199,10 +232,18 @@ function NamespaceRoleQueries.update(id, params)
     if role.is_system then
         params.role_name = nil
         params.is_system = nil
+        -- Owner role always has full access — permissions cannot be stripped
+        if role.role_name == "owner" then
+            params.permissions = nil
+        end
     end
 
-    -- Encode permissions if table
+    -- Validate and encode permissions if table
     if type(params.permissions) == "table" then
+        local valid, err = validatePermissions(params.permissions)
+        if not valid then
+            error(err)
+        end
         params.permissions = cjson.encode(params.permissions)
     end
 
@@ -251,7 +292,7 @@ function NamespaceRoleQueries.destroy(id)
         WHERE namespace_role_id = ?
     ]], role.id)
 
-    if members_with_role[1] and members_with_role[1].count > 0 then
+    if members_with_role[1] and tonumber(members_with_role[1].count) > 0 then
         error("Cannot delete role that is assigned to members. Remove role from all members first.")
     end
 
@@ -294,6 +335,13 @@ function NamespaceRoleQueries.setModulePermissions(role_id, module, actions)
         return nil
     end
 
+    -- Validate actions
+    for _, action in ipairs(actions or {}) do
+        if not VALID_ACTIONS[action] then
+            error("Invalid action '" .. tostring(action) .. "'. Valid: create, read, update, delete, manage")
+        end
+    end
+
     local permissions = role.permissions_parsed or {}
     permissions[module] = actions
 
@@ -308,6 +356,11 @@ end
 -- @param action string Action name
 -- @return table Updated role
 function NamespaceRoleQueries.addPermission(role_id, module, action)
+    -- Validate action
+    if not VALID_ACTIONS[action] then
+        error("Invalid action '" .. tostring(action) .. "'. Valid: create, read, update, delete, manage")
+    end
+
     local role = NamespaceRoleQueries.show(role_id)
     if not role then
         return nil
@@ -435,25 +488,65 @@ function NamespaceRoleQueries.count(namespace_id)
     return result[1] and result[1].count or 0
 end
 
---- Get available modules for permissions
+--- Get available modules for permissions (reads from DB)
+-- When project_code is provided (and not "all"), filters to only modules
+-- defined in ProjectConfig.PROJECT_MODULES for that project.
+-- @param project_code string|nil Optional project code to filter modules
 -- @return table List of module names with descriptions
-function NamespaceRoleQueries.getAvailableModules()
-    return {
-        { name = "dashboard", display_name = "Dashboard", description = "Main dashboard and analytics" },
-        { name = "users", display_name = "Users", description = "User management within namespace" },
-        { name = "roles", display_name = "Roles", description = "Role management within namespace" },
-        { name = "stores", display_name = "Stores", description = "Store management" },
-        { name = "products", display_name = "Products", description = "Product catalog management" },
-        { name = "orders", display_name = "Orders", description = "Order processing" },
-        { name = "customers", display_name = "Customers", description = "Customer management" },
-        { name = "settings", display_name = "Settings", description = "Namespace settings" },
-        { name = "namespace", display_name = "Namespace", description = "Namespace administration" },
-        { name = "services", display_name = "Services", description = "Service deployment and management" },
-        { name = "chat", display_name = "Chat", description = "Chat and messaging" },
-        { name = "delivery", display_name = "Delivery", description = "Delivery partners management" },
-        { name = "reports", display_name = "Reports", description = "Analytics and reports" },
-        { name = "projects", display_name = "Projects", description = "Kanban projects and tasks" }
-    }
+function NamespaceRoleQueries.getAvailableModules(project_code)
+    local results = db.query(
+        "SELECT machine_name as name, name as display_name, description, category "
+        .. "FROM modules WHERE is_active = true ORDER BY name"
+    )
+    results = results or {}
+
+    -- If no project_code or "all", return everything
+    if not project_code or project_code == "" or project_code == "all" then
+        return results
+    end
+
+    -- Build a set of allowed machine_names from ProjectConfig
+    local ProjectConfig = require("helper.project-config")
+    local allowed = {}
+
+    -- Always include core modules
+    local core_modules = ProjectConfig.PROJECT_MODULES.core
+    if core_modules then
+        for _, m in ipairs(core_modules) do
+            allowed[m.machine_name] = true
+        end
+    end
+
+    -- Add project-specific modules
+    local project_modules = ProjectConfig.PROJECT_MODULES[project_code]
+    if project_modules then
+        for _, m in ipairs(project_modules) do
+            allowed[m.machine_name] = true
+        end
+    end
+
+    -- Also check PROJECT_FEATURES for multi-feature projects
+    local project_features = ProjectConfig.PROJECT_FEATURES[project_code]
+    if project_features then
+        for _, feature in ipairs(project_features) do
+            local feature_modules = ProjectConfig.PROJECT_MODULES[feature]
+            if feature_modules then
+                for _, m in ipairs(feature_modules) do
+                    allowed[m.machine_name] = true
+                end
+            end
+        end
+    end
+
+    -- Filter results to only allowed modules
+    local filtered = {}
+    for _, mod in ipairs(results) do
+        if allowed[mod.name] then
+            table.insert(filtered, mod)
+        end
+    end
+
+    return filtered
 end
 
 --- Get available actions for permissions
@@ -469,9 +562,10 @@ function NamespaceRoleQueries.getAvailableActions()
 end
 
 --- Get full permissions for owner (all modules with manage permission)
+-- @param project_code string|nil Optional project code to filter modules
 -- @return table Full permissions object
-function NamespaceRoleQueries.getOwnerPermissions()
-    local modules = NamespaceRoleQueries.getAvailableModules()
+function NamespaceRoleQueries.getOwnerPermissions(project_code)
+    local modules = NamespaceRoleQueries.getAvailableModules(project_code)
     local permissions = {}
     for _, module in ipairs(modules) do
         permissions[module.name] = { "manage" }
@@ -480,9 +574,10 @@ function NamespaceRoleQueries.getOwnerPermissions()
 end
 
 --- Get default admin permissions (all except namespace management)
+-- @param project_code string|nil Optional project code to filter modules
 -- @return table Admin permissions object
-function NamespaceRoleQueries.getAdminPermissions()
-    local modules = NamespaceRoleQueries.getAvailableModules()
+function NamespaceRoleQueries.getAdminPermissions(project_code)
+    local modules = NamespaceRoleQueries.getAvailableModules(project_code)
     local permissions = {}
     for _, module in ipairs(modules) do
         if module.name == "namespace" then
@@ -494,114 +589,66 @@ function NamespaceRoleQueries.getAdminPermissions()
     return permissions
 end
 
---- Get default member permissions (read-only on most modules)
--- @return table Member permissions object
-function NamespaceRoleQueries.getMemberPermissions()
-    return {
-        dashboard = { "read" },
-        users = { "read" },
-        roles = { "read" },
-        stores = { "read" },
-        products = { "read" },
-        orders = { "read" },
-        customers = { "read" },
-        settings = {},
-        namespace = {},
-        services = { "read" },
-        chat = { "read", "create" },
-        delivery = { "read" },
-        reports = { "read" },
-        projects = { "read", "create", "update" }
-    }
+--- Get empty permissions for all active modules (no access by default)
+-- Used for non-admin roles — permissions must be explicitly granted
+-- @param project_code string|nil Optional project code to filter modules
+-- @return table Empty permissions object
+function NamespaceRoleQueries.getEmptyPermissions(project_code)
+    local modules = NamespaceRoleQueries.getAvailableModules(project_code)
+    local permissions = {}
+    for _, module in ipairs(modules) do
+        permissions[module.name] = {}
+    end
+    return permissions
 end
 
 --- Create default roles for a new namespace
+-- Creates 3 DB-driven roles: owner (full), admin (full except namespace), member (empty)
+-- When project_code is provided, permissions are scoped to that project's modules only
 -- @param namespace_id number Namespace ID
+-- @param project_code string|nil Optional project code to filter modules
 -- @return table List of created roles
-function NamespaceRoleQueries.createDefaultRoles(namespace_id)
+function NamespaceRoleQueries.createDefaultRoles(namespace_id, project_code)
     local created_roles = {}
 
-    -- Admin role (full access except namespace management)
+    -- Owner role (all modules with manage permission)
+    local owner_role = NamespaceRoleQueries.create({
+        namespace_id = namespace_id,
+        role_name = "owner",
+        display_name = "Owner",
+        description = "Full namespace control",
+        permissions = NamespaceRoleQueries.getOwnerPermissions(project_code),
+        is_system = true,
+        is_default = false,
+        priority = 100
+    })
+    table.insert(created_roles, owner_role)
+
+    -- Admin role (manage on all except namespace = read)
     local admin_role = NamespaceRoleQueries.create({
         namespace_id = namespace_id,
         role_name = "admin",
         display_name = "Administrator",
         description = "Full access to all namespace features",
-        permissions = NamespaceRoleQueries.getAdminPermissions(),
+        permissions = NamespaceRoleQueries.getAdminPermissions(project_code),
         is_system = true,
         is_default = false,
         priority = 90
     })
     table.insert(created_roles, admin_role)
 
-    -- Manager role
-    local manager_role = NamespaceRoleQueries.create({
-        namespace_id = namespace_id,
-        role_name = "manager",
-        display_name = "Manager",
-        description = "Can manage stores, products, orders, and customers",
-        permissions = {
-            dashboard = { "read" },
-            users = { "read" },
-            roles = { "read" },
-            stores = { "manage" },
-            products = { "manage" },
-            orders = { "manage" },
-            customers = { "manage" },
-            settings = { "read" },
-            namespace = {},
-            services = { "read" },
-            chat = { "manage" },
-            delivery = { "manage" },
-            reports = { "read" },
-            projects = { "manage" }
-        },
-        is_system = false,
-        is_default = false,
-        priority = 70
-    })
-    table.insert(created_roles, manager_role)
-
-    -- Member role (default for new members)
+    -- Member role (empty permissions — must be explicitly granted)
     local member_role = NamespaceRoleQueries.create({
         namespace_id = namespace_id,
         role_name = "member",
         display_name = "Member",
-        description = "Basic access to view content and participate in projects",
-        permissions = NamespaceRoleQueries.getMemberPermissions(),
+        description = "Permissions must be explicitly granted",
+        permissions = NamespaceRoleQueries.getEmptyPermissions(project_code),
         is_system = true,
         is_default = true,
         priority = 10
     })
     table.insert(created_roles, member_role)
-
-    -- Viewer role (read-only)
-    local viewer_role = NamespaceRoleQueries.create({
-        namespace_id = namespace_id,
-        role_name = "viewer",
-        display_name = "Viewer",
-        description = "Read-only access to namespace content",
-        permissions = {
-            dashboard = { "read" },
-            users = {},
-            roles = {},
-            stores = { "read" },
-            products = { "read" },
-            orders = { "read" },
-            customers = {},
-            settings = {},
-            namespace = {},
-            services = { "read" },
-            chat = { "read" },
-            delivery = {},
-            reports = { "read" },
-            projects = { "read" }
-        },
-        is_system = false,
-        is_default = false,
-        priority = 5
-    })
-    table.insert(created_roles, viewer_role)
 
     return created_roles
 end

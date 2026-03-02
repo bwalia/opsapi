@@ -4,6 +4,7 @@ import type {
   Namespace,
   NamespaceWithMembership,
   NamespacePermissions,
+  PermissionAction,
   UserNamespaceSettings,
   CreateNamespaceDto,
 } from '@/types';
@@ -65,7 +66,7 @@ interface NamespaceActions {
   clearNamespace: () => void;
 
   // Check permission in current namespace
-  hasPermission: (module: keyof NamespacePermissions, action: string) => boolean;
+  hasPermission: (module: string, action: PermissionAction) => boolean;
 
   // Clear errors
   clearErrors: () => void;

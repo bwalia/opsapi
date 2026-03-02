@@ -223,8 +223,14 @@ app:before_filter(function(self)
 end)
 
 -- ============================================
--- PROTECTED ROUTES
+-- PROTECTED ROUTES (Feature-gated loading)
+--
+-- Routes are only loaded when their required feature is enabled
+-- via PROJECT_CODE. This prevents 500 errors from querying
+-- tables that don't exist for the current project.
 -- ============================================
+
+local ProjectConfig = require("helper.project-config")
 
 local function safe_load_routes(route_name)
     local ok, route_module = pcall(require, route_name)
@@ -243,111 +249,131 @@ local function safe_load_routes(route_name)
     return true
 end
 
-ngx.log(ngx.NOTICE, "Loading routes...")
+-- Load routes only when their required feature is enabled
+local function load_if(feature, route_name)
+    if ProjectConfig.isFeatureEnabled(feature) then
+        return safe_load_routes(route_name)
+    else
+        ngx.log(ngx.NOTICE, "Skipped (feature '", feature, "' disabled): ", route_name)
+        return false
+    end
+end
 
+ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCode(), ")...")
+
+-- ============================================
+-- CORE ROUTES (always loaded — core tables exist for all projects)
+-- ============================================
 safe_load_routes("routes.auth")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
 safe_load_routes("routes.roles")
-safe_load_routes("routes.products")
-safe_load_routes("routes.categories")
-safe_load_routes("routes.orders")
-safe_load_routes("routes.cart")
-safe_load_routes("routes.payments")
-safe_load_routes("routes.addresses")
-safe_load_routes("routes.tenants")
 safe_load_routes("routes.permissions")
-
-
-
-
-
-
 safe_load_routes("routes.module")
-
 safe_load_routes("routes.documents")
 safe_load_routes("routes.secrets")
 safe_load_routes("routes.tags")
 safe_load_routes("routes.templates")
 safe_load_routes("routes.projects")
 safe_load_routes("routes.enquiries")
-safe_load_routes("routes.stores")
-safe_load_routes("routes.storeproducts")
-safe_load_routes("routes.customers")
-safe_load_routes("routes.orderitems")
 safe_load_routes("routes.register")
+safe_load_routes("routes.namespaces")
 
-safe_load_routes("routes.checkout")
-safe_load_routes("routes.variants")
+-- ============================================
+-- MENU SYSTEM (backend-driven navigation)
+-- ============================================
+load_if("menu", "routes.menu")
 
+-- ============================================
+-- ECOMMERCE (stores, products, orders, payments)
+-- ============================================
+load_if("ecommerce", "routes.products")
+load_if("ecommerce", "routes.categories")
+load_if("ecommerce", "routes.orders")
+load_if("ecommerce", "routes.cart")
+load_if("ecommerce", "routes.payments")
+load_if("ecommerce", "routes.addresses")
+load_if("ecommerce", "routes.stores")
+load_if("ecommerce", "routes.storeproducts")
+load_if("ecommerce", "routes.customers")
+load_if("ecommerce", "routes.orderitems")
+load_if("ecommerce", "routes.checkout")
+load_if("ecommerce", "routes.variants")
+load_if("ecommerce", "routes.stripe-webhook")
+load_if("ecommerce", "routes.order_management")
+load_if("ecommerce", "routes.order-status")
+load_if("ecommerce", "routes.buyer-orders")
+load_if("ecommerce", "routes.public-store")
+load_if("ecommerce", "routes.tenants")
 
-safe_load_routes("routes.stripe-webhook")   -- Stripe webhook ha
+-- ============================================
+-- DELIVERY PARTNER SYSTEM
+-- ============================================
+load_if("delivery", "routes.delivery-partners")
+load_if("delivery", "routes.delivery-assignments")
+load_if("delivery", "routes.delivery-requests")
+load_if("delivery", "routes.delivery-partner-dashboard")
+load_if("delivery", "routes.delivery-management")
+load_if("delivery", "routes.store-delivery-partners")
+load_if("delivery", "routes.delivery-partners-enhanced")
+load_if("delivery", "routes.delivery-dashboard-enhanced")
+load_if("delivery", "routes.delivery-partner-verification")
+load_if("delivery", "routes.delivery-pricing")
 
-safe_load_routes("routes.order_management") -- Enhanced seller order management
-safe_load_routes("routes.order-status")     -- Order status workflow management
-safe_load_routes("routes.buyer-orders")     -- Buyer order management
-safe_load_routes("routes.notifications")    -- Notifications system
-safe_load_routes("routes.public-store")     -- Public store products
+-- ============================================
+-- CHAT SYSTEM (Slack-like messaging)
+-- ============================================
+load_if("chat", "routes.chat-channels")
+load_if("chat", "routes.chat-messages")
+load_if("chat", "routes.chat-reactions")
+load_if("chat", "routes.chat-mentions")
+load_if("chat", "routes.chat-extras")
 
--- Delivery Partner System (Legacy)
-safe_load_routes("routes.delivery-partners")          -- Delivery partner registration & profile
-safe_load_routes("routes.delivery-assignments")       -- Delivery assignments management
-safe_load_routes("routes.delivery-requests")          -- Delivery requests management
-safe_load_routes("routes.delivery-partner-dashboard") -- Delivery partner dashboard
-safe_load_routes("routes.delivery-management")        -- Professional delivery management (accept, update status)
-safe_load_routes("routes.store-delivery-partners")    -- Store delivery partner associations
+-- ============================================
+-- KANBAN PROJECT MANAGEMENT
+-- ============================================
+load_if("kanban", "routes.kanban-projects")
+load_if("kanban", "routes.kanban-boards")
+load_if("kanban", "routes.kanban-tasks")
+load_if("kanban", "routes.kanban-labels")
+load_if("kanban", "routes.kanban-sprints")
+load_if("kanban", "routes.kanban-time-tracking")
+load_if("kanban", "routes.kanban-notifications")
+load_if("kanban", "routes.kanban-analytics")
 
--- Enhanced Delivery Partner System (Geolocation-Based)
-safe_load_routes("routes.delivery-partners-enhanced")    -- Geolocation registration & profile
-safe_load_routes("routes.delivery-dashboard-enhanced")   -- Geo-based dashboard with nearby orders
-safe_load_routes("routes.delivery-partner-verification") -- Verification system with document upload
+-- ============================================
+-- NOTIFICATIONS (Push notifications, device tokens)
+-- ============================================
+load_if("notifications", "routes.notifications")
+load_if("notifications", "routes.device-tokens")
+load_if("notifications", "routes.test-notification")
 
--- Delivery Pricing System
-safe_load_routes("routes.delivery-pricing") -- Professional delivery fee calculation & validation
+-- ============================================
+-- SERVICES MODULE (GitHub Workflow Integration)
+-- ============================================
+load_if("services", "routes.services")
 
--- Chat System (Slack-like messaging)
-safe_load_routes("routes.chat-channels")  -- Channel management (create, update, members)
-safe_load_routes("routes.chat-messages")  -- Message operations (send, edit, delete, threads)
-safe_load_routes("routes.chat-reactions") -- Message reactions (add, remove, toggle)
-safe_load_routes("routes.chat-mentions")  -- Mentions API (list, read, autocomplete)
-safe_load_routes("routes.chat-extras")    -- Bookmarks, drafts, presence, invites, files
+-- ============================================
+-- SECRET VAULT
+-- ============================================
+load_if("vault", "routes.secret-vault")
 
--- Namespace System (Multi-tenant)
-safe_load_routes("routes.namespaces") -- Namespace management, members, roles, switching
+-- ============================================
+-- BANK TRANSACTIONS
+-- ============================================
+load_if("bank_transactions", "routes.bank_transactions")
 
--- Menu System (Backend-driven navigation)
-safe_load_routes("routes.menu") -- User menu based on permissions
+-- ============================================
+-- TAX COPILOT (UK Tax Return AI)
+-- ============================================
+load_if("tax_copilot", "routes.tax-bank-accounts")
+load_if("tax_copilot", "routes.tax-statements")
+load_if("tax_copilot", "routes.tax-transactions")
+load_if("tax_copilot", "routes.tax-upload")
 
--- Services Module (GitHub Workflow Integration)
-safe_load_routes("routes.services") -- Service management, secrets, deployments, GitHub workflows
-
--- Kanban Project Management System (Integrated with Chat)
-safe_load_routes("routes.kanban-projects")      -- Projects, members, starred
-safe_load_routes("routes.kanban-boards")        -- Boards, columns, reordering
-safe_load_routes("routes.kanban-tasks")         -- Tasks, assignments, comments, checklists, attachments
-safe_load_routes("routes.kanban-labels")        -- Project labels
-safe_load_routes("routes.kanban-sprints")       -- Sprint management, burndown, velocity
-safe_load_routes("routes.kanban-time-tracking") -- Time tracking, timers, timesheets
-safe_load_routes("routes.kanban-notifications") -- Notifications, preferences
-safe_load_routes("routes.kanban-analytics")     -- Project analytics, activity feed, reports
-
--- Secret Vault System (Secure secrets with user-provided encryption keys)
-safe_load_routes("routes.secret-vault") -- Vault, folders, secrets, sharing, audit logs
-
--- Bank Transactions System
-safe_load_routes("routes.bank_transactions") -- Bank transaction management
-
--- Tax Copilot System (UK Tax Return AI)
-safe_load_routes("routes.tax-bank-accounts")  -- Tax bank account management
-safe_load_routes("routes.tax-statements")     -- Tax statement management (upload, workflow)
-safe_load_routes("routes.tax-transactions")   -- Tax transaction management (from AI extraction)
-safe_load_routes("routes.tax-upload")         -- Tax statement file upload (MinIO storage)
-
--- Push Notifications (Device Token Management)
-safe_load_routes("routes.device-tokens") -- FCM device token registration for push notifications
-safe_load_routes("routes.test-notification") -- Test endpoint for push notifications (remove in production)
-
--- Fetch the value of OPSAPI_CUSTOM_ROUTES_DIR environment variable
+-- ============================================
+-- CUSTOM ROUTES (loaded from external directory)
+-- ============================================
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
 if custom_routes_dir then
     ngx.log(ngx.NOTICE, "Loading custom routes from: ", custom_routes_dir)

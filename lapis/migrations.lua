@@ -821,6 +821,26 @@ return {
     ['322_tax_migration_complete'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 23),
     ['323_tax_rename_account_number'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 24),
 
+    -- =========================================================================
+    -- RBAC ENHANCEMENT: Add columns to modules table for dynamic RBAC
+    -- =========================================================================
+    ['400_add_module_rbac_columns'] = function()
+        -- Add new columns for dynamic RBAC module management
+        db.query("ALTER TABLE modules ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true")
+        db.query("ALTER TABLE modules ADD COLUMN IF NOT EXISTS category varchar(255)")
+        db.query("ALTER TABLE modules ADD COLUMN IF NOT EXISTS default_actions text DEFAULT 'create,read,update,delete,manage'")
+        db.query("ALTER TABLE modules ADD COLUMN IF NOT EXISTS is_system boolean DEFAULT false")
+    end,
+
+    -- =========================================================================
+    -- Add project_code to namespaces for per-namespace module filtering
+    -- =========================================================================
+    ['401_add_namespace_project_code'] = function()
+        db.query("ALTER TABLE namespaces ADD COLUMN IF NOT EXISTS project_code varchar(255) DEFAULT 'all'")
+        -- Backfill: set existing namespaces with slug 'system' to 'all'
+        db.query("UPDATE namespaces SET project_code = 'all' WHERE project_code IS NULL")
+    end,
+
     -- Custom migrations
     ['custom_migrations'] = function()
         local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")

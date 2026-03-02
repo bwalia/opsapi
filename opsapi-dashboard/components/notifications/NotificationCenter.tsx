@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useCallback, useState, memo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   Check,
@@ -25,22 +25,25 @@ import {
   Loader2,
   WifiOff,
   Wifi,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useNotificationStore } from '@/store/notification.store';
-import { useNotificationSocket } from '@/hooks/useWebSocket';
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useNotificationStore } from "@/store/notification.store";
+import { useNotificationSocket } from "@/hooks/useWebSocket";
 import {
   formatNotificationTime,
   getNotificationTypeLabel,
   groupNotificationsByDate,
-} from '@/services/notification.service';
-import type { KanbanNotification, NotificationType } from '@/types';
+} from "@/services/notification.service";
+import type { KanbanNotification, NotificationType } from "@/types";
 
 // ============================================
 // Icon Map
 // ============================================
 
-const NOTIFICATION_ICONS: Record<NotificationType, React.ComponentType<{ className?: string }>> = {
+const NOTIFICATION_ICONS: Record<
+  NotificationType,
+  React.ComponentType<{ className?: string }>
+> = {
   task_assigned: UserPlus,
   task_unassigned: UserMinus,
   task_commented: MessageSquare,
@@ -77,21 +80,22 @@ const NotificationItem = memo(function NotificationItem({
   onDelete,
   onClick,
 }: NotificationItemProps) {
-  const IconComponent = NOTIFICATION_ICONS[notification.type as NotificationType] || Bell;
+  const IconComponent =
+    NOTIFICATION_ICONS[notification.type as NotificationType] || Bell;
 
   const priorityStyles = {
-    urgent: 'border-l-4 border-l-red-500',
-    high: 'border-l-4 border-l-orange-500',
-    normal: '',
-    low: '',
+    urgent: "border-l-4 border-l-red-500",
+    high: "border-l-4 border-l-orange-500",
+    normal: "",
+    low: "",
   };
 
   return (
     <div
       className={cn(
-        'group relative px-4 py-3 hover:bg-secondary-50 transition-colors cursor-pointer',
-        !notification.is_read && 'bg-primary-50/30',
-        priorityStyles[notification.priority || 'normal']
+        "group relative px-4 py-3 hover:bg-secondary-50 transition-colors cursor-pointer",
+        !notification.is_read && "bg-primary-50/30",
+        priorityStyles[notification.priority || "normal"],
       )}
       onClick={() => onClick(notification)}
     >
@@ -99,10 +103,10 @@ const NotificationItem = memo(function NotificationItem({
         {/* Icon */}
         <div
           className={cn(
-            'flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center',
+            "shrink-0 w-9 h-9 rounded-lg flex items-center justify-center",
             notification.is_read
-              ? 'bg-secondary-100 text-secondary-500'
-              : 'bg-primary-100 text-primary-600'
+              ? "bg-secondary-100 text-secondary-500"
+              : "bg-primary-100 text-primary-600",
           )}
         >
           <IconComponent className="w-4 h-4" />
@@ -114,8 +118,10 @@ const NotificationItem = memo(function NotificationItem({
             <div className="flex-1 min-w-0">
               <p
                 className={cn(
-                  'text-sm line-clamp-1',
-                  notification.is_read ? 'text-secondary-600' : 'text-secondary-900 font-medium'
+                  "text-sm line-clamp-1",
+                  notification.is_read
+                    ? "text-secondary-600"
+                    : "text-secondary-900 font-medium",
                 )}
               >
                 {notification.title}
@@ -127,7 +133,7 @@ const NotificationItem = memo(function NotificationItem({
 
             {/* Unread indicator */}
             {!notification.is_read && (
-              <span className="flex-shrink-0 w-2 h-2 rounded-full bg-primary-500 mt-1.5" />
+              <span className="shrink-0 w-2 h-2 rounded-full bg-primary-500 mt-1.5" />
             )}
           </div>
 
@@ -215,32 +221,35 @@ const NotificationPanel = memo(function NotificationPanel({
   // Close on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+      if (
+        panelRef.current &&
+        !panelRef.current.contains(event.target as Node)
+      ) {
         onClose();
       }
     };
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener("mousedown", handleClickOutside);
     }
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isOpen, onClose]);
 
   // Close on escape
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === "Escape") onClose();
     };
 
     if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
+      document.addEventListener("keydown", handleEscape);
     }
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [isOpen, onClose]);
 
@@ -254,17 +263,21 @@ const NotificationPanel = memo(function NotificationPanel({
         onClose();
       }
     },
-    [markAsRead, router, onClose]
+    [markAsRead, router, onClose],
   );
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-      if (scrollHeight - scrollTop <= clientHeight * 1.5 && hasMore && !notificationsLoading) {
+      if (
+        scrollHeight - scrollTop <= clientHeight * 1.5 &&
+        hasMore &&
+        !notificationsLoading
+      ) {
         loadMoreNotifications();
       }
     },
-    [hasMore, notificationsLoading, loadMoreNotifications]
+    [hasMore, notificationsLoading, loadMoreNotifications],
   );
 
   const groupedNotifications = groupNotificationsByDate(notifications);
@@ -284,7 +297,9 @@ const NotificationPanel = memo(function NotificationPanel({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-secondary-200">
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-secondary-900">Notifications</h3>
+            <h3 className="text-base font-semibold text-secondary-900">
+              Notifications
+            </h3>
             {unreadCount > 0 && (
               <span className="px-2 py-0.5 text-xs font-medium bg-primary-100 text-primary-700 rounded-full">
                 {unreadCount}
@@ -295,12 +310,16 @@ const NotificationPanel = memo(function NotificationPanel({
             {/* Connection status */}
             <div
               className={cn(
-                'p-1.5 rounded-lg',
-                isConnected ? 'text-success-500' : 'text-secondary-400'
+                "p-1.5 rounded-lg",
+                isConnected ? "text-success-500" : "text-secondary-400",
               )}
-              title={isConnected ? 'Real-time connected' : 'Connecting...'}
+              title={isConnected ? "Real-time connected" : "Connecting..."}
             >
-              {isConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+              {isConnected ? (
+                <Wifi className="w-4 h-4" />
+              ) : (
+                <WifiOff className="w-4 h-4" />
+              )}
             </div>
 
             {/* Mark all as read */}
@@ -317,7 +336,7 @@ const NotificationPanel = memo(function NotificationPanel({
             {/* Settings */}
             <button
               onClick={() => {
-                router.push('/dashboard/settings/notifications');
+                router.push("/dashboard/settings/notifications");
                 onClose();
               }}
               className="p-1.5 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
@@ -347,31 +366,36 @@ const NotificationPanel = memo(function NotificationPanel({
               <div className="w-14 h-14 bg-secondary-100 rounded-full flex items-center justify-center mb-3">
                 <Bell className="w-7 h-7 text-secondary-400" />
               </div>
-              <p className="text-sm font-medium text-secondary-700">No notifications</p>
+              <p className="text-sm font-medium text-secondary-700">
+                No notifications
+              </p>
               <p className="text-xs text-secondary-500 mt-1">
-                You&apos;re all caught up! We&apos;ll notify you when something new happens.
+                You&apos;re all caught up! We&apos;ll notify you when something
+                new happens.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-secondary-100">
-              {Array.from(groupedNotifications.entries()).map(([date, items]) => (
-                <div key={date}>
-                  <div className="px-4 py-2 bg-secondary-50 border-y border-secondary-100">
-                    <p className="text-xs font-medium text-secondary-500 uppercase tracking-wide">
-                      {date}
-                    </p>
+              {Array.from(groupedNotifications.entries()).map(
+                ([date, items]) => (
+                  <div key={date}>
+                    <div className="px-4 py-2 bg-secondary-50 border-y border-secondary-100">
+                      <p className="text-xs font-medium text-secondary-500 uppercase tracking-wide">
+                        {date}
+                      </p>
+                    </div>
+                    {items.map((notification) => (
+                      <NotificationItem
+                        key={notification.uuid}
+                        notification={notification}
+                        onMarkAsRead={markAsRead}
+                        onDelete={deleteNotification}
+                        onClick={handleNotificationClick}
+                      />
+                    ))}
                   </div>
-                  {items.map((notification) => (
-                    <NotificationItem
-                      key={notification.uuid}
-                      notification={notification}
-                      onMarkAsRead={markAsRead}
-                      onDelete={deleteNotification}
-                      onClick={handleNotificationClick}
-                    />
-                  ))}
-                </div>
-              ))}
+                ),
+              )}
             </div>
           )}
 
@@ -388,7 +412,7 @@ const NotificationPanel = memo(function NotificationPanel({
           <div className="border-t border-secondary-200 p-2">
             <button
               onClick={() => {
-                router.push('/dashboard/notifications');
+                router.push("/dashboard/notifications");
                 onClose();
               }}
               className="w-full py-2 text-sm font-medium text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
@@ -408,7 +432,8 @@ const NotificationPanel = memo(function NotificationPanel({
 
 export const NotificationBell = memo(function NotificationBell() {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const { unreadCount, addNotification, setConnected, loadNotifications } = useNotificationStore();
+  const { unreadCount, addNotification, setConnected, loadNotifications } =
+    useNotificationStore();
 
   // Connect to WebSocket for real-time notifications
   const { isConnected } = useNotificationSocket({
@@ -441,10 +466,10 @@ export const NotificationBell = memo(function NotificationBell() {
       <button
         onClick={togglePanel}
         className={cn(
-          'relative p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors',
-          isPanelOpen && 'bg-secondary-100 text-secondary-700'
+          "relative p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors",
+          isPanelOpen && "bg-secondary-100 text-secondary-700",
         )}
-        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
         aria-expanded={isPanelOpen}
         aria-haspopup="true"
       >
@@ -453,7 +478,7 @@ export const NotificationBell = memo(function NotificationBell() {
         {/* Unread badge */}
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-semibold text-white bg-error-500 rounded-full shadow-sm">
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
 

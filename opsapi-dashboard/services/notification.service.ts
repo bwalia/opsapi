@@ -73,20 +73,30 @@ export const notificationService = {
       type: params?.type,
       project_id: params?.project_id,
     });
-    const response = await apiClient.get<NotificationListResponse>(
-      `/api/v2/kanban/notifications${queryString}`
-    );
-    return response.data;
+    try {
+      const response = await apiClient.get<NotificationListResponse>(
+        `/api/v2/kanban/notifications${queryString}`
+      );
+      return response.data;
+    } catch {
+      // Return empty result when notifications endpoint is unavailable
+      // (e.g., kanban feature disabled for this project)
+      return { data: [], total: 0, unread_count: 0, page: 1, per_page: params?.perPage || 20 };
+    }
   },
 
   /**
    * Get unread notification count
    */
   async getUnreadCount(): Promise<number> {
-    const response = await apiClient.get<ApiDataResponse<{ count: number }>>(
-      '/api/v2/kanban/notifications/unread-count'
-    );
-    return response.data.data.count;
+    try {
+      const response = await apiClient.get<ApiDataResponse<{ count: number }>>(
+        '/api/v2/kanban/notifications/unread-count'
+      );
+      return response.data.data.count;
+    } catch {
+      return 0;
+    }
   },
 
   /**

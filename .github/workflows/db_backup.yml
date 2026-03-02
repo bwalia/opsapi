@@ -50,17 +50,34 @@ jobs:
       - name: Retrieve PostgreSQL Credentials from Kubernetes
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
-          export PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_HOST}" | base64 --decode)
-          export PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PORT}" | base64 --decode)
-          export PGUSER=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_USER}" | base64 --decode)
-          export PGPASSWORD=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PASSWORD}" | base64 --decode)
-          export PGDATABASE=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DATABASE}" | base64 --decode)
+
+          # Debug: list available keys in the secret
+          echo "Available secret keys:"
+          kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data}" | python3 -c "import sys,json; print('\n'.join(json.loads(sys.stdin.read()).keys()))"
+
+          PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_HOST}" | base64 --decode)
+          PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PORT}" | base64 --decode)
+          PGUSER=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_USER}" | base64 --decode)
+          PGPASSWORD=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PASSWORD}" | base64 --decode)
+          PGDATABASE=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DATABASE}" | base64 --decode)
+
+          # Validate required credentials
+          if [ -z "$PGHOST" ]; then
+            echo "::error::PGHOST is empty - DB_HOST key not found in opsapi-secrets"
+            exit 1
+          fi
+          if [ -z "$PGDATABASE" ]; then
+            echo "::error::PGDATABASE is empty - DATABASE key not found in opsapi-secrets"
+            exit 1
+          fi
 
           echo "PGHOST=$PGHOST" >> $GITHUB_ENV
-          echo "PGPORT=$PGPORT" >> $GITHUB_ENV
+          echo "PGPORT=${PGPORT:-5432}" >> $GITHUB_ENV
           echo "PGUSER=$PGUSER" >> $GITHUB_ENV
           echo "PGPASSWORD=$PGPASSWORD" >> $GITHUB_ENV
           echo "PGDATABASE=$PGDATABASE" >> $GITHUB_ENV
+
+          echo "Successfully retrieved credentials (host: $PGHOST, port: ${PGPORT:-5432}, db: $PGDATABASE)"
 
       - name: Install PostgreSQL Client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
