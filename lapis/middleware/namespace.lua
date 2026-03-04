@@ -295,7 +295,8 @@ function NamespaceMiddleware.requireOwner(handler)
         end
 
         if not self.is_namespace_owner then
-            ngx.log(ngx.WARN, "Owner access denied for user ", self.current_user.uuid)
+            local user_id = self.current_user and self.current_user.uuid or "unknown"
+            ngx.log(ngx.WARN, "Owner access denied for user ", user_id)
             return {
                 json = { error = "This action requires namespace owner privileges" },
                 status = 403

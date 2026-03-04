@@ -90,6 +90,18 @@ on:
         default: "self-hosted"
         required: false
 
+      ADMIN_EMAIL:
+        type: string
+        description: "Super admin email for namespace setup"
+        default: ""
+        required: false
+
+      ADMIN_PASSWORD:
+        type: string
+        description: "Super admin password for namespace setup"
+        default: ""
+        required: false
+
 env:
   BASE_DOMAIN: "diytaxreturn.co.uk"
   SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/${{ github.event.inputs.TARGET_ENV || 'test' }}/${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}/.env"
@@ -229,6 +241,16 @@ jobs:
             ARGS="$ARGS -r"
           fi
 
+          # Add admin credentials if provided (otherwise start.sh uses defaults)
+          ADMIN_EMAIL="${{ github.event.inputs.ADMIN_EMAIL }}"
+          ADMIN_PASSWORD="${{ github.event.inputs.ADMIN_PASSWORD }}"
+          if [ -n "$ADMIN_EMAIL" ]; then
+            ARGS="$ARGS -A $ADMIN_EMAIL"
+          fi
+          if [ -n "$ADMIN_PASSWORD" ]; then
+            ARGS="$ARGS -W $ADMIN_PASSWORD"
+          fi
+
           echo "Executing: ./start.sh $ARGS"
           ./start.sh $ARGS
         shell: bash
@@ -239,7 +261,7 @@ jobs:
 
           # Check if containers are running
           cd lapis
-          docker compose ps
+          docker compose -f docker-compose.ci.yml ps
 
           # Health check - try to reach the API
           echo ""
@@ -276,7 +298,7 @@ jobs:
         run: |
           echo "Deployment failed. Showing container logs..."
           cd lapis
-          docker compose logs --tail=100
+          docker compose -f docker-compose.ci.yml logs --tail=100
         shell: bash
 
       - name: Slack notification - Success

@@ -36,9 +36,13 @@ services:
       # In CI/CD, we want to use the files baked into the Docker image
       - ./logs:/var/log/nginx
     env_file: ".env"
+    environment:
+      - PROJECT_CODE=${PROJECT_CODE:-all}
     depends_on:
-      - postgres
-      - minio
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     # DNS configuration for external API calls (GitHub, etc.)
     dns:
       - 8.8.8.8

@@ -96,6 +96,7 @@ return function(app)
         end
 
         -- Then check for specific namespace create permission
+        -- Use exact JSON array element check to avoid substring false positives
         local perm_check = db.query([[
             SELECT p.id FROM permissions p
             JOIN roles r ON p.role_id = r.id
@@ -104,7 +105,7 @@ return function(app)
             JOIN modules m ON p.module_id = m.id
             WHERE u.uuid = ?
             AND m.machine_name = 'namespaces'
-            AND p.permissions LIKE '%create%'
+            AND (p.permissions::jsonb @> '"create"' OR p.permissions::jsonb @> '"manage"')
         ]], current_user.uuid)
 
         return perm_check and #perm_check > 0
@@ -632,7 +633,10 @@ return function(app)
                         table.insert(role_ids, ns_role[1].id)
                     end
                 end
-                NamespaceMemberQueries.setRoles(existing.id, role_ids)
+                local roles_ok, roles_err = pcall(NamespaceMemberQueries.setRoles, existing.id, role_ids)
+                if not roles_ok then
+                    return error_response(500, "Failed to update member roles", tostring(roles_err))
+                end
                 return success_response({
                     message = "User roles updated in namespace",
                     membership = NamespaceMemberQueries.getWithDetails(existing.id)
@@ -716,7 +720,10 @@ return function(app)
             return error_response(400, "At least one role_id or role_name is required")
         end
 
-        NamespaceMemberQueries.setRoles(membership.id, role_ids)
+        local roles_ok, roles_err = pcall(NamespaceMemberQueries.setRoles, membership.id, role_ids)
+        if not roles_ok then
+            return error_response(500, "Failed to update member roles", tostring(roles_err))
+        end
 
         return success_response({
             message = "User roles updated successfully",
@@ -841,7 +848,10 @@ return function(app)
 
                 -- Update roles if provided
                 if params.role_ids then
-                    NamespaceMemberQueries.setRoles(member.id, params.role_ids)
+                    local roles_ok, roles_err = pcall(NamespaceMemberQueries.setRoles, member.id, params.role_ids)
+                    if not roles_ok then
+                        return error_response(500, "Failed to update member roles", tostring(roles_err))
+                    end
                     audit(self, "member.role_changed", "namespace_member", member.id,
                         nil, { role_ids = params.role_ids }
                     )
