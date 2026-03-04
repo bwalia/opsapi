@@ -4,7 +4,7 @@ local Global = require "helper.global"
 local PatientHealthRecordModel = Model:extend("patient_health_records", {
     timestamp = true,
     relations = {
-        {"patient", belongs_to = "PatientModel", key = "patient_id"}
+        { "patient", belongs_to = "PatientModel", key = "patient_id" }
     }
 })
 
@@ -44,14 +44,14 @@ function PatientHealthRecordModel:create(data)
         created_at = Global.getCurrentTimestamp(),
         updated_at = Global.getCurrentTimestamp()
     }
-    
+
     return self:create(record_data)
 end
 
 -- Update health record
 function PatientHealthRecordModel:update(record_id, data)
     local update_data = {}
-    
+
     if data.record_type then update_data.record_type = data.record_type end
     if data.record_date then update_data.record_date = data.record_date end
     if data.record_time then update_data.record_time = data.record_time end
@@ -80,88 +80,92 @@ function PatientHealthRecordModel:update(record_id, data)
     if data.general_notes then update_data.general_notes = data.general_notes end
     if data.follow_up_required ~= nil then update_data.follow_up_required = data.follow_up_required end
     if data.follow_up_date then update_data.follow_up_date = data.follow_up_date end
-    
+
     update_data.updated_at = Global.getCurrentTimestamp()
-    
+
     return self:update(record_id, update_data)
 end
 
 -- Get health records by patient
 function PatientHealthRecordModel:getByPatient(patient_id, limit, offset)
     local query = "WHERE patient_id = ? ORDER BY record_date DESC, record_time DESC"
-    local params = {patient_id}
-    
+    local params = { patient_id }
+
     if limit then
         query = query .. " LIMIT ?"
         table.insert(params, limit)
-        
+
         if offset then
             query = query .. " OFFSET ?"
             table.insert(params, offset)
         end
     end
-    
-    return self:select(query, unpack(params))
+
+    return self:select(query, table.unpack(params))
 end
 
 -- Get health records by date range
 function PatientHealthRecordModel:getByDateRange(patient_id, start_date, end_date)
-    return self:select("WHERE patient_id = ? AND record_date >= ? AND record_date <= ? ORDER BY record_date DESC, record_time DESC", 
+    return self:select(
+        "WHERE patient_id = ? AND record_date >= ? AND record_date <= ? ORDER BY record_date DESC, record_time DESC",
         patient_id, start_date, end_date)
 end
 
 -- Get health records by type
 function PatientHealthRecordModel:getByType(patient_id, record_type, limit)
     local query = "WHERE patient_id = ? AND record_type = ? ORDER BY record_date DESC, record_time DESC"
-    local params = {patient_id, record_type}
-    
+    local params = { patient_id, record_type }
+
     if limit then
         query = query .. " LIMIT ?"
         table.insert(params, limit)
     end
-    
-    return self:select(query, unpack(params))
+
+    return self:select(query, table.unpack(params))
 end
 
 -- Get latest vital signs for a patient
 function PatientHealthRecordModel:getLatestVitals(patient_id)
-    return self:select("WHERE patient_id = ? AND record_type = 'vital_signs' ORDER BY record_date DESC, record_time DESC LIMIT 1", patient_id)
+    return self:select(
+        "WHERE patient_id = ? AND record_type = 'vital_signs' ORDER BY record_date DESC, record_time DESC LIMIT 1",
+        patient_id)
 end
 
 -- Get medication history for a patient
 function PatientHealthRecordModel:getMedicationHistory(patient_id, limit)
     local query = "WHERE patient_id = ? AND record_type = 'medication' ORDER BY record_date DESC, record_time DESC"
-    local params = {patient_id}
-    
+    local params = { patient_id }
+
     if limit then
         query = query .. " LIMIT ?"
         table.insert(params, limit)
     end
-    
-    return self:select(query, unpack(params))
+
+    return self:select(query, table.unpack(params))
 end
 
 -- Get meal records for a patient
 function PatientHealthRecordModel:getMealRecords(patient_id, date)
     if date then
-        return self:select("WHERE patient_id = ? AND record_type = 'meal' AND record_date = ? ORDER BY record_time ASC", 
+        return self:select("WHERE patient_id = ? AND record_type = 'meal' AND record_date = ? ORDER BY record_time ASC",
             patient_id, date)
     else
-        return self:select("WHERE patient_id = ? AND record_type = 'meal' ORDER BY record_date DESC, record_time DESC", patient_id)
+        return self:select("WHERE patient_id = ? AND record_type = 'meal' ORDER BY record_date DESC, record_time DESC",
+            patient_id)
     end
 end
 
 -- Get activity records for a patient
 function PatientHealthRecordModel:getActivityRecords(patient_id, limit)
     local query = "WHERE patient_id = ? AND record_type = 'activity' ORDER BY record_date DESC, record_time DESC"
-    local params = {patient_id}
-    
+    local params = { patient_id }
+
     if limit then
         query = query .. " LIMIT ?"
         table.insert(params, limit)
     end
-    
-    return self:select(query, unpack(params))
+
+    return self:select(query, table.unpack(params))
 end
 
 -- Get records requiring follow-up
@@ -172,62 +176,74 @@ end
 -- Get health record statistics for a patient
 function PatientHealthRecordModel:getStatistics(patient_id)
     local db = require("lapis.db")
-    
+
     local stats = {}
-    
+
     -- Total records
-    local total_records = db.select("SELECT COUNT(*) as count FROM patient_health_records WHERE patient_id = ?", patient_id)
+    local total_records = db.select("SELECT COUNT(*) as count FROM patient_health_records WHERE patient_id = ?",
+        patient_id)
     stats.total_records = total_records[1] and total_records[1].count or 0
-    
+
     -- Records by type
-    local records_by_type = db.select("SELECT record_type, COUNT(*) as count FROM patient_health_records WHERE patient_id = ? GROUP BY record_type", patient_id)
+    local records_by_type = db.select(
+        "SELECT record_type, COUNT(*) as count FROM patient_health_records WHERE patient_id = ? GROUP BY record_type",
+        patient_id)
     stats.by_type = {}
     for _, row in ipairs(records_by_type) do
         stats.by_type[row.record_type] = row.count
     end
-    
+
     -- Records requiring follow-up
-    local follow_up_count = db.select("SELECT COUNT(*) as count FROM patient_health_records WHERE patient_id = ? AND follow_up_required = true", patient_id)
+    local follow_up_count = db.select(
+        "SELECT COUNT(*) as count FROM patient_health_records WHERE patient_id = ? AND follow_up_required = true",
+        patient_id)
     stats.follow_up_required = follow_up_count[1] and follow_up_count[1].count or 0
-    
+
     -- Recent records (last 7 days)
-    local recent_records = db.select("SELECT COUNT(*) as count FROM patient_health_records WHERE patient_id = ? AND record_date >= CURRENT_DATE - INTERVAL '7 days'", patient_id)
+    local recent_records = db.select(
+        "SELECT COUNT(*) as count FROM patient_health_records WHERE patient_id = ? AND record_date >= CURRENT_DATE - INTERVAL '7 days'",
+        patient_id)
     stats.recent_records = recent_records[1] and recent_records[1].count or 0
-    
+
     return stats
 end
 
 -- Get daily summary for a patient
 function PatientHealthRecordModel:getDailySummary(patient_id, date)
     local db = require("lapis.db")
-    
+
     local summary = {}
-    
+
     -- Vital signs for the day
-    local vitals = db.select("SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'vital_signs' AND record_date = ? ORDER BY record_time DESC", 
+    local vitals = db.select(
+        "SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'vital_signs' AND record_date = ? ORDER BY record_time DESC",
         patient_id, date)
     summary.vitals = vitals
-    
+
     -- Medications for the day
-    local medications = db.select("SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'medication' AND record_date = ? ORDER BY record_time ASC", 
+    local medications = db.select(
+        "SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'medication' AND record_date = ? ORDER BY record_time ASC",
         patient_id, date)
     summary.medications = medications
-    
+
     -- Meals for the day
-    local meals = db.select("SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'meal' AND record_date = ? ORDER BY record_time ASC", 
+    local meals = db.select(
+        "SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'meal' AND record_date = ? ORDER BY record_time ASC",
         patient_id, date)
     summary.meals = meals
-    
+
     -- Activities for the day
-    local activities = db.select("SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'activity' AND record_date = ? ORDER BY record_time ASC", 
+    local activities = db.select(
+        "SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'activity' AND record_date = ? ORDER BY record_time ASC",
         patient_id, date)
     summary.activities = activities
-    
+
     -- General notes for the day
-    local notes = db.select("SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'note' AND record_date = ? ORDER BY record_time DESC", 
+    local notes = db.select(
+        "SELECT * FROM patient_health_records WHERE patient_id = ? AND record_type = 'note' AND record_date = ? ORDER BY record_time DESC",
         patient_id, date)
     summary.notes = notes
-    
+
     return summary
 end
 

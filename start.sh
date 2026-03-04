@@ -1013,15 +1013,23 @@ echo "[+] Removing lines matching '$HOSTNAME' from $HOSTS_FILE"
 # Backup before change
 sudo cp "$HOSTS_FILE" "$HOSTS_FILE.bak"
 
-# Delete lines containing the host entry
-sudo sed -i '' "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
+# Delete lines containing the host entry (cross-platform sed -i)
+if [[ "$(uname)" == "Darwin" ]]; then
+    sudo sed -i '' "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
+else
+    sudo sed -i "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
+fi
 
 echo "[+] House keeping Done. Backup saved as $HOSTS_FILE.bak"
 
 # Check if the entry already exists
 if grep -q "$HOSTNAME" $HOSTS_FILE; then
     echo "[+] Updating existing entry for $HOSTNAME"
-    sudo sed -i '' "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+    if [[ "$(uname)" == "Darwin" ]]; then
+        sudo sed -i '' "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+    else
+        sudo sed -i "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+    fi
 else
     echo "[+] Adding new entry: $K3S_LB_IP $HOSTNAME"
     echo "$K3S_LB_IP $HOSTNAME" | sudo tee -a $HOSTS_FILE > /dev/null

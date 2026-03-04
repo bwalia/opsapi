@@ -9,8 +9,16 @@ return function(app)
         POST = function(self)
             local params = self.params
 
-            if not params.role or (params.role ~= "seller" and params.role ~= "buyer" and params.role ~= "delivery_partner") then
-                return { json = { error = "Role must be 'seller', 'buyer', or 'delivery_partner'" }, status = 400 }
+            -- Accept common registration roles; default to "member" if not provided
+            local allowed_roles = {
+                member = true, buyer = true, seller = true,
+                delivery_partner = true, tax_client = true
+            }
+            if not params.role or params.role == "" then
+                params.role = "member"
+            end
+            if not allowed_roles[params.role] then
+                return { json = { error = "Invalid registration role" }, status = 400 }
             end
 
             local success, err = pcall(function()
