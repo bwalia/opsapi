@@ -52,7 +52,7 @@ return function(app)
                     username = user.username,
                     role = user.role
                 },
-                exp = ngx.time() + (86400 * 7) -- 7 days expiry
+                exp = ngx.time() + (60 * 60) -- 1 hour expiry (matches DEFAULT_EXPIRATION)
             }
 
             local jwt_token = jwt:sign(JWT_SECRET_KEY, {

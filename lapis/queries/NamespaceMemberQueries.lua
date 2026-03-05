@@ -422,12 +422,17 @@ function NamespaceMemberQueries.getPermissions(member_id)
         end
     end
 
-    -- Convert to array format
+    -- Convert to array format, omitting modules with no granted actions.
+    -- This prevents empty entries (e.g. "tax_admin": []) from leaking into
+    -- the JWT and confusing downstream permission checks.
     local result = {}
     for module, actions in pairs(permissions) do
-        result[module] = {}
+        local arr = {}
         for action, _ in pairs(actions) do
-            table.insert(result[module], action)
+            table.insert(arr, action)
+        end
+        if #arr > 0 then
+            result[module] = arr
         end
     end
 
