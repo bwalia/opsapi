@@ -7,7 +7,7 @@ fi
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 BACKUP_FILE="backup_$TIMESTAMP.sql.gz"
 
-pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DATABASE" -F c | gzip > "/tmp/$BACKUP_FILE"
+pg_dump -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -F c | gzip > "/tmp/$BACKUP_FILE"
 
 # Install MinIO Client
 curl -O https://dl.min.io/client/mc/release/linux-amd64/mc

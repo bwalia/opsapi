@@ -20,13 +20,13 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  echo "Connecting to PostgreSQL at: $DB_HOST"
+                  echo "Connecting to PostgreSQL at: $POSTGRES_HOST"
 
                   # Load environment variables
-                  export PGPASSWORD="$DB_PASSWORD"
+                  export PGPASSWORD="$POSTGRES_PASSWORD"
 
                   # Check if we can reach the PostgreSQL server
-                  pg_isready -h "$DB_HOST" -p $DB_PORT -U "$DB_USER"
+                  pg_isready -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER"
 
                   # Set backup file name with timestamp
                   BACKUP_FILE="/tmp/backup_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
@@ -34,7 +34,7 @@ spec:
                   echo "Starting PostgreSQL backup..."
 
                   # ✅ Force TCP connection by explicitly setting -h and -p
-                  pg_dump -h "$DB_HOST" -p $DB_PORT -U "$DB_USER" -d "$DATABASE" | gzip > "$BACKUP_FILE"
+                  pg_dump -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$BACKUP_FILE"
 
                   echo "Backup completed: $BACKUP_FILE"
                   if [ ! -f "$BACKUP_FILE" ]; then
@@ -93,31 +93,31 @@ spec:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_BUCKET
-                - name: DB_HOST
+                - name: POSTGRES_HOST
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_HOST
-                - name: DB_USER
+                      key: POSTGRES_HOST
+                - name: POSTGRES_USER
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_USER
-                - name: DB_PASSWORD
+                      key: POSTGRES_USER
+                - name: POSTGRES_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_PASSWORD
-                - name: DB_PORT
+                      key: POSTGRES_PASSWORD
+                - name: POSTGRES_PORT
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_PORT
-                - name: DATABASE
+                      key: POSTGRES_PORT
+                - name: POSTGRES_DB
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DATABASE
+                      key: POSTGRES_DB
           volumes:
             - name: {{ .Release.Name }}-backup-script
               configMap:
@@ -148,13 +148,13 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  echo "Connecting to PostgreSQL at: $DB_HOST"
+                  echo "Connecting to PostgreSQL at: $POSTGRES_HOST"
 
                   # Load environment variables
-                  export PGPASSWORD="$DB_PASSWORD"
+                  export PGPASSWORD="$POSTGRES_PASSWORD"
 
                   # Check if we can reach the PostgreSQL server
-                  pg_isready -h "$DB_HOST" -p $DB_PORT -U "$DB_USER"
+                  pg_isready -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER"
 
                   # Set backup file name with timestamp
                   BACKUP_FILE="/tmp/backup_$(date +'%Y-%m-%d_%H-%M-%S').sql.gz"
@@ -162,7 +162,7 @@ spec:
                   echo "Starting PostgreSQL backup..."
 
                   # ✅ Force TCP connection by explicitly setting -h and -p
-                  pg_dump -h "$DB_HOST" -p $DB_PORT -U "$DB_USER" -d "$DATABASE" | gzip > "$BACKUP_FILE"
+                  pg_dump -h "$POSTGRES_HOST" -p $POSTGRES_PORT -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$BACKUP_FILE"
 
                   echo "Backup completed: $BACKUP_FILE"
                   if [ ! -f "$BACKUP_FILE" ]; then
@@ -220,31 +220,31 @@ spec:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_BUCKET
-                - name: DB_HOST
+                - name: POSTGRES_HOST
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_HOST
-                - name: DB_USER
+                      key: POSTGRES_HOST
+                - name: POSTGRES_USER
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_USER
-                - name: DB_PASSWORD
+                      key: POSTGRES_USER
+                - name: POSTGRES_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_PASSWORD
-                - name: DB_PORT
+                      key: POSTGRES_PASSWORD
+                - name: POSTGRES_PORT
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DB_PORT
-                - name: DATABASE
+                      key: POSTGRES_PORT
+                - name: POSTGRES_DB
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
-                      key: DATABASE
+                      key: POSTGRES_DB
           volumes:
             - name: {{ .Release.Name }}-backup-script
               configMap:

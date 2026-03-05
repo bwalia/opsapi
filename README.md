@@ -246,11 +246,11 @@ All environment variables are in `lapis/.env`. The `.sample.env` file has workin
 
 | Variable | Description | Local Default |
 |----------|-------------|---------------|
-| `DB_HOST` | PostgreSQL host | `172.71.0.10` |
-| `DB_PORT` | PostgreSQL port | `5432` |
-| `DB_USER` | Database user | `pguser` |
-| `DB_PASSWORD` | Database password | `pgpassword` |
-| `DATABASE` | Database name | `opsapi` |
+| `POSTGRES_HOST` | PostgreSQL host | `172.71.0.10` |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
+| `POSTGRES_USER` | Database user | `pguser` |
+| `POSTGRES_PASSWORD` | Database password | `pgpassword` |
+| `POSTGRES_DB` | Database name | `opsapi` |
 | `JWT_SECRET_KEY` | JWT signing secret | Set in `.sample.env` |
 | `OPENSSL_SECRET_KEY` | AES-128 encryption key (32 hex chars) | Set in `.sample.env` |
 | `OPENSSL_SECRET_IV` | AES-128 encryption IV (32 hex chars) | Set in `.sample.env` |
