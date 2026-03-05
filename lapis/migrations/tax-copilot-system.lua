@@ -571,7 +571,7 @@ return {
         print("[Tax Copilot] account_number column expanded to VARCHAR(20)")
     end,
 
-    -- 25. Consolidate dashboard modules: rename "Dashboard" to "Admin Dashboard" and deactivate tax_admin
+    -- 25. Consolidate dashboard modules: rename "Dashboard" to "Admin Dashboard" and remove tax_admin
     -- The "dashboard" module is now the sole admin gate. "tax_admin" is redundant.
     [25] = function()
         -- Rename core dashboard module display name
@@ -583,12 +583,12 @@ return {
         ]])
         print("[Tax Copilot] Renamed 'dashboard' module display name to 'Admin Dashboard'")
 
-        -- Deactivate the redundant tax_admin module
+        -- Remove the redundant tax_admin module entirely.
+        -- Note: is_active column may not exist yet (added in migration 400), so we DELETE instead.
         db.query([[
-            UPDATE modules SET is_active = false, updated_at = NOW()
-            WHERE machine_name = 'tax_admin'
+            DELETE FROM modules WHERE machine_name = 'tax_admin'
         ]])
-        print("[Tax Copilot] Deactivated 'tax_admin' module (redundant — 'dashboard' is the sole admin gate)")
+        print("[Tax Copilot] Removed 'tax_admin' module (redundant — 'dashboard' is the sole admin gate)")
 
         -- Remove tax_admin from any existing role permissions so it doesn't linger
         -- This strips the "tax_admin" key from the JSON permissions column in namespace_roles
@@ -658,16 +658,17 @@ return {
         ]])
     end,
 
-    -- 29. Deactivate modules no longer needed for tax_copilot
+    -- 29. Remove modules no longer needed for tax_copilot
+    -- Note: DELETE instead of SET is_active=false because is_active column
+    -- is added later in migration 400_add_module_rbac_columns.
     [29] = function()
         local removed = {"namespace", "tax_extract", "tax_classify", "tax_reconcile", "tax_calculate"}
         for _, m in ipairs(removed) do
             db.query([[
-                UPDATE modules SET is_active = false, updated_at = NOW()
-                WHERE machine_name = ?
+                DELETE FROM modules WHERE machine_name = ?
             ]], m)
         end
-        print("[Tax Copilot] Deactivated modules: " .. table.concat(removed, ", "))
+        print("[Tax Copilot] Removed modules: " .. table.concat(removed, ", "))
 
         -- Clean removed modules from existing role permissions
         for _, m in ipairs(removed) do
@@ -764,6 +765,6 @@ return {
         print("  Single-checkbox (access): dashboard, reports, tax_bank_accounts, tax_file")
         print("  Custom actions (read/reply): tax_support")
         print("  Full CRUD: users, roles, settings, tax_transactions, tax_categories, tax_statements")
-        print("  Deactivated: namespace, tax_extract, tax_classify, tax_reconcile, tax_calculate, tax_admin")
+        print("  Removed: namespace, tax_extract, tax_classify, tax_reconcile, tax_calculate, tax_admin")
     end,
 }

@@ -46,7 +46,7 @@ on:
 
       APEX_DOMAIN:
         type: string
-        description: "Apex domain (default: wslcrm.com). e.g., kisaan.com, myapp.co.uk"
+        description: "Apex domain (default: diytaxreturn.co.uk). e.g., kisaan.com, myapp.co.uk"
         default: "diytaxreturn.co.uk"
         required: false
 
@@ -269,15 +269,23 @@ jobs:
 
           HEALTH_URL="http://127.0.0.1:4010/health"
 
-          # Retry health check up to 5 times
-          for i in {1..5}; do
+          # Retry health check up to 10 times
+          HEALTH_OK=false
+          for i in {1..10}; do
             if curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" | grep -q "200"; then
               echo "Health check passed!"
+              HEALTH_OK=true
               break
             fi
             echo "Health check attempt $i failed, retrying in 5 seconds..."
             sleep 5
           done
+
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "ERROR: Health check failed after 10 attempts!"
+            docker compose -f docker-compose.ci.yml logs --tail=50 opsapi
+            exit 1
+          fi
 
           echo ""
           echo "=========================================="
