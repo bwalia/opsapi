@@ -1331,15 +1331,87 @@ return function(app)
         )
     }))
 
-    -- Get available modules and actions for permissions
-    -- Filters modules by the namespace's project_code (e.g. tax_copilot only sees tax modules)
+    -- Get enabled modules and actions for permissions (Roles page)
+    -- Returns only modules enabled in namespace settings (or all if no filter set)
     app:get("/api/v2/namespace/roles/meta/permissions", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("roles", "read", function(self)
             local project_code = self.namespace and self.namespace.project_code or nil
+            local namespace_id = self.namespace and self.namespace.id or nil
             return success_response({
-                modules = NamespaceRoleQueries.getAvailableModules(project_code),
+                modules = NamespaceRoleQueries.getEnabledModules(namespace_id, project_code),
                 actions = NamespaceRoleQueries.getAvailableActions()
             })
+        end)
+    ))
+
+    -- ============================================================
+    -- NAMESPACE MODULE SETTINGS
+    -- ============================================================
+
+    -- Get all available modules with enabled/disabled status (Settings page)
+    app:get("/api/v2/namespace/settings/modules", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            -- Platform admins or settings:manage permission
+            if not check_platform_admin(self.current_user) then
+                local has_perm = self.namespace_permissions and self.namespace_permissions["settings"]
+                if not has_perm or (type(has_perm) == "table" and #has_perm == 0) then
+                    return error_response(403, "Settings access required")
+                end
+            end
+
+            local project_code = self.namespace and self.namespace.project_code or nil
+            local namespace_id = self.namespace and self.namespace.id or nil
+            return success_response({
+                modules = NamespaceRoleQueries.getModulesWithStatus(namespace_id, project_code)
+            })
+        end)
+    ))
+
+    -- Update enabled modules for namespace (Settings page save)
+    app:put("/api/v2/namespace/settings/modules", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            -- Platform admins or settings:manage permission
+            if not check_platform_admin(self.current_user) then
+                local has_perm = self.namespace_permissions and self.namespace_permissions["settings"]
+                if not has_perm or (type(has_perm) == "table" and #has_perm == 0) then
+                    return error_response(403, "Settings manage permission required")
+                end
+            end
+
+            local params = RequestParser.parse_request(self)
+            local enabled_modules = params.enabled_modules
+            if type(enabled_modules) ~= "table" then
+                return error_response(400, "enabled_modules must be an array")
+            end
+
+            -- Always ensure dashboard and roles are included (required for admin panel to work)
+            local has_dashboard, has_roles = false, false
+            for _, m in ipairs(enabled_modules) do
+                if m == "dashboard" then has_dashboard = true end
+                if m == "roles" then has_roles = true end
+            end
+            if not has_dashboard then table.insert(enabled_modules, "dashboard") end
+            if not has_roles then table.insert(enabled_modules, "roles") end
+
+            -- Load current settings, merge enabled_modules into it
+            local ns = db.query("SELECT settings FROM namespaces WHERE id = ?", self.namespace.id)
+            local current_settings = {}
+            if ns and #ns > 0 and ns[1].settings then
+                local ok, parsed = pcall(cjson.decode, ns[1].settings)
+                if ok and type(parsed) == "table" then
+                    current_settings = parsed
+                end
+            end
+
+            current_settings.enabled_modules = enabled_modules
+
+            db.query(
+                "UPDATE namespaces SET settings = ?, updated_at = NOW() WHERE id = ?",
+                cjson.encode(current_settings),
+                self.namespace.id
+            )
+
+            return success_response({ enabled_modules = enabled_modules })
         end)
     ))
 

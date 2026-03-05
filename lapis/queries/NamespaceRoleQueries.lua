@@ -15,7 +15,7 @@ local NamespaceRoleQueries = {}
 
 -- Valid permission actions — reject anything not in this set
 local VALID_ACTIONS = {
-    create = true, read = true, update = true, delete = true, manage = true
+    access = true, create = true, read = true, update = true, delete = true, manage = true, reply = true
 }
 
 --- Validate permissions object: check actions are valid and modules exist in DB
@@ -495,10 +495,24 @@ end
 -- @return table List of module names with descriptions
 function NamespaceRoleQueries.getAvailableModules(project_code)
     local results = db.query(
-        "SELECT machine_name as name, name as display_name, description, category "
+        "SELECT machine_name as name, name as display_name, description, category, allowed_actions "
         .. "FROM modules WHERE is_active = true ORDER BY name"
     )
     results = results or {}
+
+    -- Parse allowed_actions JSON from DB (stored as JSON array or NULL)
+    for _, mod in ipairs(results) do
+        if mod.allowed_actions and mod.allowed_actions ~= "" then
+            local ok, parsed = pcall(cjson.decode, mod.allowed_actions)
+            if ok and type(parsed) == "table" then
+                mod.allowed_actions = parsed
+            else
+                mod.allowed_actions = nil  -- NULL means full CRUD
+            end
+        else
+            mod.allowed_actions = nil
+        end
+    end
 
     -- If no project_code or "all", return everything
     if not project_code or project_code == "" or project_code == "all" then
@@ -549,14 +563,96 @@ function NamespaceRoleQueries.getAvailableModules(project_code)
     return filtered
 end
 
+--- Get modules enabled for a specific namespace (filtered by namespace settings).
+-- If the namespace has no `enabled_modules` setting, all project modules are returned.
+-- @param namespace_id number Namespace ID
+-- @param project_code string|nil Optional project code
+-- @return table List of enabled modules
+function NamespaceRoleQueries.getEnabledModules(namespace_id, project_code)
+    local all_modules = NamespaceRoleQueries.getAvailableModules(project_code)
+
+    if not namespace_id then
+        return all_modules
+    end
+
+    -- Load namespace settings
+    local ns = db.query("SELECT settings FROM namespaces WHERE id = ?", namespace_id)
+    if not ns or #ns == 0 or not ns[1].settings then
+        return all_modules
+    end
+
+    local ok, settings = pcall(cjson.decode, ns[1].settings)
+    if not ok or type(settings) ~= "table" then
+        return all_modules
+    end
+
+    local enabled = settings.enabled_modules
+    if not enabled or type(enabled) ~= "table" or #enabled == 0 then
+        return all_modules  -- no filter set = show all
+    end
+
+    -- Build lookup set
+    local enabled_set = {}
+    for _, name in ipairs(enabled) do
+        enabled_set[name] = true
+    end
+
+    -- Filter
+    local filtered = {}
+    for _, mod in ipairs(all_modules) do
+        if enabled_set[mod.name] then
+            table.insert(filtered, mod)
+        end
+    end
+    return filtered
+end
+
+--- Get all available modules with their enabled status for a namespace.
+-- Used by the Settings page to show toggles.
+-- @param namespace_id number Namespace ID
+-- @param project_code string|nil Optional project code
+-- @return table List of modules with `enabled` boolean field
+function NamespaceRoleQueries.getModulesWithStatus(namespace_id, project_code)
+    local all_modules = NamespaceRoleQueries.getAvailableModules(project_code)
+
+    -- Default: everything enabled
+    local enabled_set = nil
+
+    if namespace_id then
+        local ns = db.query("SELECT settings FROM namespaces WHERE id = ?", namespace_id)
+        if ns and #ns > 0 and ns[1].settings then
+            local ok, settings = pcall(cjson.decode, ns[1].settings)
+            if ok and type(settings) == "table" and settings.enabled_modules and type(settings.enabled_modules) == "table" and #settings.enabled_modules > 0 then
+                enabled_set = {}
+                for _, name in ipairs(settings.enabled_modules) do
+                    enabled_set[name] = true
+                end
+            end
+        end
+    end
+
+    -- Add enabled flag to each module
+    for _, mod in ipairs(all_modules) do
+        if enabled_set then
+            mod.enabled = enabled_set[mod.name] or false
+        else
+            mod.enabled = true  -- all enabled by default
+        end
+    end
+
+    return all_modules
+end
+
 --- Get available actions for permissions
 -- @return table List of action names with descriptions
 function NamespaceRoleQueries.getAvailableActions()
     return {
+        { name = "access", display_name = "Access", description = "Grant access to this module" },
         { name = "create", display_name = "Create", description = "Create new records" },
         { name = "read", display_name = "Read", description = "View records" },
         { name = "update", display_name = "Update", description = "Modify existing records" },
         { name = "delete", display_name = "Delete", description = "Remove records" },
+        { name = "reply", display_name = "Reply", description = "Reply to conversations or messages" },
         { name = "manage", display_name = "Manage", description = "Full control (includes all actions)" }
     }
 end

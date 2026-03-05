@@ -267,13 +267,13 @@ end
 
 ProjectConfig.PROJECT_MODULES = {
     -- Core modules (always included for any project)
+    -- allowed_actions: which actions the UI should show. nil = full CRUD + manage (default).
     core = {
-        { machine_name = "dashboard", name = "Dashboard", description = "Main dashboard and analytics", category = "Core", is_system = true },
+        { machine_name = "dashboard", name = "Admin Dashboard", description = "Admin panel access and analytics dashboard", category = "Core", is_system = true, allowed_actions = {"access"} },
         { machine_name = "users", name = "Users", description = "User management within namespace", category = "Core", is_system = true },
         { machine_name = "roles", name = "Roles", description = "Role management within namespace", category = "Core", is_system = true },
         { machine_name = "settings", name = "Settings", description = "Namespace settings", category = "Core", is_system = true },
-        { machine_name = "namespace", name = "Namespace", description = "Namespace administration", category = "Core", is_system = true },
-        { machine_name = "reports", name = "Reports", description = "Analytics and reports", category = "Core" },
+        { machine_name = "reports", name = "Reports", description = "Analytics and reports", category = "Core", allowed_actions = {"access"} },
     },
 
     -- Ecommerce modules
@@ -313,17 +313,12 @@ ProjectConfig.PROJECT_MODULES = {
 
     -- Tax Copilot modules
     tax_copilot = {
-        { machine_name = "tax_support", name = "Support Chat", description = "Tax support chat", category = "Tax" },
+        { machine_name = "tax_support", name = "Support Chat", description = "View and reply to support conversations", category = "Tax", allowed_actions = {"read", "reply"} },
         { machine_name = "tax_transactions", name = "Transactions", description = "Bank transaction tracking", category = "Tax" },
         { machine_name = "tax_categories", name = "Categories", description = "Transaction categories", category = "Tax" },
-        { machine_name = "tax_bank_accounts", name = "Bank Accounts", description = "Bank account management", category = "Tax" },
+        { machine_name = "tax_bank_accounts", name = "Bank Accounts", description = "Bank account management", category = "Tax", allowed_actions = {"access"} },
         { machine_name = "tax_statements", name = "Statements", description = "Bank statement uploads", category = "Tax" },
-        { machine_name = "tax_extract", name = "Extract", description = "AI data extraction", category = "Tax - AI" },
-        { machine_name = "tax_classify", name = "Classify", description = "AI transaction classification", category = "Tax - AI" },
-        { machine_name = "tax_reconcile", name = "Reconcile", description = "AI reconciliation", category = "Tax - AI" },
-        { machine_name = "tax_calculate", name = "Calculate", description = "AI tax calculation", category = "Tax - AI" },
-        { machine_name = "tax_file", name = "HMRC Filing", description = "HMRC tax filing", category = "Tax - AI" },
-        { machine_name = "tax_admin", name = "Admin Dashboard", description = "Tax admin dashboard", category = "Tax" },
+        { machine_name = "tax_file", name = "HMRC Filing", description = "Submit tax returns to HMRC", category = "Tax", allowed_actions = {"access"} },
     },
 }
 

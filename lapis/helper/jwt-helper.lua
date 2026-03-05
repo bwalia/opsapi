@@ -11,8 +11,10 @@ local cjson = require("cjson")
 
 local JWTHelper = {}
 
---- Default token expiration (7 days in seconds)
-local DEFAULT_EXPIRATION = 7 * 24 * 60 * 60
+--- Default token expiration (1 hour in seconds).
+--- The frontend refreshes every 5 minutes via POST /auth/refresh, which re-reads
+--- permissions from the DB. Short expiry limits the stale-permission window.
+local DEFAULT_EXPIRATION = 60 * 60
 
 --- Get JWT secret key from environment
 -- @return string The JWT secret key

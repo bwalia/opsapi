@@ -820,6 +820,13 @@ return {
     ['321_tax_add_module'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 22),
     ['322_tax_migration_complete'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 23),
     ['323_tax_rename_account_number'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 24),
+    ['324_tax_consolidate_dashboard'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 25),
+    ['325_tax_consolidate_dashboard_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 26),
+    ['326_tax_add_allowed_actions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 27),
+    ['327_tax_set_allowed_actions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 28),
+    ['328_tax_deactivate_removed_modules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 29),
+    ['329_tax_migrate_permission_actions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 30),
+    ['330_tax_permission_restructure_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 31),
 
     -- =========================================================================
     -- RBAC ENHANCEMENT: Add columns to modules table for dynamic RBAC
