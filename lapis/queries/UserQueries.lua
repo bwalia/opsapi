@@ -24,6 +24,12 @@ function UserQueries.create(params)
     if userData.uuid == nil then
         userData.uuid = Global.generateUUID()
     end
+    -- Normalize active field: form data sends "true"/"false" strings
+    if userData.active == "true" or userData.active == "1" then
+        userData.active = true
+    elseif userData.active == "false" or userData.active == "0" then
+        userData.active = false
+    end
 
     userData.password = Global.hashPassword(userData.password)
     local user = Users:create(userData, {
