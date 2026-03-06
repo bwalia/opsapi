@@ -5,11 +5,11 @@ local Global = require "helper.global"
 local PatientModel = Model:extend("patients", {
     timestamp = true,
     relations = {
-        {"hospital", belongs_to = "HospitalModel", key = "hospital_id"},
-        {"health_records", has_many = "PatientHealthRecordModel", key = "patient_id"},
-        {"appointments", has_many = "PatientAppointmentModel", key = "patient_id"},
-        {"documents", has_many = "PatientDocumentModel", key = "patient_id"},
-        {"assignments", has_many = "PatientAssignmentModel", key = "patient_id"}
+        { "hospital",       belongs_to = "HospitalModel",          key = "hospital_id" },
+        { "health_records", has_many = "PatientHealthRecordModel", key = "patient_id" },
+        { "appointments",   has_many = "PatientAppointmentModel",  key = "patient_id" },
+        { "documents",      has_many = "PatientDocumentModel",     key = "patient_id" },
+        { "assignments",    has_many = "PatientAssignmentModel",   key = "patient_id" }
     }
 })
 
@@ -48,14 +48,14 @@ function PatientModel:create(data)
         created_at = Global.getCurrentTimestamp(),
         updated_at = Global.getCurrentTimestamp()
     }
-    
+
     return self:create(patient_data)
 end
 
 -- Update patient
 function PatientModel:update(patient_id, data)
     local update_data = {}
-    
+
     if data.first_name then update_data.first_name = data.first_name end
     if data.last_name then update_data.last_name = data.last_name end
     if data.date_of_birth then update_data.date_of_birth = data.date_of_birth end
@@ -82,9 +82,9 @@ function PatientModel:update(patient_id, data)
     if data.bed_number then update_data.bed_number = data.bed_number end
     if data.status then update_data.status = data.status end
     if data.notes then update_data.notes = data.notes end
-    
+
     update_data.updated_at = Global.getCurrentTimestamp()
-    
+
     return self:update(patient_id, update_data)
 end
 
@@ -94,23 +94,23 @@ function PatientModel:getWithParsedData(patient_id)
     if not patient then
         return nil
     end
-    
+
     -- Parse JSON fields
     if patient.allergies then
         local ok, parsed = pcall(cJson.decode, patient.allergies)
         if ok then patient.allergies = parsed end
     end
-    
+
     if patient.medical_conditions then
         local ok, parsed = pcall(cJson.decode, patient.medical_conditions)
         if ok then patient.medical_conditions = parsed end
     end
-    
+
     if patient.medications then
         local ok, parsed = pcall(cJson.decode, patient.medications)
         if ok then patient.medications = parsed end
     end
-    
+
     return patient
 end
 
@@ -118,55 +118,55 @@ end
 function PatientModel:search(criteria)
     local conditions = {}
     local params = {}
-    
+
     if criteria.hospital_id then
         table.insert(conditions, "hospital_id = ?")
         table.insert(params, criteria.hospital_id)
     end
-    
+
     if criteria.patient_id then
         table.insert(conditions, "patient_id ILIKE ?")
         table.insert(params, "%" .. criteria.patient_id .. "%")
     end
-    
+
     if criteria.first_name then
         table.insert(conditions, "first_name ILIKE ?")
         table.insert(params, "%" .. criteria.first_name .. "%")
     end
-    
+
     if criteria.last_name then
         table.insert(conditions, "last_name ILIKE ?")
         table.insert(params, "%" .. criteria.last_name .. "%")
     end
-    
+
     if criteria.room_number then
         table.insert(conditions, "room_number = ?")
         table.insert(params, criteria.room_number)
     end
-    
+
     if criteria.status then
         table.insert(conditions, "status = ?")
         table.insert(params, criteria.status)
     end
-    
+
     if criteria.admission_date_from then
         table.insert(conditions, "admission_date >= ?")
         table.insert(params, criteria.admission_date_from)
     end
-    
+
     if criteria.admission_date_to then
         table.insert(conditions, "admission_date <= ?")
         table.insert(params, criteria.admission_date_to)
     end
-    
+
     local where_clause = ""
     if #conditions > 0 then
         where_clause = "WHERE " .. table.concat(conditions, " AND ")
     end
-    
+
     local query = "SELECT * FROM patients " .. where_clause .. " ORDER BY last_name ASC, first_name ASC"
-    
-    return self.db.select(query, unpack(params))
+
+    return self.db.select(query, table.unpack(params))
 end
 
 -- Get patients by hospital
@@ -177,7 +177,8 @@ end
 -- Get active patients
 function PatientModel:getActive(hospital_id)
     if hospital_id then
-        return self:select("WHERE hospital_id = ? AND status = 'active' ORDER BY last_name ASC, first_name ASC", hospital_id)
+        return self:select("WHERE hospital_id = ? AND status = 'active' ORDER BY last_name ASC, first_name ASC",
+            hospital_id)
     else
         return self:select("WHERE status = 'active' ORDER BY last_name ASC, first_name ASC")
     end
@@ -191,32 +192,37 @@ end
 -- Get patient statistics
 function PatientModel:getStatistics(hospital_id)
     local db = require("lapis.db")
-    
+
     local stats = {}
-    
+
     -- Total patients
     local total_patients = db.select("SELECT COUNT(*) as count FROM patients WHERE hospital_id = ?", hospital_id)
     stats.total_patients = total_patients[1] and total_patients[1].count or 0
-    
+
     -- Active patients
-    local active_patients = db.select("SELECT COUNT(*) as count FROM patients WHERE hospital_id = ? AND status = 'active'", hospital_id)
+    local active_patients = db.select(
+    "SELECT COUNT(*) as count FROM patients WHERE hospital_id = ? AND status = 'active'", hospital_id)
     stats.active_patients = active_patients[1] and active_patients[1].count or 0
-    
+
     -- Discharged patients
-    local discharged_patients = db.select("SELECT COUNT(*) as count FROM patients WHERE hospital_id = ? AND status = 'discharged'", hospital_id)
+    local discharged_patients = db.select(
+    "SELECT COUNT(*) as count FROM patients WHERE hospital_id = ? AND status = 'discharged'", hospital_id)
     stats.discharged_patients = discharged_patients[1] and discharged_patients[1].count or 0
-    
+
     -- Patients by gender
-    local gender_stats = db.select("SELECT gender, COUNT(*) as count FROM patients WHERE hospital_id = ? GROUP BY gender", hospital_id)
+    local gender_stats = db.select(
+    "SELECT gender, COUNT(*) as count FROM patients WHERE hospital_id = ? GROUP BY gender", hospital_id)
     stats.by_gender = {}
     for _, row in ipairs(gender_stats) do
         stats.by_gender[row.gender] = row.count
     end
-    
+
     -- Recent admissions (last 30 days)
-    local recent_admissions = db.select("SELECT COUNT(*) as count FROM patients WHERE hospital_id = ? AND admission_date >= CURRENT_DATE - INTERVAL '30 days'", hospital_id)
+    local recent_admissions = db.select(
+    "SELECT COUNT(*) as count FROM patients WHERE hospital_id = ? AND admission_date >= CURRENT_DATE - INTERVAL '30 days'",
+        hospital_id)
     stats.recent_admissions = recent_admissions[1] and recent_admissions[1].count or 0
-    
+
     return stats
 end
 
@@ -226,12 +232,12 @@ function PatientModel:calculateAge(patient_id)
     if not patient or not patient.date_of_birth then
         return nil
     end
-    
+
     local birth_date = patient.date_of_birth
     local current_date = os.date("*t")
-    local birth_t = os.time({year = birth_date:sub(1,4), month = birth_date:sub(6,7), day = birth_date:sub(9,10)})
+    local birth_t = os.time({ year = birth_date:sub(1, 4), month = birth_date:sub(6, 7), day = birth_date:sub(9, 10) })
     local current_t = os.time(current_date)
-    
+
     local age = os.difftime(current_t, birth_t) / (365.25 * 24 * 60 * 60)
     return math.floor(age)
 end

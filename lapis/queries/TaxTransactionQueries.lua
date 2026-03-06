@@ -141,9 +141,8 @@ function TaxTransactionQueries.byStatement(statement_uuid, params, user)
 
     local transactions = db.query([[
         SELECT
-            t.id as internal_id,
             t.uuid as id,
-            t.statement_id,
+            s.uuid as statement_id,
             t.transaction_date,
             t.description,
             t.amount,
@@ -165,6 +164,7 @@ function TaxTransactionQueries.byStatement(statement_uuid, params, user)
             t.created_at,
             t.updated_at
         FROM tax_transactions t
+        JOIN tax_statements s ON t.statement_id = s.id
         WHERE t.statement_id = ? AND t.user_id = ?
         ORDER BY ]] .. order_by .. [[
         LIMIT ? OFFSET ?
@@ -193,7 +193,6 @@ function TaxTransactionQueries.show(uuid, user)
         -- Admin/accountant can view any transaction
         result = db.query([[
             SELECT
-                t.id as internal_id,
                 t.uuid as id,
                 s.uuid as statement_id,
                 t.transaction_date,
@@ -230,7 +229,6 @@ function TaxTransactionQueries.show(uuid, user)
         -- Regular users can only view their own transactions
         result = db.query([[
             SELECT
-                t.id as internal_id,
                 t.uuid as id,
                 s.uuid as statement_id,
                 t.transaction_date,

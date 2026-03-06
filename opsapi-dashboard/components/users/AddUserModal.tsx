@@ -4,7 +4,8 @@ import React, { useState, useCallback, useEffect, memo } from 'react';
 import Modal from '@/components/ui/Modal';
 import { Input, Button } from '@/components/ui';
 import { User, Mail, Lock, Phone, MapPin, Shield, ChevronDown } from 'lucide-react';
-import { usersService, rolesService, formatRoleName, getRoleColor, type NamespaceRole } from '@/services';
+import { usersService, rolesService, formatRoleName, getRoleColor } from '@/services';
+import type { NamespaceRole } from '@/types';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 

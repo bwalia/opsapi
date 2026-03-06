@@ -24,11 +24,18 @@
     <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.10.3/swagger-ui-standalone-preset.js"></script>
     <script>
         window.onload = () => {
+            // Auto-detect prefix: if we're at /prefix/swagger, fetch /prefix/openapi.json
+            // Works with any reverse-proxy prefix (/opsapi, /myapp, etc.) or no prefix at all
+            var currentPath = window.location.pathname;
+            var prefixEnd = currentPath.search(/\/(swagger|api-docs)/);
+            var basePath = prefixEnd > 0 ? currentPath.substring(0, prefixEnd) : "";
+            var specUrl = basePath + "/openapi.json";
+
             console.log("Initializing Swagger UI...");
-            console.log("Fetching from: " + window.location.origin + "/openapi.json");
-            
+            console.log("Fetching from: " + window.location.origin + specUrl);
+
             window.ui = SwaggerUIBundle({
-                url: "/openapi.json",
+                url: specUrl,
                 dom_id: "#swagger-ui",
                 deepLinking: true,
                 presets: [

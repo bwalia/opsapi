@@ -1,7 +1,7 @@
 name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 
 # This workflow deploys OPSAPI to self-hosted runners using Docker Compose
-# It uses the run-development.sh script to ensure consistency with local deployments
+# It uses the start.sh script to ensure consistency with local deployments
 #
 # TRIGGERS:
 # - Automatically on push to main branch (deploys to 'test' environment)
@@ -46,7 +46,7 @@ on:
 
       APEX_DOMAIN:
         type: string
-        description: "Apex domain (default: wslcrm.com). e.g., kisaan.com, myapp.co.uk"
+        description: "Apex domain (default: diytaxreturn.co.uk). e.g., kisaan.com, myapp.co.uk"
         default: "diytaxreturn.co.uk"
         required: false
 
@@ -90,8 +90,20 @@ on:
         default: "self-hosted"
         required: false
 
+      ADMIN_EMAIL:
+        type: string
+        description: "Super admin email for namespace setup"
+        default: ""
+        required: false
+
+      ADMIN_PASSWORD:
+        type: string
+        description: "Super admin password for namespace setup"
+        default: ""
+        required: false
+
 env:
-  BASE_DOMAIN: "wslcrm.com"
+  BASE_DOMAIN: "diytaxreturn.co.uk"
   SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/${{ github.event.inputs.TARGET_ENV || 'test' }}/${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}/.env"
 
 jobs:
@@ -146,7 +158,7 @@ jobs:
             PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
             RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
             PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
-            APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'wslcrm.com' }}"
+            APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
           fi
 
           BASE_DOMAIN="$APEX_DOMAIN"
@@ -154,7 +166,7 @@ jobs:
           # Generate API URL based on environment and protocol
           case "$TARGET_ENV" in
             local)
-              API_URL="${PROTOCOL}://localhost:4010"
+              API_URL="${PROTOCOL}://127.0.0.1:4010"
               ;;
             prod)
               API_URL="${PROTOCOL}://api.${BASE_DOMAIN}"
@@ -208,13 +220,13 @@ jobs:
           fi
         shell: bash
 
-      - name: Make run-development.sh executable
-        run: chmod +x ./run-development.sh
+      - name: Make start.sh executable
+        run: chmod +x ./start.sh
         shell: bash
 
-      - name: Deploy using run-development.sh
+      - name: Deploy using start.sh
         run: |
-          echo "Running deployment using run-development.sh..."
+          echo "Running deployment using start.sh..."
 
           # Build the command arguments
           ARGS="-e ${{ steps.env-setup.outputs.TARGET_ENV }}"
@@ -229,8 +241,18 @@ jobs:
             ARGS="$ARGS -r"
           fi
 
-          echo "Executing: ./run-development.sh $ARGS"
-          ./run-development.sh $ARGS
+          # Add admin credentials if provided (otherwise start.sh uses defaults)
+          ADMIN_EMAIL="${{ github.event.inputs.ADMIN_EMAIL }}"
+          ADMIN_PASSWORD="${{ github.event.inputs.ADMIN_PASSWORD }}"
+          if [ -n "$ADMIN_EMAIL" ]; then
+            ARGS="$ARGS -A $ADMIN_EMAIL"
+          fi
+          if [ -n "$ADMIN_PASSWORD" ]; then
+            ARGS="$ARGS -W $ADMIN_PASSWORD"
+          fi
+
+          echo "Executing: ./start.sh $ARGS"
+          ./start.sh $ARGS
         shell: bash
 
       - name: Verify deployment
@@ -239,23 +261,31 @@ jobs:
 
           # Check if containers are running
           cd lapis
-          docker compose ps
+          docker compose -f docker-compose.ci.yml ps
 
           # Health check - try to reach the API
           echo ""
           echo "Performing health check..."
 
-          HEALTH_URL="http://localhost:4010/health"
+          HEALTH_URL="http://127.0.0.1:4010/health"
 
-          # Retry health check up to 5 times
-          for i in {1..5}; do
+          # Retry health check up to 10 times
+          HEALTH_OK=false
+          for i in {1..10}; do
             if curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" | grep -q "200"; then
               echo "Health check passed!"
+              HEALTH_OK=true
               break
             fi
             echo "Health check attempt $i failed, retrying in 5 seconds..."
             sleep 5
           done
+
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "ERROR: Health check failed after 10 attempts!"
+            docker compose -f docker-compose.ci.yml logs --tail=50 opsapi
+            exit 1
+          fi
 
           echo ""
           echo "=========================================="
@@ -276,7 +306,7 @@ jobs:
         run: |
           echo "Deployment failed. Showing container logs..."
           cd lapis
-          docker compose logs --tail=100
+          docker compose -f docker-compose.ci.yml logs --tail=100
         shell: bash
 
       - name: Slack notification - Success
@@ -322,7 +352,7 @@ jobs:
           echo "Verifying API endpoints..."
 
           # Test health endpoint
-          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:4010/health")
+          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/health")
           if [ "$HEALTH_RESPONSE" == "200" ]; then
             echo "✓ Health endpoint: OK (HTTP $HEALTH_RESPONSE)"
           else
@@ -331,7 +361,7 @@ jobs:
           fi
 
           # Test root endpoint
-          ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:4010/")
+          ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/")
           if [ "$ROOT_RESPONSE" == "200" ]; then
             echo "✓ Root endpoint: OK (HTTP $ROOT_RESPONSE)"
           else

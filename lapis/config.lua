@@ -23,9 +23,9 @@ config("development", {
     }
   },
   postgres = {
-    host = os.getenv("DB_HOST") or "172.72.0.10",
-    user = os.getenv("DB_USER") or "pguser",
-    password = os.getenv("DB_PASSWORD") or "pgpassword",
-    database = os.getenv("DATABASE") or "opsapi"
+    host = os.getenv("POSTGRES_HOST") or "172.72.0.10",
+    user = os.getenv("POSTGRES_USER") or "pguser",
+    password = os.getenv("POSTGRES_PASSWORD") or "pgpassword",
+    database = os.getenv("POSTGRES_DB") or "opsapi-diytaxreturn"
   }
 })

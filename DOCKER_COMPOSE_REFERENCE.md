@@ -69,7 +69,7 @@ docker ps | grep opsapi
 ### After Editing prometheus.yml or alert_rules.yml
 ```bash
 # Option 1: Hot reload (recommended)
-curl -X POST http://localhost:9090/-/reload
+curl -X POST http://127.0.0.1:9090/-/reload
 
 # Option 2: Restart container
 docker-compose restart prometheus
@@ -153,13 +153,13 @@ docker-compose up -d
 
 ## Monitoring Stack URLs
 
-- **OpsAPI**: http://localhost:4010
-- **OpsAPI Metrics**: http://localhost:4010/metrics
-- **Prometheus**: http://localhost:9090
-  - Targets: http://localhost:9090/targets
-  - Alerts: http://localhost:9090/alerts
-  - Config: http://localhost:9090/config
-- **Grafana**: http://localhost:3000
+- **OpsAPI**: http://127.0.0.1:4010
+- **OpsAPI Metrics**: http://127.0.0.1:4010/metrics
+- **Prometheus**: http://127.0.0.1:9090
+  - Targets: http://127.0.0.1:9090/targets
+  - Alerts: http://127.0.0.1:9090/alerts
+  - Config: http://127.0.0.1:9090/config
+- **Grafana**: http://127.0.0.1:3000
   - Default Login: admin / admin
 
 ## Performance Commands
@@ -211,10 +211,10 @@ docker exec opsapi-grafana curl http://prometheus:9090/api/v1/query?query=up
    ```
 3. Test metrics:
    ```bash
-   curl http://localhost:4010/metrics | grep your_metric
+   curl http://127.0.0.1:4010/metrics | grep your_metric
    ```
 4. View in Prometheus:
-   - Open http://localhost:9090/graph
+   - Open http://127.0.0.1:9090/graph
    - Enter metric name
    - Click Execute
 
@@ -233,9 +233,9 @@ docker exec opsapi-grafana curl http://prometheus:9090/api/v1/query?query=up
 1. Edit `lapis/devops/alert_rules.yml`
 2. Reload Prometheus:
    ```bash
-   curl -X POST http://localhost:9090/-/reload
+   curl -X POST http://127.0.0.1:9090/-/reload
    ```
-3. Verify in http://localhost:9090/alerts
+3. Verify in http://127.0.0.1:9090/alerts
 
 ## Quick Tests
 
@@ -243,31 +243,31 @@ docker exec opsapi-grafana curl http://prometheus:9090/api/v1/query?query=up
 ```bash
 # Simple load test
 for i in {1..100}; do 
-  curl -s http://localhost:4010/api/v2/products > /dev/null
+  curl -s http://127.0.0.1:4010/api/v2/products > /dev/null
 done
 
 # Watch metrics increase
-watch -n1 'curl -s http://localhost:4010/metrics | grep nginx_http_requests_total | tail -5'
+watch -n1 'curl -s http://127.0.0.1:4010/metrics | grep nginx_http_requests_total | tail -5'
 ```
 
 ### Test DDoS Detection
 ```bash
 # Simulate high traffic
-ab -n 10000 -c 100 http://localhost:4010/
+ab -n 10000 -c 100 http://127.0.0.1:4010/
 
 # Check if suspicious requests metric increases
-curl -s http://localhost:4010/metrics | grep suspicious
+curl -s http://127.0.0.1:4010/metrics | grep suspicious
 ```
 
 ### Test Alerts
 ```bash
 # Trigger high error rate (make bad requests)
 for i in {1..100}; do 
-  curl -s http://localhost:4010/nonexistent > /dev/null
+  curl -s http://127.0.0.1:4010/nonexistent > /dev/null
 done
 
 # Check alerts in Prometheus
-open http://localhost:9090/alerts
+open http://127.0.0.1:9090/alerts
 ```
 
 ## Production Commands
@@ -299,16 +299,16 @@ docker-compose up -d --scale lapis=3
 
 ```bash
 # Quick health check
-docker-compose ps && curl -s http://localhost:4010/metrics | head -5
+docker-compose ps && curl -s http://127.0.0.1:4010/metrics | head -5
 
 # Restart entire stack
 docker-compose down && docker-compose up -d && docker-compose logs -f
 
 # Check Prometheus is scraping
-curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .labels.job, health: .health}'
+curl -s http://127.0.0.1:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .labels.job, health: .health}'
 
 # Top 10 metrics by request count
-curl -s http://localhost:4010/metrics | grep nginx_http_requests_total | sort -t'=' -k2 -nr | head -10
+curl -s http://127.0.0.1:4010/metrics | grep nginx_http_requests_total | sort -t'=' -k2 -nr | head -10
 
 # Export all container logs
 docker-compose logs > monitoring-logs-$(date +%Y%m%d).log

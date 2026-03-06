@@ -22,7 +22,6 @@ local MenuQueries = require("queries.MenuQueries")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local RequestParser = require("helper.request_parser")
-local db = require("lapis.db")
 local cjson = require("cjson")
 
 -- Configure cjson
@@ -49,19 +48,10 @@ return function(app)
     end
 
     -- Helper function to check platform admin access
+    -- Delegates to centralized AdminCheck module
+    local AdminCheck = require("helper.admin-check")
     local function is_platform_admin(current_user)
-        if not current_user then
-            return false
-        end
-
-        local admin_check = db.query([[
-            SELECT ur.id FROM user__roles ur
-            JOIN roles r ON ur.role_id = r.id
-            JOIN users u ON ur.user_id = u.id
-            WHERE u.uuid = ? AND LOWER(r.role_name) = 'administrative'
-        ]], current_user.uuid)
-
-        return admin_check and #admin_check > 0
+        return AdminCheck.isPlatformAdmin(current_user)
     end
 
     -- ============================================================
@@ -83,11 +73,13 @@ return function(app)
             end
 
             -- Get filtered menu items for this namespace
+            -- Pass project_code so menu only shows items relevant to the project
             local menu_items = MenuQueries.getForNamespace(
                 self.namespace.id,
                 namespace_permissions,
                 self.is_namespace_owner,
-                is_platform_admin(self.current_user)
+                is_platform_admin(self.current_user),
+                self.namespace.project_code
             )
 
             -- Separate main menu and secondary menu (settings)

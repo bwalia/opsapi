@@ -1,5 +1,5 @@
 [[inputs.nginx]]
-   urls = ["http://localhost/nginx_status"]
+   urls = ["http://127.0.0.1/nginx_status"]
    response_timeout = "5s"
 [[inputs.tail]]
   name_override = "nginxlog"

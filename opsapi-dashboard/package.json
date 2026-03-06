@@ -12,8 +12,8 @@
     "cy:run": "cypress run",
     "cy:run:login": "cypress run --spec 'cypress/e2e/login.cy.ts'",
     "cy:run:headless": "cypress run --browser chrome --headless",
-    "test:e2e": "start-server-and-test start http://localhost:8039 cy:run",
-    "test:e2e:login": "start-server-and-test start http://localhost:8039 cy:run:login"
+    "test:e2e": "start-server-and-test start http://127.0.0.1:8039 cy:run",
+    "test:e2e:login": "start-server-and-test start http://127.0.0.1:8039 cy:run:login"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

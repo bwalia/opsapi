@@ -154,7 +154,8 @@ end
 -- @param namespace_permissions - table of permissions from user's role e.g., {dashboard={"read"}, users={"read","update"}}
 -- @param is_namespace_owner - boolean, if true grants all permissions within namespace
 -- @param is_platform_admin - boolean, if true shows platform admin-only items
-function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_namespace_owner, is_platform_admin)
+-- @param project_code - string|nil, namespace's project_code to filter items by enabled features
+function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_namespace_owner, is_platform_admin, project_code)
     -- Query menu items with namespace-specific config
     local items = db.query([[
         SELECT
@@ -173,6 +174,57 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
         return {}
     end
 
+    -- Build a set of allowed modules for this namespace's project_code
+    -- This ensures items for disabled features (e.g., orders, products for tax_copilot) are hidden
+    --
+    -- Two layers of filtering:
+    -- 1. Namespace's DB project_code controls what this namespace INTENDS to use
+    -- 2. Environment PROJECT_CODE controls what routes are ACTUALLY loaded
+    -- Menu items must pass BOTH checks — an item whose route isn't loaded must not appear
+    local allowed_modules = nil
+    local ProjectConfig = require("helper.project-config")
+
+    -- Determine the effective project_code for filtering
+    -- If the namespace has "all" or no project_code, fall back to the environment PROJECT_CODE
+    -- This prevents showing menu items for routes that aren't loaded
+    local effective_code = project_code
+    if not effective_code or effective_code == "" or effective_code == "all" then
+        effective_code = ProjectConfig.getProjectCode()
+    end
+
+    if effective_code and effective_code ~= "" and effective_code ~= "all" then
+        allowed_modules = {}
+
+        -- Collect modules from all enabled features for this project code
+        local proj_features = ProjectConfig.PROJECT_FEATURES[effective_code]
+        if proj_features then
+            for _, feature in ipairs(proj_features) do
+                local feature_modules = ProjectConfig.PROJECT_MODULES[feature]
+                if feature_modules then
+                    for _, m in ipairs(feature_modules) do
+                        allowed_modules[m.machine_name] = true
+                    end
+                end
+            end
+        end
+
+        -- Also check direct module mapping (e.g., PROJECT_MODULES["tax_copilot"])
+        local proj_modules = ProjectConfig.PROJECT_MODULES[effective_code]
+        if proj_modules then
+            for _, m in ipairs(proj_modules) do
+                allowed_modules[m.machine_name] = true
+            end
+        end
+
+        -- Always include core modules
+        local core_modules = ProjectConfig.PROJECT_MODULES.core
+        if core_modules then
+            for _, m in ipairs(core_modules) do
+                allowed_modules[m.machine_name] = true
+            end
+        end
+    end
+
     local filtered_items = {}
 
     for _, item in ipairs(items) do
@@ -180,6 +232,13 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
 
         -- Skip if disabled for this namespace
         if not item.ns_enabled then
+            goto continue
+        end
+
+        -- Skip items whose module is not relevant to this project
+        -- (e.g., hide "orders" menu for tax_copilot even for owners)
+        -- Admin-only items bypass this check — they're platform-level, not project-scoped
+        if allowed_modules and item.module and not item.is_admin_only and not allowed_modules[item.module] then
             goto continue
         end
 
@@ -191,7 +250,7 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
             if is_platform_admin then
                 should_include = true
             end
-        -- Namespace owners have access to everything in their namespace
+        -- Namespace owners see items for modules in their project
         elseif is_namespace_owner then
             should_include = true
         -- Check permission based on module

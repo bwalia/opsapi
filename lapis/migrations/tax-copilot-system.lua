@@ -570,4 +570,201 @@ return {
         db.query("ALTER TABLE tax_bank_accounts ALTER COLUMN account_number TYPE varchar(20)")
         print("[Tax Copilot] account_number column expanded to VARCHAR(20)")
     end,
+
+    -- 25. Consolidate dashboard modules: rename "Dashboard" to "Admin Dashboard" and remove tax_admin
+    -- The "dashboard" module is now the sole admin gate. "tax_admin" is redundant.
+    [25] = function()
+        -- Rename core dashboard module display name
+        db.query([[
+            UPDATE modules SET name = 'Admin Dashboard',
+                               description = 'Admin panel access and analytics dashboard',
+                               updated_at = NOW()
+            WHERE machine_name = 'dashboard'
+        ]])
+        print("[Tax Copilot] Renamed 'dashboard' module display name to 'Admin Dashboard'")
+
+        -- Remove the redundant tax_admin module entirely.
+        -- Note: is_active column may not exist yet (added in migration 400), so we DELETE instead.
+        db.query([[
+            DELETE FROM modules WHERE machine_name = 'tax_admin'
+        ]])
+        print("[Tax Copilot] Removed 'tax_admin' module (redundant — 'dashboard' is the sole admin gate)")
+
+        -- Remove tax_admin from any existing role permissions so it doesn't linger
+        -- This strips the "tax_admin" key from the JSON permissions column in namespace_roles
+        local roles_with_perms = db.query([[
+            SELECT id, permissions FROM namespace_roles
+            WHERE permissions IS NOT NULL AND permissions::text LIKE '%tax_admin%'
+        ]])
+        if roles_with_perms then
+            for _, role in ipairs(roles_with_perms) do
+                db.query([[
+                    UPDATE namespace_roles
+                    SET permissions = (permissions::jsonb - 'tax_admin')::text,
+                        updated_at = NOW()
+                    WHERE id = ?
+                ]], role.id)
+            end
+            print("[Tax Copilot] Cleaned tax_admin from " .. #roles_with_perms .. " role permission(s)")
+        end
+    end,
+
+    -- 26. Summary
+    [26] = function()
+        print("[Tax Copilot] Dashboard consolidation complete:")
+        print("  - 'dashboard' module is now 'Admin Dashboard' (sole admin gate)")
+        print("  - 'tax_admin' module deactivated and removed from role permissions")
+    end,
+
+    -- 27. Add allowed_actions column to modules table
+    -- This lets each module declare which actions the UI should show.
+    -- NULL = full CRUD + manage (default). A JSON array restricts to specific actions.
+    [27] = function()
+        db.query([[
+            ALTER TABLE modules ADD COLUMN IF NOT EXISTS allowed_actions TEXT DEFAULT NULL
+        ]])
+        print("[Tax Copilot] Added 'allowed_actions' column to modules table")
+    end,
+
+    -- 28. Set allowed_actions for modules that are NOT full CRUD
+    [28] = function()
+        -- Single-checkbox "access" modules
+        local access_only = {"dashboard", "reports", "tax_bank_accounts", "tax_file"}
+        for _, m in ipairs(access_only) do
+            db.query([[
+                UPDATE modules SET allowed_actions = '["access"]', updated_at = NOW()
+                WHERE machine_name = ?
+            ]], m)
+        end
+        print("[Tax Copilot] Set allowed_actions=['access'] for: " .. table.concat(access_only, ", "))
+
+        -- Support chat: read + reply only
+        db.query([[
+            UPDATE modules SET allowed_actions = '["read","reply"]', updated_at = NOW()
+            WHERE machine_name = 'tax_support'
+        ]])
+        print("[Tax Copilot] Set allowed_actions=['read','reply'] for tax_support")
+
+        -- Update description for tax_support
+        db.query([[
+            UPDATE modules SET description = 'View and reply to support conversations', updated_at = NOW()
+            WHERE machine_name = 'tax_support'
+        ]])
+
+        -- Update description for tax_file
+        db.query([[
+            UPDATE modules SET description = 'Submit tax returns to HMRC', updated_at = NOW()
+            WHERE machine_name = 'tax_file'
+        ]])
+    end,
+
+    -- 29. Remove modules no longer needed for tax_copilot
+    -- Note: DELETE instead of SET is_active=false because is_active column
+    -- is added later in migration 400_add_module_rbac_columns.
+    [29] = function()
+        local removed = {"namespace", "tax_extract", "tax_classify", "tax_reconcile", "tax_calculate"}
+        for _, m in ipairs(removed) do
+            db.query([[
+                DELETE FROM modules WHERE machine_name = ?
+            ]], m)
+        end
+        print("[Tax Copilot] Removed modules: " .. table.concat(removed, ", "))
+
+        -- Clean removed modules from existing role permissions
+        for _, m in ipairs(removed) do
+            local roles_with_mod = db.query([[
+                SELECT id FROM namespace_roles
+                WHERE permissions IS NOT NULL AND permissions::text LIKE ?
+            ]], "%" .. m .. "%")
+            if roles_with_mod then
+                for _, role in ipairs(roles_with_mod) do
+                    db.query([[
+                        UPDATE namespace_roles
+                        SET permissions = (permissions::jsonb - ?)::text,
+                            updated_at = NOW()
+                        WHERE id = ?
+                    ]], m, role.id)
+                end
+                if #roles_with_mod > 0 then
+                    print("[Tax Copilot] Cleaned '" .. m .. "' from " .. #roles_with_mod .. " role(s)")
+                end
+            end
+        end
+    end,
+
+    -- 30. Migrate existing permissions to new action names
+    -- Roles that had old CRUD actions on single-checkbox modules need migration to "access"
+    [30] = function()
+        local access_modules = {"dashboard", "reports", "tax_bank_accounts", "tax_file"}
+        for _, m in ipairs(access_modules) do
+            -- Find roles that have this module with any old CRUD actions
+            local roles = db.query([[
+                SELECT id, permissions FROM namespace_roles
+                WHERE permissions IS NOT NULL AND permissions::text LIKE ?
+            ]], "%" .. m .. "%")
+            if roles then
+                for _, role in ipairs(roles) do
+                    -- Replace whatever actions existed with ["access"]
+                    db.query([[
+                        UPDATE namespace_roles
+                        SET permissions = jsonb_set(
+                            permissions::jsonb,
+                            ?::text[],
+                            '["access"]'::jsonb
+                        )::text,
+                        updated_at = NOW()
+                        WHERE id = ?
+                    ]], "{" .. m .. "}", role.id)
+                end
+                if #roles > 0 then
+                    print("[Tax Copilot] Migrated '" .. m .. "' to access-only in " .. #roles .. " role(s)")
+                end
+            end
+        end
+
+        -- Migrate tax_support: old CRUD actions -> read (+ reply if they had update/manage)
+        local support_roles = db.query([[
+            SELECT id, permissions FROM namespace_roles
+            WHERE permissions IS NOT NULL AND permissions::text LIKE '%tax_support%'
+        ]])
+        if support_roles then
+            for _, role in ipairs(support_roles) do
+                local ok, perms = pcall(require("cjson").decode, role.permissions)
+                if ok and perms and perms.tax_support then
+                    local old_actions = perms.tax_support
+                    local new_actions = {"read"}
+                    -- If they had update, manage, or create, give them reply too
+                    for _, a in ipairs(old_actions) do
+                        if a == "update" or a == "manage" or a == "create" then
+                            new_actions = {"read", "reply"}
+                            break
+                        end
+                    end
+                    local new_json = require("cjson").encode(new_actions)
+                    db.query([[
+                        UPDATE namespace_roles
+                        SET permissions = jsonb_set(
+                            permissions::jsonb,
+                            '{tax_support}'::text[],
+                            ?::jsonb
+                        )::text,
+                        updated_at = NOW()
+                        WHERE id = ?
+                    ]], new_json, role.id)
+                end
+            end
+            if #support_roles > 0 then
+                print("[Tax Copilot] Migrated tax_support actions in " .. #support_roles .. " role(s)")
+            end
+        end
+    end,
+
+    -- 31. Summary of permission module restructure
+    [31] = function()
+        print("[Tax Copilot] Permission module restructure complete:")
+        print("  Single-checkbox (access): dashboard, reports, tax_bank_accounts, tax_file")
+        print("  Custom actions (read/reply): tax_support")
+        print("  Full CRUD: users, roles, settings, tax_transactions, tax_categories, tax_statements")
+        print("  Removed: namespace, tax_extract, tax_classify, tax_reconcile, tax_calculate, tax_admin")
+    end,
 }

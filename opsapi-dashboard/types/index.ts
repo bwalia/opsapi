@@ -137,18 +137,8 @@ export interface Permission {
   updated_at: string;
 }
 
-// Dashboard modules for permission management
-export type DashboardModule =
-  | 'dashboard'
-  | 'users'
-  | 'roles'
-  | 'stores'
-  | 'products'
-  | 'orders'
-  | 'customers'
-  | 'settings'
-  | 'namespaces'
-  | 'services';
+// Dashboard modules — dynamic from API, string type for scalability
+export type DashboardModule = string;
 
 // Permission config for checking access
 export interface PermissionConfig {
@@ -156,8 +146,8 @@ export interface PermissionConfig {
   actions: PermissionAction[];
 }
 
-// User permissions map for quick lookups
-export type UserPermissions = Record<DashboardModule, PermissionAction[]>;
+// User permissions map for quick lookups — dynamic keys from modules DB
+export type UserPermissions = Record<string, PermissionAction[]>;
 
 // ============================================
 // Store Types
@@ -539,7 +529,6 @@ export interface NamespaceRole {
   display_name: string;
   description?: string;
   permissions: string | NamespacePermissions;
-  permissions_parsed?: NamespacePermissions;
   is_system: boolean;
   is_default: boolean;
   priority: number;
@@ -548,25 +537,10 @@ export interface NamespaceRole {
   member_count?: number;
 }
 
-// Namespace-scoped permissions
-export type NamespaceModule =
-  | 'dashboard'
-  | 'users'
-  | 'roles'
-  | 'stores'
-  | 'products'
-  | 'orders'
-  | 'customers'
-  | 'settings'
-  | 'namespace'
-  | 'chat'
-  | 'delivery'
-  | 'reports'
-  | 'services'
-  | 'projects'
-  | 'vault';
+// Namespace-scoped permissions — dynamic from API, string type for scalability
+export type NamespaceModule = string;
 
-export type NamespacePermissions = Partial<Record<NamespaceModule, PermissionAction[]>>;
+export type NamespacePermissions = Partial<Record<string, PermissionAction[]>>;
 
 export interface NamespaceInvitation {
   id: number;
@@ -591,6 +565,23 @@ export interface NamespaceInvitation {
     email?: string;
     name?: string; // Combined name from some API responses
   };
+}
+
+export interface AuditLog {
+  id: string;
+  namespace_id: number;
+  user_id: number;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  old_values?: Record<string, unknown> | null;
+  new_values?: Record<string, unknown> | null;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+  user_email?: string;
+  user_first_name?: string;
+  user_last_name?: string;
 }
 
 // API Response types for namespace
@@ -658,9 +649,10 @@ export interface UpdateNamespaceRoleDto extends Partial<CreateNamespaceRoleDto> 
 
 // Module metadata for UI
 export interface NamespaceModuleMeta {
-  name: NamespaceModule;
+  name: string;
   display_name: string;
   description: string;
+  category?: string;
 }
 
 export interface NamespaceActionMeta {

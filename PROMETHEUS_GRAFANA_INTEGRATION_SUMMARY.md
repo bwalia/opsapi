@@ -117,9 +117,9 @@ bash ../setup-monitoring.sh
 ```
 
 ### Step 3: Access Dashboards
-- **Grafana**: http://localhost:3000 (admin/admin)
-- **Prometheus**: http://localhost:9090
-- **Metrics**: http://localhost:4010/metrics
+- **Grafana**: http://127.0.0.1:3000 (admin/admin)
+- **Prometheus**: http://127.0.0.1:9090
+- **Metrics**: http://127.0.0.1:4010/metrics
 
 ## 📊 What You Get
 
@@ -171,13 +171,13 @@ bash ../setup-monitoring.sh
 
 ### View Metrics
 ```bash
-curl http://localhost:4010/metrics
+curl http://127.0.0.1:4010/metrics
 ```
 
 ### Restart After Config Changes
 ```bash
 # Prometheus
-curl -X POST http://localhost:9090/-/reload
+curl -X POST http://127.0.0.1:9090/-/reload
 
 # Grafana
 docker-compose restart grafana
@@ -263,8 +263,8 @@ sum(rate(ecommerce_payment_operations_total[1h]))
 ## 🔐 Security Considerations
 
 ### Default Configuration
-- Prometheus accessible on localhost:9090
-- Grafana accessible on localhost:3000
+- Prometheus accessible on 127.0.0.1:9090
+- Grafana accessible on 127.0.0.1:3000
 - Metrics endpoint IP-restricted
 
 ### Production Recommendations
@@ -307,13 +307,13 @@ sum(rate(ecommerce_payment_operations_total[1h]))
 ## 🎓 Learning Resources
 
 ### Access Points
-- **Prometheus Web UI**: http://localhost:9090
+- **Prometheus Web UI**: http://127.0.0.1:9090
   - Graph: Query and visualize metrics
   - Alerts: View active/pending alerts
   - Targets: Check scrape status
   - Config: View configuration
 
-- **Grafana**: http://localhost:3000
+- **Grafana**: http://127.0.0.1:3000
   - Dashboards: Pre-built visualizations
   - Explore: Ad-hoc metric queries
   - Alerting: Configure alert rules
@@ -339,7 +339,7 @@ sum(rate(ecommerce_payment_operations_total[1h]))
 docker ps | grep opsapi
 
 # Check metrics endpoint
-curl http://localhost:4010/metrics
+curl http://127.0.0.1:4010/metrics
 
 # Check logs
 docker logs opsapi | grep -i prometheus
@@ -351,7 +351,7 @@ docker logs opsapi | grep -i prometheus
 1. Check time range (top right)
 2. Verify Prometheus datasource (Configuration → Data Sources)
 3. Generate some traffic to OpsAPI
-4. Check Prometheus has data: http://localhost:9090
+4. Check Prometheus has data: http://127.0.0.1:9090
 
 ### Port Already in Use
 **Problem**: Port 9090 or 3000 already in use
@@ -417,16 +417,16 @@ lsof -i :3000
 For issues or questions:
 1. Check documentation in the files above
 2. View service logs: `docker-compose logs [service]`
-3. Test metrics endpoint: `curl http://localhost:4010/metrics`
-4. Check Prometheus targets: http://localhost:9090/targets
+3. Test metrics endpoint: `curl http://127.0.0.1:4010/metrics`
+4. Check Prometheus targets: http://127.0.0.1:9090/targets
 
 ## 🎯 Success Criteria
 
 ✅ All containers running: `docker-compose ps`
-✅ Metrics endpoint responding: `curl http://localhost:4010/metrics`
-✅ Prometheus scraping successfully: http://localhost:9090/targets shows UP
-✅ Grafana dashboard loading: http://localhost:3000 shows data
-✅ Alerts configured: http://localhost:9090/alerts shows rules
+✅ Metrics endpoint responding: `curl http://127.0.0.1:4010/metrics`
+✅ Prometheus scraping successfully: http://127.0.0.1:9090/targets shows UP
+✅ Grafana dashboard loading: http://127.0.0.1:3000 shows data
+✅ Alerts configured: http://127.0.0.1:9090/alerts shows rules
 
 ---
 

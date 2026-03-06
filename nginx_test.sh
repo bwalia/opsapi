@@ -20,9 +20,9 @@ PERC_500=40
 
 PER_HOUR=75000
 
-URL="http://localhost"
-URL_404="http://localhost/404.html"
-URL_500="http://localhost/500"
+URL="http://127.0.0.1"
+URL_404="http://127.0.0.1/404.html"
+URL_500="http://127.0.0.1/500"
 
 TOTAL_200=0
 TOTAL_404=0

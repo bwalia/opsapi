@@ -27,38 +27,10 @@ return function(app)
     end
 
     -- Helper to check if user is admin (platform-level administrative role)
+    -- Delegates to centralized AdminCheck module
+    local AdminCheck = require("helper.admin-check")
     local function is_admin(user)
-        if not user then return false end
-
-        -- Check primary role (string - set as userinfo.roles in JWT)
-        if user.roles then
-            if type(user.roles) == "string" then
-                if user.roles:lower():find("admin") then
-                    return true
-                end
-            elseif type(user.roles) == "table" then
-                for _, role in ipairs(user.roles) do
-                    local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
-                    if role_name:lower():find("admin") then
-                        return true
-                    end
-                end
-            end
-        end
-
-        -- Also check user_roles array (set as userinfo.user_roles in JWT)
-        if user.user_roles then
-            if type(user.user_roles) == "table" then
-                for _, role in ipairs(user.user_roles) do
-                    local role_name = type(role) == "string" and role or (role.role_name or role.name or "")
-                    if role_name:lower():find("admin") then
-                        return true
-                    end
-                end
-            end
-        end
-
-        return false
+        return AdminCheck.isPlatformAdmin(user)
     end
 
     -- LIST all permissions (with optional role filter) - Admin only

@@ -22,16 +22,19 @@ import {
   Truck,
   BarChart,
   Kanban,
+  Lock,
+  Bell,
+  Image,
+  Box,
 } from 'lucide-react';
 import {
-  rolesService,
-  NAMESPACE_MODULES,
+  namespaceService,
+  permissionsService,
   PERMISSION_ACTIONS,
-  type NamespaceRole,
 } from '@/services';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import type { PermissionAction, NamespacePermissions, NamespaceModule } from '@/types';
+import type { PermissionAction, NamespacePermissions, NamespaceRole } from '@/types';
 
 export interface EditRolePermissionsModalProps {
   isOpen: boolean;
@@ -40,27 +43,25 @@ export interface EditRolePermissionsModalProps {
   onSuccess?: () => void;
 }
 
-// Icon mapping for modules
-const MODULE_ICONS: Record<string, React.FC<{ className?: string }>> = {
-  dashboard: LayoutDashboard,
-  users: Users,
-  roles: Shield,
-  stores: Store,
-  products: Package,
-  orders: ShoppingCart,
-  customers: UserCheck,
-  settings: Settings,
-  namespace: Building2,
-  services: Rocket,
-  chat: MessageCircle,
-  delivery: Truck,
-  reports: BarChart,
-  projects: Kanban,
+// Dynamic module metadata (fetched from API)
+interface ModuleItem {
+  value: string;
+  label: string;
+  icon: string;
+  description?: string;
+}
+
+// Icon component mapping (fallback for rendering)
+const ICON_COMPONENTS: Record<string, React.FC<{ className?: string }>> = {
+  LayoutDashboard, Users, Shield, Store, Package, ShoppingCart,
+  UserCheck, Settings, Building2, Rocket, MessageCircle, Truck,
+  BarChart, Kanban, Lock, Bell, Image, Box,
 };
 
 const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
   function EditRolePermissionsModal({ isOpen, onClose, role, onSuccess }) {
     const [permissions, setPermissions] = useState<NamespacePermissions>({});
+    const [modules, setModules] = useState<ModuleItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -74,56 +75,53 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
       return role.is_system;
     }, [role.is_system]);
 
-    // Load current permissions when modal opens
-    useEffect(() => {
-      if (isOpen && role) {
-        loadPermissions();
-      }
-    }, [isOpen, role]);
-
-    const loadPermissions = async () => {
+    const loadPermissions = useCallback(async () => {
       setIsLoading(true);
       try {
+        // Fetch available modules from API (dynamic — no hardcoded list)
+        const fetchedModules = await permissionsService.fetchNamespaceModules();
+        setModules(fetchedModules);
+
         // Get role details with permissions
-        const response = await rolesService.getRole(role.id);
-        const roleData = response.role;
+        const response = await namespaceService.getRole(role.uuid);
+        const roleData = response;
 
         if (roleData.permissions) {
-          // Parse permissions if they're stored as a string
-          let parsed: NamespacePermissions;
-          if (typeof roleData.permissions === 'string') {
-            try {
-              parsed = JSON.parse(roleData.permissions);
-            } catch {
-              parsed = {};
-            }
-          } else {
-            parsed = roleData.permissions as NamespacePermissions;
+          // Parse and normalize permissions — ensure all values are arrays
+          // (cjson may encode empty Lua tables as {} instead of [])
+          const raw = typeof roleData.permissions === 'string'
+            ? (() => { try { return JSON.parse(roleData.permissions); } catch { return {}; } })()
+            : roleData.permissions;
+          const normalized: NamespacePermissions = {};
+          for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+            (normalized as Record<string, string[]>)[key] = Array.isArray(value) ? value : [];
           }
-          setPermissions(parsed);
+          setPermissions(normalized);
         } else {
-          // Initialize with empty permissions
+          // Initialize with empty permissions for all modules
           const empty: NamespacePermissions = {};
-          NAMESPACE_MODULES.forEach(module => {
-            empty[module.value as NamespaceModule] = [];
+          fetchedModules.forEach(module => {
+            empty[module.value] = [];
           });
           setPermissions(empty);
         }
       } catch (error) {
         console.error('Failed to load permissions:', error);
-        // Initialize with empty permissions
-        const empty: NamespacePermissions = {};
-        NAMESPACE_MODULES.forEach(module => {
-          empty[module.value as NamespaceModule] = [];
-        });
-        setPermissions(empty);
+        setPermissions({});
       } finally {
         setIsLoading(false);
       }
-    };
+    }, [role]);
+
+    // Load modules and current permissions when modal opens
+    useEffect(() => {
+      if (isOpen && role) {
+        loadPermissions();
+      }
+    }, [isOpen, role, loadPermissions]);
 
     const togglePermission = useCallback(
-      (module: NamespaceModule, action: PermissionAction) => {
+      (module: string, action: PermissionAction) => {
         if (isOwnerRole) return; // Don't allow changes to owner role
 
         setPermissions((prev) => {
@@ -156,7 +154,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
     );
 
     const hasPermission = useCallback(
-      (module: NamespaceModule, action: PermissionAction): boolean => {
+      (module: string, action: PermissionAction): boolean => {
         const modulePerms = permissions[module] || [];
         return modulePerms.includes(action) || modulePerms.includes('manage');
       },
@@ -171,9 +169,9 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
 
       setIsSaving(true);
       try {
-        // Update role permissions via namespace roles API
-        await rolesService.updateRole(role.id, {
-          permissions: permissions as Record<string, string[]>,
+        // Update role permissions via namespace roles API (uses form-encoded data)
+        await namespaceService.updateRole(role.uuid, {
+          permissions,
         });
 
         toast.success('Role permissions updated successfully');
@@ -196,7 +194,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
 
     // Set all permissions for a module
     const setAllModulePermissions = useCallback(
-      (module: NamespaceModule, enabled: boolean) => {
+      (module: string, enabled: boolean) => {
         if (isOwnerRole) return;
 
         setPermissions((prev) => ({
@@ -271,9 +269,9 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
 
                 {/* Permission Rows */}
                 <div className="divide-y divide-secondary-200 max-h-[400px] overflow-y-auto">
-                  {NAMESPACE_MODULES.map((module) => {
-                    const Icon = MODULE_ICONS[module.value] || Shield;
-                    const hasFullAccess = hasPermission(module.value as NamespaceModule, 'manage');
+                  {modules.map((module) => {
+                    const Icon = ICON_COMPONENTS[module.icon] || Box;
+                    const hasFullAccess = hasPermission(module.value, 'manage');
 
                     return (
                       <div
@@ -300,13 +298,13 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                                 type="button"
                                 onClick={() =>
                                   setAllModulePermissions(
-                                    module.value as NamespaceModule,
-                                    !hasPermission(module.value as NamespaceModule, 'read')
+                                    module.value,
+                                    !hasPermission(module.value, 'read')
                                   )
                                 }
                                 className="text-xs text-primary-600 hover:text-primary-700 hover:underline whitespace-nowrap"
                               >
-                                {hasPermission(module.value as NamespaceModule, 'read') ? 'Clear' : 'All'}
+                                {hasPermission(module.value, 'read') ? 'Clear' : 'All'}
                               </button>
                             )}
                           </div>
@@ -314,7 +312,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                           {/* Permission Toggles */}
                           {PERMISSION_ACTIONS.map((action) => {
                             const isChecked =
-                              isOwnerRole || hasPermission(module.value as NamespaceModule, action.value);
+                              isOwnerRole || hasPermission(module.value, action.value);
                             const isManageAction = action.value === 'manage';
 
                             return (
@@ -322,7 +320,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    togglePermission(module.value as NamespaceModule, action.value)
+                                    togglePermission(module.value, action.value)
                                   }
                                   disabled={isOwnerRole}
                                   className={cn(

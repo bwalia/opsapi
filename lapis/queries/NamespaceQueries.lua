@@ -129,9 +129,8 @@ function NamespaceQueries.all(params)
         SELECT
             id, uuid, name, slug, description, domain, logo_url, banner_url,
             status, plan, settings, max_users, max_stores, owner_user_id,
-            created_at, updated_at,
-            (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = namespaces.id AND status = 'active') as member_count,
-            (SELECT COUNT(*) FROM stores WHERE namespace_id = namespaces.id) as store_count
+            project_code, created_at, updated_at,
+            (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = namespaces.id AND status = 'active') as member_count
         FROM namespaces
         %s
         ORDER BY %s %s
@@ -324,24 +323,44 @@ function NamespaceQueries.getStats(namespace_id)
         return nil
     end
 
-    local stats = db.query([[
+    -- Core stats (tables always exist)
+    local core_stats = db.query([[
         SELECT
             (SELECT COUNT(*) FROM namespace_members WHERE namespace_id = ? AND status = 'active') as total_members,
-            (SELECT COUNT(*) FROM stores WHERE namespace_id = ?) as total_stores,
-            (SELECT COUNT(*) FROM orders WHERE namespace_id = ?) as total_orders,
-            (SELECT COUNT(*) FROM customers WHERE namespace_id = ?) as total_customers,
-            (SELECT COUNT(*) FROM storeproducts WHERE namespace_id = ?) as total_products,
-            (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE namespace_id = ? AND status != 'cancelled') as total_revenue
-    ]], namespace.id, namespace.id, namespace.id, namespace.id, namespace.id, namespace.id)
+            (SELECT COUNT(*) FROM namespace_roles WHERE namespace_id = ?) as total_roles
+    ]], namespace.id, namespace.id)
 
-    return stats and stats[1] or {
-        total_members = 0,
+    local result = {
+        total_members = core_stats and core_stats[1] and core_stats[1].total_members or 0,
+        total_roles = core_stats and core_stats[1] and core_stats[1].total_roles or 0,
         total_stores = 0,
         total_orders = 0,
         total_customers = 0,
         total_products = 0,
         total_revenue = 0
     }
+
+    -- Ecommerce stats (only if tables exist)
+    local ProjectConfig = require("helper.project-config")
+    if ProjectConfig.isEcommerceEnabled() then
+        local ok, ecom_stats = pcall(db.query, [[
+            SELECT
+                (SELECT COUNT(*) FROM stores WHERE namespace_id = ?) as total_stores,
+                (SELECT COUNT(*) FROM orders WHERE namespace_id = ?) as total_orders,
+                (SELECT COUNT(*) FROM customers WHERE namespace_id = ?) as total_customers,
+                (SELECT COUNT(*) FROM storeproducts WHERE namespace_id = ?) as total_products,
+                (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE namespace_id = ? AND status != 'cancelled') as total_revenue
+        ]], namespace.id, namespace.id, namespace.id, namespace.id, namespace.id)
+        if ok and ecom_stats and ecom_stats[1] then
+            result.total_stores = ecom_stats[1].total_stores or 0
+            result.total_orders = ecom_stats[1].total_orders or 0
+            result.total_customers = ecom_stats[1].total_customers or 0
+            result.total_products = ecom_stats[1].total_products or 0
+            result.total_revenue = ecom_stats[1].total_revenue or 0
+        end
+    end
+
+    return result
 end
 
 --- Count all namespaces
@@ -614,91 +633,20 @@ function NamespaceQueries.createWithOwner(user_id, data)
         return nil, "Failed to create membership"
     end
 
-    -- Create default roles for this namespace
-    local default_roles = {
-        {
-            role_name = "owner",
-            display_name = "Owner",
-            description = "Full control over the namespace",
-            permissions =
-            '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["manage"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
-            is_system = true,
-            is_default = false,
-            priority = 100
-        },
-        {
-            role_name = "admin",
-            display_name = "Administrator",
-            description = "Full administrative access except namespace ownership",
-            permissions =
-            '{"dashboard":["manage"],"users":["manage"],"roles":["manage"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["manage"],"namespace":["read"],"services":["manage"],"chat":["manage"],"delivery":["manage"],"reports":["manage"],"projects":["manage"]}',
-            is_system = true,
-            is_default = false,
-            priority = 90
-        },
-        {
-            role_name = "manager",
-            display_name = "Manager",
-            description = "Manage daily operations - stores, products, orders, and customers",
-            permissions =
-            '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["manage"],"products":["manage"],"orders":["manage"],"customers":["manage"],"settings":["read"],"namespace":[],"services":["read"],"chat":["manage"],"delivery":["manage"],"reports":["read"],"projects":["manage"]}',
-            is_system = false,
-            is_default = false,
-            priority = 50
-        },
-        {
-            role_name = "member",
-            display_name = "Member",
-            description = "Standard member access - view and participate in projects",
-            permissions =
-            '{"dashboard":["read"],"users":["read"],"roles":["read"],"stores":["read"],"products":["read"],"orders":["read"],"customers":["read"],"settings":[],"namespace":[],"services":["read"],"chat":["create","read"],"delivery":["read"],"reports":["read"],"projects":["create","read","update"]}',
-            is_system = true,
-            is_default = true,
-            priority = 20
-        },
-        {
-            role_name = "viewer",
-            display_name = "Viewer",
-            description = "Read-only access to all content",
-            permissions =
-            '{"dashboard":["read"],"users":[],"roles":[],"stores":["read"],"products":["read"],"orders":["read"],"customers":[],"settings":[],"namespace":[],"services":["read"],"chat":["read"],"delivery":[],"reports":["read"],"projects":["read"]}',
-            is_system = false,
-            is_default = false,
-            priority = 10
-        }
-    }
+    -- Create default roles using DB-driven permissions, filtered by project_code
+    local NamespaceRoleQueries = require("queries.NamespaceRoleQueries")
+    NamespaceRoleQueries.createDefaultRoles(namespace.id, data.project_code)
 
-    local owner_role_id = nil
-    for _, role_data in ipairs(default_roles) do
-        local role_uuid = Global.generateUUID()
-        db.insert("namespace_roles", {
-            uuid = role_uuid,
-            namespace_id = namespace.id,
-            role_name = role_data.role_name,
-            display_name = role_data.display_name,
-            description = role_data.description,
-            permissions = role_data.permissions,
-            is_system = role_data.is_system,
-            is_default = role_data.is_default,
-            priority = role_data.priority,
-            created_at = timestamp,
-            updated_at = timestamp
-        })
-
-        if role_data.role_name == "owner" then
-            local role = db.select("* FROM namespace_roles WHERE uuid = ?", role_uuid)
-            if role and #role > 0 then
-                owner_role_id = role[1].id
-            end
-        end
-    end
-
-    -- Assign owner role to the user
-    if owner_role_id then
+    -- Find the owner role and assign it to the user
+    local owner_role = db.select(
+        "id FROM namespace_roles WHERE namespace_id = ? AND role_name = 'owner'",
+        namespace.id
+    )
+    if owner_role and #owner_role > 0 then
         db.insert("namespace_user_roles", {
             uuid = Global.generateUUID(),
             namespace_member_id = member[1].id,
-            namespace_role_id = owner_role_id,
+            namespace_role_id = owner_role[1].id,
             created_at = timestamp,
             updated_at = timestamp
         })

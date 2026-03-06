@@ -3,7 +3,7 @@ FROM quay.io/keycloak/keycloak:20.0
 
 # Set environment variables
 ENV KC_DB=dev-mem
-ENV KC_HOSTNAME=localhost
+ENV KC_HOSTNAME=127.0.0.1
 ENV KC_HTTP_ENABLED=true
 ENV KEYCLOAK_ADMIN=admin
 ENV KEYCLOAK_ADMIN_PASSWORD=admin

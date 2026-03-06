@@ -12,6 +12,7 @@ services:
   gatus:
       image: twinproduction/gatus:latest
       container_name: opsapi-gatus
+      restart: unless-stopped
       ports:
         - "8711:8080"
       depends_on:
@@ -26,6 +27,7 @@ services:
 
   lapis:
     container_name: opsapi
+    restart: unless-stopped
     build: .
     ports:
       - "4010:80"
@@ -34,9 +36,13 @@ services:
       # In CI/CD, we want to use the files baked into the Docker image
       - ./logs:/var/log/nginx
     env_file: ".env"
+    environment:
+      - PROJECT_CODE=${PROJECT_CODE:-all}
     depends_on:
-      - postgres
-      - minio
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     # DNS configuration for external API calls (GitHub, etc.)
     dns:
       - 8.8.8.8
@@ -46,7 +52,7 @@ services:
       opsapi-network:
         ipv4_address: 172.71.0.12
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1/health"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -58,7 +64,7 @@ services:
       context: ../opsapi-dashboard
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4010}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://127.0.0.1:4010}
     ports:
       - "8039:8039"
     environment:
@@ -80,7 +86,7 @@ services:
       opsapi-network:
         ipv4_address: 172.71.0.19
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8039"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8039"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -89,6 +95,7 @@ services:
 
   postgres:
     container_name: opsapi-postgres-dev-db
+    restart: unless-stopped
     image: postgres:14-alpine
     ports:
       - "5439:5432"
@@ -96,15 +103,15 @@ services:
       - postgres_data:/var/lib/postgresql/data
     environment:
       PGDATA: /var/lib/postgresql/data
-      POSTGRES_USER: pguser
-      POSTGRES_PASSWORD: pgpassword
-      POSTGRES_DB: opsapi
+      POSTGRES_USER: ${POSTGRES_USER:-pguser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pgpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-opsapi}
     command: ["postgres", "-c", "max_connections=200"]
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.10
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "pguser"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-pguser}"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -112,6 +119,7 @@ services:
   adminer:
     image: adminer:latest
     container_name: adminer
+    restart: unless-stopped
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     ports:
@@ -119,7 +127,7 @@ services:
     networks:
       opsapi-network:
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -128,6 +136,7 @@ services:
   redis:
     image: redis:alpine
     container_name: opsapi-redis
+    restart: unless-stopped
     ports:
       - "6373:6379"
     networks:
@@ -145,6 +154,7 @@ services:
   minio:
     image: minio/minio:latest
     container_name: opsapi-minio
+    restart: unless-stopped
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -158,7 +168,7 @@ services:
       opsapi-network:
         ipv4_address: 172.71.0.17
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -186,6 +196,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: opsapi-prometheus
+    restart: unless-stopped
     ports:
       - "9099:9090"
     volumes:
@@ -208,6 +219,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: opsapi-grafana
+    restart: unless-stopped
     ports:
       - "3011:3000"
     volumes:
@@ -219,7 +231,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3011
+      - GF_SERVER_ROOT_URL=http://127.0.0.1:3011
       - GF_INSTALL_PLUGINS=
     networks:
       opsapi-network:

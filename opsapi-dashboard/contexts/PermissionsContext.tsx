@@ -57,18 +57,8 @@ interface PermissionsContextValue {
   refreshPermissions: () => Promise<void>;
 }
 
-const defaultPermissions: UserPermissions = {
-  dashboard: [],
-  users: [],
-  roles: [],
-  stores: [],
-  products: [],
-  orders: [],
-  customers: [],
-  settings: [],
-  namespaces: [],
-  services: [],
-};
+// Dynamic — no hardcoded module keys. Modules come from API.
+const defaultPermissions: UserPermissions = {};
 
 const PermissionsContext = createContext<PermissionsContextValue>({
   permissions: defaultPermissions,
@@ -153,27 +143,30 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     return null;
   }, [user]);
 
-  // Check if user is platform admin (has administrative role globally)
+  // Check if user is platform admin (has "administrative" role — exact match only)
+  // "admin" is a namespace role, NOT a platform admin role
   const isAdmin = useMemo(() => {
     // First check derived userRole
-    if (userRole?.toLowerCase() === 'administrative' || userRole?.toLowerCase() === 'admin') {
+    if (userRole?.toLowerCase() === 'administrative') {
       return true;
     }
 
-    // Also check user.roles directly for admin role
+    // Also check user.roles directly
     if (user?.roles) {
       const roles = user.roles as unknown;
       if (Array.isArray(roles)) {
         const found = roles.some((r: unknown) => {
           const roleName = typeof r === 'string' ? r : ((r as { role_name?: string; name?: string })?.role_name || (r as { name?: string })?.name || '');
-          return roleName.toLowerCase() === 'administrative' || roleName.toLowerCase() === 'admin';
+          return roleName.toLowerCase() === 'administrative';
         });
         if (found) {
           return true;
         }
       }
       if (typeof roles === 'string') {
-        if (roles.toLowerCase().includes('administrative') || roles.toLowerCase().includes('admin')) {
+        // Exact match — not substring. Split by comma for multi-role strings.
+        const roleList = roles.split(',').map(r => r.trim().toLowerCase());
+        if (roleList.includes('administrative')) {
           return true;
         }
       }
@@ -196,8 +189,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       setPermissions(userPermissions);
     } catch (error) {
       console.error('Failed to load permissions:', error);
-      // Fall back to default permissions
-      setPermissions(permissionsService.getDefaultPermissions(userRole));
+      setPermissions(defaultPermissions);
     } finally {
       setLegacyPermissionsLoading(false);
     }
@@ -220,7 +212,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       // Check namespace permissions first (from store/JWT)
       if (storeNamespacePermissions) {
         const modulePerms = storeNamespacePermissions[module as NamespaceModule];
-        if (modulePerms) {
+        if (modulePerms && Array.isArray(modulePerms)) {
           // Has manage = has all permissions
           if (modulePerms.includes('manage')) return true;
           // Check specific action

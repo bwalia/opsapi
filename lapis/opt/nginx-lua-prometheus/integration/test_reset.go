@@ -12,10 +12,10 @@ import (
 )
 
 func registerResetTest(tr *testRunner) {
-	tr.healthURLs = append(tr.healthURLs, "http://localhost:18002/health")
+	tr.healthURLs = append(tr.healthURLs, "http://127.0.0.1:18002/health")
 
-	const setURL = "http://localhost:18002/set_gauge"
-	const resetURL = "http://localhost:18002/reset_gauge"
+	const setURL = "http://127.0.0.1:18002/set_gauge"
+	const resetURL = "http://127.0.0.1:18002/reset_gauge"
 	const metricName = "reset_test_gauge"
 	tr.tests = append(tr.tests, func() error {
 		log.Printf("Running reset test with %d concurrent clients for %v", *concurrency, *testDuration)

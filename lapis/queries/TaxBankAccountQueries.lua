@@ -68,9 +68,9 @@ function TaxBankAccountQueries.create(data, user)
         new_values = cjson.encode(bank_account)
     })
 
-    -- Return with uuid as id
-    bank_account.internal_id = bank_account.id
+    -- Return with uuid as id (never expose numeric PKs)
     bank_account.id = bank_account.uuid
+    bank_account.user_id = nil
     return { data = bank_account }
 end
 
@@ -98,7 +98,7 @@ function TaxBankAccountQueries.all(params, user)
         user_id,
         {
             per_page = perPage,
-            fields = 'id as internal_id, uuid as id, user_id, bank_name, account_name, account_number, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
+            fields = 'uuid as id, bank_name, account_name, account_number, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
         }
     )
 
@@ -135,7 +135,7 @@ function TaxBankAccountQueries.show(uuid, user)
     local user_id = user_record[1].id
 
     local result = db.query([[
-        SELECT id as internal_id, uuid as id, user_id, bank_name, account_name,
+        SELECT uuid as id, bank_name, account_name,
                account_number, sort_code, account_type, currency,
                is_primary, is_active, created_at, updated_at
         FROM tax_bank_accounts

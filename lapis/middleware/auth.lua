@@ -22,11 +22,12 @@ function AuthMiddleware.authenticate(self)
 
     local jwt_obj = jwt:verify(JWT_SECRET_KEY, token)
     if not jwt_obj or not jwt_obj.verified then
-        return nil, { error = "Invalid or expired token: " .. (jwt_obj and jwt_obj.reason or "unknown"), status = 401 }
+        ngx.log(ngx.WARN, "JWT verification failed: ", (jwt_obj and jwt_obj.reason or "unknown"))
+        return nil, { error = "Invalid or expired token", status = 401 }
     end
 
     local user_info = jwt_obj.payload.userinfo
-    if not user_info then
+    if not user_info or (not user_info.uuid and not user_info.sub) then
         return nil, { error = "Invalid token payload", status = 401 }
     end
 

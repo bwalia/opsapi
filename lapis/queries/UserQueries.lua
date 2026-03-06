@@ -37,10 +37,29 @@ function UserQueries.create(params)
     -- Auto-add user to a namespace
     local target_namespace_id = namespace_id
     if not target_namespace_id then
-        -- Default to "System" namespace
-        local system_ns = db.select("id FROM namespaces WHERE slug = ?", "system")
-        if system_ns and #system_ns > 0 then
-            target_namespace_id = system_ns[1].id
+        -- Find the default namespace:
+        -- 1. By PROJECT_CODE (matches the deployment's namespace)
+        -- 2. By well-known slug "system" (legacy fallback)
+        -- 3. First active namespace (last resort)
+        local project_code = os.getenv("PROJECT_CODE")
+        if project_code and project_code ~= "" and project_code ~= "all" then
+            local project_slug = project_code:gsub("_", "-")
+            local project_ns = db.select("id FROM namespaces WHERE slug = ? AND status = 'active'", project_slug)
+            if project_ns and #project_ns > 0 then
+                target_namespace_id = project_ns[1].id
+            end
+        end
+        if not target_namespace_id then
+            local system_ns = db.select("id FROM namespaces WHERE slug = 'system' AND status = 'active'")
+            if system_ns and #system_ns > 0 then
+                target_namespace_id = system_ns[1].id
+            end
+        end
+        if not target_namespace_id then
+            local any_ns = db.select("id FROM namespaces WHERE status = 'active' ORDER BY id ASC LIMIT 1")
+            if any_ns and #any_ns > 0 then
+                target_namespace_id = any_ns[1].id
+            end
         end
     end
 

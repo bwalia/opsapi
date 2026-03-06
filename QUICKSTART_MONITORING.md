@@ -21,9 +21,9 @@ docker-compose up -d
 ```
 
 ### 3. Access Dashboards
-- **Grafana**: http://localhost:3000 (admin/admin)
-- **Prometheus**: http://localhost:9090
-- **Metrics**: http://localhost:4010/metrics
+- **Grafana**: http://127.0.0.1:3000 (admin/admin)
+- **Prometheus**: http://127.0.0.1:9090
+- **Metrics**: http://127.0.0.1:4010/metrics
 
 ## 📊 Dashboard Panels
 
@@ -47,7 +47,7 @@ Your pre-configured Grafana dashboard includes:
 - Credential Stuffing
 - Service Down
 
-View alerts: http://localhost:9090/alerts
+View alerts: http://127.0.0.1:9090/alerts
 
 ## 🔍 Quick Checks
 
@@ -57,19 +57,19 @@ View alerts: http://localhost:9090/alerts
 docker-compose ps
 
 # Check metrics
-curl http://localhost:4010/metrics | head -20
+curl http://127.0.0.1:4010/metrics | head -20
 
 # Check Prometheus targets
-curl -s http://localhost:9090/api/v1/targets | grep health
+curl -s http://127.0.0.1:9090/api/v1/targets | grep health
 ```
 
 ### Generate Test Data
 ```bash
 # Create some traffic
-for i in {1..50}; do curl -s http://localhost:4010/api/v2/products > /dev/null; done
+for i in {1..50}; do curl -s http://127.0.0.1:4010/api/v2/products > /dev/null; done
 
 # View metrics update
-curl http://localhost:4010/metrics | grep nginx_http_requests_total
+curl http://127.0.0.1:4010/metrics | grep nginx_http_requests_total
 ```
 
 ## 📝 Essential Commands
@@ -85,7 +85,7 @@ docker-compose restart prometheus grafana
 docker-compose down
 
 # Reload Prometheus config (after editing prometheus.yml)
-curl -X POST http://localhost:9090/-/reload
+curl -X POST http://127.0.0.1:9090/-/reload
 ```
 
 ## 🎯 Sample Queries (Use in Prometheus or Grafana)
@@ -126,8 +126,8 @@ docker-compose restart lapis
 ### Grafana shows "No Data"
 **Fix**: 
 1. Check time range (top right, set to "Last 5 minutes")
-2. Generate traffic: `curl http://localhost:4010/`
-3. Verify Prometheus: http://localhost:9090/targets
+2. Generate traffic: `curl http://127.0.0.1:4010/`
+3. Verify Prometheus: http://127.0.0.1:9090/targets
 
 ### Port Already in Use
 **Fix**: 
@@ -151,10 +151,10 @@ lsof -i :3000  # Grafana
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| OpsAPI | http://localhost:4010 | - |
-| Metrics Endpoint | http://localhost:4010/metrics | IP-restricted |
-| Prometheus | http://localhost:9090 | None |
-| Grafana | http://localhost:3000 | admin/admin |
+| OpsAPI | http://127.0.0.1:4010 | - |
+| Metrics Endpoint | http://127.0.0.1:4010/metrics | IP-restricted |
+| Prometheus | http://127.0.0.1:9090 | None |
+| Grafana | http://127.0.0.1:3000 | admin/admin |
 
 ## 📦 What's Monitoring?
 
@@ -179,7 +179,7 @@ lsof -i :3000  # Grafana
 ### Add New Alert
 Edit `devops/alert_rules.yml`, then:
 ```bash
-curl -X POST http://localhost:9090/-/reload
+curl -X POST http://127.0.0.1:9090/-/reload
 ```
 
 ### Create Custom Dashboard

@@ -7,6 +7,7 @@
 ]]
 
 local cjson = require("cjson")
+local respond_to = require("lapis.application").respond_to
 local TaxStatementQueries = require "queries.TaxStatementQueries"
 local TaxAuditLogQueries = require "queries.TaxAuditLogQueries"
 local AuthMiddleware = require("middleware.auth")
@@ -128,33 +129,35 @@ return function(app)
         }
     end))
 
-    -- Update statement workflow step only
-    app:patch("/api/v2/tax/statements/:id/workflow", AuthMiddleware.requireAuth(function(self)
-        merge_params(self)
+    -- Update statement workflow step only (PATCH via respond_to — Lapis has no native app:patch)
+    app:match("/api/v2/tax/statements/:id/workflow", respond_to({
+        PATCH = AuthMiddleware.requireAuth(function(self)
+            merge_params(self)
 
-        if not self.params.workflow_step then
+            if not self.params.workflow_step then
+                return {
+                    json = { error = "workflow_step is required" },
+                    status = 400
+                }
+            end
+
+            local statement = TaxStatementQueries.update(tostring(self.params.id), {
+                workflow_step = self.params.workflow_step
+            }, self.current_user)
+
+            if not statement then
+                return {
+                    json = { error = "Statement not found" },
+                    status = 404
+                }
+            end
+
             return {
-                json = { error = "workflow_step is required" },
-                status = 400
+                json = { data = statement },
+                status = 200
             }
-        end
-
-        local statement = TaxStatementQueries.update(tostring(self.params.id), {
-            workflow_step = self.params.workflow_step
-        }, self.current_user)
-
-        if not statement then
-            return {
-                json = { error = "Statement not found" },
-                status = 404
-            }
-        end
-
-        return {
-            json = { data = statement },
-            status = 200
-        }
-    end))
+        end)
+    }))
 
     -- Delete a statement
     app:delete("/api/v2/tax/statements/:id", AuthMiddleware.requireAuth(function(self)
