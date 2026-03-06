@@ -780,7 +780,7 @@ return function(app)
             -- If email provided, find or invite user
             local user_id = params.user_id
             if params.email and not user_id then
-                local user = db.select("id FROM users WHERE email = ?", params.email)
+                local user = db.select("id FROM users WHERE LOWER(email) = LOWER(?)", params.email)
                 if #user > 0 then
                     user_id = user[1].id
                 else
