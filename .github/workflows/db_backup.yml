@@ -8,16 +8,16 @@ on:
       TARGET_ENV:
         type: choice
         description: 'Please choose the Target environment'
-        default: 'test'
+        default: 'dev'
         required: true
         options:
             - int
-            - test
+            - dev
             - acc
             - prod
 
 env:
-  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'dev' }}
 
 jobs:
   backup:
@@ -53,21 +53,21 @@ jobs:
 
           # Debug: list available keys in the secret
           echo "Available secret keys:"
-          kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data}" | python3 -c "import sys,json; print('\n'.join(json.loads(sys.stdin.read()).keys()))"
+          kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data}" 2>/dev/null | python3 -c "import sys,json; data=sys.stdin.read(); print('\n'.join(json.loads(data).keys())) if data else print('No data found or command failed')" || echo "Failed to retrieve secret keys"
 
-          PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_HOST}" | base64 --decode)
-          PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_PORT}" | base64 --decode)
-          PGUSER=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_USER}" | base64 --decode)
-          PGPASSWORD=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_PASSWORD}" | base64 --decode)
-          PGDATABASE=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_DB}" | base64 --decode)
+          PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_HOST}" | base64 --decode)
+          PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PORT}" | base64 --decode)
+          PGUSER=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_USER}" | base64 --decode)
+          PGPASSWORD=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DB_PASSWORD}" | base64 --decode)
+          PGDATABASE=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.DATABASE}" | base64 --decode)
 
           # Validate required credentials
           if [ -z "$PGHOST" ]; then
-            echo "::error::PGHOST is empty - POSTGRES_HOST key not found in opsapi-secrets"
+            echo "::error::PGHOST is empty - DB_HOST key not found in opsapi-secrets"
             exit 1
           fi
           if [ -z "$PGDATABASE" ]; then
-            echo "::error::PGDATABASE is empty - POSTGRES_DB key not found in opsapi-secrets"
+            echo "::error::PGDATABASE is empty - DATABASE key not found in opsapi-secrets"
             exit 1
           fi
 
