@@ -767,4 +767,57 @@ return {
         print("  Full CRUD: users, roles, settings, tax_transactions, tax_categories, tax_statements")
         print("  Removed: namespace, tax_extract, tax_classify, tax_reconcile, tax_calculate, tax_admin")
     end,
+
+    -- 32. Create tax_rates table for configurable tax brackets (UUID primary key)
+    [32] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_rates (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                tax_year VARCHAR(10) NOT NULL UNIQUE,
+                personal_allowance NUMERIC NOT NULL DEFAULT 12570,
+                personal_allowance_taper_threshold NUMERIC NOT NULL DEFAULT 100000,
+                basic_rate NUMERIC NOT NULL DEFAULT 0.20,
+                basic_rate_upper NUMERIC NOT NULL DEFAULT 50270,
+                higher_rate NUMERIC NOT NULL DEFAULT 0.40,
+                higher_rate_upper NUMERIC NOT NULL DEFAULT 125140,
+                additional_rate NUMERIC NOT NULL DEFAULT 0.45,
+                nic_class4_main_rate NUMERIC NOT NULL DEFAULT 0.06,
+                nic_class4_lower_threshold NUMERIC NOT NULL DEFAULT 12570,
+                nic_class4_upper_threshold NUMERIC NOT NULL DEFAULT 50270,
+                nic_class4_additional_rate NUMERIC NOT NULL DEFAULT 0.02,
+                nic_class2_weekly NUMERIC NOT NULL DEFAULT 3.45,
+                nic_class2_annual NUMERIC NOT NULL DEFAULT 179.40,
+                nic_class2_threshold NUMERIC NOT NULL DEFAULT 12570,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid)
+            )
+        ]])
+        print("[Tax Copilot] Created tax_rates table with UUID primary key")
+    end,
+
+    -- 33. Seed 2025-26 tax rates (current HMRC rates)
+    [33] = function()
+        db.query([[
+            INSERT INTO tax_rates (
+                uuid, tax_year,
+                personal_allowance, personal_allowance_taper_threshold,
+                basic_rate, basic_rate_upper,
+                higher_rate, higher_rate_upper,
+                additional_rate,
+                nic_class4_main_rate, nic_class4_lower_threshold,
+                nic_class4_upper_threshold, nic_class4_additional_rate,
+                nic_class2_weekly, nic_class2_annual, nic_class2_threshold
+            ) VALUES
+            (gen_random_uuid()::text, '2025-26', 12570, 100000, 0.20, 50270, 0.40, 125140, 0.45,
+             0.06, 12570, 50270, 0.02, 3.45, 179.40, 12570),
+            (gen_random_uuid()::text, '2024-25', 12570, 100000, 0.20, 50270, 0.40, 125140, 0.45,
+             0.06, 12570, 50270, 0.02, 3.45, 179.40, 12570),
+            (gen_random_uuid()::text, '2023-24', 12570, 100000, 0.20, 50270, 0.40, 125140, 0.45,
+             0.09, 12570, 50270, 0.02, 3.45, 179.40, 12570)
+            ON CONFLICT (tax_year) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded tax_rates for 2023-24, 2024-25, 2025-26")
+    end,
 }
