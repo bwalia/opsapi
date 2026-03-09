@@ -78,7 +78,7 @@ local FILE_CATEGORIES = {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "text/plain", "text/csv"
+            "text/plain", "text/markdown", "text/csv"
         },
         max_size = 25 * 1024 * 1024, -- 25MB for documents
         description = "Document files (PDF, Word, Excel, PowerPoint, etc.)"
