@@ -370,6 +370,11 @@ load_if("tax_copilot", "routes.tax-bank-accounts")
 load_if("tax_copilot", "routes.tax-statements")
 load_if("tax_copilot", "routes.tax-transactions")
 load_if("tax_copilot", "routes.tax-upload")
+load_if("tax_copilot", "routes.tax-dashboard")
+load_if("tax_copilot", "routes.tax-settings")
+load_if("tax_copilot", "routes.tax-reports")
+load_if("tax_copilot", "routes.tax-rates")
+load_if("tax_copilot", "routes.tax-admin-transactions")
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)

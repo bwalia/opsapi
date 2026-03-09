@@ -827,6 +827,8 @@ return {
     ['328_tax_deactivate_removed_modules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 29),
     ['329_tax_migrate_permission_actions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 30),
     ['330_tax_permission_restructure_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 31),
+    ['331_tax_create_tax_rates_table'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 32),
+    ['332_tax_seed_tax_rates'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 33),
 
     -- =========================================================================
     -- RBAC ENHANCEMENT: Add columns to modules table for dynamic RBAC
