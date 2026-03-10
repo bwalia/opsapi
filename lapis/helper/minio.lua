@@ -53,7 +53,8 @@ local ALLOWED_MIME_TYPES = {
     ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"] = { extensions = { "xlsx" }, category = "document" },
     ["application/vnd.ms-powerpoint"] = { extensions = { "ppt" }, category = "document" },
     ["application/vnd.openxmlformats-officedocument.presentationml.presentation"] = { extensions = { "pptx" }, category = "document" },
-    ["text/plain"] = { extensions = { "txt" }, category = "document" },
+    ["text/plain"] = { extensions = { "txt", "md" }, category = "document" },
+    ["text/markdown"] = { extensions = { "md", "markdown" }, category = "document" },
     ["text/csv"] = { extensions = { "csv" }, category = "document" },
 
     -- Archives
