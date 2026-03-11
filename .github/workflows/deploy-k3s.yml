@@ -1,0 +1,227 @@
+name: Build and Deploy OpsAPI to K3s
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: "Environment to deploy (dev, acc, prod)"
+        required: true
+        default: "acc"
+        type: choice
+        options:
+          - dev
+          - acc
+          - prod
+      SKIP_BUILD:
+        description: "Skip Docker build (deploy only)?"
+        type: boolean
+        default: false
+      SKIP_SMOKE_TEST:
+        description: "Skip smoke test?"
+        type: boolean
+        default: false
+      PROJECT_CODE:
+        description: "Project code for migrations (e.g. tax_copilot, kisaan)"
+        required: true
+        default: "tax_copilot"
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REGISTRY: bwalia
+  IMAGE_NAME: opsapi
+  HELM_CHART_PATH: ./devops/helm-charts/opsapi
+
+jobs:
+  # =========================================================================
+  # 1. BUILD AND PUSH DOCKER IMAGE
+  # =========================================================================
+  build:
+    name: Build OpsAPI Image
+    runs-on: [self-hosted, Linux, X64]
+    if: github.event.inputs.SKIP_BUILD != 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push OpsAPI
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./lapis/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          build-args: TAG=latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =========================================================================
+  # 2. SMOKE TEST
+  # =========================================================================
+  smoke-test:
+    name: Smoke Test OpsAPI
+    needs: build
+    runs-on: [self-hosted, Linux, X64]
+    if: always() && (needs.build.result == 'success' || github.event.inputs.SKIP_BUILD == 'true') && github.event.inputs.SKIP_SMOKE_TEST != 'true'
+    steps:
+      - name: Identify Runner
+        run: echo "Running on $(hostname)"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Run smoke test container
+        run: |
+          docker pull ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker stop opsapi-smoke-test || true
+          docker rm opsapi-smoke-test || true
+          docker run -d --name opsapi-smoke-test \
+            -p 34080:80 \
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Check health
+        run: |
+          sleep 15
+          curl -f http://localhost:34080/health || (docker logs opsapi-smoke-test && exit 1)
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f opsapi-smoke-test || true
+
+  # =========================================================================
+  # 3. DEPLOY TO K3S
+  # =========================================================================
+  deploy-to-k3s:
+    name: Deploy OpsAPI to K3s
+    needs: [smoke-test]
+    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure')
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Identify Runner
+        run: echo "Running on $(hostname)"
+
+      - name: Clean up Workspace
+        run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
+        shell: bash
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve target environment
+        id: env
+        run: |
+          TARGET_ENV="${{ github.event.inputs.TARGET_ENV || 'acc' }}"
+          echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
+
+          # Select the right values file
+          if [ -f "${{ env.HELM_CHART_PATH }}/${TARGET_ENV}-values.yaml" ]; then
+            echo "VALUES_FILE=${{ env.HELM_CHART_PATH }}/${TARGET_ENV}-values.yaml" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Values file not found: ${TARGET_ENV}-values.yaml"
+            exit 1
+          fi
+          echo "Deploying to $TARGET_ENV"
+
+      - name: Set up Kubeconfig
+        run: |
+          if [ -z "${{ secrets.MY_K3S_CONFIG }}" ]; then
+            echo "::error::Secret MY_K3S_CONFIG is empty or missing!"
+            exit 1
+          fi
+          echo "${{ secrets.MY_K3S_CONFIG }}" | base64 -d > ./kubeconfig
+
+          # Override to use the Kube-VIP address
+          echo "Overriding Kubeconfig server to k3s0.diytaxreturn.co.uk..."
+          sed -i 's|server: https://.*:6443|server: https://k3s0.diytaxreturn.co.uk:6443|g' ./kubeconfig
+
+          # Disable TLS verification in case the cert is bound to 127.0.0.1
+          kubectl config set-cluster default --insecure-skip-tls-verify=true --kubeconfig=./kubeconfig
+
+          chmod 600 ./kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+      - name: Verify Cluster Connectivity
+        run: |
+          echo "Checking connectivity to Kube-VIP k3s0.diytaxreturn.co.uk..."
+          nc -zv -w 5 k3s0.diytaxreturn.co.uk 6443 && echo "Kube-VIP is REACHABLE" || (echo "Kube-VIP is UNREACHABLE"; exit 1)
+          kubectl cluster-info --kubeconfig=./kubeconfig
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Namespace
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          kubectl create namespace ${{ steps.env.outputs.TARGET_ENV }} --dry-run=client -o yaml | kubectl apply -f -
+
+      # For dev: Vault ExternalSecrets are disabled, so create secrets manually.
+      # For acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
+      - name: Create Secrets (dev only — acc/prod use Vault)
+        if: steps.env.outputs.TARGET_ENV == 'dev'
+        env:
+          ENV_CONTENT: ${{ secrets.OPSAPI_ENV_FILE }}
+          TARGET_ENV: ${{ steps.env.outputs.TARGET_ENV }}
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "$ENV_CONTENT" > ./.env-opsapi.tmp
+          chmod 600 ./.env-opsapi.tmp
+
+          # Create opsapi secret from .env file
+          kubectl create secret generic opsapi-secrets \
+            --from-env-file=./.env-opsapi.tmp \
+            --namespace "$TARGET_ENV" \
+            --dry-run=client -o yaml | kubectl apply --validate=false -f -
+
+          rm -f ./.env-opsapi.tmp
+
+      - name: Deploy OpsAPI
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          helm upgrade --install opsapi ${{ env.HELM_CHART_PATH }} \
+            -f ${{ steps.env.outputs.VALUES_FILE }} \
+            --namespace ${{ steps.env.outputs.TARGET_ENV }} \
+            --create-namespace \
+            --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=latest \
+            --set env=${{ steps.env.outputs.TARGET_ENV }} \
+            --set projectCode=${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}
+
+      - name: Force Refresh Pods
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          NS=${{ steps.env.outputs.TARGET_ENV }}
+          # Remove failed pods so K3s recreates them with new config
+          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed || true
+          kubectl delete pods -n "$NS" -l app=opsapi || true
+
+      - name: Wait for rollout
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          NS=${{ steps.env.outputs.TARGET_ENV }}
+          echo "Waiting for opsapi rollout..."
+          kubectl rollout status deployment/opsapi -n "$NS" --timeout=180s || true
+
+      - name: Cleanup Kubeconfig
+        if: always()
+        run: |
+          rm -f ./kubeconfig ./.env-opsapi.tmp

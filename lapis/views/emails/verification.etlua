@@ -1,0 +1,26 @@
+<h2>Verify Your Email</h2>
+
+<p>Please verify your email address to complete your <strong><%= app_name %></strong> registration.</p>
+
+<% if verification_code then %>
+  <p>Your verification code:</p>
+  <div class="code-box"><%= verification_code %></div>
+<% end %>
+
+<% if verification_url then %>
+  <p style="text-align: center; margin: 28px 0;">
+    <a href="<%= verification_url %>" class="btn">Verify Email</a>
+  </p>
+<% end %>
+
+<% if expires_in then %>
+  <p style="font-size: 13px; color: #9ca3af;">
+    This code expires in <strong><%= expires_in %></strong>.
+  </p>
+<% end %>
+
+<hr class="divider">
+
+<p style="font-size: 13px; color: #9ca3af;">
+  If you didn't create an account, you can ignore this email.
+</p>

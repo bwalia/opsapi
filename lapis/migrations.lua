@@ -850,6 +850,32 @@ return {
         db.query("UPDATE namespaces SET project_code = 'all' WHERE project_code IS NULL")
     end,
 
+    -- =========================================================================
+    -- Admin 2FA OTP codes table
+    -- =========================================================================
+    ['402_create_admin_otp_codes'] = function()
+        local exists = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'admin_otp_codes'
+        ]])
+        if #exists == 0 then
+            schema.create_table("admin_otp_codes", {
+                { "id", types.serial },
+                { "user_id", types.integer },
+                { "code", types.varchar },
+                { "expires_at", types.time },
+                { "verified", types.boolean({ default = false }) },
+                { "attempts", types.integer({ default = 0 }) },
+                { "created_at", types.time },
+                "PRIMARY KEY (id)",
+                "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            })
+            schema.create_index("admin_otp_codes", "user_id")
+            schema.create_index("admin_otp_codes", "code")
+            print("Created admin_otp_codes table")
+        end
+    end,
+
     -- Custom migrations
     ['custom_migrations'] = function()
         local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")

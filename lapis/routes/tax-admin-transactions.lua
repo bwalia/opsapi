@@ -198,7 +198,6 @@ local function filters_applied(params)
 end
 
 return function(app)
-
     -- =========================================================================
     -- GET /api/v2/tax/admin/transactions
     -- Returns paginated transactions with full server-side filtering
@@ -241,7 +240,7 @@ return function(app)
 
         -- Count total matching rows
         local count_sql = "SELECT COUNT(*) AS total " .. from_clause .. " " .. where_clause
-        local count_ok, count_rows = pcall(db.query, count_sql, unpack(values))
+        local count_ok, count_rows = pcall(db.query, count_sql, table.unpack(values))
         if not count_ok then
             return { status = 500, json = { error = "Failed to count transactions" } }
         end
@@ -287,7 +286,7 @@ return function(app)
         table.insert(query_values, limit)
         table.insert(query_values, offset)
 
-        local data_ok, rows = pcall(db.query, select_sql, unpack(query_values))
+        local data_ok, rows = pcall(db.query, select_sql, table.unpack(query_values))
         if not data_ok then
             return { status = 500, json = { error = "Failed to fetch transactions" } }
         end
@@ -438,5 +437,4 @@ return function(app)
             }
         }
     end)
-
 end
