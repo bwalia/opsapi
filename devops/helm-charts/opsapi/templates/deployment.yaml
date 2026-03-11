@@ -28,95 +28,27 @@ spec:
             - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
               mountPath: /tmp/secrets
           ports:
-            - containerPort: 80
+            - containerPort: {{ .Values.service.port }}
           livenessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: {{ .Values.service.port }}
             failureThreshold: 3
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: {{ .Values.service.port }}
             initialDelaySeconds: 120
             periodSeconds: 30
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-secrets
           env:
-            - name: KEYCLOAK_AUTH_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: KEYCLOAK_AUTH_URL
-            - name: KEYCLOAK_TOKEN_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: KEYCLOAK_TOKEN_URL
-            - name: KEYCLOAK_USERINFO_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: KEYCLOAK_USERINFO_URL
-            - name: KEYCLOAK_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: KEYCLOAK_CLIENT_ID
-            - name: KEYCLOAK_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: KEYCLOAK_CLIENT_SECRET
-            - name: KEYCLOAK_REDIRECT_URI
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: KEYCLOAK_REDIRECT_URI
-            - name: JWT_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: JWT_SECRET_KEY
-            - name: OPENSSL_SECRET_IV
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: OPENSSL_SECRET_IV
-            - name: OPENSSL_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: OPENSSL_SECRET_KEY
-            - name: MINIO_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: MINIO_ENDPOINT
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: MINIO_SECRET_KEY
-            - name: MINIO_BUCKET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: MINIO_BUCKET
-            - name: MINIO_REGION
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: MINIO_REGION
-            - name: NODE_API_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: NODE_API_URL
+            - name: LAPIS_ENVIRONMENT
+              value: "production"
+            - name: PROJECT_CODE
+              value: {{ .Values.projectCode | default "tax_copilot" | quote }}
       volumes:
         - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
           configMap:

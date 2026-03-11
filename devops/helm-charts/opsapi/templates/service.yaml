@@ -1,3 +1,4 @@
+{{- if .Values.svcAccessPort }}
 ---
 apiVersion: v1
 kind: Service
@@ -11,15 +12,16 @@ spec:
       targetPort: {{ .Values.service.port }}
       nodePort: {{ .Values.svcAccessPort }}
   type: NodePort
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-svc
+  name: {{ .Values.service.name | default (printf "%s-svc" .Release.Name) }}
 spec:
   selector:
     app: {{ .Release.Name }}
   ports:
     - port: {{ .Values.service.port }}
       targetPort: {{ .Values.service.port }}
-  type: ClusterIP
+  type: {{ .Values.service.type }}

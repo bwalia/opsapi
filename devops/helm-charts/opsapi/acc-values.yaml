@@ -1,0 +1,31 @@
+env: acc
+app: opsapi
+projectCode: tax_copilot
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  name: opsapi-svc
+  port: 80
+
+ingress:
+  enabled: false
+  className: wslproxy
+  annotations: {}
+  hosts: []
+  tls: []
+
+externalSecret:
+  enabled: true
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
