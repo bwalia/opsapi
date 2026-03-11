@@ -62,7 +62,7 @@ jobs:
       - name: Build and push OpsAPI
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./lapis
           file: ./lapis/Dockerfile
           push: true
           tags: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
