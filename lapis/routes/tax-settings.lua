@@ -19,7 +19,6 @@ local function getUserByUuid(uuid)
 end
 
 return function(app)
-
     -- =========================================================================
     -- GET /api/v2/tax/settings/profile
     -- Returns the authenticated user's profile for self-service editing
@@ -71,7 +70,7 @@ return function(app)
         -- Parse JSON body
         local params = self.params
         if ngx.req.get_headers()["content-type"] and
-           ngx.req.get_headers()["content-type"]:find("application/json") then
+            ngx.req.get_headers()["content-type"]:find("application/json") then
             ngx.req.read_body()
             local body = ngx.req.get_body_data()
             if body then
@@ -129,23 +128,27 @@ return function(app)
         local sql = "UPDATE users SET " .. table.concat(set_parts, ", ") .. " WHERE uuid = ?"
         table.insert(set_values, uuid)
 
-        db.query(sql, unpack(set_values))
+        db.query(sql, table.unpack(set_values))
 
         -- Return updated profile
         local updated = getUserByUuid(uuid)
-        return {
-            status = 200,
-            json = {
-                message = "Profile updated",
-                uuid = updated.uuid,
-                email = updated.email,
-                first_name = updated.first_name,
-                last_name = updated.last_name,
-                phone_no = updated.phone_no,
-                address = updated.address,
-                updated_at = updated.updated_at,
+        if updated ~= nil then
+            return {
+                status = 200,
+                json = {
+                    message = "Profile updated",
+                    uuid = updated.uuid,
+                    email = updated.email,
+                    first_name = updated.first_name,
+                    last_name = updated.last_name,
+                    phone_no = updated.phone_no,
+                    address = updated.address,
+                    updated_at = updated.updated_at,
+                }
             }
-        }
+        else
+            return { status = 200, json = {} }
+        end
     end)
 
     -- =========================================================================
@@ -167,7 +170,7 @@ return function(app)
         -- Parse JSON body
         local params = self.params
         if ngx.req.get_headers()["content-type"] and
-           ngx.req.get_headers()["content-type"]:find("application/json") then
+            ngx.req.get_headers()["content-type"]:find("application/json") then
             ngx.req.read_body()
             local body = ngx.req.get_body_data()
             if body then
@@ -274,7 +277,7 @@ return function(app)
         -- Parse JSON body
         local params = {}
         if ngx.req.get_headers()["content-type"] and
-           ngx.req.get_headers()["content-type"]:find("application/json") then
+            ngx.req.get_headers()["content-type"]:find("application/json") then
             ngx.req.read_body()
             local body = ngx.req.get_body_data()
             if body then
@@ -328,7 +331,7 @@ return function(app)
         -- Parse JSON body for password confirmation
         local params = self.params
         if ngx.req.get_headers()["content-type"] and
-           ngx.req.get_headers()["content-type"]:find("application/json") then
+            ngx.req.get_headers()["content-type"]:find("application/json") then
             ngx.req.read_body()
             local body = ngx.req.get_body_data()
             if body then
@@ -362,5 +365,4 @@ return function(app)
             json = { message = "Account deactivated. Contact support to permanently delete your data." }
         }
     end)
-
 end

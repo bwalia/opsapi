@@ -56,7 +56,6 @@ local RATE_FIELDS = {
 }
 
 return function(app)
-
     -- =========================================================================
     -- GET /api/v2/tax/rates
     -- Returns tax rates for a given tax year (or current year)
@@ -188,7 +187,7 @@ return function(app)
         -- Parse JSON body
         local params = {}
         if ngx.req.get_headers()["content-type"] and
-           ngx.req.get_headers()["content-type"]:find("application/json") then
+            ngx.req.get_headers()["content-type"]:find("application/json") then
             ngx.req.read_body()
             local body = ngx.req.get_body_data()
             if body then
@@ -224,7 +223,7 @@ return function(app)
             table.insert(values, existing[1].uuid)
             db.query(
                 "UPDATE tax_rates SET " .. table.concat(sets, ", ") .. " WHERE uuid = ?",
-                unpack(values)
+                table.unpack(values)
             )
         else
             -- Insert with defaults + overrides (UUID auto-generated)
@@ -240,8 +239,9 @@ return function(app)
                 end
             end
             db.query(
-                "INSERT INTO tax_rates (" .. table.concat(insert_fields, ", ") .. ") VALUES (" .. table.concat(placeholders, ", ") .. ")",
-                unpack(insert_values)
+                "INSERT INTO tax_rates (" ..
+                table.concat(insert_fields, ", ") .. ") VALUES (" .. table.concat(placeholders, ", ") .. ")",
+                table.unpack(insert_values)
             )
         end
 
@@ -274,5 +274,4 @@ return function(app)
             }
         }
     end)
-
 end

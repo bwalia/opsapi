@@ -194,9 +194,11 @@ app:before_filter(function(self)
         ["/auth/reset-password"] = true,
         ["/auth/verify-email"] = true,
         ["/auth/resend-verification"] = true,
-        ["/auth/refresh"] = true,  -- Handles its own token validation
-        ["/auth/google"] = true,  -- Google OAuth initiation
-        ["/auth/google/callback"] = true,  -- Google OAuth callback
+        ["/auth/refresh"] = true,         -- Handles its own token validation
+        ["/auth/2fa/verify"] = true,      -- 2FA OTP verification (pre-auth)
+        ["/auth/2fa/resend"] = true,      -- 2FA resend OTP (pre-auth)
+        ["/auth/google"] = true,          -- Google OAuth initiation
+        ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
     }
 
@@ -278,6 +280,7 @@ safe_load_routes("routes.projects")
 safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
+safe_load_routes("routes.email")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
@@ -383,14 +386,18 @@ local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
 if custom_routes_dir then
     ngx.log(ngx.NOTICE, "Loading custom routes from: ", custom_routes_dir)
     local custom_route_files = io.popen("ls " .. custom_routes_dir .. "/*.lua")
-    for file in custom_route_files:lines() do
-        local route_name = file:match(".*/(.*)%.lua$")
-        if route_name then
-            local full_route_path = custom_routes_dir .. "." .. route_name
-            safe_load_routes(full_route_path)
+    if custom_route_files ~= nil then
+        for file in custom_route_files:lines() do
+            local route_name = file:match(".*/(.*)%.lua$")
+            if route_name then
+                local full_route_path = custom_routes_dir .. "." .. route_name
+                safe_load_routes(full_route_path)
+            end
         end
+        custom_route_files:close()
+    else
+        ngx.log(ngx.ERR, "Failed to list custom routes in directory: ", custom_routes_dir)
     end
-    custom_route_files:close()
 else
     ngx.log(ngx.NOTICE, "No custom routes directory specified.")
 end

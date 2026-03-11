@@ -7,32 +7,136 @@ local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 local RateLimit = require("middleware.rate-limit")
+local AdminCheck = require("helper.admin-check")
+local OTP = require("helper.otp")
 
 -- Rate limit configs
 local LOGIN_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:login" }     -- 10/min per IP
 local REFRESH_LIMIT  = { rate = 30,  window = 60,  prefix = "auth:refresh" }   -- 30/min per IP
 local OAUTH_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:oauth" }     -- 10/min per IP
 local VALIDATE_LIMIT = { rate = 20,  window = 60,  prefix = "auth:validate" }  -- 20/min per IP
+local OTP_LIMIT      = { rate = 5,   window = 60,  prefix = "auth:2fa" }       -- 5/min per IP
+
+-- Helper function to parse JSON body
+local function parse_json_body()
+    local ok, result = pcall(function()
+        ngx.req.read_body()
+        local body = ngx.req.get_body_data()
+        if not body or body == "" then
+            return {}
+        end
+        return cJson.decode(body)
+    end)
+
+    if ok and type(result) == "table" then
+        return result
+    end
+    return {}
+end
+
+--- Build the full login response (user + token + namespaces).
+-- Shared by both login and 2FA verify to avoid duplication.
+-- @param userWithRoles table User record from UserQueries.show()
+-- @param user_id number Internal user ID
+-- @return table JSON-ready response body
+local function build_login_response(userWithRoles, user_id)
+    local rolesArray = {}
+    if userWithRoles.roles then
+        for _, role in ipairs(userWithRoles.roles) do
+            table.insert(rolesArray, {
+                id = role.id,
+                role_id = role.role_id,
+                role_name = role.name or role.role_name,
+                name = role.name or role.role_name
+            })
+        end
+    end
+
+    local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
+    local default_namespace = nil
+    local namespace_membership = nil
+
+    if user_id then
+        default_namespace = NamespaceQueries.getUserDefaultNamespace(user_id)
+    end
+
+    if not default_namespace then
+        for _, ns in ipairs(namespaces) do
+            if ns.status == "active" and ns.member_status == "active" then
+                default_namespace = NamespaceQueries.show(ns.id)
+                if user_id then
+                    NamespaceQueries.updateLastActiveNamespace(user_id, ns.id)
+                end
+                break
+            end
+        end
+    else
+        if user_id then
+            NamespaceQueries.updateLastActiveNamespace(user_id, default_namespace.id)
+        end
+    end
+
+    if default_namespace then
+        namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
+            userWithRoles.uuid,
+            default_namespace.id
+        )
+    end
+
+    local token
+    if default_namespace and namespace_membership then
+        local namespace_permissions = NamespaceMemberQueries.getPermissions(namespace_membership.id)
+        token = JWTHelper.generateNamespaceToken(userWithRoles, default_namespace, namespace_membership, {
+            user_roles = rolesArray,
+            namespace_permissions = namespace_permissions
+        })
+    else
+        token = JWTHelper.generateToken(userWithRoles, {
+            roles = rolesArray
+        })
+    end
+
+    local namespacesArray = {}
+    for _, ns in ipairs(namespaces) do
+        table.insert(namespacesArray, {
+            id = ns.id,
+            uuid = ns.uuid,
+            name = ns.name,
+            slug = ns.slug,
+            logo_url = ns.logo_url,
+            is_owner = ns.is_owner,
+            status = ns.status,
+            member_status = ns.member_status
+        })
+    end
+
+    return {
+        user = {
+            id = userWithRoles.internal_id,
+            uuid = userWithRoles.uuid or userWithRoles.id,
+            email = userWithRoles.email,
+            username = userWithRoles.username,
+            first_name = userWithRoles.first_name or "",
+            last_name = userWithRoles.last_name or "",
+            active = userWithRoles.active,
+            created_at = userWithRoles.created_at,
+            updated_at = userWithRoles.updated_at,
+            roles = rolesArray
+        },
+        token = token,
+        namespaces = namespacesArray,
+        current_namespace = default_namespace and {
+            id = default_namespace.id,
+            uuid = default_namespace.uuid,
+            name = default_namespace.name,
+            slug = default_namespace.slug,
+            is_owner = default_namespace.is_owner
+        } or nil
+    }
+end
 
 return function(app)
     ----------------- Auth Routes --------------------
-
-    -- Helper function to parse JSON body
-    local function parse_json_body()
-        local ok, result = pcall(function()
-            ngx.req.read_body()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then
-                return {}
-            end
-            return cJson.decode(body)
-        end)
-
-        if ok and type(result) == "table" then
-            return result
-        end
-        return {}
-    end
 
     app:post("/auth/login", RateLimit.wrap(LOGIN_LIMIT, function(self)
         local identifier = self.params.username or self.params.identifier
@@ -69,116 +173,175 @@ return function(app)
             }
         end
 
-        -- Build roles array with proper structure for frontend
-        local rolesArray = {}
-        if userWithRoles.roles then
-            for _, role in ipairs(userWithRoles.roles) do
-                table.insert(rolesArray, {
-                    id = role.id,
-                    role_id = role.role_id,
-                    role_name = role.name or role.role_name,
-                    name = role.name or role.role_name
-                })
-            end
-        end
-
-        -- USER-FIRST: Get user's namespaces and their default/last active namespace
-        local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
+        -- Resolve user's internal ID for DB lookups
         local db = require("lapis.db")
         local user_record = db.select("id FROM users WHERE uuid = ?", userWithRoles.uuid)
         local user_id = user_record and user_record[1] and user_record[1].id
 
-        -- Get user's default/last active namespace
-        local default_namespace = nil
-        local namespace_membership = nil
+        -- Check if this user has admin access (platform admin or dashboard namespace permission)
+        local is_admin = AdminCheck.isPlatformAdmin(userWithRoles)
 
-        if user_id then
-            -- First try to get user's configured default or last active namespace
-            default_namespace = NamespaceQueries.getUserDefaultNamespace(user_id)
-        end
-
-        -- If no default found, fall back to first available namespace
-        if not default_namespace then
-            for _, ns in ipairs(namespaces) do
-                if ns.status == "active" and ns.member_status == "active" then
-                    default_namespace = NamespaceQueries.show(ns.id)
-                    -- Also set this as the user's last active namespace
-                    if user_id then
-                        NamespaceQueries.updateLastActiveNamespace(user_id, ns.id)
+        if not is_admin and user_id then
+            -- Check namespace-level: does user have "dashboard" permission?
+            local default_namespace = NamespaceQueries.getUserDefaultNamespace(user_id)
+            if not default_namespace then
+                local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
+                for _, ns in ipairs(namespaces) do
+                    if ns.status == "active" and ns.member_status == "active" then
+                        default_namespace = NamespaceQueries.show(ns.id)
+                        break
                     end
-                    break
                 end
             end
-        else
-            -- Update last active namespace
-            if user_id then
-                NamespaceQueries.updateLastActiveNamespace(user_id, default_namespace.id)
+            if default_namespace then
+                local membership = NamespaceMemberQueries.findByUserAndNamespace(
+                    userWithRoles.uuid, default_namespace.id
+                )
+                if membership then
+                    local perms = NamespaceMemberQueries.getPermissions(membership.id)
+                    if perms and perms.dashboard and type(perms.dashboard) == "table" and #perms.dashboard > 0 then
+                        is_admin = true
+                    end
+                end
             end
         end
 
-        -- If user has a namespace, get membership details
-        if default_namespace then
-            namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
-                userWithRoles.uuid,
-                default_namespace.id
-            )
+        -- If admin, require 2FA — send OTP and return partial response (no JWT)
+        if is_admin then
+            -- Accept optional branding from the frontend (SaaS: each frontend sends its own brand)
+            local brand = {
+                app_name = self.params.app_name or self.params.brand_name,
+                brand_color = self.params.brand_color,
+                header_title = self.params.header_title,
+                brand_logo_url = self.params.brand_logo_url,
+                support_email = self.params.support_email,
+            }
+
+            local otp_ok, otp_err = OTP.sendToEmail({
+                id = user_id,
+                email = userWithRoles.email,
+                first_name = userWithRoles.first_name,
+            }, brand)
+
+            if not otp_ok then
+                ngx.log(ngx.ERR, "[2FA] OTP send failed for ", userWithRoles.email, ": ", tostring(otp_err))
+                -- Still require 2FA, just warn that email may not arrive
+            end
+
+            -- Generate a short-lived session token proving password was verified.
+            -- The frontend must send this back with /auth/2fa/verify and /auth/2fa/resend.
+            local session_token = OTP.generateSessionToken(userWithRoles.uuid, user_id)
+
+            return {
+                status = 200,
+                json = {
+                    requires_2fa = true,
+                    session_token = session_token,
+                    email = userWithRoles.email,
+                    message = "Verification code sent to your email"
+                }
+            }
         end
 
-        -- Generate token with namespace context if available
-        local token
-        if default_namespace and namespace_membership then
-            local namespace_permissions = NamespaceMemberQueries.getPermissions(namespace_membership.id)
-            token = JWTHelper.generateNamespaceToken(userWithRoles, default_namespace, namespace_membership, {
-                user_roles = rolesArray,
-                namespace_permissions = namespace_permissions
-            })
-        else
-            token = JWTHelper.generateToken(userWithRoles, {
-                roles = rolesArray
-            })
+        -- Non-admin user: generate token and return full response (no 2FA)
+        return {
+            status = 200,
+            json = build_login_response(userWithRoles, user_id)
+        }
+    end))
+
+    -- =========================================================================
+    -- 2FA OTP Verification — completes admin login after password was verified
+    -- =========================================================================
+
+    -- POST /auth/2fa/verify — Verify OTP and issue full JWT
+    -- Body: { "session_token": "...", "code": "123456" }
+    -- The session_token proves the user already passed password verification.
+    app:post("/auth/2fa/verify", RateLimit.wrap(OTP_LIMIT, function(self)
+        local params = parse_json_body()
+        local session_token = params.session_token or self.params.session_token
+        local code = params.code or self.params.code
+
+        if not session_token or not code then
+            return {
+                status = 400,
+                json = { error = "session_token and code are required" }
+            }
         end
 
-        -- Build namespaces array for response
-        local namespacesArray = {}
-        for _, ns in ipairs(namespaces) do
-            table.insert(namespacesArray, {
-                id = ns.id,
-                uuid = ns.uuid,
-                name = ns.name,
-                slug = ns.slug,
-                logo_url = ns.logo_url,
-                is_owner = ns.is_owner,
-                status = ns.status,
-                member_status = ns.member_status
-            })
+        -- Verify the 2FA session token (signed proof of password verification)
+        local session, session_err = OTP.verifySessionToken(session_token)
+        if not session then
+            return { status = 401, json = { error = session_err } }
         end
+
+        local user_uuid = session.user_uuid
+        local user_id = session.user_id
+
+        -- Look up user
+        local userWithRoles = UserQueries.show(user_uuid)
+        if not userWithRoles then
+            return { status = 401, json = { error = "Invalid session" } }
+        end
+
+        -- Verify OTP
+        local verified, otp_err = OTP.verify(user_id, code)
+        if not verified then
+            return { status = 401, json = { error = otp_err or "Invalid code" } }
+        end
+
+        -- OTP verified — issue the full JWT
+        ngx.log(ngx.NOTICE, "[2FA] Admin login completed for: ", userWithRoles.email)
 
         return {
             status = 200,
-            json = {
-                user = {
-                    id = userWithRoles.internal_id,
-                    uuid = userWithRoles.uuid or userWithRoles.id,
-                    email = userWithRoles.email,
-                    username = userWithRoles.username,
-                    first_name = userWithRoles.first_name or "",
-                    last_name = userWithRoles.last_name or "",
-                    active = userWithRoles.active,
-                    created_at = userWithRoles.created_at,
-                    updated_at = userWithRoles.updated_at,
-                    roles = rolesArray
-                },
-                token = token,
-                namespaces = namespacesArray,
-                current_namespace = default_namespace and {
-                    id = default_namespace.id,
-                    uuid = default_namespace.uuid,
-                    name = default_namespace.name,
-                    slug = default_namespace.slug,
-                    is_owner = default_namespace.is_owner
-                } or nil
-            }
+            json = build_login_response(userWithRoles, user_id)
         }
+    end))
+
+    -- POST /auth/2fa/resend — Resend OTP code
+    -- Body: { "session_token": "..." }
+    -- Requires the same session_token from login to prevent abuse.
+    app:post("/auth/2fa/resend", RateLimit.wrap(OTP_LIMIT, function(self)
+        local params = parse_json_body()
+        local session_token = params.session_token or self.params.session_token
+
+        if not session_token then
+            return { status = 400, json = { error = "session_token is required" } }
+        end
+
+        -- Verify the 2FA session token
+        local session, session_err = OTP.verifySessionToken(session_token)
+        if not session then
+            return { status = 401, json = { error = session_err } }
+        end
+
+        local db = require("lapis.db")
+        local user_record = db.query([[
+            SELECT id, email, first_name FROM users WHERE uuid = ? AND active = true
+        ]], session.user_uuid)
+
+        if not user_record or #user_record == 0 then
+            return { status = 200, json = { message = "If the account exists, a new code has been sent" } }
+        end
+
+        local user = user_record[1]
+
+        -- Accept optional branding for resend (same as login)
+        local brand = {
+            app_name = params.app_name or params.brand_name,
+            brand_color = params.brand_color,
+            header_title = params.header_title,
+            brand_logo_url = params.brand_logo_url,
+            support_email = params.support_email,
+        }
+
+        local ok, err = OTP.sendToEmail(user, brand)
+        if not ok then
+            ngx.log(ngx.ERR, "[2FA] Resend OTP failed for ", user.email, ": ", tostring(err))
+        end
+
+        return { status = 200, json = { message = "If the account exists, a new code has been sent" } }
     end))
 
     -- Google OAuth Routes
