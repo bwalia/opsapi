@@ -1,0 +1,11 @@
+image:
+  repository: adminer
+  tag: latest
+  pullPolicy: Always
+
+adminer:
+  defaultServer: opsapi-postgres
+  design: pepa-linha-dark
+
+service:
+  nodePort: 32200

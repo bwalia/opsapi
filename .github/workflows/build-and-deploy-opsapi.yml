@@ -174,6 +174,16 @@ jobs:
             --namespace ${{ env.TARGET_ENV }} --create-namespace
         shell: bash
 
+      - name: Deploy Adminer with NodePort for quick DB access
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "Deploying Adminer to ${{ env.TARGET_ENV }} namespace..."
+          helm upgrade --install adminer ./devops/helm-charts/adminer \
+            --namespace ${{ env.TARGET_ENV }} --create-namespace
+          echo "Adminer deployed. Access via NodePort 32200."
+        shell: bash
+
       - name: Kubeseal encrypt the env secrets file for node Helper app [Deactivated for now]
         if: ${{ env.DEPLOYMENT_TYPE == 'not_disabled' }}
         run: |
