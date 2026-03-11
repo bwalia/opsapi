@@ -160,7 +160,7 @@ return {
         INSERT INTO users (uuid, first_name, last_name, username, password, email, active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ]], MigrationUtils.generateUUID(), "Super", "User", "administrative", hashedPassword,
-                "administrative@admin.com", true, MigrationUtils.getCurrentTimestamp(),
+                "diytaxreturn.noreply@gmail.com", true, MigrationUtils.getCurrentTimestamp(),
                 MigrationUtils.getCurrentTimestamp())
         end
     end,
