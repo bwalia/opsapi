@@ -10,6 +10,14 @@ data:
 
         FILE=/app/config.lua
         cp /tmp/secrets/config.lua $FILE
+
+        # Patch nginx resolver to include K8s CoreDNS for internal service resolution
+        KUBE_DNS=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
+        if [ -n "$KUBE_DNS" ] && [ -f /app/nginx.conf ]; then
+          sed -i "s/resolver 8.8.8.8 8.8.4.4/resolver ${KUBE_DNS} 8.8.8.8 8.8.4.4/" /app/nginx.conf
+          echo "[bootstrap] Patched nginx resolver with K8s DNS: ${KUBE_DNS}"
+        fi
+
         lapis migrate
         echo "==========================="
 
