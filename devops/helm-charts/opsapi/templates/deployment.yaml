@@ -49,6 +49,18 @@ spec:
               value: "production"
             - name: PROJECT_CODE
               value: {{ .Values.projectCode | default "tax_copilot" | quote }}
+            {{- if .Values.setup.adminEmail }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.setup.adminEmail | quote }}
+            {{- end }}
+            {{- if .Values.setup.adminPassword }}
+            - name: ADMIN_PASSWORD
+              value: {{ .Values.setup.adminPassword | quote }}
+            {{- end }}
+            {{- if .Values.setup.namespaceSlug }}
+            - name: NAMESPACE_SLUG
+              value: {{ .Values.setup.namespaceSlug | quote }}
+            {{- end }}
       volumes:
         - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
           configMap:
