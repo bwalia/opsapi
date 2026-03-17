@@ -110,6 +110,15 @@ jobs:
       apex_domain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}
 
     steps:
+      - name: Ensure Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "Fixing Docker socket permissions..."
+            sudo chmod 666 /var/run/docker.sock
+          fi
+          docker info > /dev/null 2>&1 && echo "Docker is accessible" || { echo "Docker is NOT accessible"; exit 1; }
+        shell: bash
+
       - name: Clean up Docker-owned files
         run: |
           echo "Cleaning up Docker-owned files from previous runs..."
@@ -289,6 +298,15 @@ jobs:
       apex_domain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}
 
     steps:
+      - name: Ensure Docker socket access
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "Fixing Docker socket permissions..."
+            sudo chmod 666 /var/run/docker.sock
+          fi
+          docker info > /dev/null 2>&1 && echo "Docker is accessible" || { echo "Docker is NOT accessible"; exit 1; }
+        shell: bash
+
       - name: Clean up Docker-owned files
         run: |
           echo "Cleaning up Docker-owned files from previous runs..."

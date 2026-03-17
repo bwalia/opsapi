@@ -65,6 +65,12 @@
             groups: docker
             append: true
 
+        - name: Set docker socket permissions for immediate access
+          file:
+            path: /var/run/docker.sock
+            group: docker
+            mode: "0660"
+
     - name: Verify Docker installation
       command: docker --version
       register: docker_version

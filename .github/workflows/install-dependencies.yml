@@ -79,7 +79,15 @@ jobs:
 
       - name: Verify Docker is working
         run: |
-          docker --version
-          docker compose version
+          # After fresh install, current shell may not have docker group yet.
+          # Use sg to run in docker group context, fall back to sudo.
+          if sg docker -c "docker --version" 2>/dev/null; then
+            sg docker -c "docker compose version"
+          elif sudo docker --version 2>/dev/null; then
+            sudo docker compose version
+          else
+            echo "ERROR: Docker is not accessible"
+            exit 1
+          fi
           echo "Docker is ready on ${{ inputs.runner_label }} runner"
         shell: bash
