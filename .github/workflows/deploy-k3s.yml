@@ -114,18 +114,24 @@ jobs:
 
       - name: Check container starts
         run: |
-          sleep 15
-          # Smoke test only verifies nginx starts and responds (no DB available).
-          # A 503 is expected without a database — we just confirm the process is alive.
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:34080/health || true)
-          echo "Health endpoint returned HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 600 ]; then
-            echo "Smoke test passed: nginx is running and responding"
-          else
-            echo "Smoke test failed: nginx did not respond"
-            docker logs opsapi-smoke-test
-            exit 1
-          fi
+          echo "Waiting for OpenResty to start..."
+          for i in $(seq 1 30); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:34080/health 2>/dev/null || echo "000")
+            echo "Attempt $i: HTTP $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            # Accept 503 as OK for smoke test - means OpenResty is running but no DB available
+            if [ "$HTTP_CODE" = "503" ]; then
+              echo "OpenResty is running (503 expected without database). Smoke test passed."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Smoke test failed - container not responding"
+          docker logs opsapi-smoke-test
+          exit 1
 
       - name: Cleanup
         if: always()

@@ -927,41 +927,45 @@ $COMPOSE_CMD up --build -d
 
 # Wait for PostgreSQL to be ready (healthcheck-based)
 echo -e "${GREEN}[+] Waiting for PostgreSQL to be ready...${NC}"
-MAX_RETRIES=30
+PG_RETRIES=60
 RETRY_COUNT=0
 PG_CONTAINER="opsapi-postgres-dev-db"
 
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+while [ $RETRY_COUNT -lt $PG_RETRIES ]; do
     if docker exec "$PG_CONTAINER" pg_isready -U pguser > /dev/null 2>&1; then
         echo -e "${GREEN}[+] PostgreSQL is ready!${NC}"
         break
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo -e "${YELLOW}  Waiting for PostgreSQL... (${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+    echo -e "${YELLOW}  Waiting for PostgreSQL... (${RETRY_COUNT}/${PG_RETRIES})${NC}"
     sleep 2
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo -e "${RED}[!] PostgreSQL failed to start after ${MAX_RETRIES} attempts. Exiting.${NC}"
+if [ $RETRY_COUNT -eq $PG_RETRIES ]; then
+    echo -e "${RED}[!] PostgreSQL failed to start after ${PG_RETRIES} attempts. Exiting.${NC}"
     echo -e "${YELLOW}[!] Check logs: docker logs ${PG_CONTAINER}${NC}"
     exit 1
 fi
 
 # Also wait for the opsapi container (nginx/lapis) to be ready
+# Accept both 200 and 503 — 503 means OpenResty is running but DB isn't connected yet,
+# which is fine since migrations run after this step.
 echo -e "${GREEN}[+] Waiting for OpsAPI container to be ready...${NC}"
+OPSAPI_RETRIES=60
 RETRY_COUNT=0
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if docker exec "$CONTAINER_NAME" curl -sf http://127.0.0.1/health > /dev/null 2>&1; then
-        echo -e "${GREEN}[+] OpsAPI container is ready!${NC}"
+while [ $RETRY_COUNT -lt $OPSAPI_RETRIES ]; do
+    HTTP_CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/health 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "503" ]; then
+        echo -e "${GREEN}[+] OpsAPI container is ready! (HTTP $HTTP_CODE)${NC}"
         break
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo -e "${YELLOW}  Waiting for OpsAPI... (${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+    echo -e "${YELLOW}  Waiting for OpsAPI... (${RETRY_COUNT}/${OPSAPI_RETRIES})${NC}"
     sleep 2
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo -e "${RED}[!] OpsAPI container failed to start after ${MAX_RETRIES} attempts. Exiting.${NC}"
+if [ $RETRY_COUNT -eq $OPSAPI_RETRIES ]; then
+    echo -e "${RED}[!] OpsAPI container failed to start after ${OPSAPI_RETRIES} attempts. Exiting.${NC}"
     echo -e "${YELLOW}[!] Check logs: docker logs ${CONTAINER_NAME}${NC}"
     exit 1
 fi
