@@ -140,9 +140,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Copy .env file from server secrets
+      - name: Copy .env file from server secrets (INT environment)
         run: |
-          SERVER_ENV="/home/bwalia/.secrets/opsapi/int/${{ steps.env-setup.outputs.PROJECT_CODE }}/.env"
+          SERVER_ENV="/home/bwalia/.secrets/opsapi/diytaxreturnuk/int/.env"
           TARGET_ENV_FILE="lapis/.env"
           if [ -f "$SERVER_ENV" ]; then
             echo "Found .env file at $SERVER_ENV"
@@ -319,9 +319,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Copy .env file from server secrets
+      - name: Copy .env file from server secrets (Test environment)
         run: |
-          SERVER_ENV="/home/bwalia/.secrets/opsapi/test/${{ steps.env-setup.outputs.PROJECT_CODE }}/.env"
+          SERVER_ENV="/home/bwalia/.secrets/opsapi/diytaxreturnuk/test/.env"
           TARGET_ENV_FILE="lapis/.env"
           if [ -f "$SERVER_ENV" ]; then
             echo "Found .env file at $SERVER_ENV"
