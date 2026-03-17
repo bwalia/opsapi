@@ -21,6 +21,11 @@ data:
         lapis migrate
         echo "==========================="
 
+        echo "[bootstrap] Running namespace setup..."
+        lapis exec "require('scripts.setup-namespace').run({})"
+        echo "[bootstrap] Namespace setup complete."
+        echo "==========================="
+
         mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
         chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
         cp /app/api-docs/swagger.json /tmp/swagger.json

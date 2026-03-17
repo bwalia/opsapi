@@ -24,6 +24,11 @@ ingress:
 externalSecret:
   enabled: false
 
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
 autoscaling:
   enabled: false
   minReplicas: 1

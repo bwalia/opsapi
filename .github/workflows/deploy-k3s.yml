@@ -28,6 +28,21 @@ on:
         required: true
         default: "tax_copilot"
         type: string
+      ADMIN_EMAIL:
+        description: "Super admin email for namespace setup"
+        required: false
+        default: ""
+        type: string
+      ADMIN_PASSWORD:
+        description: "Super admin password for namespace setup"
+        required: false
+        default: ""
+        type: string
+      NAMESPACE_SLUG:
+        description: "Namespace slug (default: derived from project code)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -97,7 +112,7 @@ jobs:
             -p 34080:80 \
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Check health
+      - name: Check container starts
         run: |
           echo "Waiting for OpenResty to start..."
           for i in $(seq 1 30); do
@@ -220,7 +235,10 @@ jobs:
             --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=latest \
             --set env=${{ steps.env.outputs.TARGET_ENV }} \
-            --set projectCode=${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}
+            --set projectCode=${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }} \
+            --set setup.adminEmail=${{ github.event.inputs.ADMIN_EMAIL || '' }} \
+            --set setup.adminPassword=${{ github.event.inputs.ADMIN_PASSWORD || '' }} \
+            --set setup.namespaceSlug=${{ github.event.inputs.NAMESPACE_SLUG || '' }}
 
       - name: Force Refresh Pods
         run: |
