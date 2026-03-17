@@ -3,14 +3,19 @@ name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 # This workflow deploys OPSAPI to self-hosted runners using Docker Compose
 # It uses the start.sh script to ensure consistency with local deployments
 #
+# PIPELINE:
+#   1. Deploy to INT environment -> Smoke test INT
+#   2. Deploy to TEST environment -> Smoke test TEST (only if INT passes)
+#   3. Summary report with results from all stages
+#
 # TRIGGERS:
-# - Automatically on push to main branch (deploys to 'test' environment)
+# - Automatically on push to main branch (deploys int -> test)
 # - Manually via workflow_dispatch with custom options
 #
 # REQUIREMENTS:
-# - Self-hosted runner with Docker and Docker Compose installed
-# - Runner must have access to the target environment
-# - .env file should be pre-configured on the runner at /home/bwalia/.secrets/opsapi/.env
+# - Self-hosted runners with labels: [self-hosted, int] and [self-hosted, test]
+# - Docker and Docker Compose installed on runners
+# - .env file pre-configured at /home/bwalia/.secrets/opsapi/<env>/<project>/.env
 # - SLACK_WEBHOOK secret configured for notifications
 
 on:
@@ -26,27 +31,9 @@ on:
   # Manual trigger with options
   workflow_dispatch:
     inputs:
-      TARGET_ENV:
-        type: choice
-        description: "Target environment"
-        default: "test"
-        required: true
-        options:
-          - local
-          - dev
-          - test
-          - acc
-          - prod
-          - remote
-
-      CUSTOM_ENV:
-        type: string
-        description: "Custom environment name (overrides TARGET_ENV if provided)"
-        required: false
-
       APEX_DOMAIN:
         type: string
-        description: "Apex domain (default: diytaxreturn.co.uk). e.g., kisaan.com, myapp.co.uk"
+        description: "Apex domain (default: diytaxreturn.co.uk)"
         default: "diytaxreturn.co.uk"
         required: false
 
@@ -65,12 +52,6 @@ on:
         default: false
         required: false
 
-      RUN_MIGRATIONS:
-        type: boolean
-        description: "Run database migrations after deployment"
-        default: true
-        required: false
-
       PROJECT_CODE:
         type: choice
         description: "Project code for conditional migrations"
@@ -83,12 +64,6 @@ on:
           - collaboration
           - hospital
           - core_only
-
-      RUNNER_LABEL:
-        type: string
-        description: "Self-hosted runner label (default: self-hosted)"
-        default: "self-hosted"
-        required: false
 
       ADMIN_EMAIL:
         type: string
@@ -104,29 +79,30 @@ on:
 
 env:
   BASE_DOMAIN: "diytaxreturn.co.uk"
-  SERVER_ENV_PATH: "/home/bwalia/.secrets/opsapi/${{ github.event.inputs.TARGET_ENV || 'test' }}/${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}/.env"
 
 jobs:
-  deploy:
-    name: Deploy to ${{ github.event.inputs.CUSTOM_ENV || github.event.inputs.TARGET_ENV || 'test' }}
-    runs-on: ${{ github.event.inputs.RUNNER_LABEL || 'self-hosted' }}
+  # ============================================================
+  # Stage 1: Deploy to INT environment
+  # ============================================================
+  deploy-int:
+    name: Deploy to INT
+    runs-on: [self-hosted, int]
+    outputs:
+      api_url: ${{ steps.env-setup.outputs.API_URL }}
+      protocol: ${{ steps.env-setup.outputs.PROTOCOL }}
+      project_code: ${{ steps.env-setup.outputs.PROJECT_CODE }}
+      apex_domain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}
 
     steps:
       - name: Clean up Docker-owned files
         run: |
           echo "Cleaning up Docker-owned files from previous runs..."
-          # Stop any running containers first
           cd ${{ github.workspace }}/lapis 2>/dev/null && docker compose down 2>/dev/null || true
-
-          # Remove Docker-owned directories that cause permission issues
           sudo rm -rf ${{ github.workspace }}/lapis/session-data 2>/dev/null || true
           sudo rm -rf ${{ github.workspace }}/lapis/pgdata 2>/dev/null || true
           sudo rm -rf ${{ github.workspace }}/lapis/logs 2>/dev/null || true
           sudo rm -rf ${{ github.workspace }}/lapis/keycloak_data 2>/dev/null || true
-
-          # Prune Docker build cache to fix snapshot errors
           docker builder prune -f 2>/dev/null || true
-
           echo "Cleanup completed"
         shell: bash
         continue-on-error: true
@@ -134,47 +110,12 @@ jobs:
       - name: Set environment variables
         id: env-setup
         run: |
-          # Determine trigger type and set defaults
-          if [ "${{ github.event_name }}" == "push" ]; then
-            echo "Triggered by push to main branch"
-            TARGET_ENV="test"
-            PROTOCOL="https"
-            RESET_DB="false"
-            PROJECT_CODE="tax_copilot"
-            APEX_DOMAIN="${{ env.BASE_DOMAIN }}"
-          else
-            echo "Triggered manually via workflow_dispatch"
-            # Determine target environment
-            if [ -n "${{ github.event.inputs.CUSTOM_ENV }}" ]; then
-              TARGET_ENV="${{ github.event.inputs.CUSTOM_ENV }}"
-              echo "Using custom environment: $TARGET_ENV"
-            elif [ -n "${{ github.event.inputs.TARGET_ENV }}" ]; then
-              TARGET_ENV="${{ github.event.inputs.TARGET_ENV }}"
-              echo "Using preset environment: $TARGET_ENV"
-            else
-              TARGET_ENV="test"
-              echo "Using default environment: $TARGET_ENV"
-            fi
-            PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
-            RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
-            PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
-            APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
-          fi
-
-          BASE_DOMAIN="$APEX_DOMAIN"
-
-          # Generate API URL based on environment and protocol
-          case "$TARGET_ENV" in
-            local)
-              API_URL="${PROTOCOL}://127.0.0.1:4010"
-              ;;
-            prod)
-              API_URL="${PROTOCOL}://api.${BASE_DOMAIN}"
-              ;;
-            *)
-              API_URL="${PROTOCOL}://${TARGET_ENV}-api.${BASE_DOMAIN}"
-              ;;
-          esac
+          TARGET_ENV="int"
+          PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
+          RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
+          PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
+          APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
+          API_URL="${PROTOCOL}://${TARGET_ENV}-api.${APEX_DOMAIN}"
 
           echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
           echo "API_URL=$API_URL" >> $GITHUB_OUTPUT
@@ -182,11 +123,9 @@ jobs:
           echo "RESET_DB=$RESET_DB" >> $GITHUB_OUTPUT
           echo "PROJECT_CODE=$PROJECT_CODE" >> $GITHUB_OUTPUT
           echo "APEX_DOMAIN=$APEX_DOMAIN" >> $GITHUB_OUTPUT
-          echo "TRIGGER=${{ github.event_name }}" >> $GITHUB_OUTPUT
 
           echo "=========================================="
-          echo "Deployment Configuration:"
-          echo "  Trigger: ${{ github.event_name }}"
+          echo "INT Deployment Configuration:"
           echo "  Environment: $TARGET_ENV"
           echo "  Apex Domain: $APEX_DOMAIN"
           echo "  Protocol: $PROTOCOL"
@@ -203,19 +142,13 @@ jobs:
 
       - name: Copy .env file from server secrets
         run: |
-          echo "Copying .env file from server secrets path..."
-
-          SERVER_ENV="${{ env.SERVER_ENV_PATH }}"
+          SERVER_ENV="/home/bwalia/.secrets/opsapi/int/${{ steps.env-setup.outputs.PROJECT_CODE }}/.env"
           TARGET_ENV_FILE="lapis/.env"
-
-          # Check if server .env file exists
           if [ -f "$SERVER_ENV" ]; then
             echo "Found .env file at $SERVER_ENV"
             cp "$SERVER_ENV" "$TARGET_ENV_FILE"
-            echo ".env file copied successfully to $TARGET_ENV_FILE"
           else
             echo "Error: .env file not found at $SERVER_ENV"
-            echo "Please ensure the .env file exists on the runner at: $SERVER_ENV"
             exit 1
           fi
         shell: bash
@@ -226,22 +159,16 @@ jobs:
 
       - name: Deploy using start.sh
         run: |
-          echo "Running deployment using start.sh..."
-
-          # Build the command arguments
-          ARGS="-e ${{ steps.env-setup.outputs.TARGET_ENV }}"
+          ARGS="-e int"
           ARGS="$ARGS -d ${{ steps.env-setup.outputs.APEX_DOMAIN }}"
           ARGS="$ARGS -P ${{ steps.env-setup.outputs.PROTOCOL }}"
           ARGS="$ARGS -j ${{ steps.env-setup.outputs.PROJECT_CODE }}"
-          ARGS="$ARGS -n"  # No git operations (already checked out)
-          ARGS="$ARGS -C"  # CI mode: uses override file (no dev volume mounts, different ports)
+          ARGS="$ARGS -n -C"
 
-          # Add reset-db flag if requested
           if [ "${{ steps.env-setup.outputs.RESET_DB }}" == "true" ]; then
             ARGS="$ARGS -r"
           fi
 
-          # Add admin credentials if provided (otherwise start.sh uses defaults)
           ADMIN_EMAIL="${{ github.event.inputs.ADMIN_EMAIL }}"
           ADMIN_PASSWORD="${{ github.event.inputs.ADMIN_PASSWORD }}"
           if [ -n "$ADMIN_EMAIL" ]; then
@@ -255,144 +182,357 @@ jobs:
           ./start.sh $ARGS
         shell: bash
 
-      - name: Verify deployment
-        run: |
-          echo "Verifying deployment..."
-
-          # Check if containers are running
-          cd lapis
-          docker compose -f docker-compose.ci.yml ps
-
-          # Health check - try to reach the API
-          echo ""
-          echo "Performing health check..."
-
-          HEALTH_URL="http://127.0.0.1:4010/health"
-
-          # Retry health check up to 10 times
-          HEALTH_OK=false
-          for i in {1..10}; do
-            if curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" | grep -q "200"; then
-              echo "Health check passed!"
-              HEALTH_OK=true
-              break
-            fi
-            echo "Health check attempt $i failed, retrying in 5 seconds..."
-            sleep 5
-          done
-
-          if [ "$HEALTH_OK" != "true" ]; then
-            echo "ERROR: Health check failed after 10 attempts!"
-            docker compose -f docker-compose.ci.yml logs --tail=50 opsapi
-            exit 1
-          fi
-
-          echo ""
-          echo "=========================================="
-          echo "Deployment Summary"
-          echo "=========================================="
-          echo "Trigger: ${{ steps.env-setup.outputs.TRIGGER }}"
-          echo "Environment: ${{ steps.env-setup.outputs.TARGET_ENV }}"
-          echo "Apex Domain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}"
-          echo "API URL: ${{ steps.env-setup.outputs.API_URL }}"
-          echo "Protocol: ${{ steps.env-setup.outputs.PROTOCOL }}"
-          echo "Project Code: ${{ steps.env-setup.outputs.PROJECT_CODE }}"
-          echo "Reset DB: ${{ steps.env-setup.outputs.RESET_DB }}"
-          echo "=========================================="
-        shell: bash
-
       - name: Show container logs on failure
         if: failure()
         run: |
-          echo "Deployment failed. Showing container logs..."
           cd lapis
           docker compose -f docker-compose.ci.yml logs --tail=100
         shell: bash
 
-      - name: Slack notification - Success
-        if: success()
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_CHANNEL: github-updates
-          SLACK_COLOR: ${{ job.status }}
-          SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI deployed successfully to ${{ steps.env-setup.outputs.TARGET_ENV }} environment :rocket:\nAPI URL: ${{ steps.env-setup.outputs.API_URL }}\nDomain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}\nProject: ${{ steps.env-setup.outputs.PROJECT_CODE }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}"
-          SLACK_TITLE: OPSAPI Deployment Success
-          SLACK_USERNAME: rtCamp
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-      - name: Slack notification - Failure
-        if: failure()
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_CHANNEL: github-updates
-          SLACK_COLOR: ${{ job.status }}
-          SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI deployment FAILED for ${{ steps.env-setup.outputs.TARGET_ENV }} environment :x:\nDomain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}\nProject: ${{ steps.env-setup.outputs.PROJECT_CODE }}\nTriggered by: ${{ steps.env-setup.outputs.TRIGGER }}\nCommit: ${{ github.sha }}\nCheck workflow logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          SLACK_TITLE: OPSAPI Deployment Failed
-          SLACK_USERNAME: rtCamp
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-  # Optional: Run post-deployment tests
-  post-deploy-verification:
-    name: Post-deployment verification
-    runs-on: ${{ github.event.inputs.RUNNER_LABEL || 'self-hosted' }}
-    needs: deploy
-    if: success()
+  # ============================================================
+  # Stage 2: Smoke test INT environment
+  # ============================================================
+  smoke-test-int:
+    name: Smoke Test INT
+    runs-on: [self-hosted, int]
+    needs: deploy-int
 
     steps:
       - name: Wait for services to stabilize
+        run: sleep 15
+        shell: bash
+
+      - name: Health check
+        id: health
         run: |
-          echo "Waiting for services to stabilize..."
-          sleep 10
+          echo "Running smoke tests against INT (http://127.0.0.1:4010)..."
+
+          HEALTH_OK=false
+          for i in {1..10}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/health")
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "Health check passed on attempt $i"
+              HEALTH_OK=true
+              break
+            fi
+            echo "Attempt $i: HTTP $HTTP_CODE - retrying in 5s..."
+            sleep 5
+          done
+
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "ERROR: Health check failed after 10 attempts"
+            cd ${{ github.workspace }}/lapis 2>/dev/null && docker compose -f docker-compose.ci.yml logs --tail=50 opsapi || true
+            exit 1
+          fi
         shell: bash
 
       - name: Verify API endpoints
         run: |
-          echo "Verifying API endpoints..."
+          PASS=0
+          FAIL=0
 
           # Test health endpoint
           HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/health")
           if [ "$HEALTH_RESPONSE" == "200" ]; then
-            echo "✓ Health endpoint: OK (HTTP $HEALTH_RESPONSE)"
+            echo "PASS: /health (HTTP $HEALTH_RESPONSE)"
+            PASS=$((PASS + 1))
           else
-            echo "✗ Health endpoint: FAILED (HTTP $HEALTH_RESPONSE)"
-            exit 1
+            echo "FAIL: /health (HTTP $HEALTH_RESPONSE)"
+            FAIL=$((FAIL + 1))
           fi
 
           # Test root endpoint
           ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/")
           if [ "$ROOT_RESPONSE" == "200" ]; then
-            echo "✓ Root endpoint: OK (HTTP $ROOT_RESPONSE)"
+            echo "PASS: / (HTTP $ROOT_RESPONSE)"
+            PASS=$((PASS + 1))
           else
-            echo "✗ Root endpoint: FAILED (HTTP $ROOT_RESPONSE)"
-            exit 1
+            echo "FAIL: / (HTTP $ROOT_RESPONSE)"
+            FAIL=$((FAIL + 1))
           fi
 
           echo ""
-          echo "All endpoint verifications passed!"
+          echo "INT Smoke Test Results: $PASS passed, $FAIL failed"
+
+          if [ "$FAIL" -gt 0 ]; then
+            exit 1
+          fi
         shell: bash
 
-      - name: Slack notification - Verification Success
-        if: success()
+  # ============================================================
+  # Stage 3: Deploy to TEST environment (only if INT passes)
+  # ============================================================
+  deploy-test:
+    name: Deploy to TEST
+    runs-on: [self-hosted, test]
+    needs: smoke-test-int
+    outputs:
+      api_url: ${{ steps.env-setup.outputs.API_URL }}
+      protocol: ${{ steps.env-setup.outputs.PROTOCOL }}
+      project_code: ${{ steps.env-setup.outputs.PROJECT_CODE }}
+      apex_domain: ${{ steps.env-setup.outputs.APEX_DOMAIN }}
+
+    steps:
+      - name: Clean up Docker-owned files
+        run: |
+          echo "Cleaning up Docker-owned files from previous runs..."
+          cd ${{ github.workspace }}/lapis 2>/dev/null && docker compose down 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/session-data 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/pgdata 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/logs 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/lapis/keycloak_data 2>/dev/null || true
+          docker builder prune -f 2>/dev/null || true
+          echo "Cleanup completed"
+        shell: bash
+        continue-on-error: true
+
+      - name: Set environment variables
+        id: env-setup
+        run: |
+          TARGET_ENV="test"
+          PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
+          RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
+          PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
+          APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
+          API_URL="${PROTOCOL}://${TARGET_ENV}-api.${APEX_DOMAIN}"
+
+          echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
+          echo "API_URL=$API_URL" >> $GITHUB_OUTPUT
+          echo "PROTOCOL=$PROTOCOL" >> $GITHUB_OUTPUT
+          echo "RESET_DB=$RESET_DB" >> $GITHUB_OUTPUT
+          echo "PROJECT_CODE=$PROJECT_CODE" >> $GITHUB_OUTPUT
+          echo "APEX_DOMAIN=$APEX_DOMAIN" >> $GITHUB_OUTPUT
+
+          echo "=========================================="
+          echo "TEST Deployment Configuration:"
+          echo "  Environment: $TARGET_ENV"
+          echo "  Apex Domain: $APEX_DOMAIN"
+          echo "  Protocol: $PROTOCOL"
+          echo "  API URL: $API_URL"
+          echo "  Project Code: $PROJECT_CODE"
+          echo "  Reset DB: $RESET_DB"
+          echo "=========================================="
+        shell: bash
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Copy .env file from server secrets
+        run: |
+          SERVER_ENV="/home/bwalia/.secrets/opsapi/test/${{ steps.env-setup.outputs.PROJECT_CODE }}/.env"
+          TARGET_ENV_FILE="lapis/.env"
+          if [ -f "$SERVER_ENV" ]; then
+            echo "Found .env file at $SERVER_ENV"
+            cp "$SERVER_ENV" "$TARGET_ENV_FILE"
+          else
+            echo "Error: .env file not found at $SERVER_ENV"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Make start.sh executable
+        run: chmod +x ./start.sh
+        shell: bash
+
+      - name: Deploy using start.sh
+        run: |
+          ARGS="-e test"
+          ARGS="$ARGS -d ${{ steps.env-setup.outputs.APEX_DOMAIN }}"
+          ARGS="$ARGS -P ${{ steps.env-setup.outputs.PROTOCOL }}"
+          ARGS="$ARGS -j ${{ steps.env-setup.outputs.PROJECT_CODE }}"
+          ARGS="$ARGS -n -C"
+
+          if [ "${{ steps.env-setup.outputs.RESET_DB }}" == "true" ]; then
+            ARGS="$ARGS -r"
+          fi
+
+          ADMIN_EMAIL="${{ github.event.inputs.ADMIN_EMAIL }}"
+          ADMIN_PASSWORD="${{ github.event.inputs.ADMIN_PASSWORD }}"
+          if [ -n "$ADMIN_EMAIL" ]; then
+            ARGS="$ARGS -A $ADMIN_EMAIL"
+          fi
+          if [ -n "$ADMIN_PASSWORD" ]; then
+            ARGS="$ARGS -W $ADMIN_PASSWORD"
+          fi
+
+          echo "Executing: ./start.sh $ARGS"
+          ./start.sh $ARGS
+        shell: bash
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          cd lapis
+          docker compose -f docker-compose.ci.yml logs --tail=100
+        shell: bash
+
+  # ============================================================
+  # Stage 4: Smoke test TEST environment
+  # ============================================================
+  smoke-test-test:
+    name: Smoke Test TEST
+    runs-on: [self-hosted, test]
+    needs: deploy-test
+
+    steps:
+      - name: Wait for services to stabilize
+        run: sleep 15
+        shell: bash
+
+      - name: Health check
+        id: health
+        run: |
+          echo "Running smoke tests against TEST (http://127.0.0.1:4010)..."
+
+          HEALTH_OK=false
+          for i in {1..10}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/health")
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "Health check passed on attempt $i"
+              HEALTH_OK=true
+              break
+            fi
+            echo "Attempt $i: HTTP $HTTP_CODE - retrying in 5s..."
+            sleep 5
+          done
+
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "ERROR: Health check failed after 10 attempts"
+            cd ${{ github.workspace }}/lapis 2>/dev/null && docker compose -f docker-compose.ci.yml logs --tail=50 opsapi || true
+            exit 1
+          fi
+        shell: bash
+
+      - name: Verify API endpoints
+        run: |
+          PASS=0
+          FAIL=0
+
+          # Test health endpoint
+          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/health")
+          if [ "$HEALTH_RESPONSE" == "200" ]; then
+            echo "PASS: /health (HTTP $HEALTH_RESPONSE)"
+            PASS=$((PASS + 1))
+          else
+            echo "FAIL: /health (HTTP $HEALTH_RESPONSE)"
+            FAIL=$((FAIL + 1))
+          fi
+
+          # Test root endpoint
+          ROOT_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:4010/")
+          if [ "$ROOT_RESPONSE" == "200" ]; then
+            echo "PASS: / (HTTP $ROOT_RESPONSE)"
+            PASS=$((PASS + 1))
+          else
+            echo "FAIL: / (HTTP $ROOT_RESPONSE)"
+            FAIL=$((FAIL + 1))
+          fi
+
+          echo ""
+          echo "TEST Smoke Test Results: $PASS passed, $FAIL failed"
+
+          if [ "$FAIL" -gt 0 ]; then
+            exit 1
+          fi
+        shell: bash
+
+  # ============================================================
+  # Stage 5: Summary report (always runs)
+  # ============================================================
+  summary:
+    name: Deployment Summary
+    runs-on: [self-hosted, test]
+    needs: [deploy-int, smoke-test-int, deploy-test, smoke-test-test]
+    if: always()
+
+    steps:
+      - name: Generate summary report
+        run: |
+          echo "============================================================"
+          echo "        OPSAPI Deployment Pipeline Summary"
+          echo "============================================================"
+          echo ""
+          echo "Trigger:      ${{ github.event_name }}"
+          echo "Commit:       ${{ github.sha }}"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Run:          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+          echo "------------------------------------------------------------"
+          echo "Stage                  | Status"
+          echo "------------------------------------------------------------"
+          echo "Deploy INT             | ${{ needs.deploy-int.result }}"
+          echo "Smoke Test INT         | ${{ needs.smoke-test-int.result }}"
+          echo "Deploy TEST            | ${{ needs.deploy-test.result }}"
+          echo "Smoke Test TEST        | ${{ needs.smoke-test-test.result }}"
+          echo "------------------------------------------------------------"
+          echo ""
+
+          # Determine overall status
+          if [ "${{ needs.smoke-test-test.result }}" == "success" ]; then
+            echo "OVERALL: ALL STAGES PASSED"
+            OVERALL="success"
+          elif [ "${{ needs.smoke-test-int.result }}" == "success" ] && [ "${{ needs.deploy-test.result }}" != "success" ]; then
+            echo "OVERALL: INT passed, TEST deployment failed"
+            OVERALL="partial"
+          elif [ "${{ needs.deploy-int.result }}" != "success" ]; then
+            echo "OVERALL: INT deployment failed - TEST was skipped"
+            OVERALL="failed"
+          else
+            echo "OVERALL: Pipeline failed"
+            OVERALL="failed"
+          fi
+
+          echo ""
+          echo "INT API URL:  ${{ needs.deploy-int.outputs.api_url }}"
+          echo "TEST API URL: ${{ needs.deploy-test.outputs.api_url }}"
+          echo "Project Code: ${{ needs.deploy-int.outputs.project_code }}"
+          echo "Domain:       ${{ needs.deploy-int.outputs.apex_domain }}"
+          echo "============================================================"
+        shell: bash
+
+      - name: Slack notification - Pipeline Success
+        if: needs.smoke-test-test.result == 'success'
         uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_CHANNEL: github-updates
-          SLACK_COLOR: ${{ job.status }}
+          SLACK_COLOR: good
           SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI post-deployment verification completed successfully :white_check_mark:\nAll API endpoints responding correctly."
-          SLACK_TITLE: OPSAPI Verification Passed
+          SLACK_MESSAGE: |
+            OPSAPI deployment pipeline completed successfully :rocket:
+
+            Deploy INT: ${{ needs.deploy-int.result }}
+            Smoke INT: ${{ needs.smoke-test-int.result }}
+            Deploy TEST: ${{ needs.deploy-test.result }}
+            Smoke TEST: ${{ needs.smoke-test-test.result }}
+
+            INT API: ${{ needs.deploy-int.outputs.api_url }}
+            TEST API: ${{ needs.deploy-test.outputs.api_url }}
+            Project: ${{ needs.deploy-int.outputs.project_code }}
+            Commit: ${{ github.sha }}
+          SLACK_TITLE: OPSAPI Pipeline - All Stages Passed
           SLACK_USERNAME: rtCamp
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
-      - name: Slack notification - Verification Failed
-        if: failure()
+      - name: Slack notification - Pipeline Failed
+        if: needs.smoke-test-test.result != 'success'
         uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_CHANNEL: github-updates
-          SLACK_COLOR: ${{ job.status }}
+          SLACK_COLOR: danger
           SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_MESSAGE: "OPSAPI post-deployment verification FAILED :warning:\nAPI endpoints may not be responding correctly.\nCheck workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          SLACK_TITLE: OPSAPI Verification Failed
+          SLACK_MESSAGE: |
+            OPSAPI deployment pipeline had failures :x:
+
+            Deploy INT: ${{ needs.deploy-int.result }}
+            Smoke INT: ${{ needs.smoke-test-int.result }}
+            Deploy TEST: ${{ needs.deploy-test.result }}
+            Smoke TEST: ${{ needs.smoke-test-test.result }}
+
+            Project: ${{ needs.deploy-int.outputs.project_code }}
+            Commit: ${{ github.sha }}
+            Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SLACK_TITLE: OPSAPI Pipeline - Failures Detected
           SLACK_USERNAME: rtCamp
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
