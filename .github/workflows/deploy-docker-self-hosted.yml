@@ -82,10 +82,26 @@ env:
 
 jobs:
   # ============================================================
+  # Stage 0: Ensure dependencies are installed on runners
+  # ============================================================
+  deps-int:
+    name: Dependencies (INT)
+    uses: ./.github/workflows/install-dependencies.yml
+    with:
+      runner_label: int
+
+  deps-test:
+    name: Dependencies (TEST)
+    uses: ./.github/workflows/install-dependencies.yml
+    with:
+      runner_label: test
+
+  # ============================================================
   # Stage 1: Deploy to INT environment
   # ============================================================
   deploy-int:
     name: Deploy to INT
+    needs: deps-int
     runs-on: [self-hosted, int]
     outputs:
       api_url: ${{ steps.env-setup.outputs.API_URL }}
@@ -265,7 +281,7 @@ jobs:
   deploy-test:
     name: Deploy to TEST
     runs-on: [self-hosted, test]
-    needs: smoke-test-int
+    needs: [smoke-test-int, deps-test]
     outputs:
       api_url: ${{ steps.env-setup.outputs.API_URL }}
       protocol: ${{ steps.env-setup.outputs.PROTOCOL }}
@@ -444,7 +460,7 @@ jobs:
   summary:
     name: Deployment Summary
     runs-on: [self-hosted, test]
-    needs: [deploy-int, smoke-test-int, deploy-test, smoke-test-test]
+    needs: [deps-int, deps-test, deploy-int, smoke-test-int, deploy-test, smoke-test-test]
     if: always()
 
     steps:
