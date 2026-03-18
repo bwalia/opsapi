@@ -267,6 +267,7 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- CORE ROUTES (always loaded — core tables exist for all projects)
 -- ============================================
 safe_load_routes("routes.auth")
+safe_load_routes("routes.pin")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
 safe_load_routes("routes.roles")
