@@ -98,10 +98,10 @@ return function(app)
             }
         end
 
+        -- statement_id is optional — when connecting from settings/profile page
+        -- it won't be provided. The callback uses it to redirect back appropriately.
         local statement_id = self.params.statement_id
-        if not statement_id or statement_id == "" then
-            return { status = 400, json = { error = "statement_id is required" } }
-        end
+        local source = self.params.source or "file"  -- "file" or "settings"
 
         -- current_user is set by the before_filter auth middleware
         local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.id)
@@ -112,7 +112,8 @@ return function(app)
         -- Build HMAC-signed state
         local state, state_err = sign_state({
             uuid = user_uuid,
-            sid  = statement_id,
+            sid  = statement_id or "",
+            src  = source,
             ts   = ngx.time(),
         })
         if not state then
@@ -177,6 +178,18 @@ return function(app)
 
         local user_uuid    = state_data.uuid
         local statement_id = state_data.sid
+        local source       = state_data.src or "file"
+
+        -- Build redirect base depending on where the user started
+        local function error_redirect(err_code)
+            if source == "settings" then
+                return { redirect_to = frontend_url .. "/settings?hmrc_error=" .. ngx.escape_uri(err_code) }
+            end
+            return {
+                redirect_to = frontend_url .. "/file?statement=" .. (statement_id or "") ..
+                              "&hmrc_error=" .. ngx.escape_uri(err_code)
+            }
+        end
 
         -- ── Exchange code for token ──
         local client_id     = Global.getEnvVar("HMRC_CLIENT_ID")
@@ -208,27 +221,18 @@ return function(app)
 
         if not token_res then
             ngx.log(ngx.ERR, "[HMRC] Token exchange HTTP error: ", tostring(token_err))
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_exchange_failed"
-            }
+            return error_redirect("token_exchange_failed")
         end
 
         if token_res.status ~= 200 then
             ngx.log(ngx.ERR, "[HMRC] Token exchange failed HTTP ", token_res.status, ": ", token_res.body)
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_exchange_failed"
-            }
+            return error_redirect("token_exchange_failed")
         end
 
         local ok, token_data = pcall(cjson.decode, token_res.body)
         if not ok or not token_data or not token_data.access_token then
             ngx.log(ngx.ERR, "[HMRC] Token response missing access_token")
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_exchange_failed"
-            }
+            return error_redirect("token_exchange_failed")
         end
 
         -- ── Store token in DB ──
@@ -244,19 +248,20 @@ return function(app)
 
         if not store_ok then
             ngx.log(ngx.ERR, "[HMRC] Failed to store token: ", tostring(store_err))
-            -- Non-fatal: redirect but show error
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_store_failed"
-            }
+            return error_redirect("token_store_failed")
         end
 
         ngx.log(ngx.NOTICE, "[HMRC] OAuth successful for user=", user_uuid,
-                             " statement=", statement_id, " expires_in=", expires_in)
+                             " statement=", statement_id, " source=", source, " expires_in=", expires_in)
 
         -- ── Redirect to frontend — no token in URL ──
+        if source == "settings" then
+            return {
+                redirect_to = frontend_url .. "/settings?hmrc_connected=true"
+            }
+        end
         return {
-            redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
+            redirect_to = frontend_url .. "/file?statement=" .. (statement_id or "") ..
                           "&hmrc_connected=true"
         }
     end))

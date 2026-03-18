@@ -14,6 +14,9 @@
   - tax_audit_logs          : Audit trail for all changes
   - tax_support_conversations : User-accountant messaging
   - tax_support_messages    : Individual support messages
+  - tax_user_profiles       : User HMRC profile (hashed NINO, preferences)
+  - hmrc_businesses         : Cached HMRC business details
+  - hmrc_obligations        : Cached quarterly obligation periods
 ]]
 
 local schema = require("lapis.db.schema")
@@ -819,5 +822,112 @@ return {
             ON CONFLICT (tax_year) DO NOTHING
         ]])
         print("[Tax Copilot] Seeded tax_rates for 2023-24, 2024-25, 2025-26")
+    end,
+
+    -- 34. Create tax_user_profiles table
+    -- Stores user's HMRC-related profile data (hashed NINO, business info, etc.)
+    -- NINO is stored as a bcrypt hash — only last 4 chars are kept in plaintext for display.
+    [34] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_user_profiles (
+                id SERIAL NOT NULL,
+                uuid CHARACTER VARYING(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                user_id INTEGER NOT NULL UNIQUE,
+                user_uuid CHARACTER VARYING(255) NOT NULL UNIQUE,
+                nino_hash TEXT,
+                nino_last4 CHARACTER VARYING(255),
+                has_nino BOOLEAN NOT NULL DEFAULT FALSE,
+                hmrc_connected BOOLEAN NOT NULL DEFAULT FALSE,
+                default_business_id CHARACTER VARYING(255),
+                default_tax_year CHARACTER VARYING(255),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (id)
+            )
+        ]])
+        print("[Tax Copilot] Created tax_user_profiles table (NINO stored as bcrypt hash)")
+    end,
+
+    -- 35. Add indexes to tax_user_profiles
+    [35] = function()
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_user_id ON tax_user_profiles (user_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_user_uuid ON tax_user_profiles (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_uuid ON tax_user_profiles (uuid)")
+        print("[Tax Copilot] Added indexes to tax_user_profiles")
+    end,
+
+    -- 36. Create hmrc_businesses table
+    -- Caches the user's HMRC business details fetched via MTD API
+    [36] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_businesses (
+                id SERIAL NOT NULL,
+                uuid CHARACTER VARYING(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                user_uuid CHARACTER VARYING(255) NOT NULL,
+                business_id CHARACTER VARYING(255) NOT NULL,
+                type_of_business CHARACTER VARYING(255) NOT NULL DEFAULT 'self-employment',
+                trading_name CHARACTER VARYING(255),
+                accounting_type CHARACTER VARYING(255),
+                first_accounting_period_start CHARACTER VARYING(255),
+                first_accounting_period_end CHARACTER VARYING(255),
+                raw_response TEXT,
+                fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (id)
+            )
+        ]])
+        print("[Tax Copilot] Created hmrc_businesses table")
+    end,
+
+    -- 37. Add indexes to hmrc_businesses
+    [37] = function()
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_businesses_user_uuid ON hmrc_businesses (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_businesses_business_id ON hmrc_businesses (business_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_businesses_uuid ON hmrc_businesses (uuid)")
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_businesses_user_business
+            ON hmrc_businesses (user_uuid, business_id)
+        ]])
+        print("[Tax Copilot] Added indexes to hmrc_businesses")
+    end,
+
+    -- 38. Create hmrc_obligations table
+    -- Caches quarterly obligation periods fetched from HMRC
+    [38] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_obligations (
+                id SERIAL NOT NULL,
+                uuid CHARACTER VARYING(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                user_uuid CHARACTER VARYING(255) NOT NULL,
+                business_id CHARACTER VARYING(255) NOT NULL,
+                tax_year CHARACTER VARYING(255) NOT NULL,
+                period_start CHARACTER VARYING(255) NOT NULL,
+                period_end CHARACTER VARYING(255) NOT NULL,
+                due_date CHARACTER VARYING(255),
+                status CHARACTER VARYING(255) NOT NULL DEFAULT 'Open',
+                received_date CHARACTER VARYING(255),
+                period_key CHARACTER VARYING(255),
+                fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (id)
+            )
+        ]])
+        print("[Tax Copilot] Created hmrc_obligations table")
+    end,
+
+    -- 39. Add indexes to hmrc_obligations
+    [39] = function()
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_user_uuid ON hmrc_obligations (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_business_id ON hmrc_obligations (business_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_tax_year ON hmrc_obligations (tax_year)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_status ON hmrc_obligations (status)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_uuid ON hmrc_obligations (uuid)")
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_obligations_period
+            ON hmrc_obligations (user_uuid, business_id, period_start, period_end)
+        ]])
+        print("[Tax Copilot] Added indexes to hmrc_obligations")
     end,
 }
