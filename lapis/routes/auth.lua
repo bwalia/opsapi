@@ -1,5 +1,6 @@
 local http = require("resty.http")
 local cJson = require("cjson")
+local db = require("lapis.db")
 local UserQueries = require "queries.UserQueries"
 local Global = require "helper.global"
 local JWTHelper = require "helper.jwt-helper"
@@ -7,7 +8,6 @@ local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 local RateLimit = require("middleware.rate-limit")
-local AdminCheck = require("helper.admin-check")
 local OTP = require("helper.otp")
 
 -- Rate limit configs
@@ -110,6 +110,13 @@ local function build_login_response(userWithRoles, user_id)
         })
     end
 
+    -- Check if user has a PIN set (for mobile app lock)
+    local has_pin = false
+    if user_id then
+        local pin_result = db.select("pin_hash FROM users WHERE id = ?", user_id)
+        has_pin = pin_result and pin_result[1] and pin_result[1].pin_hash ~= nil and true or false
+    end
+
     return {
         user = {
             id = userWithRoles.internal_id,
@@ -124,6 +131,7 @@ local function build_login_response(userWithRoles, user_id)
             roles = rolesArray
         },
         token = token,
+        has_pin = has_pin,
         namespaces = namespacesArray,
         current_namespace = default_namespace and {
             id = default_namespace.id,
@@ -178,75 +186,39 @@ return function(app)
         local user_record = db.select("id FROM users WHERE uuid = ?", userWithRoles.uuid)
         local user_id = user_record and user_record[1] and user_record[1].id
 
-        -- Check if this user has admin access (platform admin or dashboard namespace permission)
-        local is_admin = AdminCheck.isPlatformAdmin(userWithRoles)
+        -- All users require 2FA — send OTP and return partial response (no JWT)
+        -- Accept optional branding from the frontend (SaaS: each frontend sends its own brand)
+        local brand = {
+            app_name = self.params.app_name or self.params.brand_name,
+            brand_color = self.params.brand_color,
+            header_title = self.params.header_title,
+            brand_logo_url = self.params.brand_logo_url,
+            support_email = self.params.support_email,
+        }
 
-        if not is_admin and user_id then
-            -- Check namespace-level: does user have "dashboard" permission?
-            local default_namespace = NamespaceQueries.getUserDefaultNamespace(user_id)
-            if not default_namespace then
-                local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
-                for _, ns in ipairs(namespaces) do
-                    if ns.status == "active" and ns.member_status == "active" then
-                        default_namespace = NamespaceQueries.show(ns.id)
-                        break
-                    end
-                end
-            end
-            if default_namespace then
-                local membership = NamespaceMemberQueries.findByUserAndNamespace(
-                    userWithRoles.uuid, default_namespace.id
-                )
-                if membership then
-                    local perms = NamespaceMemberQueries.getPermissions(membership.id)
-                    if perms and perms.dashboard and type(perms.dashboard) == "table" and #perms.dashboard > 0 then
-                        is_admin = true
-                    end
-                end
-            end
+        local otp_ok, otp_err = OTP.sendToEmail({
+            id = user_id,
+            email = userWithRoles.email,
+            first_name = userWithRoles.first_name,
+        }, brand)
+
+        if not otp_ok then
+            ngx.log(ngx.ERR, "[2FA] OTP send failed for ", userWithRoles.email, ": ", tostring(otp_err))
+            -- Still require 2FA, just warn that email may not arrive
         end
 
-        -- If admin, require 2FA — send OTP and return partial response (no JWT)
-        if is_admin then
-            -- Accept optional branding from the frontend (SaaS: each frontend sends its own brand)
-            local brand = {
-                app_name = self.params.app_name or self.params.brand_name,
-                brand_color = self.params.brand_color,
-                header_title = self.params.header_title,
-                brand_logo_url = self.params.brand_logo_url,
-                support_email = self.params.support_email,
-            }
+        -- Generate a short-lived session token proving password was verified.
+        -- The frontend must send this back with /auth/2fa/verify and /auth/2fa/resend.
+        local session_token = OTP.generateSessionToken(userWithRoles.uuid, user_id)
 
-            local otp_ok, otp_err = OTP.sendToEmail({
-                id = user_id,
-                email = userWithRoles.email,
-                first_name = userWithRoles.first_name,
-            }, brand)
-
-            if not otp_ok then
-                ngx.log(ngx.ERR, "[2FA] OTP send failed for ", userWithRoles.email, ": ", tostring(otp_err))
-                -- Still require 2FA, just warn that email may not arrive
-            end
-
-            -- Generate a short-lived session token proving password was verified.
-            -- The frontend must send this back with /auth/2fa/verify and /auth/2fa/resend.
-            local session_token = OTP.generateSessionToken(userWithRoles.uuid, user_id)
-
-            return {
-                status = 200,
-                json = {
-                    requires_2fa = true,
-                    session_token = session_token,
-                    email = userWithRoles.email,
-                    message = "Verification code sent to your email"
-                }
-            }
-        end
-
-        -- Non-admin user: generate token and return full response (no 2FA)
         return {
             status = 200,
-            json = build_login_response(userWithRoles, user_id)
+            json = {
+                requires_2fa = true,
+                session_token = session_token,
+                email = userWithRoles.email,
+                message = "Verification code sent to your email"
+            }
         }
     end))
 
