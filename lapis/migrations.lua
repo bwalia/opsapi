@@ -1067,6 +1067,11 @@ return {
         end
     end,
 
+    ['403_add_user_pin_hash'] = function()
+        db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash varchar(255) DEFAULT NULL")
+        print("Added pin_hash column to users table")
+    end,
+
     -- Custom migrations
     ['custom_migrations'] = function()
         local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")
