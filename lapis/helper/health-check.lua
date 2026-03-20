@@ -140,43 +140,66 @@ function HealthCheck.checkMinio()
         details = {}
     }
 
-    local minio_endpoint = os.getenv("MINIO_ENDPOINT") or "http://localhost:9000"
-    status.details.endpoint = minio_endpoint
+    local minio_internal = "http://minio:9000"
+    local minio_external = os.getenv("MINIO_ENDPOINT") or minio_internal
+    status.details.endpoint = minio_external
+    status.details.internal_endpoint = minio_internal
 
-    local success, result = pcall(function()
+    -- Check internal endpoint (container-to-container connectivity)
+    local internal_ok, internal_result = pcall(function()
         local httpc = http.new()
-        httpc:set_timeout(5000) -- 5 second timeout
-
-        local res, err = httpc:request_uri(minio_endpoint .. "/minio/health/live", {
+        httpc:set_timeout(5000)
+        local res, err = httpc:request_uri(minio_internal .. "/minio/health/live", {
             method = "GET",
         })
-
         if not res then
             error("Connection failed: " .. tostring(err))
         end
-
-        return {
-            connected = true,
-            http_code = res.status,
-        }
+        return { connected = true, http_code = res.status }
     end)
+
+    status.details.internal = internal_ok and internal_result or { connected = false, error = tostring(internal_result) }
+
+    -- Check external endpoint (SSL/proxy health)
+    local external_ok, external_result = pcall(function()
+        local httpc = http.new()
+        httpc:set_timeout(5000)
+        local res, err = httpc:request_uri(minio_external .. "/minio/health/live", {
+            method = "GET",
+            ssl_verify = true,
+        })
+        if not res then
+            error("Connection failed: " .. tostring(err))
+        end
+        return { connected = true, http_code = res.status }
+    end)
+
+    status.details.external = external_ok and external_result or { connected = false, error = tostring(external_result) }
 
     status.response_time_ms = math.floor((ngx.now() - start_time) * 1000)
 
-    if not success then
-        status.status = "degraded"
-        status.error = "MinIO not available: " .. tostring(result)
+    if not internal_ok then
+        status.status = "unhealthy"
+        status.error = "MinIO internal not available: " .. tostring(internal_result)
         status.details.connected = false
         return status
     end
 
-    if result.http_code ~= 200 then
-        status.status = "degraded"
-        status.error = "MinIO returned HTTP " .. tostring(result.http_code)
+    if internal_result.http_code ~= 200 then
+        status.status = "unhealthy"
+        status.error = "MinIO internal returned HTTP " .. tostring(internal_result.http_code)
+        status.details.connected = false
+        return status
     end
 
-    status.details.connected = result.connected
-    status.details.http_code = result.http_code
+    -- Internal is healthy; external failure is degraded (SSL/proxy issue, not MinIO itself)
+    status.details.connected = true
+    if not external_ok or (external_result.http_code and external_result.http_code ~= 200) then
+        status.status = "degraded"
+        local ext_err = not external_ok and tostring(external_result) or ("HTTP " .. tostring(external_result.http_code))
+        status.error = "MinIO external endpoint issue: " .. ext_err
+    end
+
     return status
 end
 

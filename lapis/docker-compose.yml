@@ -155,6 +155,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_DOMAIN: test-s3.diytaxreturn.co.uk,test-s3-cli.diytaxreturn.co.uk
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -180,6 +181,7 @@ services:
 
       echo 'Creating buckets...';
       mc mb local/opsapi --ignore-existing;
+      mc mb local/opsapi-diytaxreturn --ignore-existing;
       mc mb local/documents --ignore-existing;
       mc mb local/avatars --ignore-existing;
       mc mb local/attachments --ignore-existing;
@@ -189,6 +191,7 @@ services:
 
       echo 'Setting bucket policies...';
       mc anonymous set public local/opsapi;
+      mc anonymous set public local/opsapi-diytaxreturn;
       mc anonymous set public local/documents;
       mc anonymous set public local/avatars;
       mc anonymous set public local/attachments;
