@@ -938,4 +938,25 @@ return {
         db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS nino_encrypted TEXT")
         print("[Tax Copilot] Added nino_encrypted column to tax_user_profiles")
     end,
+
+    -- 41. Create hmrc_tokens table
+    -- Stores HMRC OAuth access/refresh tokens per user.
+    -- Previously created at runtime via ensureTable() — now a proper migration.
+    [41] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_tokens (
+                id           SERIAL PRIMARY KEY,
+                user_uuid    TEXT        NOT NULL UNIQUE,
+                access_token TEXT        NOT NULL,
+                refresh_token TEXT,
+                scope        TEXT,
+                expires_at   TIMESTAMP,
+                created_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+                updated_at   TIMESTAMP   NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_tokens_user_uuid ON hmrc_tokens (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_tokens_expires_at ON hmrc_tokens (expires_at)")
+        print("[Tax Copilot] Created hmrc_tokens table")
+    end,
 }
