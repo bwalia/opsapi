@@ -1013,6 +1013,13 @@ return {
         tax_copilot_migrations, 31),
     ['331_tax_create_tax_rates_table'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 32),
     ['332_tax_seed_tax_rates'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 33),
+    ['333_tax_create_user_profiles'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 34),
+    ['334_tax_add_user_profiles_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 35),
+    ['335_tax_create_hmrc_businesses'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 36),
+    ['336_tax_add_hmrc_businesses_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 37),
+    ['337_tax_create_hmrc_obligations'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 38),
+    ['338_tax_add_hmrc_obligations_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 39),
+    ['339_tax_add_nino_encrypted'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 40),
 
     -- =========================================================================
     -- RBAC ENHANCEMENT: Add columns to modules table for dynamic RBAC
