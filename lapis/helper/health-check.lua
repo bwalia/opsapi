@@ -131,6 +131,9 @@ function HealthCheck.checkRedis()
 end
 
 -- Check MinIO connectivity
+-- Verifies both internal (MINIO_ENDPOINT — used by the app for S3 operations)
+-- and external (MINIO_ENDPOINT_WEB_EXTERNAL — used by browsers/clients for public access).
+-- "healthy" = both pass, "degraded" = one passes, "unhealthy" = neither passes.
 function HealthCheck.checkMinio()
     local start_time = ngx.now()
     local status = {
@@ -140,64 +143,82 @@ function HealthCheck.checkMinio()
         details = {}
     }
 
-    local minio_internal = "http://minio:9000"
-    local minio_external = os.getenv("MINIO_ENDPOINT") or minio_internal
-    status.details.endpoint = minio_external
+    -- Internal: the endpoint the app uses for S3 operations (container-to-container)
+    local minio_internal = os.getenv("MINIO_ENDPOINT")
+        or os.getenv("MINIO_INTERNAL_ENDPOINT")
+        or "http://minio:9000"
+    -- External: server-accessible public endpoint (set on deployed environments)
+    -- Falls back to MINIO_PUBLIC_URL but skips localhost URLs (browser-only, not reachable from container)
+    local minio_external = os.getenv("MINIO_ENDPOINT_WEB_EXTERNAL")
+    if not minio_external or minio_external == "" then
+        local public_url = os.getenv("MINIO_PUBLIC_URL")
+        if public_url and public_url ~= "" and not public_url:match("localhost") and not public_url:match("127%.0%.0%.1") then
+            minio_external = public_url
+        end
+    end
+
     status.details.internal_endpoint = minio_internal
+    status.details.external_endpoint = minio_external or "(not configured)"
 
-    -- Check internal endpoint (container-to-container connectivity)
-    local internal_ok, internal_result = pcall(function()
-        local httpc = http.new()
-        httpc:set_timeout(5000)
-        local res, err = httpc:request_uri(minio_internal .. "/minio/health/live", {
-            method = "GET",
-        })
-        if not res then
-            error("Connection failed: " .. tostring(err))
+    -- SSL verification: enabled via HEALTH_CHECK_SSL_VERIFY=true (default: false)
+    local ssl_env = os.getenv("HEALTH_CHECK_SSL_VERIFY")
+    local ssl_verify = ssl_env == "true" or ssl_env == "1"
+    status.details.ssl_verify = ssl_verify
+
+    -- Helper: try a single MinIO health request
+    local function check_endpoint(url)
+        if not url or url == "" then
+            return { connected = false, error = "Not configured" }
         end
-        return { connected = true, http_code = res.status }
-    end)
-
-    status.details.internal = internal_ok and internal_result or { connected = false, error = tostring(internal_result) }
-
-    -- Check external endpoint (SSL/proxy health)
-    local external_ok, external_result = pcall(function()
-        local httpc = http.new()
-        httpc:set_timeout(5000)
-        local res, err = httpc:request_uri(minio_external .. "/minio/health/live", {
-            method = "GET",
-            ssl_verify = true,
-        })
-        if not res then
-            error("Connection failed: " .. tostring(err))
+        local ok, result = pcall(function()
+            local httpc = http.new()
+            httpc:set_timeout(5000)
+            local res, err = httpc:request_uri(url .. "/minio/health/live", {
+                method = "GET",
+                ssl_verify = ssl_verify,
+            })
+            if not res then
+                error("Connection failed: " .. tostring(err))
+            end
+            return { connected = true, http_code = res.status }
+        end)
+        if ok then
+            return result
         end
-        return { connected = true, http_code = res.status }
-    end)
+        return { connected = false, error = tostring(result) }
+    end
 
-    status.details.external = external_ok and external_result or { connected = false, error = tostring(external_result) }
+    -- Check both endpoints
+    local internal_result = check_endpoint(minio_internal)
+    status.details.internal = internal_result
+    local internal_healthy = internal_result.connected and internal_result.http_code == 200
+
+    local external_result = check_endpoint(minio_external)
+    status.details.external = external_result
+    local external_healthy = external_result.connected and external_result.http_code == 200
 
     status.response_time_ms = math.floor((ngx.now() - start_time) * 1000)
 
-    if not internal_ok then
-        status.status = "unhealthy"
-        status.error = "MinIO internal not available: " .. tostring(internal_result)
-        status.details.connected = false
-        return status
-    end
+    local external_configured = minio_external and minio_external ~= ""
 
-    if internal_result.http_code ~= 200 then
-        status.status = "unhealthy"
-        status.error = "MinIO internal returned HTTP " .. tostring(internal_result.http_code)
-        status.details.connected = false
-        return status
-    end
-
-    -- Internal is healthy; external failure is degraded (SSL/proxy issue, not MinIO itself)
-    status.details.connected = true
-    if not external_ok or (external_result.http_code and external_result.http_code ~= 200) then
+    if internal_healthy and (external_healthy or not external_configured) then
+        -- Internal works, and external either works or wasn't configured — all good
+        status.details.connected = true
+    elseif internal_healthy and external_configured and not external_healthy then
+        -- App can talk to MinIO but public access is broken
         status.status = "degraded"
-        local ext_err = not external_ok and tostring(external_result) or ("HTTP " .. tostring(external_result.http_code))
-        status.error = "MinIO external endpoint issue: " .. ext_err
+        status.details.connected = true
+        status.error = "MinIO external endpoint not reachable (internal OK)"
+    elseif external_healthy and not internal_healthy then
+        -- External works but internal is broken — app S3 operations may fail
+        status.status = "degraded"
+        status.details.connected = true
+        status.error = "MinIO internal endpoint not reachable (external OK)"
+    else
+        -- Neither works
+        status.status = "unhealthy"
+        status.details.connected = false
+        status.error = "MinIO not reachable on any endpoint"
     end
 
     return status
@@ -368,10 +389,14 @@ function HealthCheck.getQuickStatus()
     local db_check = HealthCheck.checkDatabase()
     local minio_check = HealthCheck.checkMinio()
 
+    -- Database is critical (unhealthy = overall unhealthy)
+    -- MinIO is important but not critical (unhealthy = overall degraded)
     local overall = "healthy"
     if db_check.status == "unhealthy" then
         overall = "unhealthy"
-    elseif db_check.status == "degraded" or minio_check.status == "degraded" then
+    elseif db_check.status == "degraded"
+        or minio_check.status == "degraded"
+        or minio_check.status == "unhealthy" then
         overall = "degraded"
     end
 
@@ -392,7 +417,8 @@ function HealthCheck.getQuickStatus()
             minio = {
                 status = minio_check.status,
                 response_time_ms = minio_check.response_time_ms,
-                endpoint = minio_check.details and minio_check.details.endpoint or nil,
+                connected = minio_check.details and minio_check.details.connected or false,
+                error = minio_check.error,
             }
         }
     }
