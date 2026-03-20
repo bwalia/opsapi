@@ -69,10 +69,33 @@ export interface LoginNamespace {
   permissions?: NamespacePermissions;
 }
 
+/** Returned when admin 2FA is required — no JWT issued yet */
+export interface TwoFactorRequiredResponse {
+  requires_2fa: true;
+  session_token: string;
+  email: string;
+  message: string;
+}
+
+/** Params for POST /auth/2fa/verify */
+export interface Verify2faParams {
+  session_token: string;
+  code: string;
+}
+
+/** Params for POST /auth/2fa/resend */
+export interface Resend2faParams {
+  session_token: string;
+}
+
 export interface LoginResponse {
   token: string;
   user: User;
   message?: string;
+  /** Present when admin 2FA is required */
+  requires_2fa?: boolean;
+  session_token?: string;
+  email?: string;
   namespaces?: Array<{
     id: number;
     uuid: string;
