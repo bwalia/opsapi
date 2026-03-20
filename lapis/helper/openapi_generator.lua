@@ -415,7 +415,8 @@ function _M.generate()
             { name = "Tenants", description = "Multi-tenant management" },
             { name = "Permissions", description = "Permission management" },
             { name = "Hospitals", description = "Hospital and care home management" },
-            { name = "Patients", description = "Patient management and health tracking" }
+            { name = "Patients", description = "Patient management and health tracking" },
+            { name = "HMRC", description = "HMRC Making Tax Digital OAuth and tax profile management" }
         },
         paths = {
             -- Public endpoints
@@ -1610,6 +1611,236 @@ function _M.generate()
                                 }
                             }
                         }
+                    }
+                }
+            },
+            -- ── HMRC Tax Profile Endpoints ──────────────────────────
+            ["/auth/hmrc/initiate"] = {
+                get = {
+                    summary = "Initiate HMRC OAuth",
+                    description = "Returns an HMRC authorisation URL. Redirect the user to this URL to connect their HMRC account via Government Gateway. After the user grants permission, HMRC redirects back to the callback endpoint.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        {
+                            name = "source",
+                            ["in"] = "query",
+                            required = false,
+                            description = "Where the user started: 'settings' or 'file' (default: file)",
+                            schema = { type = "string", enum = { "settings", "file" }, default = "file" }
+                        },
+                        {
+                            name = "statement_id",
+                            ["in"] = "query",
+                            required = false,
+                            description = "Optional statement UUID (used when connecting from the file upload page)",
+                            schema = { type = "string", format = "uuid" }
+                        }
+                    },
+                    responses = {
+                        ["200"] = {
+                            description = "HMRC authorisation URL",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            auth_url = { type = "string", format = "uri", description = "Redirect user to this URL" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["401"] = { description = "Not authenticated" },
+                        ["503"] = { description = "HMRC OAuth not configured on server" }
+                    }
+                }
+            },
+            ["/auth/hmrc/callback"] = {
+                get = {
+                    summary = "HMRC OAuth Callback (system use)",
+                    description = "Called by HMRC after user authenticates. Exchanges the authorisation code for tokens and stores them. **Do not call this directly** — HMRC redirects the browser here automatically.",
+                    tags = { "HMRC" },
+                    security = {},
+                    parameters = {
+                        { name = "code", ["in"] = "query", required = true, schema = { type = "string" } },
+                        { name = "state", ["in"] = "query", required = true, schema = { type = "string" } }
+                    },
+                    responses = {
+                        ["302"] = { description = "Redirects to frontend with hmrc_connected=true or hmrc_error=..." }
+                    }
+                }
+            },
+            ["/auth/hmrc/disconnect"] = {
+                delete = {
+                    summary = "Disconnect HMRC",
+                    description = "Removes stored HMRC OAuth tokens for the current user. Cached business and obligation data is preserved.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    responses = {
+                        ["200"] = {
+                            description = "Disconnected",
+                            content = { ["application/json"] = { schema = { type = "object", properties = { message = { type = "string" } } } } }
+                        },
+                        ["401"] = { description = "Not authenticated" }
+                    }
+                }
+            },
+            ["/api/v2/tax/profile"] = {
+                get = {
+                    summary = "Get HMRC Tax Profile",
+                    description = "Returns the user's tax profile including masked NINO, HMRC connection status, cached businesses, and open obligation count.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    responses = {
+                        ["200"] = {
+                            description = "Tax profile",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            uuid = { type = "string" },
+                                            has_nino = { type = "boolean" },
+                                            nino_masked = { type = "string", nullable = true, description = "e.g. ****6789A" },
+                                            hmrc_connected = { type = "boolean" },
+                                            hmrc_token_expires_at = { type = "string", format = "date-time", nullable = true },
+                                            default_business_id = { type = "string", nullable = true },
+                                            default_tax_year = { type = "string", nullable = true },
+                                            businesses = { type = "array", items = { type = "object" } },
+                                            open_obligations_count = { type = "integer" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["401"] = { description = "Not authenticated" }
+                    }
+                }
+            },
+            ["/api/v2/tax/profile/nino"] = {
+                post = {
+                    summary = "Save NINO",
+                    description = "Save the user's National Insurance Number. The NINO is encrypted (AES-128) and hashed (bcrypt). Only the last 4 characters are stored for display.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = {
+                                    type = "object",
+                                    required = { "nino" },
+                                    properties = {
+                                        nino = { type = "string", description = "UK National Insurance Number (e.g. QQ123456C)", example = "QQ123456C" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["200"] = {
+                            description = "NINO saved",
+                            content = { ["application/json"] = { schema = { type = "object", properties = { message = { type = "string" }, nino_masked = { type = "string" }, has_nino = { type = "boolean" } } } } }
+                        },
+                        ["400"] = { description = "Invalid NINO format" },
+                        ["401"] = { description = "Not authenticated" }
+                    }
+                },
+                delete = {
+                    summary = "Remove NINO",
+                    description = "Remove the stored NINO from the user's profile.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    responses = {
+                        ["200"] = {
+                            description = "NINO removed",
+                            content = { ["application/json"] = { schema = { type = "object", properties = { message = { type = "string" }, has_nino = { type = "boolean" } } } } }
+                        },
+                        ["401"] = { description = "Not authenticated" }
+                    }
+                }
+            },
+            ["/api/v2/tax/profile/nino/verify"] = {
+                post = {
+                    summary = "Verify NINO",
+                    description = "Verify a NINO matches the stored hash. Used before HMRC operations.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = {
+                                    type = "object",
+                                    required = { "nino" },
+                                    properties = { nino = { type = "string" } }
+                                }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["200"] = {
+                            description = "Verification result",
+                            content = { ["application/json"] = { schema = { type = "object", properties = { verified = { type = "boolean" } } } } }
+                        },
+                        ["401"] = { description = "Not authenticated" }
+                    }
+                }
+            },
+            ["/api/v2/tax/profile/preferences"] = {
+                put = {
+                    summary = "Update Tax Preferences",
+                    description = "Update default business and/or default tax year for HMRC operations.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    requestBody = {
+                        required = true,
+                        content = {
+                            ["application/json"] = {
+                                schema = {
+                                    type = "object",
+                                    properties = {
+                                        default_business_id = { type = "string", description = "HMRC business ID to use by default" },
+                                        default_tax_year = { type = "string", description = "Tax year in YYYY-YY format (e.g. 2024-25)" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    responses = {
+                        ["200"] = { description = "Preferences updated" },
+                        ["400"] = { description = "Invalid tax year format" },
+                        ["401"] = { description = "Not authenticated" }
+                    }
+                }
+            },
+            ["/api/v2/tax/profile/obligations"] = {
+                get = {
+                    summary = "Get Cached Obligations",
+                    description = "Returns cached HMRC obligations from the database. Use the FastAPI /api/hmrc/obligations/fetch endpoint to refresh from HMRC.",
+                    tags = { "HMRC" },
+                    security = { { BearerAuth = {} } },
+                    parameters = {
+                        { name = "tax_year", ["in"] = "query", required = false, schema = { type = "string" }, description = "Filter by tax year (e.g. 2024-25)" },
+                        { name = "business_id", ["in"] = "query", required = false, schema = { type = "string" }, description = "Filter by business ID" }
+                    },
+                    responses = {
+                        ["200"] = {
+                            description = "Obligations list",
+                            content = {
+                                ["application/json"] = {
+                                    schema = {
+                                        type = "object",
+                                        properties = {
+                                            obligations = { type = "array", items = { type = "object" } },
+                                            total = { type = "integer" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        ["401"] = { description = "Not authenticated" }
                     }
                 }
             },

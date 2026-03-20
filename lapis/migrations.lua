@@ -1019,6 +1019,7 @@ return {
     ['336_tax_add_hmrc_businesses_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 37),
     ['337_tax_create_hmrc_obligations'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 38),
     ['338_tax_add_hmrc_obligations_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 39),
+    ['339_tax_add_nino_encrypted'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 40),
 
     -- =========================================================================
     -- RBAC ENHANCEMENT: Add columns to modules table for dynamic RBAC

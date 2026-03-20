@@ -91,6 +91,16 @@ return function(app)
         local redirect_uri = Global.getEnvVar("HMRC_REDIRECT_URI")
         local environment  = Global.getEnvVar("HMRC_ENVIRONMENT") or "sandbox"
 
+        -- Validate environment value
+        if environment ~= "sandbox" and environment ~= "production" then
+            ngx.log(ngx.ERR, "[HMRC] Invalid HMRC_ENVIRONMENT: ", environment,
+                             " — must be 'sandbox' or 'production'")
+            return {
+                status = 503,
+                json   = { error = "HMRC_ENVIRONMENT must be 'sandbox' or 'production'" }
+            }
+        end
+
         if not client_id or not redirect_uri then
             return {
                 status = 503,
@@ -152,8 +162,13 @@ return function(app)
     -- Called by HMRC after user authenticates.
     -- -----------------------------------------------------------------------
     app:get("/auth/hmrc/callback", RateLimit.wrap(HMRC_LIMIT, function(self)
-        local frontend_url = Global.getEnvVar("APP_BASE_URL") or "http://localhost"
+        local frontend_url = Global.getEnvVar("FRONT_URL") or "http://localhost"
         local environment  = Global.getEnvVar("HMRC_ENVIRONMENT") or "sandbox"
+
+        if environment ~= "sandbox" and environment ~= "production" then
+            ngx.log(ngx.ERR, "[HMRC] Invalid HMRC_ENVIRONMENT in callback: ", environment)
+            return { redirect_to = frontend_url .. "/settings?hmrc_error=server_misconfigured" }
+        end
 
         -- ── OAuth error from HMRC ──
         local oauth_error = self.params.error
@@ -196,6 +211,11 @@ return function(app)
         local client_secret = Global.getEnvVar("HMRC_CLIENT_SECRET")
         local redirect_uri  = Global.getEnvVar("HMRC_REDIRECT_URI")
 
+        if not client_id or not client_secret or not redirect_uri then
+            ngx.log(ngx.ERR, "[HMRC] Missing OAuth config in callback")
+            return error_redirect("server_misconfigured")
+        end
+
         local token_url
         if environment == "production" then
             token_url = "https://api.service.hmrc.gov.uk/oauth/token"
@@ -216,7 +236,7 @@ return function(app)
                 redirect_uri  = redirect_uri,
             }),
             headers    = { ["Content-Type"] = "application/x-www-form-urlencoded" },
-            ssl_verify = false,  -- required for sandbox; production uses valid cert
+            ssl_verify = (environment == "production"),
         })
 
         if not token_res then
@@ -270,7 +290,7 @@ return function(app)
     -- DELETE /auth/hmrc/disconnect
     -- Requires: JWT auth. Removes stored HMRC token for the current user.
     -- -----------------------------------------------------------------------
-    app:delete("/auth/hmrc/disconnect", function(self)
+    app:delete("/auth/hmrc/disconnect", RateLimit.wrap(HMRC_LIMIT, function(self)
         local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.id)
         if not user_uuid then
             return { status = 401, json = { error = "Not authenticated" } }
@@ -284,6 +304,6 @@ return function(app)
 
         ngx.log(ngx.NOTICE, "[HMRC] Disconnected HMRC for user=", user_uuid)
         return { status = 200, json = { message = "HMRC disconnected successfully" } }
-    end)
+    end))
 
 end

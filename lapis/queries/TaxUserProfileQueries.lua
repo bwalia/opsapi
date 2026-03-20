@@ -72,8 +72,11 @@ function TaxUserProfileQueries.saveNino(user_uuid, nino)
         return nil, "Invalid NINO format. Expected: 2 letters + 6 digits + 1 letter (e.g. QQ123456C)"
     end
 
-    -- Hash with bcrypt
+    -- Hash with bcrypt (for verification)
     local hash = bcrypt.digest(nino, BCRYPT_ROUNDS)
+
+    -- Encrypt with AES (for server-side HMRC API calls)
+    local encrypted = Global.encryptSecret(nino)
 
     -- Extract last 4 characters for masked display
     local last4 = nino:sub(-4)
@@ -86,9 +89,9 @@ function TaxUserProfileQueries.saveNino(user_uuid, nino)
 
     db.query([[
         UPDATE tax_user_profiles
-        SET nino_hash = ?, nino_last4 = ?, has_nino = true, updated_at = NOW()
+        SET nino_hash = ?, nino_last4 = ?, nino_encrypted = ?, has_nino = true, updated_at = NOW()
         WHERE user_uuid = ?
-    ]], hash, last4, user_uuid)
+    ]], hash, last4, encrypted, user_uuid)
 
     return { success = true, nino_last4 = last4 }
 end
@@ -107,11 +110,24 @@ function TaxUserProfileQueries.verifyNino(user_uuid, nino)
     return bcrypt.verify(nino, profile.nino_hash)
 end
 
+-- Decrypt and return NINO for server-side HMRC API calls
+-- This should NEVER be exposed to the frontend
+function TaxUserProfileQueries.getNinoDecrypted(user_uuid)
+    local rows = db.query(
+        "SELECT nino_encrypted FROM tax_user_profiles WHERE user_uuid = ? AND has_nino = true LIMIT 1",
+        user_uuid
+    )
+    if rows and #rows > 0 and rows[1].nino_encrypted then
+        return Global.decryptSecret(rows[1].nino_encrypted)
+    end
+    return nil
+end
+
 -- Remove NINO from profile
 function TaxUserProfileQueries.removeNino(user_uuid)
     db.query([[
         UPDATE tax_user_profiles
-        SET nino_hash = NULL, nino_last4 = NULL, has_nino = false, updated_at = NOW()
+        SET nino_hash = NULL, nino_last4 = NULL, nino_encrypted = NULL, has_nino = false, updated_at = NOW()
         WHERE user_uuid = ?
     ]], user_uuid)
     return { success = true }

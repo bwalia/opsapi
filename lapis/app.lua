@@ -200,6 +200,7 @@ app:before_filter(function(self)
         ["/auth/google"] = true,          -- Google OAuth initiation
         ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
+        ["/auth/hmrc/callback"] = true,   -- HMRC MTD OAuth callback
     }
 
     -- Skip auth for public routes
@@ -380,6 +381,7 @@ load_if("tax_copilot", "routes.tax-reports")
 load_if("tax_copilot", "routes.tax-rates")
 load_if("tax_copilot", "routes.tax-admin-transactions")
 load_if("tax_copilot", "routes.tax-profile")
+load_if("tax_copilot", "routes.tax-hmrc-auth")
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)

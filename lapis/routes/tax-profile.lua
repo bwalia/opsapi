@@ -133,7 +133,12 @@ return function(app)
         end
 
         local user_uuid = user.uuid or user.id
-        local result, err = TaxUserProfileQueries.saveNino(user_uuid, nino)
+        local ok_save, result, err = pcall(TaxUserProfileQueries.saveNino, user_uuid, nino)
+
+        if not ok_save then
+            ngx.log(ngx.ERR, "[Tax Profile] saveNino error: ", tostring(result))
+            return { status = 500, json = { error = "Failed to save NINO" } }
+        end
 
         if not result then
             return { status = 400, json = { error = err or "Failed to save NINO" } }
@@ -172,11 +177,16 @@ return function(app)
         end
 
         local user_uuid = user.uuid or user.id
-        local verified = TaxUserProfileQueries.verifyNino(user_uuid, nino)
+        local ok_verify, verified = pcall(TaxUserProfileQueries.verifyNino, user_uuid, nino)
+
+        if not ok_verify then
+            ngx.log(ngx.ERR, "[Tax Profile] verifyNino error: ", tostring(verified))
+            return { status = 500, json = { error = "Failed to verify NINO" } }
+        end
 
         return {
             status = 200,
-            json = { verified = verified }
+            json = { verified = verified or false }
         }
     end)
 
@@ -191,7 +201,11 @@ return function(app)
         end
 
         local user_uuid = user.uuid or user.id
-        TaxUserProfileQueries.removeNino(user_uuid)
+        local ok_rm, rm_err = pcall(TaxUserProfileQueries.removeNino, user_uuid)
+        if not ok_rm then
+            ngx.log(ngx.ERR, "[Tax Profile] removeNino error: ", tostring(rm_err))
+            return { status = 500, json = { error = "Failed to remove NINO" } }
+        end
 
         return {
             status = 200,
@@ -214,10 +228,18 @@ return function(app)
         local user_uuid = user.uuid or user.id
 
         -- Ensure profile exists
-        TaxUserProfileQueries.getOrCreate(user_uuid)
+        local ok_gc, gc_err = pcall(TaxUserProfileQueries.getOrCreate, user_uuid)
+        if not ok_gc then
+            ngx.log(ngx.ERR, "[Tax Profile] getOrCreate failed in preferences: ", tostring(gc_err))
+            return { status = 500, json = { error = "Failed to load profile" } }
+        end
 
         if params.default_business_id then
-            TaxUserProfileQueries.setDefaultBusiness(user_uuid, params.default_business_id)
+            local ok_biz, biz_err = pcall(TaxUserProfileQueries.setDefaultBusiness, user_uuid, params.default_business_id)
+            if not ok_biz then
+                ngx.log(ngx.ERR, "[Tax Profile] setDefaultBusiness error: ", tostring(biz_err))
+                return { status = 500, json = { error = "Failed to update default business" } }
+            end
         end
 
         if params.default_tax_year then
@@ -225,7 +247,11 @@ return function(app)
             if not params.default_tax_year:match("^%d%d%d%d%-%d%d$") then
                 return { status = 400, json = { error = "Invalid tax year format. Expected: YYYY-YY (e.g. 2024-25)" } }
             end
-            TaxUserProfileQueries.setDefaultTaxYear(user_uuid, params.default_tax_year)
+            local ok_ty, ty_err = pcall(TaxUserProfileQueries.setDefaultTaxYear, user_uuid, params.default_tax_year)
+            if not ok_ty then
+                ngx.log(ngx.ERR, "[Tax Profile] setDefaultTaxYear error: ", tostring(ty_err))
+                return { status = 500, json = { error = "Failed to update default tax year" } }
+            end
         end
 
         return {
@@ -250,11 +276,17 @@ return function(app)
         local business_id = self.params.business_id
 
         local obligations
+        local ob_ok, ob_result
         if tax_year and business_id then
-            obligations = HMRCObligationQueries.forTaxYear(user_uuid, business_id, tax_year)
+            ob_ok, ob_result = pcall(HMRCObligationQueries.forTaxYear, user_uuid, business_id, tax_year)
         else
-            obligations = HMRCObligationQueries.allForUser(user_uuid)
+            ob_ok, ob_result = pcall(HMRCObligationQueries.allForUser, user_uuid)
         end
+        if not ob_ok then
+            ngx.log(ngx.ERR, "[Tax Profile] obligations query error: ", tostring(ob_result))
+            return { status = 500, json = { error = "Failed to load obligations" } }
+        end
+        obligations = ob_result
 
         -- Clean up for API response
         local result = {}

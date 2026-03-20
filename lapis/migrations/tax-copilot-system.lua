@@ -930,4 +930,12 @@ return {
         ]])
         print("[Tax Copilot] Added indexes to hmrc_obligations")
     end,
+
+    -- 40. Add encrypted NINO column to tax_user_profiles
+    -- Stores AES-encrypted NINO for server-side HMRC API calls
+    -- (bcrypt hash is kept for verification, encrypted copy for API usage)
+    [40] = function()
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS nino_encrypted TEXT")
+        print("[Tax Copilot] Added nino_encrypted column to tax_user_profiles")
+    end,
 }
