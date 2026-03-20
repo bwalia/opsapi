@@ -80,47 +80,53 @@ function HealthCheck.checkDatabase()
     return status
 end
 
--- Check Redis connection (if configured)
+-- Check Redis connection (only when REDIS_ENABLED=true)
 function HealthCheck.checkRedis()
+    local redis_enabled = os.getenv("REDIS_ENABLED")
+    if redis_enabled ~= "true" and redis_enabled ~= "1" then
+        return {
+            name = "redis",
+            status = "skipped",
+            response_time_ms = 0,
+            details = { enabled = false, message = "Redis is disabled (REDIS_ENABLED is not true)" }
+        }
+    end
+
     local start_time = ngx.now()
     local status = {
         name = "redis",
         status = "healthy",
         response_time_ms = 0,
-        details = {}
+        details = { enabled = true }
     }
 
     local success, result = pcall(function()
         local red = redis:new()
         red:set_timeout(1000) -- 1 second timeout
 
-        -- Try to connect to Redis
         local ok, err = red:connect(os.getenv("REDIS_HOST") or "127.0.0.1",
-                                    tonumber(os.getenv("REDIS_PORT")) or 6379)
+            tonumber(os.getenv("REDIS_PORT")) or 6379)
 
         if not ok then
             error("Connection failed: " .. tostring(err))
         end
 
-        -- Test PING command
-        local res, err = red:ping()
+        local res, ping_err = red:ping()
         if not res then
-            error("PING failed: " .. tostring(err))
+            error("PING failed: " .. tostring(ping_err))
         end
 
-        -- Get Redis info
-        local info, err = red:info("server")
+        local info = red:info("server")
 
-        -- Close connection
         red:set_keepalive(10000, 100)
 
-        return { connected = true, ping = res, info = info }
+        return { enabled = true, connected = true, ping = res, info = info }
     end)
 
     status.response_time_ms = math.floor((ngx.now() - start_time) * 1000)
 
     if not success then
-        status.status = "degraded"  -- Redis is optional, so degraded instead of unhealthy
+        status.status = "degraded"
         status.error = "Redis not available: " .. tostring(result)
         status.details.connected = false
         return status
