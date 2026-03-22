@@ -1,5 +1,8 @@
 env: acc
 
+externalSecret:
+  enabled: false
+
 image:
   repository: bwalia/opsapi
   tag: latest
