@@ -1,29 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Values.app.name }}
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Values.app.name }}
+    app: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.replicaCount | default 1 }}
   selector:
     matchLabels:
-      app: {{ .Values.app.name }}
+      app: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: {{ .Values.app.name }}
+        app: {{ .Release.Name }}
     spec:
       volumes:
         - name: env-file
           secret:
-            secretName: {{ .Values.app.name }}-env
+            secretName: {{ .Release.Name }}-env
         - name: bootstrap
           configMap:
-            name: {{ .Values.app.name }}-bootstrap
+            name: {{ .Release.Name }}-bootstrap
       containers:
-        - name: {{ .Values.app.name }}
+        - name: {{ .Release.Name }}
           image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
           imagePullPolicy: {{ .Values.app.image.pullPolicy | default "IfNotPresent" }}
           ports:

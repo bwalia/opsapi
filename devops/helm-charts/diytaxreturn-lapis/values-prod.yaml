@@ -1,5 +1,5 @@
-env: dev
-app: opsapi
+env: prod
+app: diytaxreturn-lapis
 projectCode: tax_copilot
 
 image:
@@ -11,7 +11,6 @@ replicaCount: 1
 
 service:
   type: ClusterIP
-  name: opsapi-svc
   port: 80
 
 ingress:
@@ -22,7 +21,7 @@ ingress:
   tls: []
 
 externalSecret:
-  enabled: false
+  enabled: true
 
 setup:
   adminEmail: ""

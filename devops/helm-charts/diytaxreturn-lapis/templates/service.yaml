@@ -18,7 +18,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.service.name | default (printf "%s-svc" .Release.Name) }}
+  name: {{ .Release.Name }}
 spec:
   selector:
     app: {{ .Release.Name }}

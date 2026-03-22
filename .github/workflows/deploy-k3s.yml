@@ -51,7 +51,7 @@ permissions:
 env:
   IMAGE_REGISTRY: bwalia
   IMAGE_NAME: opsapi
-  HELM_CHART_PATH: ./devops/helm-charts/opsapi
+  HELM_CHART_PATH: ./devops/helm-charts/diytaxreturn-lapis
 
 jobs:
   # =========================================================================
@@ -167,10 +167,10 @@ jobs:
           echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
 
           # Select the right values file
-          if [ -f "${{ env.HELM_CHART_PATH }}/${TARGET_ENV}-values.yaml" ]; then
-            echo "VALUES_FILE=${{ env.HELM_CHART_PATH }}/${TARGET_ENV}-values.yaml" >> $GITHUB_OUTPUT
+          if [ -f "${{ env.HELM_CHART_PATH }}/values-${TARGET_ENV}.yaml" ]; then
+            echo "VALUES_FILE=${{ env.HELM_CHART_PATH }}/values-${TARGET_ENV}.yaml" >> $GITHUB_OUTPUT
           else
-            echo "::error::Values file not found: ${TARGET_ENV}-values.yaml"
+            echo "::error::Values file not found: values-${TARGET_ENV}.yaml"
             exit 1
           fi
           echo "Deploying to $TARGET_ENV"
@@ -222,7 +222,7 @@ jobs:
           chmod 600 ./.env-opsapi.tmp
 
           # Create opsapi secret from .env file
-          kubectl create secret generic opsapi-secrets \
+          kubectl create secret generic diytaxreturn-lapis-secrets \
             --from-env-file=./.env-opsapi.tmp \
             --namespace "$TARGET_ENV" \
             --dry-run=client -o yaml | kubectl apply --validate=false -f -
@@ -232,7 +232,7 @@ jobs:
       - name: Deploy OpsAPI
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
-          helm upgrade --install opsapi ${{ env.HELM_CHART_PATH }} \
+          helm upgrade --install diytaxreturn-lapis ${{ env.HELM_CHART_PATH }} \
             -f ${{ steps.env.outputs.VALUES_FILE }} \
             --namespace ${{ steps.env.outputs.TARGET_ENV }} \
             --create-namespace \
@@ -251,14 +251,14 @@ jobs:
           NS=${{ steps.env.outputs.TARGET_ENV }}
           # Remove failed pods so K3s recreates them with new config
           kubectl delete pods -n "$NS" --field-selector=status.phase=Failed || true
-          kubectl delete pods -n "$NS" -l app=opsapi || true
+          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis || true
 
       - name: Wait for rollout
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
           NS=${{ steps.env.outputs.TARGET_ENV }}
-          echo "Waiting for opsapi rollout..."
-          kubectl rollout status deployment/opsapi -n "$NS" --timeout=180s || true
+          echo "Waiting for diytaxreturn-lapis rollout..."
+          kubectl rollout status deployment/diytaxreturn-lapis -n "$NS" --timeout=180s || true
 
       - name: Cleanup Kubeconfig
         if: always()
