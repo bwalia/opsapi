@@ -21,6 +21,9 @@ ingress:
   hosts: []
   tls: []
 
+database:
+  host: "10.96.69.50"
+
 externalSecret:
   enabled: true
 
