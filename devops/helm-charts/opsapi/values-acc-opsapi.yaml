@@ -1,4 +1,5 @@
 env: acc
+app: opsapi
 
 externalSecret:
   enabled: false
