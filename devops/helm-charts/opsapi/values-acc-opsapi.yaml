@@ -3,6 +3,11 @@ env: acc
 externalSecret:
   enabled: false
 
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
 image:
   repository: bwalia/opsapi
   tag: latest
