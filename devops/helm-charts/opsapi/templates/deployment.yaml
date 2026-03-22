@@ -28,22 +28,28 @@ spec:
             - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
               mountPath: /tmp/secrets
           ports:
-            - containerPort: {{ .Values.service.port }}
+            - containerPort: {{ .Values.containerPort | default 80 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.containerPort | default 80 }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /health
-              port: {{ .Values.service.port }}
-            initialDelaySeconds: 60
+              port: {{ .Values.containerPort | default 80 }}
             timeoutSeconds: 5
-            failureThreshold: 5
+            failureThreshold: 3
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
-              port: {{ .Values.service.port }}
-            initialDelaySeconds: 30
+              port: {{ .Values.containerPort | default 80 }}
             timeoutSeconds: 5
-            periodSeconds: 30
+            periodSeconds: 10
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-secrets
@@ -52,15 +58,15 @@ spec:
               value: "production"
             - name: PROJECT_CODE
               value: {{ .Values.projectCode | default "tax_copilot" | quote }}
-            {{- if .Values.setup.adminEmail }}
+            {{- if and .Values.setup .Values.setup.adminEmail }}
             - name: ADMIN_EMAIL
               value: {{ .Values.setup.adminEmail | quote }}
             {{- end }}
-            {{- if .Values.setup.adminPassword }}
+            {{- if and .Values.setup .Values.setup.adminPassword }}
             - name: ADMIN_PASSWORD
               value: {{ .Values.setup.adminPassword | quote }}
             {{- end }}
-            {{- if .Values.setup.namespaceSlug }}
+            {{- if and .Values.setup .Values.setup.namespaceSlug }}
             - name: NAMESPACE_SLUG
               value: {{ .Values.setup.namespaceSlug | quote }}
             {{- end }}
