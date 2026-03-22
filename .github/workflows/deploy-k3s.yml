@@ -236,6 +236,7 @@ jobs:
             -f ${{ steps.env.outputs.VALUES_FILE }} \
             --namespace ${{ steps.env.outputs.TARGET_ENV }} \
             --create-namespace \
+            --force \
             --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=latest \
             --set env=${{ steps.env.outputs.TARGET_ENV }} \
