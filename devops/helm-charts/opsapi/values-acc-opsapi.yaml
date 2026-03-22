@@ -35,8 +35,9 @@ app_secrets:
 replicaCount: 1
 
 service:
+  name: opsapi-svc
   type: ClusterIP
-  port: 8080
+  port: 80
 
 svcAccessPort: 32136
 
