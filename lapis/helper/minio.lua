@@ -30,6 +30,189 @@ local cjson = require("cjson.safe")
 local MinioClient = {}
 MinioClient.__index = MinioClient
 
+--------------------------------------------------------------------------------
+-- DNS Resolution Cache (module-level, shared across all MinioClient instances)
+--
+-- OpenResty cosockets rely on the nginx `resolver` directive for DNS, which can
+-- fail intermittently in Kubernetes (cached NXDOMAIN, CoreDNS not ready, etc.).
+-- This resolver uses resty.dns.resolver to query CoreDNS directly and caches
+-- results for 30 seconds. Falls back to the original hostname on failure so the
+-- nginx resolver still gets a chance.
+--
+-- Environment detection:
+--   K8s  -> /var/run/secrets/kubernetes.io/serviceaccount exists
+--           Uses resty.dns.resolver with CoreDNS from /etc/resolv.conf
+--   Docker -> No K8s service account
+--           Skips resty.dns.resolver entirely; relies on nginx resolver + Docker DNS
+--------------------------------------------------------------------------------
+local _dns_cache = {}       -- { [hostname] = { ip = "...", expires = ngx.now() + ttl } }
+local DNS_CACHE_TTL = 30    -- seconds
+local MAX_CNAME_DEPTH = 5   -- prevent infinite CNAME loops
+
+-- Detect Kubernetes environment (runs once at module load)
+local _is_kubernetes = nil
+
+local function is_kubernetes()
+    if _is_kubernetes ~= nil then return _is_kubernetes end
+    -- K8s mounts a service account token in every pod
+    local ok, f = pcall(io.open, "/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
+    if ok and f then
+        f:close()
+        _is_kubernetes = true
+    else
+        _is_kubernetes = false
+    end
+    return _is_kubernetes
+end
+
+-- Cache the resty.dns.resolver module (loaded once)
+local _dns_module
+local _dns_module_loaded = false
+
+local function get_dns_module()
+    if _dns_module_loaded then return _dns_module end
+    _dns_module_loaded = true
+    local ok, mod = pcall(require, "resty.dns.resolver")
+    if ok then
+        _dns_module = mod
+    else
+        ngx.log(ngx.WARN, "[MinIO DNS] resty.dns.resolver not available: ", tostring(mod))
+    end
+    return _dns_module
+end
+
+--- Read nameserver IPs from /etc/resolv.conf.
+-- Re-reads if the previous attempt found no nameservers (handles startup race).
+-- Filters out 127.x.x.x addresses (Docker embedded DNS) since resty.dns.resolver
+-- cannot reliably query Docker's userland DNS proxy via cosockets.
+local _nameservers
+local function get_nameservers()
+    if _nameservers and #_nameservers > 0 then return _nameservers end
+
+    local servers = {}
+    local ok, f_or_err = pcall(io.open, "/etc/resolv.conf", "r")
+    if ok and f_or_err then
+        local f = f_or_err
+        for line in f:lines() do
+            local ip = line:match("^%s*nameserver%s+([%d%.]+)")
+            if ip and not ip:match("^127%.") then
+                servers[#servers + 1] = ip
+            end
+        end
+        f:close()
+    end
+
+    if #servers > 0 then
+        _nameservers = servers
+    else
+        -- No non-loopback nameservers found; don't cache so we retry next time
+        return nil
+    end
+    return _nameservers
+end
+
+--- Resolve a hostname to an IP address using resty.dns.resolver.
+-- Only active in Kubernetes environments. In Docker, returns nil immediately
+-- so the caller falls back to the original hostname (Docker DNS handles it).
+-- Results are cached for DNS_CACHE_TTL seconds.
+-- @param hostname string The hostname to resolve
+-- @param depth number (internal) Current CNAME recursion depth
+local function resolve_host(hostname, depth)
+    depth = depth or 0
+
+    -- Guard: nil or empty hostname
+    if not hostname or hostname == "" then
+        return nil
+    end
+
+    -- Skip resolution for IPv4 addresses
+    if hostname:match("^%d+%.%d+%.%d+%.%d+$") then
+        return hostname
+    end
+
+    -- Skip resolution for IPv6 addresses (bracketed or raw)
+    if hostname:match("^%[") or hostname:match(":.*:") then
+        return hostname
+    end
+
+    -- In Docker (non-K8s), skip resty.dns.resolver entirely.
+    -- Docker's embedded DNS (127.0.0.11) handles resolution at the TCP layer,
+    -- and resty.dns.resolver can't reliably query it via UDP cosockets.
+    if not is_kubernetes() then
+        return nil
+    end
+
+    -- Check cache
+    local cached = _dns_cache[hostname]
+    if cached and cached.expires > ngx.now() then
+        return cached.ip
+    end
+
+    -- Get the DNS module
+    local dns = get_dns_module()
+    if not dns then
+        return nil
+    end
+
+    -- Get usable nameservers (non-loopback)
+    local nameservers = get_nameservers()
+    if not nameservers then
+        ngx.log(ngx.WARN, "[MinIO DNS] No usable nameservers found, skipping resolution")
+        return nil
+    end
+
+    -- Create resolver instance
+    local r, err = dns:new({
+        nameservers = nameservers,
+        retrans = 2,
+        timeout = 2000,  -- 2 seconds
+    })
+    if not r then
+        ngx.log(ngx.WARN, "[MinIO DNS] Failed to create resolver: ", tostring(err))
+        return nil
+    end
+
+    -- Query for A record
+    local answers, resolve_err = r:query(hostname, { qtype = 1 })
+    if not answers then
+        ngx.log(ngx.WARN, "[MinIO DNS] Query failed for ", hostname, ": ", tostring(resolve_err))
+        return nil
+    end
+
+    if answers.errcode then
+        ngx.log(ngx.WARN, "[MinIO DNS] DNS error for ", hostname,
+            " (code=", tostring(answers.errcode), "): ", tostring(answers.errstr))
+        return nil
+    end
+
+    -- Pick first A record
+    for _, ans in ipairs(answers) do
+        if ans.type == 1 and ans.address then
+            _dns_cache[hostname] = {
+                ip = ans.address,
+                expires = ngx.now() + DNS_CACHE_TTL,
+            }
+            ngx.log(ngx.DEBUG, "[MinIO DNS] Resolved ", hostname, " -> ", ans.address)
+            return ans.address
+        end
+    end
+
+    -- Follow CNAME chain with depth limit
+    if depth < MAX_CNAME_DEPTH then
+        for _, ans in ipairs(answers) do
+            if ans.type == 5 and ans.cname then
+                ngx.log(ngx.DEBUG, "[MinIO DNS] Following CNAME ", hostname, " -> ", ans.cname)
+                return resolve_host(ans.cname, depth + 1)
+            end
+        end
+    elseif depth >= MAX_CNAME_DEPTH then
+        ngx.log(ngx.WARN, "[MinIO DNS] CNAME depth limit reached for ", hostname)
+    end
+
+    ngx.log(ngx.WARN, "[MinIO DNS] No A record found for ", hostname)
+    return nil
+end
+
 -- Configuration defaults
 local DEFAULT_REGION = "us-east-1"
 local MAX_FILE_SIZE = 10 * 1024 * 1024  -- 10MB default max
@@ -278,13 +461,41 @@ function MinioClient.new(config)
     -- e.g., http://127.0.0.1:9000 or https://s3.yourdomain.com
     self.public_url = config.public_url or getEnv("MINIO_ENDPOINT_WEB_EXTERNAL") or self.endpoint
 
-    -- Parse endpoint to get host
+    -- Parse endpoint to get host, hostname, and port
     if self.endpoint then
         self.host = self.endpoint:gsub("^https?://", ""):gsub("/$", "")
         self.use_ssl = self.endpoint:match("^https") ~= nil
+
+        -- Extract hostname and port separately for DNS resolution
+        local host_port = self.host
+        local hostname, port = host_port:match("^(.+):(%d+)$")
+        if not hostname then
+            hostname = host_port
+            port = self.use_ssl and "443" or "80"
+        end
+        self._hostname = hostname
+        self._port = port
+        self._scheme = self.use_ssl and "https" or "http"
     end
 
     return self
+end
+
+--- Build an endpoint URL with DNS-resolved IP for the current request.
+-- Resolves the hostname via resty.dns.resolver and returns a URL using the IP.
+-- The original hostname is preserved in self.host for the Host header.
+-- Falls back to the original endpoint if resolution fails.
+function MinioClient:_resolved_endpoint()
+    if not self._hostname then
+        return self.endpoint
+    end
+
+    local ip = resolve_host(self._hostname)
+    if not ip then
+        return self.endpoint  -- fallback: let nginx resolver try
+    end
+
+    return self._scheme .. "://" .. ip .. ":" .. self._port
 end
 
 --- Validate client configuration
@@ -394,7 +605,7 @@ function MinioClient:bucketExists(bucket)
     local httpc = http.new()
     httpc:set_timeout(5000)
 
-    local url = self.endpoint .. uri
+    local url = self:_resolved_endpoint() .. uri
     local res, _ = httpc:request_uri(url, {
         method = "HEAD",
         headers = headers,
@@ -449,7 +660,7 @@ function MinioClient:createBucket(bucket)
     local httpc = http.new()
     httpc:set_timeout(10000)
 
-    local url = self.endpoint .. uri
+    local url = self:_resolved_endpoint() .. uri
     local res, err = httpc:request_uri(url, {
         method = "PUT",
         headers = headers,
@@ -553,7 +764,7 @@ function MinioClient:upload(file, options)
     local httpc = http.new()
     httpc:set_timeout(30000)  -- 30 second timeout
 
-    local url = self.endpoint .. uri
+    local url = self:_resolved_endpoint() .. uri
 
     ngx.log(ngx.DEBUG, "[MinIO] Uploading to: ", url)
 
@@ -628,7 +839,7 @@ function MinioClient:delete(object_key, bucket)
     local httpc = http.new()
     httpc:set_timeout(10000)
 
-    local url = self.endpoint .. uri
+    local url = self:_resolved_endpoint() .. uri
     local res, err = httpc:request_uri(url, {
         method = "DELETE",
         headers = headers,
@@ -685,7 +896,7 @@ function MinioClient:exists(object_key, bucket)
     local httpc = http.new()
     httpc:set_timeout(5000)
 
-    local url = self.endpoint .. uri
+    local url = self:_resolved_endpoint() .. uri
     local res, _ = httpc:request_uri(url, {
         method = "HEAD",
         headers = headers,
