@@ -1,0 +1,38 @@
+env: int
+app: diytaxreturn-lapis
+projectCode: tax_copilot
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: wslproxy
+  annotations: {}
+  hosts: []
+  tls: []
+
+database:
+  host: "10.96.129.108"
+
+externalSecret:
+  enabled: false
+
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80

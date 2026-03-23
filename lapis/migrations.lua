@@ -117,6 +117,9 @@ local namespace_system_migrations = require("migrations.namespace-system")
 -- Tax Copilot (new)
 local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-copilot-system") or {}
 
+-- Dynamic Profile Builder (tax_copilot feature)
+local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
+
 -- =============================================================================
 -- HELPER FUNCTIONS FOR CONDITIONAL MIGRATIONS
 -- =============================================================================
@@ -1073,6 +1076,37 @@ return {
         db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash varchar(255) DEFAULT NULL")
         print("Added pin_hash column to users table")
     end,
+
+    -- =========================================================================
+    -- DYNAMIC PROFILE BUILDER (27 steps)
+    -- =========================================================================
+    ['404_profile_create_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 1),
+    ['405_profile_create_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 2),
+    ['406_profile_create_question_versions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 3),
+    ['407_profile_create_question_options'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 4),
+    ['408_profile_create_question_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 5),
+    ['409_profile_create_lookup_tables'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 6),
+    ['410_profile_create_lookup_values'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 7),
+    ['411_profile_create_user_answers'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 8),
+    ['412_profile_create_answer_history'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 9),
+    ['413_profile_create_tags'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 10),
+    ['414_profile_create_user_tags'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 11),
+    ['415_profile_create_tag_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 12),
+    ['416_profile_create_completion_status'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 13),
+    ['417_profile_create_touchpoints'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 14),
+    ['418_profile_create_question_touchpoints'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 15),
+    ['419_profile_create_audit_logs'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 16),
+    ['420_profile_add_category_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 17),
+    ['421_profile_add_question_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 18),
+    ['422_profile_add_answer_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 19),
+    ['423_profile_add_tag_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 20),
+    ['424_profile_add_remaining_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 21),
+    ['425_profile_seed_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 22),
+    ['426_profile_seed_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 23),
+    ['427_profile_seed_question_options'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 24),
+    ['428_profile_seed_touchpoints'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 25),
+    ['429_profile_seed_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 26),
+    ['430_profile_seed_tags_and_autorules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 27),
 
     -- Custom migrations
     ['custom_migrations'] = function()
