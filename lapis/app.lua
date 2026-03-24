@@ -382,6 +382,7 @@ load_if("tax_copilot", "routes.tax-rates")
 load_if("tax_copilot", "routes.tax-admin-transactions")
 load_if("tax_copilot", "routes.tax-profile")
 load_if("tax_copilot", "routes.tax-hmrc-auth")
+load_if("tax_copilot", "routes.profile-builder")
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)

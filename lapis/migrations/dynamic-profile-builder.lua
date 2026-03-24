@@ -233,9 +233,9 @@ return {
             { "uuid", types.varchar({ unique = true }) },
             { "question_id", types.integer },
             { "rule_name", types.varchar({ null = true }) },
-            { "rule_type", types.varchar({ default = "'visibility'" }) },
+            { "rule_type", types.varchar },
             { "operator", types.varchar },
-            { "logic_group", types.varchar({ default = "'AND'" }) },
+            { "logic_group", types.varchar },
             { "source_question_id", types.integer({ null = true }) },
             { "source_field", types.varchar({ null = true }) },
             { "expected_value", types.text({ null = true }) },
@@ -247,6 +247,9 @@ return {
             { "updated_at", types.time({ default = db.raw("NOW()") }) },
             "PRIMARY KEY (id)"
         })
+        -- Set proper defaults via raw SQL (Lapis types.varchar double-escapes quoted defaults)
+        db.query("ALTER TABLE profile_question_rules ALTER COLUMN rule_type SET DEFAULT 'visibility'")
+        db.query("ALTER TABLE profile_question_rules ALTER COLUMN logic_group SET DEFAULT 'AND'")
         db.query("ALTER TABLE profile_question_rules ADD CONSTRAINT fk_pqr_question FOREIGN KEY (question_id) REFERENCES profile_questions(id) ON DELETE CASCADE")
         db.query("ALTER TABLE profile_question_rules ADD CONSTRAINT fk_pqr_source FOREIGN KEY (source_question_id) REFERENCES profile_questions(id) ON DELETE SET NULL")
         schema.create_index("profile_question_rules", "question_id")
@@ -665,8 +668,8 @@ return {
                 local exists = db.select("id FROM profile_question_options WHERE question_id = ? AND value = ?", bt_id, opt.value)
                 if not exists or #exists == 0 then
                     db.query([[
-                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, parent_option_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, true, NULL, NOW(), NOW())
                     ]], MigrationUtils.generateUUID(), bt_id, opt.label, opt.value, opt.display_order)
                 end
             end
@@ -688,8 +691,8 @@ return {
                 local exists = db.select("id FROM profile_question_options WHERE question_id = ? AND value = ?", at_id, opt.value)
                 if not exists or #exists == 0 then
                     db.query([[
-                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, parent_option_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, true, NULL, NOW(), NOW())
                     ]], MigrationUtils.generateUUID(), at_id, opt.label, opt.value, opt.display_order)
                 end
             end
@@ -748,8 +751,8 @@ return {
                 local exists = db.select("id FROM profile_question_options WHERE question_id = ? AND value = ?", pot_id, opt.value)
                 if not exists or #exists == 0 then
                     db.query([[
-                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, parent_option_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, true, NULL, NOW(), NOW())
                     ]], MigrationUtils.generateUUID(), pot_id, opt.label, opt.value, opt.display_order)
                 end
             end
@@ -770,8 +773,8 @@ return {
                 local exists = db.select("id FROM profile_question_options WHERE question_id = ? AND value = ?", rib_id, opt.value)
                 if not exists or #exists == 0 then
                     db.query([[
-                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, parent_option_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, true, NULL, NOW(), NOW())
                     ]], MigrationUtils.generateUUID(), rib_id, opt.label, opt.value, opt.display_order)
                 end
             end
@@ -831,8 +834,8 @@ return {
                 local exists = db.select("id FROM profile_question_options WHERE question_id = ? AND value = ?", hq_id, opt.value)
                 if not exists or #exists == 0 then
                     db.query([[
-                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                        INSERT INTO profile_question_options (uuid, question_id, label, value, display_order, is_active, parent_option_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, true, NULL, NOW(), NOW())
                     ]], MigrationUtils.generateUUID(), hq_id, opt.label, opt.value, opt.display_order)
                 end
             end
@@ -850,8 +853,8 @@ return {
             local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", target_q[1].id, source_q[1].id)
             if not exists or #exists == 0 then
                 db.query([[
-                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                 ]], MigrationUtils.generateUUID(), target_q[1].id, "Show if rents properties", source_q[1].id)
             end
         end
@@ -862,8 +865,8 @@ return {
             local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", pot_q[1].id, source_q[1].id)
             if not exists or #exists == 0 then
                 db.query([[
-                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                 ]], MigrationUtils.generateUUID(), pot_q[1].id, "Show if rents properties", source_q[1].id)
             end
         end
@@ -874,8 +877,8 @@ return {
             local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", rib_q[1].id, source_q[1].id)
             if not exists or #exists == 0 then
                 db.query([[
-                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                 ]], MigrationUtils.generateUUID(), rib_q[1].id, "Show if rents properties", source_q[1].id)
             end
         end
@@ -887,8 +890,8 @@ return {
             local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", bt_q[1].id, se_q[1].id)
             if not exists or #exists == 0 then
                 db.query([[
-                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                 ]], MigrationUtils.generateUUID(), bt_q[1].id, "Show if self-employed", se_q[1].id)
             end
         end
