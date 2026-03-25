@@ -116,10 +116,18 @@ function TaxBankAccountQueries.create(data, user)
         db.query("UPDATE tax_bank_accounts SET is_primary = false WHERE user_id = ? AND is_primary = true", data.user_id)
     end
 
+    -- Resolve namespace_id from user's default namespace if not provided
+    if not data.namespace_id or data.namespace_id == 0 then
+        local ns = db.query("SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = ? LIMIT 1", data.user_id)
+        if ns and #ns > 0 and ns[1].default_namespace_id then
+            data.namespace_id = ns[1].default_namespace_id
+        end
+    end
+
     local bank_account = TaxBankAccounts:create({
         uuid = data.uuid,
         user_id = data.user_id,
-        namespace_id = data.namespace_id,
+        namespace_id = data.namespace_id or 0,
         bank_name = data.bank_name,
         account_name = data.account_name,
         account_number = data.account_number,

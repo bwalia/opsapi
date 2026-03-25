@@ -221,6 +221,11 @@ app:before_filter(function(self)
         -- Populate self.current_user from ngx.ctx.user for Lapis routes
         if ngx.ctx.user then
             self.current_user = ngx.ctx.user
+            -- Ensure user has a default namespace (lazy assignment on first request)
+            local ns_ok, ns_resolver = pcall(require, "helper.namespace-resolver")
+            if ns_ok then
+                pcall(ns_resolver.resolve, self.current_user)
+            end
         end
     end
 end)
