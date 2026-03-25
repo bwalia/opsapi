@@ -13,15 +13,51 @@ local cjson = require("cjson")
 
 local TaxBankAccountQueries = {}
 
--- Create a new bank account
-function TaxBankAccountQueries.create(data, user)
-    local user_uuid = user.uuid or user.id
-
-    if data.uuid == nil then
-        data.uuid = Global.generateUUID()
+-- Find existing bank account by sort_code + account_number or bank_name for a user
+function TaxBankAccountQueries.findMatchingAccount(user_id, data)
+    -- Exact match: sort_code + account_number (strongest signal)
+    if data.sort_code and data.sort_code ~= "" and data.account_number and data.account_number ~= "" then
+        -- Normalise sort_code: remove dashes/spaces for comparison
+        local normalised_sc = data.sort_code:gsub("[%-%s]", "")
+        local normalised_an = data.account_number:gsub("[%s]", "")
+        local match = db.query([[
+            SELECT * FROM tax_bank_accounts
+            WHERE user_id = ? AND is_active = true
+              AND REPLACE(REPLACE(sort_code, '-', ''), ' ', '') = ?
+              AND REPLACE(account_number, ' ', '') = ?
+            LIMIT 1
+        ]], user_id, normalised_sc, normalised_an)
+        if match and #match > 0 then
+            return match[1]
+        end
     end
 
-    -- Get internal user ID from users table
+    -- Fuzzy match: normalised bank_name (weaker signal — only if no account details)
+    if data.bank_name and data.bank_name ~= "" and (not data.sort_code or data.sort_code == "") and (not data.account_number or data.account_number == "") then
+        local normalised_name = data.bank_name:lower():gsub("[%s%-_]+", ""):gsub("uk$", ""):gsub("plc$", "")
+        local accounts = db.query([[
+            SELECT * FROM tax_bank_accounts
+            WHERE user_id = ? AND is_active = true
+            ORDER BY created_at ASC
+        ]], user_id)
+        if accounts then
+            for _, acct in ipairs(accounts) do
+                local acct_name = (acct.bank_name or ""):lower():gsub("[%s%-_]+", ""):gsub("uk$", ""):gsub("plc$", "")
+                if acct_name == normalised_name then
+                    return acct
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+-- Find or create a bank account (dedup-aware)
+function TaxBankAccountQueries.findOrCreate(data, user)
+    local user_uuid = user.uuid or user.id
+
+    -- Get internal user ID
     local user_record
     if user.uuid then
         user_record = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
@@ -31,7 +67,43 @@ function TaxBankAccountQueries.create(data, user)
     if not user_record or #user_record == 0 then
         return nil, "User not found"
     end
-    data.user_id = user_record[1].id
+    local internal_user_id = user_record[1].id
+
+    -- Try to find existing match
+    local existing = TaxBankAccountQueries.findMatchingAccount(internal_user_id, data)
+    if existing then
+        existing.id = existing.uuid
+        existing.user_id = nil
+        existing._matched = true
+        return { data = existing, matched = true }
+    end
+
+    -- No match — create new
+    data.user_id = internal_user_id
+    return TaxBankAccountQueries.create(data, user)
+end
+
+-- Create a new bank account
+function TaxBankAccountQueries.create(data, user)
+    local user_uuid = user.uuid or user.id
+
+    if data.uuid == nil then
+        data.uuid = Global.generateUUID()
+    end
+
+    -- Get internal user ID from users table (if not already resolved)
+    if not data.user_id then
+        local user_record
+        if user.uuid then
+            user_record = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+        else
+            user_record = db.query("SELECT id FROM users WHERE id = ? LIMIT 1", user_uuid)
+        end
+        if not user_record or #user_record == 0 then
+            return nil, "User not found"
+        end
+        data.user_id = user_record[1].id
+    end
 
     -- If this is the first account, make it primary
     local existing = db.query("SELECT COUNT(*) as count FROM tax_bank_accounts WHERE user_id = ?", data.user_id)
