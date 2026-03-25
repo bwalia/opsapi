@@ -1107,6 +1107,13 @@ return {
     ['428_profile_seed_touchpoints'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 25),
     ['429_profile_seed_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 26),
     ['430_profile_seed_tags_and_autorules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 27),
+    ['431_profile_seed_personal_information'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 28),
+    ['432_profile_seed_contact_details'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 29),
+    ['433_profile_seed_employment'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 30),
+    ['434_profile_seed_financial_tax'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 31),
+    ['435_profile_seed_compliance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 32),
+    ['436_profile_seed_preferences'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 33),
+    ['437_profile_seed_new_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 34),
 
     -- Custom migrations
     ['custom_migrations'] = function()
