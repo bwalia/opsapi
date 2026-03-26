@@ -158,6 +158,35 @@ return function(app)
         }
     end))
 
+    -- Find or create a bank account (dedup-aware — used by upload flow)
+    app:post("/api/v2/tax/bank-accounts/find-or-create", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+
+        local valid, validation_err = validate_bank_account_params(self.params, true)
+        if not valid then
+            return {
+                json = { error = validation_err },
+                status = 400
+            }
+        end
+
+        local result, err = TaxBankAccountQueries.findOrCreate(self.params, self.current_user)
+
+        if not result then
+            return {
+                json = { error = err or "Failed to find or create bank account" },
+                status = 400
+            }
+        end
+
+        -- 200 if matched existing, 201 if created new
+        local status_code = result.matched and 200 or 201
+        return {
+            json = result,
+            status = status_code
+        }
+    end))
+
     -- Get a single bank account
     app:get("/api/v2/tax/bank-accounts/:id", AuthMiddleware.requireAuth(function(self)
         local account = TaxBankAccountQueries.show(tostring(self.params.id), self.current_user)
