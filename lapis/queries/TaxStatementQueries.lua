@@ -140,6 +140,20 @@ function TaxStatementQueries.all(params, user)
         table.insert(where_values, params.workflow_step)
     end
 
+    if params.tax_year then
+        table.insert(where_parts, "s.tax_year = ?")
+        table.insert(where_values, params.tax_year)
+    end
+
+    if params.search and params.search ~= "" then
+        table.insert(where_parts, "(s.file_name ILIKE ? OR ba.bank_name ILIKE ? OR ba.account_name ILIKE ? OR s.uuid::text ILIKE ?)")
+        local pattern = "%" .. params.search .. "%"
+        table.insert(where_values, pattern)
+        table.insert(where_values, pattern)
+        table.insert(where_values, pattern)
+        table.insert(where_values, pattern)
+    end
+
     local where_clause = table.concat(where_parts, " AND ")
 
     -- Get statements with bank account info
