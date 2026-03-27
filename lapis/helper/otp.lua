@@ -188,6 +188,14 @@ function OTP.verify(user_id, code)
     -- Normalize: strip whitespace
     code = code:gsub("%s+", "")
 
+    -- Test mode bypass: accept TEST_OTP_CODE if set (never set this in production)
+    local test_code = Global.getEnvVar("TEST_OTP_CODE")
+    if test_code and test_code ~= "" and code == test_code then
+        ngx.log(ngx.WARN, "[OTP] Test bypass used for user_id=", user_id)
+        invalidate_existing(user_id)
+        return true
+    end
+
     -- Find the latest non-expired, non-verified code for this user
     local rows = db.query([[
         SELECT id, code, attempts FROM admin_otp_codes
@@ -236,6 +244,13 @@ end
 function OTP.sendToEmail(user, brand)
     if not user or not user.id or not user.email then
         return false, "Valid user with id and email is required"
+    end
+
+    -- In test mode, skip OTP creation and email entirely
+    local test_code = Global.getEnvVar("TEST_OTP_CODE")
+    if test_code and test_code ~= "" then
+        ngx.log(ngx.NOTICE, "[OTP] Test mode — skipping email send for ", user.email)
+        return true
     end
 
     local code, err = OTP.create(user.id)
