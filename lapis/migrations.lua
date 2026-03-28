@@ -17,9 +17,15 @@ local types = schema.types
 local db = require("lapis.db")
 local MigrationUtils = require "helper.migration-utils"
 local ProjectConfig = require "helper.project-config"
+local MigrationTracker = require "helper.migration-tracker"
 
 -- Print project configuration at migration start
 ProjectConfig.printConfig()
+
+-- Initialize migration tracker (skip logging, dry-run support, summary report)
+MigrationTracker.init(ProjectConfig.getProjectCode(), ProjectConfig.getEnabledFeatures())
+
+-- Dry-run mode is handled after building the migrations table (see end of file)
 
 -- Default admin password - CHANGE THIS AFTER FIRST LOGIN
 local DEFAULT_ADMIN_PASSWORD = "DiyReturn@1990"
@@ -28,10 +34,10 @@ local DEFAULT_ADMIN_PASSWORD = "DiyReturn@1990"
 -- CONDITIONAL MIGRATION LOADERS
 -- =============================================================================
 
--- Helper function to create a no-op migration
-local function skip_migration(_name)
+-- Helper function to create a no-op migration (logs the skip via tracker)
+local function skip_migration(name, feature)
     return function()
-        -- Migration skipped based on PROJECT_CODE
+        MigrationTracker.recordSkipped(name or "unknown", feature or "unknown")
     end
 end
 
@@ -124,27 +130,84 @@ local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- HELPER FUNCTIONS FOR CONDITIONAL MIGRATIONS
 -- =============================================================================
 
--- Returns the migration function or a skip function
+-- Returns the migration function or a skip function (with tracking)
 local function conditional(feature, migration_func)
     if ProjectConfig.isFeatureEnabled(feature) and migration_func then
-        return migration_func
+        return function(...)
+            MigrationTracker.recordRan(feature, feature)
+            return migration_func(...)
+        end
     end
-    return skip_migration(feature)
+    return skip_migration(feature, feature)
 end
 
--- Returns the migration from an array or a skip function
+-- Returns the migration from an array or a skip function (with tracking)
 local function conditional_array(feature, migrations_array, index)
+    local name = feature .. "[" .. tostring(index) .. "]"
     if ProjectConfig.isFeatureEnabled(feature) and migrations_array and migrations_array[index] then
-        return migrations_array[index]
+        return function(...)
+            MigrationTracker.recordRan(name, feature)
+            return migrations_array[index](...)
+        end
     end
-    return skip_migration(feature .. "[" .. tostring(index) .. "]")
+    return skip_migration(name, feature)
+end
+
+-- Dry-run: preview what would run/skip without touching the DB.
+-- Returns an empty table so lapis executes nothing.
+local function dry_run_preview(migrations_table)
+    print("")
+    print("============================================================")
+    print("  DRY-RUN MODE: No database changes will be made")
+    print("============================================================")
+
+    -- Count total migrations
+    local names = {}
+    for name in pairs(migrations_table) do
+        table.insert(names, name)
+    end
+    table.sort(names)
+
+    -- Report feature status
+    local all_features = {
+        ProjectConfig.FEATURES.ECOMMERCE,
+        ProjectConfig.FEATURES.DELIVERY,
+        ProjectConfig.FEATURES.CHAT,
+        ProjectConfig.FEATURES.KANBAN,
+        ProjectConfig.FEATURES.HOSPITAL,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.REVIEWS,
+        ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.VAULT,
+        ProjectConfig.FEATURES.SERVICES,
+        ProjectConfig.FEATURES.BANK_TRANSACTIONS,
+        ProjectConfig.FEATURES.TAX_COPILOT,
+    }
+
+    print("")
+    print("  Feature status for PROJECT_CODE=" .. ProjectConfig.getProjectCode() .. ":")
+    print("  ------------------------------------------------------------")
+    for _, feature in ipairs(all_features) do
+        local enabled = ProjectConfig.isFeatureEnabled(feature)
+        local status = enabled and "ENABLED  (migrations WILL run)" or "DISABLED (migrations will be SKIPPED)"
+        print("    " .. feature .. ": " .. status)
+    end
+    print("  ------------------------------------------------------------")
+    print("  Total migrations defined: " .. #names)
+    print("")
+    print("  To apply migrations, run without MIGRATION_DRY_RUN=1")
+    print("============================================================")
+    print("")
+
+    -- Return empty table so lapis does nothing
+    return {}
 end
 
 -- =============================================================================
 -- MIGRATIONS TABLE
 -- =============================================================================
 
-return {
+local _migrations = {
     -- =========================================================================
     -- CORE MIGRATIONS (Always run - these are required for any project)
     -- =========================================================================
@@ -1115,20 +1178,114 @@ return {
     ['436_profile_seed_preferences'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 33),
     ['437_profile_seed_new_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 34),
 
-    -- Custom migrations
+    -- Custom migrations (supports per-project directories)
     ['custom_migrations'] = function()
         local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")
+        local project_code = ProjectConfig.getProjectCode()
+        local is_dry_run = MigrationTracker.isDryRun()
+
         if custom_migrations_dir then
             local lfs = require("lfs")
-            for file in lfs.dir(custom_migrations_dir) do
-                if file:match("%.lua$") then
+
+            -- 1. Run shared custom migrations from root dir (backward compatible)
+            local root_exists = lfs.attributes(custom_migrations_dir, "mode") == "directory"
+            if root_exists then
+                local files = {}
+                for file in lfs.dir(custom_migrations_dir) do
+                    if file:match("%.lua$") then
+                        table.insert(files, file)
+                    end
+                end
+                table.sort(files)
+
+                for _, file in ipairs(files) do
                     local migration_path = custom_migrations_dir .. "/" .. file
-                    local migration_func = dofile(migration_path)
-                    if type(migration_func) == "function" then
-                        migration_func(schema, db, MigrationUtils)
+                    if is_dry_run then
+                        print("[Migration] DRY-RUN: Would execute custom migration " .. file)
+                        MigrationTracker.recordRan("custom:" .. file, "custom")
+                    else
+                        local migration_func = dofile(migration_path)
+                        if type(migration_func) == "function" then
+                            migration_func(schema, db, MigrationUtils)
+                            MigrationTracker.recordRan("custom:" .. file, "custom")
+                        end
+                    end
+                end
+            end
+
+            -- 2. Run project-specific custom migrations from subdirectories
+            --    Supports comma-separated PROJECT_CODE (e.g. "tax_copilot,ecommerce")
+            local project_codes = ProjectConfig.parseProjectCodes()
+            for _, code in ipairs(project_codes) do
+                if code ~= "all" then
+                    local project_dir = custom_migrations_dir .. "/" .. code
+                    local dir_exists = lfs.attributes(project_dir, "mode") == "directory"
+                    if dir_exists then
+                        local files = {}
+                        for file in lfs.dir(project_dir) do
+                            if file:match("%.lua$") then
+                                table.insert(files, file)
+                            end
+                        end
+                        table.sort(files)
+
+                        for _, file in ipairs(files) do
+                            local migration_path = project_dir .. "/" .. file
+                            if is_dry_run then
+                                print("[Migration] DRY-RUN: Would execute project migration " .. code .. "/" .. file)
+                                MigrationTracker.recordRan("custom:" .. code .. "/" .. file, "custom:" .. code)
+                            else
+                                local migration_func = dofile(migration_path)
+                                if type(migration_func) == "function" then
+                                    migration_func(schema, db, MigrationUtils)
+                                    MigrationTracker.recordRan("custom:" .. code .. "/" .. file, "custom:" .. code)
+                                end
+                            end
+                        end
                     end
                 end
             end
         end
+
+    end,
+
+    -- =========================================================================
+    -- MIGRATION SUMMARY (runs last due to alphabetical ordering)
+    -- Uses a DB trigger to auto-delete its lapis_migrations record so it
+    -- always re-runs on each deploy.
+    -- =========================================================================
+    ['zzz_migration_summary'] = function()
+        MigrationTracker.printSummary()
+        -- Create a trigger (once) that auto-deletes this migration record
+        -- after lapis inserts it. This ensures the summary runs every time.
+        db.query([[
+            CREATE OR REPLACE FUNCTION delete_zzz_migration_summary()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.name = 'zzz_migration_summary' THEN
+                    DELETE FROM lapis_migrations WHERE name = 'zzz_migration_summary';
+                    RETURN NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        ]])
+        db.query([[
+            DROP TRIGGER IF EXISTS trg_delete_zzz_summary ON lapis_migrations
+        ]])
+        db.query([[
+            CREATE TRIGGER trg_delete_zzz_summary
+            AFTER INSERT ON lapis_migrations
+            FOR EACH ROW
+            WHEN (NEW.name = 'zzz_migration_summary')
+            EXECUTE FUNCTION delete_zzz_migration_summary()
+        ]])
     end
 }
+
+-- In dry-run mode, show preview and return empty table (no DB changes)
+if MigrationTracker.isDryRun() then
+    return dry_run_preview(_migrations)
+end
+
+return _migrations
