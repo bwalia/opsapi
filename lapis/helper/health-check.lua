@@ -7,6 +7,70 @@ local http = require("resty.http")
 
 local HealthCheck = {}
 
+-- ── DNS resolution helper (mirrors minio.lua logic) ──────────────────────────
+-- In K8s, resty.http can't resolve .svc.cluster.local hostnames via the nginx
+-- resolver. This helper uses resty.dns.resolver to query CoreDNS directly,
+-- then replaces the hostname in the URL with the resolved IP.
+local _dns_cache = {}
+local DNS_CACHE_TTL = 30
+
+local function is_kubernetes()
+    local f = io.open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
+    if f then f:close(); return true end
+    return false
+end
+
+local function resolve_for_health_check(url)
+    if not url or url == "" then return url end
+    if not is_kubernetes() then return url end
+
+    -- Extract hostname from URL: http://hostname:port/path
+    local scheme, host, port, path = url:match("^(https?)://([^:/]+):?(%d*)(.*)")
+    if not host then return url end
+    if host:match("^%d+%.%d+%.%d+%.%d+$") then return url end -- already IP
+
+    -- Check cache
+    local cached = _dns_cache[host]
+    if cached and cached.expires > ngx.now() then
+        local resolved_url = scheme .. "://" .. cached.ip .. (port ~= "" and (":" .. port) or "") .. path
+        return resolved_url
+    end
+
+    -- Get nameservers from /etc/resolv.conf (skip 127.x.x.x)
+    local nameservers = {}
+    local f = io.open("/etc/resolv.conf", "r")
+    if f then
+        for line in f:lines() do
+            local ns = line:match("^nameserver%s+(%S+)")
+            if ns and not ns:match("^127%.") then
+                nameservers[#nameservers + 1] = ns
+            end
+        end
+        f:close()
+    end
+    if #nameservers == 0 then return url end
+
+    -- Resolve using resty.dns.resolver
+    local ok_mod, dns = pcall(require, "resty.dns.resolver")
+    if not ok_mod then return url end
+
+    local r, err = dns:new({ nameservers = nameservers, retrans = 2, timeout = 2000 })
+    if not r then return url end
+
+    local answers, err = r:query(host, { qtype = r.TYPE_A })
+    if not answers or answers.errcode then return url end
+
+    for _, ans in ipairs(answers) do
+        if ans.type == r.TYPE_A and ans.address then
+            _dns_cache[host] = { ip = ans.address, expires = ngx.now() + DNS_CACHE_TTL }
+            local resolved_url = scheme .. "://" .. ans.address .. (port ~= "" and (":" .. port) or "") .. path
+            return resolved_url
+        end
+    end
+
+    return url
+end
+
 -- Get database connection status
 function HealthCheck.checkDatabase()
     local start_time = ngx.now()
@@ -179,7 +243,9 @@ function HealthCheck.checkMinio()
         local ok, result = pcall(function()
             local httpc = http.new()
             httpc:set_timeout(5000)
-            local res, err = httpc:request_uri(url .. "/minio/health/live", {
+            -- Resolve K8s DNS hostnames (e.g. .svc.cluster.local) to IP
+            local resolved_url = resolve_for_health_check(url)
+            local res, err = httpc:request_uri(resolved_url .. "/minio/health/live", {
                 method = "GET",
                 ssl_verify = ssl_verify,
             })
