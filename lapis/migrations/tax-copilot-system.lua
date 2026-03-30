@@ -959,4 +959,77 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_tokens_expires_at ON hmrc_tokens (expires_at)")
         print("[Tax Copilot] Created hmrc_tokens table")
     end,
+
+    -- 42. Add namespace_id to tables missing it + backfill with active namespace
+    -- Ensures all tax data is namespace-scoped for multi-tenant isolation.
+    -- Safe: adds column with DEFAULT 0, then backfills from the first active namespace.
+    [42] = function()
+        -- Tables that need namespace_id added
+        local tables_to_add = {
+            "tax_transactions",
+            "tax_user_profiles",
+            "hmrc_businesses",
+            "hmrc_obligations",
+            "hmrc_tokens",
+        }
+
+        for _, tbl in ipairs(tables_to_add) do
+            -- Check if column already exists (idempotent)
+            local col_check = db.query([[
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = ? AND column_name = 'namespace_id'
+            ]], tbl)
+            if not col_check or #col_check == 0 then
+                db.query("ALTER TABLE " .. db.escape_identifier(tbl) ..
+                    " ADD COLUMN namespace_id INTEGER NOT NULL DEFAULT 0")
+                db.query("CREATE INDEX IF NOT EXISTS idx_" .. tbl .. "_namespace_id ON " ..
+                    db.escape_identifier(tbl) .. " (namespace_id)")
+                print("[Tax Copilot] Added namespace_id to " .. tbl)
+            else
+                print("[Tax Copilot] namespace_id already exists on " .. tbl)
+            end
+        end
+
+        -- Backfill: set namespace_id to the tax_copilot namespace (not system)
+        -- Uses PROJECT_CODE env var to find the correct namespace.
+        -- Falls back to project_code = 'tax_copilot', then first non-system namespace.
+        local project_code = os.getenv("PROJECT_CODE") or "tax_copilot"
+        local ns = db.query([[
+            SELECT id FROM namespaces
+            WHERE status = 'active' AND project_code = ?
+            ORDER BY id ASC LIMIT 1
+        ]], project_code)
+        -- Fallback: first non-system active namespace
+        if not ns or #ns == 0 then
+            ns = db.query([[
+                SELECT id FROM namespaces
+                WHERE status = 'active' AND slug != 'system'
+                ORDER BY id ASC LIMIT 1
+            ]])
+        end
+        if ns and #ns > 0 then
+            local ns_id = ns[1].id
+            -- All tables with namespace_id (including ones that already had it)
+            local all_tables = {
+                "tax_bank_accounts",
+                "tax_statements",
+                "tax_transactions",
+                "tax_user_profiles",
+                "hmrc_businesses",
+                "hmrc_obligations",
+                "hmrc_tokens",
+            }
+            for _, tbl in ipairs(all_tables) do
+                local updated = db.query(
+                    "UPDATE " .. db.escape_identifier(tbl) ..
+                    " SET namespace_id = ? WHERE namespace_id = 0 OR namespace_id IS NULL",
+                    ns_id
+                )
+                local count = updated and updated.affected_rows or 0
+                print("[Tax Copilot] Backfilled " .. tbl .. " namespace_id=" .. ns_id .. " (" .. tostring(count) .. " rows)")
+            end
+        else
+            print("[Tax Copilot] WARNING: No active namespace found, skipping backfill")
+        end
+    end,
 }
