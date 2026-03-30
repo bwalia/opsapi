@@ -13,6 +13,18 @@ local cjson = require("cjson")
 
 local TaxBankAccountQueries = {}
 
+-- Resolve user's default namespace_id (returns 0 if not found)
+local function resolveNamespaceId(user_id)
+    local ok, rows = pcall(db.query, [[
+        SELECT default_namespace_id FROM user_namespace_settings
+        WHERE user_id = ? LIMIT 1
+    ]], user_id)
+    if ok and rows and #rows > 0 and rows[1].default_namespace_id then
+        return tonumber(rows[1].default_namespace_id) or 0
+    end
+    return 0
+end
+
 -- Find existing bank account by sort_code + account_number or bank_name for a user
 function TaxBankAccountQueries.findMatchingAccount(user_id, data)
     -- Exact match: sort_code + account_number (strongest signal)
@@ -173,14 +185,28 @@ function TaxBankAccountQueries.all(params, user)
     local page = tonumber(params.page) or 1
     local perPage = tonumber(params.perPage) or 20
 
-    local paginated = TaxBankAccounts:paginated(
-        "WHERE user_id = ? AND is_active = true ORDER BY is_primary DESC, created_at DESC",
-        user_id,
-        {
-            per_page = perPage,
-            fields = 'uuid as id, bank_name, account_name, account_number, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
-        }
-    )
+    -- Resolve namespace for scoped queries
+    local ns_id = resolveNamespaceId(user_id)
+    local paginated
+    if ns_id > 0 then
+        paginated = TaxBankAccounts:paginated(
+            "WHERE user_id = ? AND namespace_id = ? AND is_active = true ORDER BY is_primary DESC, created_at DESC",
+            user_id, ns_id,
+            {
+                per_page = perPage,
+                fields = 'uuid as id, bank_name, account_name, account_number, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
+            }
+        )
+    else
+        paginated = TaxBankAccounts:paginated(
+            "WHERE user_id = ? AND is_active = true ORDER BY is_primary DESC, created_at DESC",
+            user_id,
+            {
+                per_page = perPage,
+                fields = 'uuid as id, bank_name, account_name, account_number, sort_code, account_type, currency, is_primary, is_active, created_at, updated_at'
+            }
+        )
+    end
 
     local accounts = paginated:get_page(page)
 

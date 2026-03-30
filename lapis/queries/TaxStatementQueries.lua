@@ -125,6 +125,13 @@ function TaxStatementQueries.all(params, user)
     local where_parts = { "s.user_id = ?" }
     local where_values = { user_id }
 
+    -- Namespace isolation: filter by user's default namespace if available
+    local ns_rows = db.query("SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = ? LIMIT 1", user_id)
+    if ns_rows and #ns_rows > 0 and ns_rows[1].default_namespace_id and tonumber(ns_rows[1].default_namespace_id) > 0 then
+        table.insert(where_parts, "s.namespace_id = ?")
+        table.insert(where_values, tonumber(ns_rows[1].default_namespace_id))
+    end
+
     if params.bank_account_id then
         table.insert(where_parts, "ba.uuid = ?")
         table.insert(where_values, params.bank_account_id)

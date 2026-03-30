@@ -1177,6 +1177,7 @@ local _migrations = {
     ['435_profile_seed_compliance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 32),
     ['436_profile_seed_preferences'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 33),
     ['437_profile_seed_new_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 34),
+    ['438_tax_namespace_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 42),
 
     -- Custom migrations (supports per-project directories)
     ['custom_migrations'] = function()
