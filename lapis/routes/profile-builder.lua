@@ -72,29 +72,48 @@ local function getNamespaceId(self)
     local user = self.current_user
     if user then
         local user_uuid = user.uuid or user.id
+        -- Try user_namespace_settings first (correct table)
         local ok, rows = pcall(db.query, [[
-            SELECT namespace_id FROM user_namespaces WHERE user_uuid = ? LIMIT 1
+            SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = (
+                SELECT id FROM users WHERE uuid = ? LIMIT 1
+            ) LIMIT 1
         ]], user_uuid)
-        if ok and rows and #rows > 0 then
-            return rows[1].namespace_id
+        if ok and rows and #rows > 0 and rows[1].default_namespace_id then
+            return tonumber(rows[1].default_namespace_id)
         end
     end
-    return nil
+    return 0 -- Default namespace
+end
+
+-- Resolve a user UUID to internal integer ID (cached per request via ngx.ctx)
+local function resolveUserId(user_uuid)
+    if not user_uuid then return 0 end
+    if type(user_uuid) == "number" then return user_uuid end
+    -- Check if already numeric string
+    if tonumber(user_uuid) then return tonumber(user_uuid) end
+    -- Resolve UUID → integer ID
+    local cache_key = "uid:" .. tostring(user_uuid)
+    if ngx.ctx[cache_key] then return ngx.ctx[cache_key] end
+    local ok, rows = pcall(db.query, "SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+    local id = (ok and rows and #rows > 0) and rows[1].id or 0
+    ngx.ctx[cache_key] = id
+    return id
 end
 
 local function auditLog(params)
+    local user_id = resolveUserId(params.user_id)
     local ok, err = pcall(db.query, [[
         INSERT INTO profile_audit_logs (uuid, namespace_id, user_id, action, entity_type, entity_uuid, old_data_json, new_data_json, ip_address, created_at)
         VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     ]],
-        params.namespace_id,
-        params.user_id,
-        params.action,
-        params.entity_type,
-        params.entity_uuid,
-        params.old_data_json,
-        params.new_data_json,
-        params.ip_address
+        params.namespace_id or 0,
+        user_id,
+        params.action or "unknown",
+        params.entity_type or "unknown",
+        params.entity_uuid or db.NULL,
+        params.old_data_json or db.NULL,
+        params.new_data_json or db.NULL,
+        params.ip_address or db.NULL
     )
     if not ok then
         ngx.log(ngx.ERR, "[ProfileBuilder] audit log insert failed: ", tostring(err))
@@ -164,6 +183,180 @@ local function recalculateCompletion(user_id, user_uuid, category_id)
     end
 end
 
+-- Evaluate auto-tag rules against user's current answers and assign/remove tags
+local function evaluateTagRules(user_id, user_uuid)
+    local ok, err = pcall(function()
+        -- Get all active tag rules with their associated tag info
+        local rules = db.query([[
+            SELECT tr.id, tr.tag_id, tr.source_question_id, tr.operator, tr.expected_value,
+                   pt.slug as tag_slug, pt.name as tag_name
+            FROM profile_tag_rules tr
+            JOIN profile_tags pt ON pt.id = tr.tag_id
+            WHERE tr.is_active = true AND pt.is_active = true
+        ]])
+        if not rules or #rules == 0 then return end
+
+        -- Get user's current answers indexed by question_id
+        local answer_map = {}
+        local answers = db.query([[
+            SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+            FROM user_profile_answers
+            WHERE user_id = ? AND is_draft = false
+        ]], user_id)
+        for _, a in ipairs(answers or {}) do
+            answer_map[a.question_id] = a
+        end
+
+        -- Evaluate each rule
+        local tags_to_add = {}
+        local tags_to_remove = {}
+
+        for _, rule in ipairs(rules) do
+            local answer = answer_map[rule.source_question_id]
+            local match = false
+
+            if answer then
+                local actual = answer.answer_text or answer.answer_boolean or answer.answer_number or ""
+                actual = tostring(actual)
+                local expected = tostring(rule.expected_value or "")
+
+                if rule.operator == "equals" then
+                    match = actual == expected
+                elseif rule.operator == "not_equals" then
+                    match = actual ~= expected
+                elseif rule.operator == "greater_than" then
+                    match = (tonumber(actual) or 0) > (tonumber(expected) or 0)
+                elseif rule.operator == "less_than" then
+                    match = (tonumber(actual) or 0) < (tonumber(expected) or 0)
+                elseif rule.operator == "contains" then
+                    match = actual:lower():find(expected:lower(), 1, true) ~= nil
+                elseif rule.operator == "in_list" then
+                    for item in expected:gmatch("[^,]+") do
+                        if actual == item:match("^%s*(.-)%s*$") then
+                            match = true
+                            break
+                        end
+                    end
+                elseif rule.operator == "is_not_empty" then
+                    match = actual ~= "" and actual ~= "nil" and actual ~= "false"
+                end
+            end
+
+            if match then
+                tags_to_add[rule.tag_id] = rule.tag_slug
+            else
+                tags_to_remove[rule.tag_id] = rule.tag_slug
+            end
+        end
+
+        -- Remove tags that no longer match (only auto-assigned ones)
+        for tag_id, _ in pairs(tags_to_remove) do
+            if not tags_to_add[tag_id] then
+                pcall(db.query, [[
+                    DELETE FROM user_profile_tags
+                    WHERE user_id = ? AND tag_id = ? AND assignment_source = 'auto'
+                ]], user_id, tag_id)
+            end
+        end
+
+        -- Add tags that match
+        for tag_id, _ in pairs(tags_to_add) do
+            pcall(db.query, [[
+                INSERT INTO user_profile_tags (uuid, user_id, user_uuid, tag_id, assigned_by, assignment_source, assigned_at, created_at)
+                VALUES (gen_random_uuid()::text, ?, ?, ?, ?, 'auto', NOW(), NOW())
+                ON CONFLICT (user_id, tag_id) DO UPDATE SET
+                    assignment_source = 'auto',
+                    assigned_at = NOW()
+            ]], user_id, user_uuid, tag_id, user_uuid)
+        end
+    end)
+    if not ok then
+        ngx.log(ngx.ERR, "[ProfileBuilder] evaluateTagRules failed: ", tostring(err))
+    end
+end
+
+-- Get user's assigned tags
+local function getUserTags(user_id)
+    local ok, rows = pcall(db.query, [[
+        SELECT pt.uuid, pt.name, pt.slug, pt.color, pt.tag_type, pt.description,
+               upt.assignment_source, upt.assigned_at
+        FROM user_profile_tags upt
+        JOIN profile_tags pt ON pt.id = upt.tag_id
+        WHERE upt.user_id = ? AND pt.is_active = true
+        ORDER BY pt.name ASC
+    ]], user_id)
+    if ok and rows then return rows end
+    return {}
+end
+
+-- Evaluate visibility rules for a question against current answers
+local function evaluateVisibility(question_id, answer_map)
+    local ok, rules = pcall(db.query, [[
+        SELECT rule_type, operator, expected_value, source_question_id, logic_group
+        FROM profile_question_rules
+        WHERE question_id = ? AND is_active = true AND rule_type = 'visibility'
+        ORDER BY logic_group ASC, display_order ASC
+    ]], question_id)
+    if not ok or not rules or #rules == 0 then
+        return true -- No rules = always visible
+    end
+
+    -- Group rules by logic_group
+    local groups = {}
+    for _, r in ipairs(rules) do
+        local g = r.logic_group or "AND"
+        if not groups[g] then groups[g] = {} end
+        table.insert(groups[g], r)
+    end
+
+    -- Evaluate AND groups (all must pass) and OR groups (any must pass)
+    local and_result = true
+    local or_result = false
+    local has_or = false
+
+    for group_name, group_rules in pairs(groups) do
+        for _, rule in ipairs(group_rules) do
+            local answer = answer_map[rule.source_question_id]
+            local actual = ""
+            if answer then
+                actual = tostring(answer.answer_text or answer.answer_boolean or answer.answer_number or "")
+            end
+            local expected = tostring(rule.expected_value or "")
+
+            local match = false
+            if rule.operator == "equals" then
+                match = actual == expected
+            elseif rule.operator == "not_equals" then
+                match = actual ~= expected
+            elseif rule.operator == "in_list" then
+                for item in expected:gmatch("[^,]+") do
+                    if actual == item:match("^%s*(.-)%s*$") then match = true; break end
+                end
+            elseif rule.operator == "is_not_empty" then
+                match = actual ~= "" and actual ~= "nil" and actual ~= "false"
+            elseif rule.operator == "is_empty" then
+                match = actual == "" or actual == "nil" or actual == "false"
+            elseif rule.operator == "greater_than" then
+                match = (tonumber(actual) or 0) > (tonumber(expected) or 0)
+            elseif rule.operator == "contains" then
+                match = actual:lower():find(expected:lower(), 1, true) ~= nil
+            end
+
+            if group_name == "OR" then
+                has_or = true
+                if match then or_result = true end
+            else
+                if not match then and_result = false end
+            end
+        end
+    end
+
+    if has_or then
+        return and_result and or_result
+    end
+    return and_result
+end
+
 local function getUserIdByUuid(user_uuid)
     local ok, rows = pcall(db.query, "SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
     if ok and rows and #rows > 0 then
@@ -197,15 +390,35 @@ return function(app)
         local user_id = getUserIdByUuid(user_uuid)
         local namespace_id = getNamespaceId(self)
 
+        -- Include global categories (namespace_id = 0) and user's namespace categories
+        local ns_filter = ""
+        if namespace_id and namespace_id > 0 then
+            ns_filter = " AND (namespace_id = " .. db.escape_literal(namespace_id) .. " OR namespace_id = 0)"
+        end
         local ok_cats, categories = pcall(db.query, [[
             SELECT * FROM profile_categories
             WHERE is_active = true AND is_archived = false
-            ]] .. (namespace_id and " AND namespace_id = " .. db.escape_literal(namespace_id) or "") .. [[
+            ]] .. ns_filter .. [[
             ORDER BY display_order ASC, name ASC
         ]])
         if not ok_cats then
             ngx.log(ngx.ERR, "[ProfileBuilder] schema categories query failed: ", tostring(categories))
             return { status = 500, json = { error = "Failed to load schema" } }
+        end
+
+        -- Pre-load all user answers indexed by question_id for visibility evaluation
+        local answer_map = {}
+        if user_id then
+            local ok_all_ans, all_ans = pcall(db.query, [[
+                SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                FROM user_profile_answers
+                WHERE user_id = ? AND is_draft = false
+            ]], user_id)
+            if ok_all_ans and all_ans then
+                for _, a in ipairs(all_ans) do
+                    answer_map[a.question_id] = a
+                end
+            end
         end
 
         local result = {}
@@ -229,17 +442,11 @@ return function(app)
                 ]], q.id)
                 if not ok_opts then options = {} end
 
-                local answer = nil
-                if user_id then
-                    local ok_ans, ans_rows = pcall(db.query, [[
-                        SELECT * FROM user_profile_answers
-                        WHERE user_id = ? AND question_id = ?
-                        ORDER BY answered_at DESC LIMIT 1
-                    ]], user_id, q.id)
-                    if ok_ans and ans_rows and #ans_rows > 0 then
-                        answer = ans_rows[1]
-                    end
-                end
+                -- Use pre-loaded answer from answer_map
+                local answer = answer_map[q.id]
+
+                -- Evaluate visibility rules server-side
+                local is_visible = evaluateVisibility(q.id, answer_map)
 
                 local opt_list = {}
                 for _, o in ipairs(options or {}) do
@@ -250,6 +457,7 @@ return function(app)
                         description = o.description,
                         display_order = o.display_order,
                         is_default = o.is_default,
+                        is_active = o.is_active,
                         parent_option_id = o.parent_option_id,
                         metadata_json = o.metadata_json
                     })
@@ -266,6 +474,7 @@ return function(app)
                     is_required = q.is_required,
                     is_multi_value = q.is_multi_value,
                     is_editable_by_user = q.is_editable_by_user,
+                    is_visible = is_visible,
                     display_order = q.display_order,
                     validation_json = q.validation_json,
                     default_value = q.default_value,
@@ -321,7 +530,34 @@ return function(app)
             })
         end
 
-        return { status = 200, json = { schema = result } }
+        -- Get user tags
+        local user_tags = {}
+        if user_id then
+            user_tags = getUserTags(user_id)
+        end
+
+        -- Calculate overall completion
+        local overall_completion = { total = 0, answered = 0, percent = 0 }
+        for _, cat in ipairs(result) do
+            if cat.completion then
+                overall_completion.total = overall_completion.total + (cat.completion.total_questions or 0)
+                overall_completion.answered = overall_completion.answered + (cat.completion.answered_questions or 0)
+            else
+                overall_completion.total = overall_completion.total + #cat.questions
+            end
+        end
+        if overall_completion.total > 0 then
+            overall_completion.percent = math.floor((overall_completion.answered / overall_completion.total) * 100)
+        end
+
+        return {
+            status = 200,
+            json = {
+                schema = result,
+                user_tags = user_tags,
+                overall_completion = overall_completion
+            }
+        }
     end)
 
     -- =====================================================================
@@ -348,10 +584,15 @@ return function(app)
 
         local namespace_id = getNamespaceId(self)
 
+        -- Include global categories (namespace_id = 0) and user's namespace categories
+        local ns_filter = ""
+        if namespace_id and namespace_id > 0 then
+            ns_filter = " AND (namespace_id = " .. db.escape_literal(namespace_id) .. " OR namespace_id = 0)"
+        end
         local ok_cats, categories = pcall(db.query, [[
             SELECT * FROM profile_categories
             WHERE is_active = true AND is_archived = false
-            ]] .. (namespace_id and " AND namespace_id = " .. db.escape_literal(namespace_id) or "") .. [[
+            ]] .. ns_filter .. [[
             ORDER BY display_order ASC, name ASC
         ]])
         if not ok_cats then
@@ -461,8 +702,8 @@ return function(app)
         if not include_archived then
             table.insert(where_parts, "is_archived = false")
         end
-        if namespace_id then
-            table.insert(where_parts, "namespace_id = ?")
+        if namespace_id and namespace_id > 0 then
+            table.insert(where_parts, "(namespace_id = ? OR namespace_id = 0)")
             table.insert(where_vals, namespace_id)
         end
         if parent_id and parent_id ~= "" then
@@ -535,26 +776,31 @@ return function(app)
 
         local namespace_id = getNamespaceId(self)
         local admin_uuid = admin.uuid or admin.id
+        local admin_id = resolveUserId(admin_uuid)
 
         local ok, result = pcall(db.query, [[
             INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, parent_id, is_active, is_archived, visibility_rule_json, completion_rule_json, created_by, updated_by, created_at, updated_at)
             VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, true, false, ?, ?, ?, ?, NOW(), NOW())
             RETURNING *
         ]],
-            namespace_id,
-            params.name,
-            params.slug,
-            params.description,
-            params.icon,
+            namespace_id or 0,
+            params.name or "",
+            params.slug or "",
+            params.description or db.NULL,
+            params.icon or db.NULL,
             params.display_order or 0,
-            params.parent_id,
-            params.visibility_rule_json,
-            params.completion_rule_json,
-            admin_uuid,
-            admin_uuid
+            params.parent_id or db.NULL,
+            params.visibility_rule_json or db.NULL,
+            params.completion_rule_json or db.NULL,
+            admin_id,
+            admin_id
         )
         if not ok then
-            ngx.log(ngx.ERR, "[ProfileBuilder] create category failed: ", tostring(result))
+            local err_msg = tostring(result)
+            ngx.log(ngx.ERR, "[ProfileBuilder] create category failed: ", err_msg)
+            if err_msg:find("duplicate key") or err_msg:find("unique constraint") then
+                return { status = 409, json = { error = "A category with this slug already exists" } }
+            end
             return { status = 500, json = { error = "Failed to create category" } }
         end
 
@@ -609,8 +855,9 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
         table.insert(set_parts, "updated_by = ?")
-        table.insert(set_vals, admin_uuid)
+        table.insert(set_vals, admin_int_id)
         table.insert(set_parts, "updated_at = NOW()")
         table.insert(set_vals, cat_uuid)
 
@@ -655,10 +902,11 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
         local ok_upd, upd_err = pcall(db.query, [[
             UPDATE profile_categories SET is_archived = true, updated_by = ?, updated_at = NOW()
             WHERE uuid = ?
-        ]], admin_uuid, cat_uuid)
+        ]], admin_int_id, cat_uuid)
         if not ok_upd then
             ngx.log(ngx.ERR, "[ProfileBuilder] archive category failed: ", tostring(upd_err))
             return { status = 500, json = { error = "Failed to archive category" } }
@@ -695,12 +943,13 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
         for _, item in ipairs(items) do
             if item.uuid and item.display_order ~= nil then
                 local ok, err = pcall(db.query, [[
                     UPDATE profile_categories SET display_order = ?, updated_by = ?, updated_at = NOW()
                     WHERE uuid = ?
-                ]], item.display_order, admin_uuid, item.uuid)
+                ]], item.display_order, admin_int_id, item.uuid)
                 if not ok then
                     ngx.log(ngx.ERR, "[ProfileBuilder] reorder category failed: ", tostring(err))
                 end
@@ -763,7 +1012,7 @@ return function(app)
             table.insert(where_vals, self.params.touchpoint)
         end
 
-        local sql = "SELECT pq.* FROM profile_questions pq WHERE " .. table.concat(where_parts, " AND ") .. " ORDER BY pq.display_order ASC, pq.label ASC"
+        local sql = "SELECT pq.*, pc.uuid as category_uuid, pc.name as category_name FROM profile_questions pq LEFT JOIN profile_categories pc ON pc.id = pq.category_id WHERE " .. table.concat(where_parts, " AND ") .. " ORDER BY pq.display_order ASC, pq.label ASC"
         local ok, rows = pcall(db.query, sql, unpack(where_vals))
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] questions list failed: ", tostring(rows))
@@ -851,8 +1100,9 @@ return function(app)
 
         local namespace_id = category.namespace_id or getNamespaceId(self)
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
 
-        local lookup_table_id = nil
+        local lookup_table_id = db.NULL
         if params.lookup_table_uuid and params.lookup_table_uuid ~= "" then
             local ok_lt, lt_rows = pcall(db.query, "SELECT id FROM profile_lookup_tables WHERE uuid = ? LIMIT 1", params.lookup_table_uuid)
             if ok_lt and lt_rows and #lt_rows > 0 then
@@ -865,25 +1115,25 @@ return function(app)
             VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true, false, ?, ?, NOW(), NOW())
             RETURNING *
         ]],
-            namespace_id,
+            namespace_id or 0,
             category.id,
             params.question_key,
             params.label,
-            params.description,
-            params.help_text,
-            params.placeholder,
+            params.description or db.NULL,
+            params.help_text or db.NULL,
+            params.placeholder or db.NULL,
             params.question_type,
             params.is_required or false,
             params.is_multi_value or false,
             params.is_editable_by_user ~= false,
             params.display_order or 0,
-            params.validation_json,
-            params.default_value,
-            params.config_json,
+            params.validation_json or db.NULL,
+            params.default_value or db.NULL,
+            params.config_json or db.NULL,
             lookup_table_id,
             params.version or 1,
-            admin_uuid,
-            admin_uuid
+            admin_int_id,
+            admin_int_id
         )
         if not ok_ins then
             ngx.log(ngx.ERR, "[ProfileBuilder] create question failed: ", tostring(ins_result))
@@ -961,8 +1211,9 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
         table.insert(set_parts, "updated_by = ?")
-        table.insert(set_vals, admin_uuid)
+        table.insert(set_vals, admin_int_id)
         table.insert(set_parts, "updated_at = NOW()")
         table.insert(set_vals, q_uuid)
 
@@ -1007,10 +1258,11 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
         local ok_upd, upd_err = pcall(db.query, [[
             UPDATE profile_questions SET is_archived = true, updated_by = ?, updated_at = NOW()
             WHERE uuid = ?
-        ]], admin_uuid, q_uuid)
+        ]], admin_int_id, q_uuid)
         if not ok_upd then
             ngx.log(ngx.ERR, "[ProfileBuilder] archive question failed: ", tostring(upd_err))
             return { status = 500, json = { error = "Failed to archive question" } }
@@ -1047,12 +1299,13 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
         for _, item in ipairs(items) do
             if item.uuid and item.display_order ~= nil then
                 local ok, err = pcall(db.query, [[
                     UPDATE profile_questions SET display_order = ?, updated_by = ?, updated_at = NOW()
                     WHERE uuid = ?
-                ]], item.display_order, admin_uuid, item.uuid)
+                ]], item.display_order, admin_int_id, item.uuid)
                 if not ok then
                     ngx.log(ngx.ERR, "[ProfileBuilder] reorder question failed: ", tostring(err))
                 end
@@ -1131,11 +1384,11 @@ return function(app)
             question_id,
             params.label,
             params.value,
-            params.description,
+            params.description or db.NULL,
             params.display_order or 0,
             params.is_default or false,
-            parent_option_id,
-            params.metadata_json
+            parent_option_id or db.NULL,
+            params.metadata_json or db.NULL
         )
         if not ok_ins then
             ngx.log(ngx.ERR, "[ProfileBuilder] create option failed: ", tostring(ins_result))
@@ -1613,7 +1866,18 @@ return function(app)
             recalculateCompletion(user_id, user_uuid, category_id)
         end
 
-        local response = { message = "Answers saved", saved = saved, total = #answers }
+        -- Evaluate auto-tag rules based on updated answers
+        evaluateTagRules(user_id, user_uuid)
+
+        -- Get updated tags to return to frontend
+        local updated_tags = getUserTags(user_id)
+
+        local response = {
+            message = "Answers saved",
+            saved = saved,
+            total = #answers,
+            user_tags = updated_tags,
+        }
         if #errors > 0 then
             response.errors = errors
         end
@@ -1770,8 +2034,8 @@ return function(app)
         local namespace_id = getNamespaceId(self)
         local where_clause = "is_active = true"
         local vals = {}
-        if namespace_id then
-            where_clause = where_clause .. " AND namespace_id = ?"
+        if namespace_id and namespace_id > 0 then
+            where_clause = where_clause .. " AND (namespace_id = ? OR namespace_id = 0)"
             table.insert(vals, namespace_id)
         end
 
@@ -2163,8 +2427,8 @@ return function(app)
         local namespace_id = getNamespaceId(self)
         local where_clause = "is_active = true"
         local vals = {}
-        if namespace_id then
-            where_clause = where_clause .. " AND namespace_id = ?"
+        if namespace_id and namespace_id > 0 then
+            where_clause = where_clause .. " AND (namespace_id = ? OR namespace_id = 0)"
             table.insert(vals, namespace_id)
         end
 
@@ -2386,8 +2650,8 @@ return function(app)
         local namespace_id = getNamespaceId(self)
         local where_clause = "is_active = true"
         local vals = {}
-        if namespace_id then
-            where_clause = where_clause .. " AND namespace_id = ?"
+        if namespace_id and namespace_id > 0 then
+            where_clause = where_clause .. " AND (namespace_id = ? OR namespace_id = 0)"
             table.insert(vals, namespace_id)
         end
 
@@ -2918,8 +3182,8 @@ return function(app)
         end
 
         local namespace_id = getNamespaceId(self)
-        if namespace_id then
-            table.insert(where_parts, "pal.namespace_id = ?")
+        if namespace_id and namespace_id > 0 then
+            table.insert(where_parts, "(pal.namespace_id = ? OR pal.namespace_id = 0)")
             table.insert(where_vals, namespace_id)
         end
 
