@@ -165,8 +165,8 @@ local function recalculateCompletion(user_id, user_uuid, category_id)
         end
 
         db.query([[
-            INSERT INTO profile_completion_status (uuid, user_id, user_uuid, category_id, total_questions, answered_questions, required_questions, required_answered, completion_percent, status, last_calculated_at, created_at, updated_at)
-            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())
+            INSERT INTO profile_completion_status (uuid, user_id, user_uuid, category_id, total_questions, answered_questions, required_questions, required_answered, completion_percent, status, last_updated_at)
+            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ON CONFLICT (user_id, category_id) DO UPDATE SET
                 total_questions = EXCLUDED.total_questions,
                 answered_questions = EXCLUDED.answered_questions,
@@ -174,8 +174,7 @@ local function recalculateCompletion(user_id, user_uuid, category_id)
                 required_answered = EXCLUDED.required_answered,
                 completion_percent = EXCLUDED.completion_percent,
                 status = EXCLUDED.status,
-                last_calculated_at = NOW(),
-                updated_at = NOW()
+                last_updated_at = NOW()
         ]], user_id, user_uuid, category_id, total, answered, required, req_answered, pct, status)
     end)
     if not ok then
@@ -196,12 +195,12 @@ local function evaluateTagRules(user_id, user_uuid)
         ]])
         if not rules or #rules == 0 then return end
 
-        -- Get user's current answers indexed by question_id
+        -- Get user's current answers indexed by question_id (include drafts for visibility)
         local answer_map = {}
         local answers = db.query([[
             SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
             FROM user_profile_answers
-            WHERE user_id = ? AND is_draft = false
+            WHERE user_id = ?
         ]], user_id)
         for _, a in ipairs(answers or {}) do
             answer_map[a.question_id] = a
@@ -216,18 +215,34 @@ local function evaluateTagRules(user_id, user_uuid)
             local match = false
 
             if answer then
-                local actual = answer.answer_text or answer.answer_boolean or answer.answer_number or ""
-                actual = tostring(actual)
+                -- Resolve actual value: check each field, handling boolean false correctly
+                local actual
+                if answer.answer_text and answer.answer_text ~= "" then
+                    actual = answer.answer_text
+                elseif answer.answer_boolean ~= nil then
+                    actual = tostring(answer.answer_boolean)
+                elseif answer.answer_number ~= nil then
+                    actual = tostring(answer.answer_number)
+                else
+                    actual = ""
+                end
                 local expected = tostring(rule.expected_value or "")
+
+                local num_actual = tonumber(actual) or 0
+                local num_expected = tonumber(expected) or 0
 
                 if rule.operator == "equals" then
                     match = actual == expected
                 elseif rule.operator == "not_equals" then
                     match = actual ~= expected
                 elseif rule.operator == "greater_than" then
-                    match = (tonumber(actual) or 0) > (tonumber(expected) or 0)
+                    match = num_actual > num_expected
                 elseif rule.operator == "less_than" then
-                    match = (tonumber(actual) or 0) < (tonumber(expected) or 0)
+                    match = num_actual < num_expected
+                elseif rule.operator == "greater_than_or_equal" then
+                    match = num_actual >= num_expected
+                elseif rule.operator == "less_than_or_equal" then
+                    match = num_actual <= num_expected
                 elseif rule.operator == "contains" then
                     match = actual:lower():find(expected:lower(), 1, true) ~= nil
                 elseif rule.operator == "in_list" then
@@ -238,7 +253,9 @@ local function evaluateTagRules(user_id, user_uuid)
                         end
                     end
                 elseif rule.operator == "is_not_empty" then
-                    match = actual ~= "" and actual ~= "nil" and actual ~= "false"
+                    match = actual ~= "" and actual ~= "nil"
+                elseif rule.operator == "is_empty" then
+                    match = actual == "" or actual == "nil"
                 end
             end
 
@@ -262,12 +279,13 @@ local function evaluateTagRules(user_id, user_uuid)
         -- Add tags that match
         for tag_id, _ in pairs(tags_to_add) do
             pcall(db.query, [[
-                INSERT INTO user_profile_tags (uuid, user_id, user_uuid, tag_id, assigned_by, assignment_source, assigned_at, created_at)
-                VALUES (gen_random_uuid()::text, ?, ?, ?, ?, 'auto', NOW(), NOW())
+                INSERT INTO user_profile_tags (uuid, user_id, user_uuid, tag_id, assigned_by, assignment_source, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid()::text, ?, ?, ?, ?, 'auto', true, NOW(), NOW())
                 ON CONFLICT (user_id, tag_id) DO UPDATE SET
                     assignment_source = 'auto',
-                    assigned_at = NOW()
-            ]], user_id, user_uuid, tag_id, user_uuid)
+                    is_active = true,
+                    updated_at = NOW()
+            ]], user_id, user_uuid, tag_id, user_id)
         end
     end)
     if not ok then
@@ -279,7 +297,7 @@ end
 local function getUserTags(user_id)
     local ok, rows = pcall(db.query, [[
         SELECT pt.uuid, pt.name, pt.slug, pt.color, pt.tag_type, pt.description,
-               upt.assignment_source, upt.assigned_at
+               upt.assignment_source, upt.created_at as assigned_at
         FROM user_profile_tags upt
         JOIN profile_tags pt ON pt.id = upt.tag_id
         WHERE upt.user_id = ? AND pt.is_active = true
@@ -319,27 +337,61 @@ local function evaluateVisibility(question_id, answer_map)
             local answer = answer_map[rule.source_question_id]
             local actual = ""
             if answer then
-                actual = tostring(answer.answer_text or answer.answer_boolean or answer.answer_number or "")
+                if answer.answer_text and answer.answer_text ~= "" then
+                    actual = answer.answer_text
+                elseif answer.answer_boolean ~= nil then
+                    actual = tostring(answer.answer_boolean)
+                elseif answer.answer_number ~= nil then
+                    actual = tostring(answer.answer_number)
+                end
             end
             local expected = tostring(rule.expected_value or "")
 
             local match = false
+            local num_actual = tonumber(actual) or 0
+            local num_expected = tonumber(expected) or 0
+
             if rule.operator == "equals" then
                 match = actual == expected
             elseif rule.operator == "not_equals" then
                 match = actual ~= expected
+            elseif rule.operator == "greater_than" then
+                match = num_actual > num_expected
+            elseif rule.operator == "less_than" then
+                match = num_actual < num_expected
+            elseif rule.operator == "greater_than_or_equal" then
+                match = num_actual >= num_expected
+            elseif rule.operator == "less_than_or_equal" then
+                match = num_actual <= num_expected
+            elseif rule.operator == "between" then
+                -- expected_value format: "min,max"
+                local parts = {}
+                for p in expected:gmatch("[^,]+") do table.insert(parts, tonumber(p:match("^%s*(.-)%s*$")) or 0) end
+                if #parts >= 2 then match = num_actual >= parts[1] and num_actual <= parts[2] end
             elseif rule.operator == "in_list" then
                 for item in expected:gmatch("[^,]+") do
                     if actual == item:match("^%s*(.-)%s*$") then match = true; break end
                 end
-            elseif rule.operator == "is_not_empty" then
-                match = actual ~= "" and actual ~= "nil" and actual ~= "false"
-            elseif rule.operator == "is_empty" then
-                match = actual == "" or actual == "nil" or actual == "false"
-            elseif rule.operator == "greater_than" then
-                match = (tonumber(actual) or 0) > (tonumber(expected) or 0)
+            elseif rule.operator == "not_in_list" then
+                match = true
+                for item in expected:gmatch("[^,]+") do
+                    if actual == item:match("^%s*(.-)%s*$") then match = false; break end
+                end
             elseif rule.operator == "contains" then
                 match = actual:lower():find(expected:lower(), 1, true) ~= nil
+            elseif rule.operator == "not_contains" then
+                match = actual:lower():find(expected:lower(), 1, true) == nil
+            elseif rule.operator == "starts_with" then
+                match = actual:sub(1, #expected):lower() == expected:lower()
+            elseif rule.operator == "ends_with" then
+                match = actual:sub(-#expected):lower() == expected:lower()
+            elseif rule.operator == "matches_regex" then
+                local ok_match = pcall(function() match = actual:match(expected) ~= nil end)
+                if not ok_match then match = false end
+            elseif rule.operator == "is_empty" then
+                match = actual == "" or actual == "nil"
+            elseif rule.operator == "is_not_empty" then
+                match = actual ~= "" and actual ~= "nil"
             end
 
             if group_name == "OR" then
@@ -406,13 +458,13 @@ return function(app)
             return { status = 500, json = { error = "Failed to load schema" } }
         end
 
-        -- Pre-load all user answers indexed by question_id for visibility evaluation
+        -- Pre-load all user answers indexed by question_id (include drafts for visibility/completion)
         local answer_map = {}
         if user_id then
             local ok_all_ans, all_ans = pcall(db.query, [[
                 SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
                 FROM user_profile_answers
-                WHERE user_id = ? AND is_draft = false
+                WHERE user_id = ?
             ]], user_id)
             if ok_all_ans and all_ans then
                 for _, a in ipairs(all_ans) do
@@ -448,6 +500,34 @@ return function(app)
                 -- Evaluate visibility rules server-side
                 local is_visible = evaluateVisibility(q.id, answer_map)
 
+                -- Load rules for client-side real-time evaluation
+                local rule_list = {}
+                local ok_rules, q_rules = pcall(db.query, [[
+                    SELECT pqr.uuid, pqr.rule_type, pqr.operator, pqr.logic_group,
+                           pqr.expected_value, pqr.expected_values_json, pqr.priority,
+                           pq_src.question_key as source_question_key,
+                           pq_src.uuid as source_question_uuid
+                    FROM profile_question_rules pqr
+                    LEFT JOIN profile_questions pq_src ON pq_src.id = pqr.source_question_id
+                    WHERE pqr.question_id = ? AND pqr.is_active = true
+                    ORDER BY pqr.priority ASC
+                ]], q.id)
+                if ok_rules and q_rules then
+                    for _, r in ipairs(q_rules) do
+                        table.insert(rule_list, {
+                            uuid = r.uuid,
+                            rule_type = r.rule_type,
+                            operator = r.operator,
+                            logic_group = r.logic_group or "AND",
+                            expected_value = r.expected_value,
+                            expected_values_json = r.expected_values_json,
+                            source_question_key = r.source_question_key,
+                            source_question_uuid = r.source_question_uuid,
+                            is_active = true, -- only active rules are returned
+                        })
+                    end
+                end
+
                 local opt_list = {}
                 for _, o in ipairs(options or {}) do
                     table.insert(opt_list, {
@@ -481,7 +561,8 @@ return function(app)
                     config_json = q.config_json,
                     version = q.version,
                     options = opt_list,
-                    answer = answer and {
+                    rules = rule_list,
+                    current_answer = answer and {
                         uuid = answer.uuid,
                         answer_text = answer.answer_text,
                         answer_number = answer.answer_number,
@@ -1546,7 +1627,7 @@ return function(app)
             table.insert(where_vals, self.params.is_active == "true")
         end
 
-        local sql = "SELECT pqr.* FROM profile_question_rules pqr WHERE " .. table.concat(where_parts, " AND ") .. " ORDER BY pqr.priority ASC"
+        local sql = "SELECT pqr.*, pq_target.uuid as question_uuid, pq_target.question_key as question_key, pq_target.label as question_label, pq_source.uuid as source_question_uuid, pq_source.question_key as source_question_key, pq_source.label as source_question_label FROM profile_question_rules pqr LEFT JOIN profile_questions pq_target ON pq_target.id = pqr.question_id LEFT JOIN profile_questions pq_source ON pq_source.id = pqr.source_question_id WHERE " .. table.concat(where_parts, " AND ") .. " ORDER BY pqr.priority ASC"
         local ok, rows = pcall(db.query, sql, unpack(where_vals))
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] rules list failed: ", tostring(rows))
@@ -1593,6 +1674,7 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
 
         local ok_ins, ins_result = pcall(db.query, [[
             INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, source_field, expected_value, expected_values_json, priority, is_active, created_by, created_at, updated_at)
@@ -1600,19 +1682,23 @@ return function(app)
             RETURNING *
         ]],
             question_id,
-            params.rule_name,
+            params.rule_name or db.NULL,
             params.rule_type,
-            params.operator,
-            params.logic_group,
-            source_question_id,
-            params.source_field,
-            params.expected_value,
-            params.expected_values_json,
+            params.operator or db.NULL,
+            params.logic_group or db.NULL,
+            source_question_id or db.NULL,
+            params.source_field or db.NULL,
+            params.expected_value or db.NULL,
+            params.expected_values_json or db.NULL,
             params.priority or 0,
-            admin_uuid
+            admin_int_id
         )
         if not ok_ins then
-            ngx.log(ngx.ERR, "[ProfileBuilder] create rule failed: ", tostring(ins_result))
+            local err_msg = tostring(ins_result)
+            ngx.log(ngx.ERR, "[ProfileBuilder] create rule failed: ", err_msg)
+            if err_msg:find("duplicate key") or err_msg:find("unique constraint") then
+                return { status = 409, json = { error = "A rule with this configuration already exists" } }
+            end
             return { status = 500, json = { error = "Failed to create rule" } }
         end
 
@@ -1647,6 +1733,16 @@ return function(app)
             end
         end
 
+        -- Resolve question_uuid → question_id (target question this rule applies to)
+        if params.question_uuid and params.question_uuid ~= "" then
+            local ok_tq, tq_rows = pcall(db.query, "SELECT id FROM profile_questions WHERE uuid = ? LIMIT 1", params.question_uuid)
+            if ok_tq and tq_rows and #tq_rows > 0 then
+                table.insert(set_parts, "question_id = ?")
+                table.insert(set_vals, tq_rows[1].id)
+            end
+        end
+
+        -- Resolve source_question_uuid → source_question_id (trigger question)
         if params.source_question_uuid ~= nil then
             if params.source_question_uuid == "" or params.source_question_uuid == cjson.null then
                 table.insert(set_parts, "source_question_id = NULL")
@@ -1813,16 +1909,16 @@ return function(app)
                     ]],
                         user_id,
                         user_uuid,
-                        namespace_id,
+                        namespace_id or 0,
                         question.id,
-                        question.version,
-                        ans.answer_text,
-                        ans.answer_number,
-                        ans.answer_boolean,
-                        ans.answer_date,
-                        ans.answer_json,
-                        ans.answer_file_url,
-                        ans.is_draft or false
+                        question.version or 1,
+                        ans.answer_text or db.NULL,
+                        ans.answer_number or db.NULL,
+                        ans.answer_boolean == nil and db.NULL or ans.answer_boolean,
+                        ans.answer_date or db.NULL,
+                        ans.answer_json or db.NULL,
+                        ans.answer_file_url or db.NULL,
+                        ans.is_draft == nil and false or ans.is_draft
                     )
 
                     if not ok_upsert then
@@ -1840,20 +1936,20 @@ return function(app)
                                 old_answer.id,
                                 user_id,
                                 question.id,
-                                question.version,
-                                old_answer.answer_text,
-                                old_answer.answer_number,
-                                old_answer.answer_boolean,
-                                old_answer.answer_date,
-                                old_answer.answer_json,
-                                ans.answer_text,
-                                ans.answer_number,
-                                ans.answer_boolean,
-                                ans.answer_date,
-                                ans.answer_json,
-                                user_uuid,
+                                question.version or 1,
+                                old_answer.answer_text or db.NULL,
+                                old_answer.answer_number or db.NULL,
+                                old_answer.answer_boolean == nil and db.NULL or old_answer.answer_boolean,
+                                old_answer.answer_date or db.NULL,
+                                old_answer.answer_json or db.NULL,
+                                ans.answer_text or db.NULL,
+                                ans.answer_number or db.NULL,
+                                ans.answer_boolean == nil and db.NULL or ans.answer_boolean,
+                                ans.answer_date or db.NULL,
+                                ans.answer_json or db.NULL,
+                                user_id,
                                 "user",
-                                ans.change_reason
+                                ans.change_reason or db.NULL
                             )
                         end
                     end
@@ -2067,19 +2163,20 @@ return function(app)
 
         local namespace_id = getNamespaceId(self)
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
 
         local ok, result = pcall(db.query, [[
             INSERT INTO profile_tags (uuid, namespace_id, name, slug, description, color, tag_type, is_active, created_by, created_at, updated_at)
             VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, true, ?, NOW(), NOW())
             RETURNING *
         ]],
-            namespace_id,
+            namespace_id or 0,
             params.name,
             params.slug,
-            params.description,
-            params.color,
-            params.tag_type,
-            admin_uuid
+            params.description or db.NULL,
+            params.color or db.NULL,
+            params.tag_type or "manual",
+            admin_int_id
         )
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] create tag failed: ", tostring(result))
@@ -2204,7 +2301,7 @@ return function(app)
             tag_id,
             admin_uuid,
             params.assignment_source or "admin",
-            params.assignment_reason
+            params.assignment_reason or db.NULL
         )
         if not ok_ins then
             ngx.log(ngx.ERR, "[ProfileBuilder] assign tag failed: ", tostring(ins_result))
@@ -2306,6 +2403,7 @@ return function(app)
         end
 
         local admin_uuid = admin.uuid or admin.id
+        local admin_int_id = resolveUserId(admin_uuid)
 
         local ok_ins, ins_result = pcall(db.query, [[
             INSERT INTO profile_tag_rules (uuid, tag_id, rule_name, description, source_question_id, source_field, operator, expected_value, expected_values_json, logic_group, priority, is_active, created_by, created_at, updated_at)
@@ -2313,16 +2411,16 @@ return function(app)
             RETURNING *
         ]],
             tag_rows[1].id,
-            params.rule_name,
-            params.description,
-            source_question_id,
-            params.source_field,
-            params.operator,
-            params.expected_value,
-            params.expected_values_json,
-            params.logic_group,
+            params.rule_name or db.NULL,
+            params.description or db.NULL,
+            source_question_id or db.NULL,
+            params.source_field or db.NULL,
+            params.operator or db.NULL,
+            params.expected_value or db.NULL,
+            params.expected_values_json or db.NULL,
+            params.logic_group or db.NULL,
             params.priority or 0,
-            admin_uuid
+            admin_int_id
         )
         if not ok_ins then
             ngx.log(ngx.ERR, "[ProfileBuilder] create tag rule failed: ", tostring(ins_result))
