@@ -278,7 +278,7 @@ local function evaluateTagRules(user_id, user_uuid)
 
         -- Add tags that match
         for tag_id, _ in pairs(tags_to_add) do
-            pcall(db.query, [[
+            local ok_tag, tag_err = pcall(db.query, [[
                 INSERT INTO user_profile_tags (uuid, user_id, user_uuid, tag_id, assigned_by, assignment_source, is_active, created_at, updated_at)
                 VALUES (gen_random_uuid()::text, ?, ?, ?, ?, 'auto', true, NOW(), NOW())
                 ON CONFLICT (user_id, tag_id) DO UPDATE SET
@@ -286,6 +286,9 @@ local function evaluateTagRules(user_id, user_uuid)
                     is_active = true,
                     updated_at = NOW()
             ]], user_id, user_uuid, tag_id, user_id)
+            if not ok_tag then
+                ngx.log(ngx.ERR, "[ProfileBuilder] auto-tag assign failed for tag_id=", tag_id, ": ", tostring(tag_err))
+            end
         end
     end)
     if not ok then
@@ -3098,6 +3101,102 @@ return function(app)
     -- 13. ADMIN user endpoints
     -- =====================================================================
 
+    -- GET /admin/users — List all users who have submitted profile answers
+    app:get(PREFIX .. "/admin/users", function(self)
+        local admin, admin_err = requireAdmin(self)
+        if not admin then
+            if admin_err == "forbidden" then
+                return { status = 403, json = { error = "Admin access required" } }
+            end
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        local page = tonumber(self.params.page) or 1
+        local per_page = tonumber(self.params.per_page) or 20
+        if per_page > 100 then per_page = 100 end
+        local offset = (page - 1) * per_page
+
+        local namespace_id = getNamespaceId(self)
+
+        -- Build WHERE clause
+        local where_parts = { "1=1" }
+        local where_vals = {}
+
+        if namespace_id and namespace_id > 0 then
+            table.insert(where_parts, "(upa.namespace_id = ? OR upa.namespace_id = 0)")
+            table.insert(where_vals, namespace_id)
+        end
+
+        -- Search filter (email, name)
+        if self.params.search and self.params.search ~= "" then
+            table.insert(where_parts, "(u.email ILIKE ? OR u.first_name ILIKE ? OR u.last_name ILIKE ?)")
+            local pattern = "%" .. self.params.search .. "%"
+            table.insert(where_vals, pattern)
+            table.insert(where_vals, pattern)
+            table.insert(where_vals, pattern)
+        end
+
+        -- Tag filter
+        if self.params.tag_slug and self.params.tag_slug ~= "" then
+            table.insert(where_parts, [[
+                u.id IN (
+                    SELECT upt.user_id FROM user_profile_tags upt
+                    JOIN profile_tags pt ON pt.id = upt.tag_id
+                    WHERE pt.slug = ? AND upt.is_active = true
+                )
+            ]])
+            table.insert(where_vals, self.params.tag_slug)
+        end
+
+        local where_clause = table.concat(where_parts, " AND ")
+
+        -- Count total distinct users with answers
+        local count_sql = "SELECT COUNT(DISTINCT u.id) as total FROM users u JOIN user_profile_answers upa ON upa.user_id = u.id WHERE " .. where_clause
+        local ok_count, count_rows = pcall(db.query, count_sql, unpack(where_vals))
+        local total = (ok_count and count_rows and #count_rows > 0) and tonumber(count_rows[1].total) or 0
+
+        -- Get users with their answer stats
+        local data_sql = [[
+            SELECT
+                u.uuid,
+                u.email,
+                u.first_name,
+                u.last_name,
+                u.created_at as user_created_at,
+                COUNT(DISTINCT upa.question_id) as answers_count,
+                MAX(upa.answered_at) as last_answered_at,
+                (SELECT string_agg(pt.name, ', ' ORDER BY pt.name)
+                 FROM user_profile_tags upt
+                 JOIN profile_tags pt ON pt.id = upt.tag_id
+                 WHERE upt.user_id = u.id AND upt.is_active = true
+                ) as tags
+            FROM users u
+            JOIN user_profile_answers upa ON upa.user_id = u.id
+            WHERE ]] .. where_clause .. [[
+            GROUP BY u.id, u.uuid, u.email, u.first_name, u.last_name, u.created_at
+            ORDER BY MAX(upa.answered_at) DESC
+            LIMIT ? OFFSET ?
+        ]]
+        table.insert(where_vals, per_page)
+        table.insert(where_vals, offset)
+
+        local ok_data, data_rows = pcall(db.query, data_sql, unpack(where_vals))
+        if not ok_data then
+            ngx.log(ngx.ERR, "[ProfileBuilder] admin users list failed: ", tostring(data_rows))
+            return { status = 500, json = { error = "Failed to load users" } }
+        end
+
+        return {
+            status = 200,
+            json = {
+                users = data_rows or {},
+                total = total,
+                page = page,
+                per_page = per_page
+            }
+        }
+    end)
+
     -- GET /admin/users/:userUuid/profile
     app:get(PREFIX .. "/admin/users/:userUuid/profile", function(self)
         local admin, admin_err = requireAdmin(self)
@@ -3120,15 +3219,16 @@ return function(app)
         ]], target_uuid)
         local user_info = (ok_user and user_rows and #user_rows > 0) and user_rows[1] or nil
 
-        -- Get answers
+        -- Get answers grouped by category, then question order
         local ok_ans, answers = pcall(db.query, [[
             SELECT upa.*, pq.question_key, pq.label AS question_label, pq.uuid AS question_uuid,
-                   pc.name AS category_name, pc.slug AS category_slug
+                   pq.question_type,
+                   pc.name AS category_name, pc.slug AS category_slug, pc.display_order AS category_order
             FROM user_profile_answers upa
             JOIN profile_questions pq ON pq.id = upa.question_id
             JOIN profile_categories pc ON pc.id = pq.category_id
             WHERE upa.user_id = ?
-            ORDER BY pc.display_order ASC, pq.display_order ASC
+            ORDER BY pc.display_order ASC, pc.name ASC, pq.display_order ASC
         ]], target_user_id)
         if not ok_ans then answers = {} end
 
