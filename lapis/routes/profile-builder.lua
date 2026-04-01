@@ -518,11 +518,12 @@ return function(app)
                             uuid = r.uuid,
                             rule_type = r.rule_type,
                             operator = r.operator,
-                            logic_group = r.logic_group,
+                            logic_group = r.logic_group or "AND",
                             expected_value = r.expected_value,
                             expected_values_json = r.expected_values_json,
                             source_question_key = r.source_question_key,
                             source_question_uuid = r.source_question_uuid,
+                            is_active = true, -- only active rules are returned
                         })
                     end
                 end
