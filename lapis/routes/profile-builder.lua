@@ -278,7 +278,7 @@ local function evaluateTagRules(user_id, user_uuid)
 
         -- Add tags that match
         for tag_id, _ in pairs(tags_to_add) do
-            pcall(db.query, [[
+            local ok_tag, tag_err = pcall(db.query, [[
                 INSERT INTO user_profile_tags (uuid, user_id, user_uuid, tag_id, assigned_by, assignment_source, is_active, created_at, updated_at)
                 VALUES (gen_random_uuid()::text, ?, ?, ?, ?, 'auto', true, NOW(), NOW())
                 ON CONFLICT (user_id, tag_id) DO UPDATE SET
@@ -286,6 +286,9 @@ local function evaluateTagRules(user_id, user_uuid)
                     is_active = true,
                     updated_at = NOW()
             ]], user_id, user_uuid, tag_id, user_id)
+            if not ok_tag then
+                ngx.log(ngx.ERR, "[ProfileBuilder] auto-tag assign failed for tag_id=", tag_id, ": ", tostring(tag_err))
+            end
         end
     end)
     if not ok then
