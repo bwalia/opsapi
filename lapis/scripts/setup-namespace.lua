@@ -304,9 +304,11 @@ function SetupNamespace.run(config)
     end
 
     -- Step 8: Set as default namespace for admin user
+    -- Uses UPSERT: creates if missing, updates if currently pointing to System namespace.
+    -- Does NOT override if admin has intentionally switched to another project namespace.
     print("[Setup] Step 8: Setting default namespace...")
     local user_settings = db.select(
-        "id FROM user_namespace_settings WHERE user_id = ?", admin_user[1].id
+        "id, default_namespace_id FROM user_namespace_settings WHERE user_id = ?", admin_user[1].id
     )
 
     if not user_settings or #user_settings == 0 then
@@ -319,7 +321,21 @@ function SetupNamespace.run(config)
         })
         print("  + Set '" .. ns_slug .. "' as default namespace")
     else
-        print("  Default namespace already configured")
+        -- Check if admin's default is the System namespace — if so, update to project namespace
+        local system_ns = db.select("id FROM namespaces WHERE slug = 'system' LIMIT 1")
+        local system_ns_id = (system_ns and #system_ns > 0) and system_ns[1].id or nil
+        local current_default = user_settings[1].default_namespace_id
+
+        if system_ns_id and tonumber(current_default) == tonumber(system_ns_id) then
+            db.query([[
+                UPDATE user_namespace_settings
+                SET default_namespace_id = ?, last_active_namespace_id = ?, updated_at = NOW()
+                WHERE user_id = ?
+            ]], namespace[1].id, namespace[1].id, admin_user[1].id)
+            print("  + Updated default from 'system' to '" .. ns_slug .. "'")
+        else
+            print("  Default namespace already configured (" .. tostring(current_default) .. ")")
+        end
     end
 
     print("")
