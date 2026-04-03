@@ -1630,4 +1630,180 @@ return {
             end
         end
     end,
+
+    -- ==========================================================================
+    -- 35. Replace seed data with client's actual categories & questions
+    --
+    -- Source: developer_handoff_user_questions.docx
+    -- Categories: Personal Details, Employment Income, Self-Employment,
+    --             Construction Industry Scheme, Other Income, Rental Income, Investments
+    -- All seeded with question_key-based idempotency (won't duplicate on re-run).
+    -- ==========================================================================
+    [35] = function()
+        -- Deactivate old seeded categories that no longer match client requirements
+        local old_slugs = {
+            "education", "employment", "business-profile", "property-rental",
+            "financial-tax", "compliance", "preferences", "contact-details"
+        }
+        for _, slug in ipairs(old_slugs) do
+            db.query("UPDATE profile_categories SET is_active = false, is_archived = true, updated_at = NOW() WHERE slug = ? AND namespace_id = 0", slug)
+        end
+
+        -- Helper: create or reactivate a category
+        local function ensure_category(slug, name, description, icon, display_order)
+            local exists = db.select("id FROM profile_categories WHERE slug = ?", slug)
+            if exists and #exists > 0 then
+                db.query("UPDATE profile_categories SET name = ?, description = ?, icon = ?, display_order = ?, is_active = true, is_archived = false, updated_at = NOW() WHERE slug = ?",
+                    name, description, icon, display_order, slug)
+                return exists[1].id
+            else
+                db.query([[
+                    INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, is_active, is_archived, created_at, updated_at)
+                    VALUES (?, 0, ?, ?, ?, ?, ?, true, false, NOW(), NOW())
+                ]], MigrationUtils.generateUUID(), name, slug, description, icon, display_order)
+                local row = db.select("id FROM profile_categories WHERE slug = ?", slug)
+                return row and row[1] and row[1].id or nil
+            end
+        end
+
+        -- Helper: create or update a question
+        local function ensure_question(cat_id, q)
+            local exists = db.select("id FROM profile_questions WHERE question_key = ?", q.question_key)
+            if exists and #exists > 0 then
+                db.query([[
+                    UPDATE profile_questions SET category_id = ?, label = ?, question_type = ?, is_required = ?,
+                    display_order = ?, help_text = ?, placeholder = ?, is_active = true, is_archived = false, updated_at = NOW()
+                    WHERE question_key = ?
+                ]], cat_id, q.label, q.question_type, q.is_required, q.display_order, q.help_text or "", q.placeholder or "", q.question_key)
+                return exists[1].id
+            else
+                db.query([[
+                    INSERT INTO profile_questions (uuid, category_id, question_key, label, question_type, is_required, display_order, help_text, placeholder, is_active, version, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 1, NOW(), NOW())
+                ]], MigrationUtils.generateUUID(), cat_id, q.question_key, q.label, q.question_type, q.is_required, q.display_order, q.help_text or "", q.placeholder or "")
+                local row = db.select("id FROM profile_questions WHERE question_key = ?", q.question_key)
+                return row and row[1] and row[1].id or nil
+            end
+        end
+
+        -- Helper: create a visibility rule (idempotent)
+        local function ensure_rule(target_key, source_key, rule_name, operator, expected_value)
+            local tgt = db.select("id FROM profile_questions WHERE question_key = ?", target_key)
+            local src = db.select("id FROM profile_questions WHERE question_key = ?", source_key)
+            if not tgt or #tgt == 0 or not src or #src == 0 then return end
+            local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", tgt[1].id, src[1].id)
+            if exists and #exists > 0 then return end
+            db.query([[
+                INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, logic_group, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 'visibility', ?, ?, ?, 'AND', true, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), tgt[1].id, rule_name, operator, src[1].id, expected_value)
+        end
+
+        -- ── 1. Personal Details ──────────────────────────────────────────────
+        -- Rename existing "personal-information" to match client terminology
+        local personal_id = ensure_category("personal-information", "Personal Details", "Your personal information", "user", 1)
+        if personal_id then
+            ensure_question(personal_id, { question_key = "first_name", label = "What is your first name?", question_type = "short_text", is_required = true, display_order = 1 })
+            ensure_question(personal_id, { question_key = "middle_name", label = "What is your middle name?", question_type = "short_text", is_required = false, display_order = 2 })
+            ensure_question(personal_id, { question_key = "surname", label = "What is your surname?", question_type = "short_text", is_required = true, display_order = 3 })
+            ensure_question(personal_id, { question_key = "address", label = "What is your address?", question_type = "address", is_required = true, display_order = 4 })
+            ensure_question(personal_id, { question_key = "ni_number", label = "What is your NI number?", question_type = "short_text", is_required = true, display_order = 5, help_text = "Your National Insurance number (e.g. QQ 123456 C)", placeholder = "QQ 123456 C" })
+            ensure_question(personal_id, { question_key = "utr_number", label = "What is your UTR number?", question_type = "short_text", is_required = true, display_order = 6, help_text = "Your Unique Taxpayer Reference (10 digits)", placeholder = "1234567890" })
+            ensure_question(personal_id, { question_key = "profession", label = "What is your profession?", question_type = "short_text", is_required = true, display_order = 7 })
+        end
+        print("[Profile] Seeded Personal Details: 7 questions")
+
+        -- ── 2. Employment Income ─────────────────────────────────────────────
+        local employment_id = ensure_category("employment-income", "Employment Income", "Your salary and benefits", "briefcase", 2)
+        if employment_id then
+            ensure_question(employment_id, { question_key = "has_salary_income", label = "Do you have salary income?", question_type = "boolean", is_required = true, display_order = 1 })
+            ensure_question(employment_id, { question_key = "has_p11d_benefits", label = "Do you get benefits in kind (P11D) from your employer?", question_type = "boolean", is_required = true, display_order = 2, help_text = "P11D is a form listing benefits and expenses provided by your employer" })
+        end
+        print("[Profile] Seeded Employment Income: 2 questions")
+
+        -- ── 3. Self-Employment ───────────────────────────────────────────────
+        local self_emp_id = ensure_category("self-employment", "Self-Employment", "Self-employment details", "building", 3)
+        if self_emp_id then
+            ensure_question(self_emp_id, { question_key = "is_self_employed", label = "Are you self-employed?", question_type = "boolean", is_required = true, display_order = 1 })
+            ensure_question(self_emp_id, { question_key = "revenue_above_20k", label = "Is your self-employment revenue above £20,000 before deducting expenses?", question_type = "boolean", is_required = false, display_order = 2, help_text = "Your gross revenue before any business expenses are deducted" })
+        end
+        ensure_rule("revenue_above_20k", "is_self_employed", "Show if self-employed", "equals", "true")
+        print("[Profile] Seeded Self-Employment: 2 questions, 1 rule")
+
+        -- ── 4. Construction Industry Scheme (CIS) ────────────────────────────
+        local cis_id = ensure_category("construction-industry", "Construction Industry Scheme (CIS)", "CIS deductions and construction work", "hard-hat", 4)
+        if cis_id then
+            ensure_question(cis_id, { question_key = "is_construction_worker", label = "Are you working in the construction industry?", question_type = "boolean", is_required = true, display_order = 1 })
+            ensure_question(cis_id, { question_key = "has_cis_deductions", label = "Is your contractor deducting your CIS?", question_type = "boolean", is_required = false, display_order = 2, help_text = "CIS (Construction Industry Scheme) deductions taken by your contractor" })
+        end
+        ensure_rule("has_cis_deductions", "is_construction_worker", "Show if in construction", "equals", "true")
+        print("[Profile] Seeded CIS: 2 questions, 1 rule")
+
+        -- ── 5. Other Income ──────────────────────────────────────────────────
+        local other_id = ensure_category("other-income", "Other Income", "Interest and other income sources", "pound-sign", 5)
+        if other_id then
+            ensure_question(other_id, { question_key = "has_interest_income", label = "Do you have interest income?", question_type = "boolean", is_required = true, display_order = 1, help_text = "Interest from savings accounts, bonds, or other investments" })
+        end
+        print("[Profile] Seeded Other Income: 1 question")
+
+        -- ── 6. Rental Income ─────────────────────────────────────────────────
+        local rental_id = ensure_category("rental-income", "Rental Income", "Property rental income details", "home", 6)
+        if rental_id then
+            ensure_question(rental_id, { question_key = "has_rental_income", label = "Do you have rental income?", question_type = "boolean", is_required = true, display_order = 1 })
+            ensure_question(rental_id, { question_key = "num_rental_properties", label = "How many rental properties do you have?", question_type = "number", is_required = false, display_order = 2 })
+            ensure_question(rental_id, { question_key = "rental_property_addresses", label = "What is the address of each rental property?", question_type = "repeating_group", is_required = false, display_order = 3, help_text = "Add the address for each property you rent out" })
+            ensure_question(rental_id, { question_key = "has_rental_mortgage", label = "Do you have a mortgage on a rental property?", question_type = "boolean", is_required = false, display_order = 4 })
+            ensure_question(rental_id, { question_key = "is_interest_only_mortgage", label = "Is it an interest-only mortgage?", question_type = "boolean", is_required = false, display_order = 5 })
+        end
+        ensure_rule("num_rental_properties", "has_rental_income", "Show if has rental income", "equals", "true")
+        ensure_rule("rental_property_addresses", "has_rental_income", "Show if has rental income", "equals", "true")
+        ensure_rule("has_rental_mortgage", "has_rental_income", "Show if has rental income", "equals", "true")
+        ensure_rule("is_interest_only_mortgage", "has_rental_mortgage", "Show if has mortgage", "equals", "true")
+        print("[Profile] Seeded Rental Income: 5 questions, 4 rules")
+
+        -- ── 7. Investments ───────────────────────────────────────────────────
+        local invest_id = ensure_category("investments", "Investments", "Investment schemes and capital gains", "trending-up", 7)
+        if invest_id then
+            ensure_question(invest_id, { question_key = "has_eis_seis", label = "Do you make any investments such as EIS or SEIS?", question_type = "boolean", is_required = true, display_order = 1, help_text = "Enterprise Investment Scheme (EIS) or Seed Enterprise Investment Scheme (SEIS)" })
+        end
+        print("[Profile] Seeded Investments: 1 question")
+
+        -- ── Auto-tag rules ───────────────────────────────────────────────────
+        -- Ensure tags exist
+        local function ensure_tag(name, slug, tag_type, color)
+            local exists = db.select("id FROM profile_tags WHERE slug = ?", slug)
+            if exists and #exists > 0 then return exists[1].id end
+            db.query([[
+                INSERT INTO profile_tags (uuid, namespace_id, name, slug, tag_type, color, is_active, created_at, updated_at)
+                VALUES (?, 0, ?, ?, ?, ?, true, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), name, slug, tag_type, color)
+            local row = db.select("id FROM profile_tags WHERE slug = ?", slug)
+            return row and row[1] and row[1].id or nil
+        end
+
+        local function ensure_tag_rule(tag_slug, source_key, operator, expected_value)
+            local tag = db.select("id FROM profile_tags WHERE slug = ?", tag_slug)
+            local src = db.select("id FROM profile_questions WHERE question_key = ?", source_key)
+            if not tag or #tag == 0 or not src or #src == 0 then return end
+            local exists = db.select("id FROM profile_tag_rules WHERE tag_id = ? AND source_question_id = ?", tag[1].id, src[1].id)
+            if exists and #exists > 0 then return end
+            db.query([[
+                INSERT INTO profile_tag_rules (uuid, tag_id, rule_name, source_question_id, operator, expected_value, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, true, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), tag[1].id, "Auto: " .. tag_slug, src[1].id, operator, expected_value)
+        end
+
+        ensure_tag("Self-Employed", "self-employed", "auto", "#6366f1")
+        ensure_tag("Landlord", "landlord", "auto", "#0891b2")
+        ensure_tag("Construction Worker", "construction-worker", "auto", "#d97706")
+        ensure_tag("Investor", "investor", "auto", "#059669")
+
+        ensure_tag_rule("self-employed", "is_self_employed", "equals", "true")
+        ensure_tag_rule("landlord", "has_rental_income", "equals", "true")
+        ensure_tag_rule("construction-worker", "is_construction_worker", "equals", "true")
+        ensure_tag_rule("investor", "has_eis_seis", "equals", "true")
+        print("[Profile] Seeded 4 auto-tag rules")
+
+        print("[Profile] Client questions migration complete: 7 categories, 20 questions, 6 visibility rules, 4 tag rules")
+    end,
 }
