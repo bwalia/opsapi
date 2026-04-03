@@ -905,8 +905,8 @@ return {
                     local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", dep_q[1].id, se_q[1].id)
                     if not exists or #exists == 0 then
                         db.query([[
-                            INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                            VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                            INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                            VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                         ]], MigrationUtils.generateUUID(), dep_q[1].id, "Show if self-employed", se_q[1].id)
                     end
                 end
@@ -1596,8 +1596,8 @@ return {
                     local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", dep_q[1].id, es_q[1].id)
                     if not exists or #exists == 0 then
                         db.query([[
-                            INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                            VALUES (?, ?, ?, 'visibility', 'in_list', ?, 'employed_full_time,employed_part_time,director', true, NOW(), NOW())
+                            INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                            VALUES (?, ?, ?, 'visibility', 'in_list', 'AND', ?, 'employed_full_time,employed_part_time,director', true, NOW(), NOW())
                         ]], MigrationUtils.generateUUID(), dep_q[1].id, "Show if employed", es_q[1].id)
                     end
                 end
@@ -1611,8 +1611,8 @@ return {
             local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", oid_q[1].id, hoi_q[1].id)
             if not exists or #exists == 0 then
                 db.query([[
-                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                 ]], MigrationUtils.generateUUID(), oid_q[1].id, "Show if has other income", hoi_q[1].id)
             end
         end
@@ -1624,8 +1624,8 @@ return {
             local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", slp_q[1].id, hsl_q[1].id)
             if not exists or #exists == 0 then
                 db.query([[
-                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'visibility', 'equals', ?, 'true', true, NOW(), NOW())
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, logic_group, source_question_id, expected_value, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'visibility', 'equals', 'AND', ?, 'true', true, NOW(), NOW())
                 ]], MigrationUtils.generateUUID(), slp_q[1].id, "Show if has student loan", hsl_q[1].id)
             end
         end
