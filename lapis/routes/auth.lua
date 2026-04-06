@@ -9,6 +9,7 @@ local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 local RateLimit = require("middleware.rate-limit")
 local OTP = require("helper.otp")
+local RefreshToken = require("helper.refresh-token")
 
 -- Rate limit configs
 local LOGIN_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:login" }     -- 10/min per IP
@@ -34,12 +35,13 @@ local function parse_json_body()
     return {}
 end
 
---- Build the full login response (user + token + namespaces).
+--- Build the full login response (user + token + namespaces + refresh_token).
 -- Shared by both login and 2FA verify to avoid duplication.
 -- @param userWithRoles table User record from UserQueries.show()
 -- @param user_id number Internal user ID
+-- @param device_info string|nil Optional device description for refresh token
 -- @return table JSON-ready response body
-local function build_login_response(userWithRoles, user_id)
+local function build_login_response(userWithRoles, user_id, device_info)
     local rolesArray = {}
     if userWithRoles.roles then
         for _, role in ipairs(userWithRoles.roles) do
@@ -117,6 +119,20 @@ local function build_login_response(userWithRoles, user_id)
         has_pin = pin_result and pin_result[1] and pin_result[1].pin_hash ~= nil and true or false
     end
 
+    -- Issue an opaque refresh token (stored hashed in DB, revocable).
+    -- Wrapped in pcall: if the refresh_tokens table doesn't exist yet (migration
+    -- pending), login must still succeed — just without a refresh token.
+    local refresh_token_raw
+    if user_id then
+        local ok, rt_or_err, rt_err = pcall(RefreshToken.create, user_id, device_info)
+        if ok and rt_or_err then
+            refresh_token_raw = rt_or_err
+        else
+            ngx.log(ngx.WARN, "[AUTH] Refresh token creation skipped: ",
+                tostring(ok and rt_err or rt_or_err))
+        end
+    end
+
     return {
         user = {
             id = userWithRoles.internal_id,
@@ -131,6 +147,7 @@ local function build_login_response(userWithRoles, user_id)
             roles = rolesArray
         },
         token = token,
+        refresh_token = refresh_token_raw,
         has_pin = has_pin,
         namespaces = namespacesArray,
         current_namespace = default_namespace and {
@@ -265,9 +282,15 @@ return function(app)
         -- OTP verified — issue the full JWT
         ngx.log(ngx.NOTICE, "[2FA] Admin login completed for: ", userWithRoles.email)
 
+        -- Extract device info from User-Agent for refresh token tracking
+        local device_info = ngx.req.get_headers()["user-agent"]
+        if device_info and #device_info > 255 then
+            device_info = device_info:sub(1, 255)
+        end
+
         return {
             status = 200,
-            json = build_login_response(userWithRoles, user_id)
+            json = build_login_response(userWithRoles, user_id, device_info)
         }
     end))
 
@@ -815,13 +838,115 @@ return function(app)
         }
     end))
 
-    -- Token refresh endpoint with namespace support
+    -- Token refresh endpoint with opaque refresh token + backward compat
+    --
+    -- New flow:  POST /auth/refresh  { "refresh_token": "<opaque>" }
+    --            → validates opaque token, rotates it, issues new JWT + new refresh token
+    --
+    -- Legacy:    POST /auth/refresh  (Authorization: Bearer <jwt>)
+    --            → re-signs the JWT (old behavior, for clients that haven't upgraded)
     app:post("/auth/refresh", RateLimit.wrap(REFRESH_LIMIT, function(self)
+        local params = parse_json_body()
+        local refresh_token_raw = params.refresh_token or self.params.refresh_token
+
+        -- ── New flow: opaque refresh token ──
+        if refresh_token_raw and refresh_token_raw ~= "" then
+            -- pcall protects against missing table (migration not yet run).
+            -- If pcall fails, fall through to legacy JWT-based refresh.
+            local ok_validate, rt_data, rt_err = pcall(RefreshToken.validate, refresh_token_raw)
+            if not ok_validate then
+                ngx.log(ngx.WARN, "[AUTH] Refresh token validation error (falling back to legacy): ", tostring(rt_data))
+                -- Fall through to legacy flow below
+            elseif not rt_data then
+                return { status = 401, json = { error = rt_err or "Invalid refresh token" } }
+            else
+                -- Re-validate user from DB
+                local user_record = db.select("* FROM users WHERE id = ? AND active = true", rt_data.user_id)
+                if not user_record or #user_record == 0 then
+                    pcall(RefreshToken.revokeAllForUser, rt_data.user_id)
+                    return { status = 401, json = { error = "Account is deactivated" } }
+                end
+                local db_user = user_record[1]
+
+                -- Build a fresh JWT via the same logic as login
+                local userWithRoles = UserQueries.show(db_user.uuid)
+                if not userWithRoles then
+                    return { status = 401, json = { error = "User not found" } }
+                end
+
+                local rolesArray = {}
+                if userWithRoles.roles then
+                    for _, role in ipairs(userWithRoles.roles) do
+                        table.insert(rolesArray, {
+                            id = role.id,
+                            role_id = role.role_id,
+                            role_name = role.name or role.role_name,
+                            name = role.name or role.role_name
+                        })
+                    end
+                end
+
+                -- Rebuild namespace context from DB
+                local token_options = { roles = rolesArray }
+                local default_ns = NamespaceQueries.getUserDefaultNamespace(db_user.id)
+                local ns_membership
+                if default_ns then
+                    token_options.namespace = default_ns
+                    ns_membership = NamespaceMemberQueries.findByUserAndNamespace(db_user.uuid, default_ns.id)
+                    if ns_membership then
+                        token_options.namespace_permissions = NamespaceMemberQueries.getPermissions(ns_membership.id)
+                        local raw_is_owner = ns_membership.is_owner
+                        token_options.is_namespace_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
+
+                        local member_details = NamespaceMemberQueries.getWithDetails(ns_membership.id)
+                        if member_details and member_details.roles then
+                            local roles = member_details.roles
+                            if type(roles) == "string" then
+                                local ok_parse, parsed = pcall(cJson.decode, roles)
+                                if ok_parse then roles = parsed end
+                            end
+                            if type(roles) == "table" and #roles > 0 then
+                                token_options.namespace_role = roles[1].role_name
+                            end
+                        end
+                    end
+                end
+
+                local new_jwt
+                if token_options.namespace and ns_membership then
+                    new_jwt = JWTHelper.generateNamespaceToken(userWithRoles, token_options.namespace, ns_membership, {
+                        user_roles = rolesArray,
+                        namespace_permissions = token_options.namespace_permissions
+                    })
+                else
+                    new_jwt = JWTHelper.generateToken(userWithRoles, token_options)
+                end
+
+                -- Rotate the refresh token (revoke old, issue new in same family)
+                local device_info = ngx.req.get_headers()["user-agent"]
+                if device_info and #device_info > 255 then
+                    device_info = device_info:sub(1, 255)
+                end
+                local ok_rotate, new_refresh = pcall(RefreshToken.rotate,
+                    rt_data.id, rt_data.user_id, rt_data.family_id, device_info)
+
+                return {
+                    status = 200,
+                    json = {
+                        token = new_jwt,
+                        refresh_token = ok_rotate and new_refresh or nil,
+                        message = "Token refreshed successfully"
+                    }
+                }
+            end
+        end
+
+        -- ── Legacy flow: JWT-based refresh (backward compatibility) ──
         local auth_header = self.req.headers["authorization"]
         if not auth_header then
             return {
                 status = 401,
-                json = { error = "Authorization header required" }
+                json = { error = "Authorization header or refresh_token required" }
             }
         end
 
@@ -849,6 +974,23 @@ return function(app)
             }
         }
     end))
+
+    -- =========================================================================
+    -- Logout — revoke refresh token
+    -- =========================================================================
+    app:post("/auth/logout", function(self)
+        local params = parse_json_body()
+        local refresh_token_raw = params.refresh_token or self.params.refresh_token
+
+        if refresh_token_raw and refresh_token_raw ~= "" then
+            pcall(RefreshToken.revoke, refresh_token_raw)
+        end
+
+        return {
+            status = 200,
+            json = { message = "Logged out successfully" }
+        }
+    end)
 
     -- Get current user info (includes namespace)
     app:get("/auth/me", function(self)
