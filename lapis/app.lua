@@ -201,6 +201,7 @@ app:before_filter(function(self)
         ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
         ["/auth/hmrc/callback"] = true,   -- HMRC MTD OAuth callback
+        ["/auth/logout"] = true,         -- Logout (revokes refresh token)
     }
 
     -- Skip auth for public routes

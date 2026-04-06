@@ -1180,6 +1180,35 @@ local _migrations = {
     ['438_tax_namespace_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 42),
     ['439_profile_client_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 35),
 
+    -- =========================================================================
+    -- Refresh tokens table (opaque, rotatable, revocable)
+    -- =========================================================================
+    ['440_create_refresh_tokens'] = function()
+        local exists = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'refresh_tokens'
+        ]])
+        if #exists == 0 then
+            schema.create_table("refresh_tokens", {
+                { "id",          types.serial },
+                { "user_id",     types.integer },
+                { "token_hash",  types.varchar({ unique = true }) },
+                { "family_id",   types.varchar },
+                { "device_info", types.varchar({ null = true }) },
+                { "expires_at",  types.time },
+                { "revoked_at",  types.time({ null = true }) },
+                { "created_at",  types.time({ default = db.raw("NOW()") }) },
+                "PRIMARY KEY (id)",
+                "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            })
+            schema.create_index("refresh_tokens", "user_id")
+            schema.create_index("refresh_tokens", "token_hash")
+            schema.create_index("refresh_tokens", "family_id")
+            schema.create_index("refresh_tokens", "expires_at")
+            print("Created refresh_tokens table")
+        end
+    end,
+
     -- Custom migrations (supports per-project directories)
     ['custom_migrations'] = function()
         local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")
