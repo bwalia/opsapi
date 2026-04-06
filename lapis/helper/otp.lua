@@ -246,11 +246,12 @@ function OTP.sendToEmail(user, brand)
         return false, "Valid user with id and email is required"
     end
 
-    -- In test mode, skip OTP creation and email entirely
-    local test_code = Global.getEnvVar("TEST_OTP_CODE")
-    if test_code and test_code ~= "" then
-        ngx.log(ngx.NOTICE, "[OTP] Test mode — skipping email send for ", user.email)
-        return true
+    -- When TEST_OTP_CODE is set, the test bypass code is accepted by OTP.verify()
+    -- but we still create a real OTP and send the email so users receive the code.
+    -- This allows E2E tests to bypass with the test code while real users get emails.
+    local test_mode = Global.getEnvVar("TEST_OTP_CODE")
+    if test_mode and test_mode ~= "" then
+        ngx.log(ngx.NOTICE, "[OTP] Test bypass enabled — real OTP will also be created and emailed for ", user.email)
     end
 
     local code, err = OTP.create(user.id)
