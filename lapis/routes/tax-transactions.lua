@@ -512,6 +512,32 @@ return function(app)
         }
     end))
 
+    -- Send selected transactions to AI training data
+    app:post("/api/v2/tax/transactions/send-to-training", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+
+        if not self.params.transaction_ids then
+            return { json = { error = "transaction_ids array is required" }, status = 400 }
+        end
+
+        local transaction_ids = self.params.transaction_ids
+        if type(transaction_ids) == "string" then
+            local ok, parsed = pcall(cjson.decode, transaction_ids)
+            if ok then transaction_ids = parsed end
+        end
+
+        if type(transaction_ids) ~= "table" or #transaction_ids == 0 then
+            return { json = { error = "transaction_ids must be a non-empty array" }, status = 400 }
+        end
+
+        local result, err = TaxTransactionQueries.sendToTraining(transaction_ids, self.current_user)
+        if not result then
+            return { json = { error = err or "Failed to send to training" }, status = 400 }
+        end
+
+        return { json = result, status = 200 }
+    end))
+
     -- Bulk confirm classifications
     app:post("/api/v2/tax/statements/:statement_id/transactions/bulk-confirm-classification", AuthMiddleware.requireAuth(function(self)
         merge_params(self)
