@@ -1032,4 +1032,132 @@ return {
             print("[Tax Copilot] WARNING: No active namespace found, skipping backfill")
         end
     end,
+
+    -- =========================================================================
+    -- 43. Classification training data table
+    --
+    -- Stores high-confidence AI classifications and accountant corrections
+    -- as training data for building a custom classification model.
+    -- Embeddings and MinIO paths are NULL when created by OpsAPI (accountant
+    -- corrections) and filled asynchronously by FastAPI background processor.
+    -- =========================================================================
+    [43] = function()
+        local exists = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'classification_training_data'
+        ]])
+        if #exists > 0 then
+            -- Table exists (possibly from Python auto-create with old schema).
+            -- Ensure all required columns exist for the current schema.
+            print("[Tax Copilot] classification_training_data exists — ensuring columns are up to date")
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS source varchar(50) DEFAULT 'ai_classification'") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS original_category varchar(100)") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS corrected_by integer") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS namespace_id integer DEFAULT 0") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS updated_at timestamp DEFAULT NOW()") end)
+            -- Ensure pgvector column (may be text from old auto-create)
+            pcall(function() db.query("CREATE EXTENSION IF NOT EXISTS vector") end)
+            pcall(function()
+                -- Ensure embedding column is vector(384) for all-MiniLM-L6-v2.
+                -- Handles: text (old Python auto-create), vector(1536) (old OpenAI), or missing.
+                local col_info = db.query([[
+                    SELECT data_type, udt_name FROM information_schema.columns
+                    WHERE table_name = 'classification_training_data' AND column_name = 'embedding'
+                ]])
+                if col_info and #col_info > 0 then
+                    local dt = col_info[1].data_type
+                    if dt == "text" then
+                        -- Drop existing data (incompatible format) and change type
+                        db.query("UPDATE classification_training_data SET embedding = NULL WHERE embedding IS NOT NULL")
+                        db.query("ALTER TABLE classification_training_data ALTER COLUMN embedding TYPE vector(384) USING NULL")
+                        print("[Tax Copilot] Converted embedding column from text to vector(384)")
+                    elseif dt == "USER-DEFINED" then
+                        -- Already vector type; check if it's the wrong dimension
+                        -- Drop and recreate if needed (NULL out old embeddings since dimensions changed)
+                        local check_dim = db.query("SELECT atttypmod FROM pg_attribute WHERE attrelid = 'classification_training_data'::regclass AND attname = 'embedding'")
+                        if check_dim and #check_dim > 0 and check_dim[1].atttypmod ~= 388 then
+                            -- atttypmod = dims + 4 for pgvector; 384 + 4 = 388
+                            db.query("UPDATE classification_training_data SET embedding = NULL")
+                            pcall(function() db.query("DROP INDEX IF EXISTS idx_ctd_embedding_hnsw") end)
+                            db.query("ALTER TABLE classification_training_data ALTER COLUMN embedding TYPE vector(384) USING NULL")
+                            print("[Tax Copilot] Changed embedding column from vector(1536) to vector(384)")
+                        end
+                    end
+                else
+                    -- Column missing entirely
+                    db.query("ALTER TABLE classification_training_data ADD COLUMN embedding vector(384)")
+                    print("[Tax Copilot] Added embedding column as vector(384)")
+                end
+            end)
+            -- Ensure indexes
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_source ON classification_training_data(source)") end)
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_namespace ON classification_training_data(namespace_id)") end)
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_embedding_hnsw ON classification_training_data USING hnsw (embedding vector_cosine_ops)") end)
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_pending_embedding ON classification_training_data (id) WHERE embedding IS NULL") end)
+            print("[Tax Copilot] classification_training_data schema updated")
+            return
+        end
+
+        -- Ensure pgvector extension is available
+        pcall(function()
+            db.query("CREATE EXTENSION IF NOT EXISTS vector")
+        end)
+
+        schema.create_table("classification_training_data", {
+            { "id",                types.serial },
+            { "uuid",              types.varchar({ unique = true }) },
+            { "transaction_uuid",  types.text },
+            { "user_id",           types.integer },
+            { "source",            types.varchar },                        -- ai_classification | accountant_correction
+            { "original_category", types.varchar({ null = true }) },       -- AI's category before accountant changed it
+            { "corrected_by",      types.integer({ null = true }) },       -- accountant user_id
+            { "description",       types.text },
+            { "amount",            "numeric(18,2)" },
+            { "transaction_type",  types.varchar },
+            { "transaction_date",  types.varchar({ null = true }) },
+            { "category",          types.varchar },                        -- final category (after correction if any)
+            { "hmrc_category",     types.varchar },
+            { "confidence",        "numeric(5,4)" },
+            { "is_tax_deductible", types.boolean({ default = false }) },
+            { "reasoning",         types.text({ null = true }) },
+            { "classified_by",     types.varchar({ null = true }) },
+            { "minio_path",        types.text({ null = true }) },          -- filled by FastAPI
+            { "namespace_id",      types.integer({ default = 0 }) },
+            { "created_at",        types.time({ default = db.raw("NOW()") }) },
+            { "updated_at",        types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)",
+            "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+        })
+
+        -- Native pgvector column (384 dimensions for all-MiniLM-L6-v2 sentence-transformer)
+        -- Added via raw SQL because Lapis schema builder doesn't know the vector type.
+        -- NULL when created by OpsAPI; filled by FastAPI background processor.
+        db.query("ALTER TABLE classification_training_data ADD COLUMN embedding vector(384)")
+
+        -- Unique constraint on transaction_uuid (idempotency)
+        db.query("ALTER TABLE classification_training_data ADD CONSTRAINT uq_ctd_transaction_uuid UNIQUE (transaction_uuid)")
+
+        -- Standard indexes
+        schema.create_index("classification_training_data", "uuid")
+        schema.create_index("classification_training_data", "transaction_uuid")
+        schema.create_index("classification_training_data", "user_id")
+        schema.create_index("classification_training_data", "source")
+        schema.create_index("classification_training_data", "category")
+        schema.create_index("classification_training_data", "created_at")
+        schema.create_index("classification_training_data", "namespace_id")
+
+        -- HNSW index for fast approximate nearest-neighbor search on embeddings.
+        -- cosine distance (vector_cosine_ops) matches the similarity metric used
+        -- by the Python search_similar() query.
+        db.query([[
+            CREATE INDEX idx_ctd_embedding_hnsw
+            ON classification_training_data
+            USING hnsw (embedding vector_cosine_ops)
+        ]])
+
+        -- Partial index: records awaiting embedding generation
+        db.query("CREATE INDEX idx_ctd_pending_embedding ON classification_training_data (id) WHERE embedding IS NULL")
+
+        print("[Tax Copilot] Created classification_training_data table with pgvector embedding")
+    end,
 }
