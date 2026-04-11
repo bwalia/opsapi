@@ -7,7 +7,7 @@ services:
       container_name: opsapi-gatus
       restart: unless-stopped
       ports:
-        - "8888:8080"
+        - "8877:8080"
       depends_on:
       - minio
       - adminer
