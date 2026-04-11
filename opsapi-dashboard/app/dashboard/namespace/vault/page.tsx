@@ -28,7 +28,7 @@ import type { Vault, VaultFolder, VaultSecret, VaultStats } from '@/types';
 import toast from 'react-hot-toast';
 import { ConfirmDialog } from '@/components/ui/Modal';
 
-type VaultView = 'secrets' | 'logs' | 'settings';
+type VaultView = 'secrets' | 'logs' | 'settings' | 'providers';
 
 export default function VaultPage() {
   const { currentNamespace } = useNamespace();
@@ -304,6 +304,14 @@ export default function VaultPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => window.location.href = '/dashboard/namespace/vault/providers'}
+            title="External providers"
+          >
+            <Shield className="w-4 h-4 mr-2" />
+            Providers
+          </Button>
           <Button
             variant="ghost"
             onClick={() => setShowLogsModal(true)}

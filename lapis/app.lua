@@ -368,6 +368,7 @@ load_if("services", "routes.services")
 -- SECRET VAULT
 -- ============================================
 load_if("vault", "routes.secret-vault")
+load_if("vault", "routes.vault-providers")
 
 -- ============================================
 -- BANK TRANSACTIONS

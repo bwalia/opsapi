@@ -108,6 +108,7 @@ local menu_system_migrations = load_if_enabled(ProjectConfig.FEATURES.MENU, "mig
 
 -- Vault
 local secret_vault_migrations = load_if_enabled(ProjectConfig.FEATURES.VAULT, "migrations.secret-vault") or {}
+local vault_integration_migrations = load_if_enabled(ProjectConfig.FEATURES.VAULT, "migrations.vault-integrations") or {}
 
 -- Services
 local services_module_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.services-module") or {}
@@ -1234,6 +1235,13 @@ local _migrations = {
     ['571_doc_create_versions'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 2),
     ['572_doc_create_generated'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 3),
     ['573_doc_seed_defaults'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 4),
+
+    -- =========================================================================
+    -- VAULT INTEGRATIONS (580-582)
+    -- =========================================================================
+    ['580_vault_create_providers'] = conditional_array(ProjectConfig.FEATURES.VAULT, vault_integration_migrations, 1),
+    ['581_vault_create_sync_mappings'] = conditional_array(ProjectConfig.FEATURES.VAULT, vault_integration_migrations, 2),
+    ['582_vault_create_sync_logs'] = conditional_array(ProjectConfig.FEATURES.VAULT, vault_integration_migrations, 3),
 
     -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)
