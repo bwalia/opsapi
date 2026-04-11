@@ -752,9 +752,14 @@ export default function SprintBurndownPage() {
     const load = async () => {
       setVelocityLoading(true);
       try {
-        const velocity = await sprintService.getVelocityHistory(projectUuid, 10);
+        const velocityResult = await sprintService.getVelocityHistory(projectUuid, 10) as unknown;
         if (cancelled) return;
-        setVelocityData(velocity);
+        // API may return array or wrapper object - handle both
+        if (Array.isArray(velocityResult)) {
+          setVelocityData({ sprints: velocityResult as VelocityHistoryItem[], average_velocity: 0, sprint_count: velocityResult.length });
+        } else {
+          setVelocityData(velocityResult as VelocityHistory);
+        }
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load velocity:', error);
@@ -790,7 +795,11 @@ export default function SprintBurndownPage() {
           completion_rate: stats.completion_rate,
           velocity: stats.velocity,
         });
-        setVelocityData(velocity);
+        if (Array.isArray(velocity)) {
+          setVelocityData({ sprints: velocity as unknown as VelocityHistoryItem[], average_velocity: 0, sprint_count: velocity.length });
+        } else {
+          setVelocityData(velocity as unknown as VelocityHistory);
+        }
       }).catch(console.error).finally(() => {
         setBurndownLoading(false);
         setStatsLoading(false);

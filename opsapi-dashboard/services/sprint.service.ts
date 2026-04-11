@@ -276,7 +276,7 @@ export const sprintService = {
    * Get product backlog (tasks not assigned to any sprint)
    */
   async getBacklog(projectUuid: string, params?: PaginationParams): Promise<{ data: unknown[]; meta: { total: number; page: number; per_page: number; total_pages: number } }> {
-    const queryString = buildQueryString({ page: params?.page || 1, per_page: params?.per_page || 50 });
+    const queryString = buildQueryString({ page: params?.page || 1, per_page: params?.perPage || 50 });
     const response = await apiClient.get(`/api/v2/kanban/projects/${projectUuid}/backlog${queryString}`);
     return response.data;
   },
