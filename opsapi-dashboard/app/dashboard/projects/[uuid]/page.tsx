@@ -491,6 +491,12 @@ export default function ProjectDetailPage() {
               {currentProject?.member_count || 0}
             </Button>
 
+            {/* Scrum Board */}
+            <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/sprints`)}>
+              <LayoutGrid size={18} className="mr-1" />
+              Scrum
+            </Button>
+
             {/* Settings */}
             <Button variant="ghost" size="sm" onClick={handleSettings}>
               <Settings size={18} />
