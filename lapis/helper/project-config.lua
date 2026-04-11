@@ -35,6 +35,9 @@ ProjectConfig.FEATURES = {
 
     -- New project-specific features
     TAX_COPILOT = "tax_copilot",       -- UK Tax Return AI Agent
+    CRM = "crm",                       -- CRM: accounts, contacts, deals, pipelines
+    TIMESHEETS = "timesheets",         -- Timesheet tracking and approval
+    INVOICING = "invoicing",           -- Invoice generation and payments
 }
 
 -- Define what features each project code includes
@@ -54,6 +57,9 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.SERVICES,
         ProjectConfig.FEATURES.BANK_TRANSACTIONS,
         ProjectConfig.FEATURES.TAX_COPILOT,
+        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.TIMESHEETS,
+        ProjectConfig.FEATURES.INVOICING,
     },
 
     -- Tax Copilot - UK Tax Return AI Agent
@@ -101,6 +107,17 @@ ProjectConfig.PROJECT_FEATURES = {
     hospital = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.HOSPITAL,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
+    },
+
+    -- Business/Professional Services
+    business = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.TIMESHEETS,
+        ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
     },
@@ -235,6 +252,18 @@ function ProjectConfig.isTaxCopilotEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.TAX_COPILOT)
 end
 
+function ProjectConfig.isCrmEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.CRM)
+end
+
+function ProjectConfig.isTimesheetsEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.TIMESHEETS)
+end
+
+function ProjectConfig.isInvoicingEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.INVOICING)
+end
+
 -- Get project info for debugging/logging
 function ProjectConfig.getProjectInfo()
     return {
@@ -319,6 +348,28 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "tax_bank_accounts", name = "Bank Accounts", description = "Bank account management", category = "Tax", allowed_actions = {"access"} },
         { machine_name = "tax_statements", name = "Statements", description = "Bank statement uploads", category = "Tax" },
         { machine_name = "tax_file", name = "HMRC Filing", description = "Submit tax returns to HMRC", category = "Tax", allowed_actions = {"access"} },
+    },
+
+    -- CRM modules
+    crm = {
+        { machine_name = "crm_accounts", name = "CRM Accounts", description = "Company/organization management", category = "CRM" },
+        { machine_name = "crm_contacts", name = "CRM Contacts", description = "Contact management", category = "CRM" },
+        { machine_name = "crm_deals", name = "CRM Deals", description = "Deal pipeline management", category = "CRM" },
+        { machine_name = "crm_pipelines", name = "CRM Pipelines", description = "Sales pipeline configuration", category = "CRM" },
+        { machine_name = "crm_activities", name = "CRM Activities", description = "Activity tracking", category = "CRM" },
+    },
+
+    -- Timesheet modules
+    timesheets = {
+        { machine_name = "timesheets", name = "Timesheets", description = "Time tracking and approval", category = "Business" },
+        { machine_name = "timesheet_approvals", name = "Timesheet Approvals", description = "Approve/reject timesheets", category = "Business", allowed_actions = {"approve", "reject", "read"} },
+    },
+
+    -- Invoicing modules
+    invoicing = {
+        { machine_name = "invoices", name = "Invoices", description = "Invoice creation and management", category = "Finance" },
+        { machine_name = "payments", name = "Payments", description = "Payment recording and tracking", category = "Finance" },
+        { machine_name = "tax_rates_config", name = "Tax Rates", description = "Tax rate configuration", category = "Finance" },
     },
 }
 

@@ -391,6 +391,25 @@ load_if("tax_copilot", "routes.tax-hmrc-auth")
 load_if("tax_copilot", "routes.profile-builder")
 
 -- ============================================
+-- CRM (Accounts, Contacts, Deals, Pipelines)
+-- ============================================
+load_if("crm", "routes.crm-pipelines")
+load_if("crm", "routes.crm-accounts")
+load_if("crm", "routes.crm-contacts")
+load_if("crm", "routes.crm-deals")
+load_if("crm", "routes.crm-activities")
+
+-- ============================================
+-- TIMESHEETS (Time tracking and approval)
+-- ============================================
+load_if("timesheets", "routes.timesheets")
+
+-- ============================================
+-- INVOICING (Invoice generation and payments)
+-- ============================================
+load_if("invoicing", "routes.invoices")
+
+-- ============================================
 -- CUSTOM ROUTES (loaded from external directory)
 -- ============================================
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")

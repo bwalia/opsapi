@@ -126,6 +126,18 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- CRM
+local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
+
+-- Timesheets
+local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
+
+-- Invoicing
+local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-system") or {}
+
+-- Kafka/Audit (always loaded - infrastructure)
+local kafka_audit_migrations = require("migrations.kafka-audit-system")
+
 -- =============================================================================
 -- HELPER FUNCTIONS FOR CONDITIONAL MIGRATIONS
 -- =============================================================================
@@ -1180,6 +1192,37 @@ local _migrations = {
     ['438_tax_namespace_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 42),
     ['439_profile_client_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 35),
     ['441_create_classification_training_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 43),
+
+    -- =========================================================================
+    -- CRM SYSTEM (500-509)
+    -- =========================================================================
+    ['500_crm_create_pipelines'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 1),
+    ['501_crm_create_accounts'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 2),
+    ['502_crm_create_contacts'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 3),
+    ['503_crm_create_deals'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 4),
+    ['504_crm_create_activities'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 5),
+
+    -- =========================================================================
+    -- TIMESHEET SYSTEM (520-529)
+    -- =========================================================================
+    ['520_ts_create_timesheets'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 1),
+    ['521_ts_create_entries'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 2),
+    ['522_ts_create_approvals'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 3),
+
+    -- =========================================================================
+    -- INVOICING SYSTEM (540-549)
+    -- =========================================================================
+    ['540_inv_create_invoices'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 1),
+    ['541_inv_create_line_items'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 2),
+    ['542_inv_create_payments'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 3),
+    ['543_inv_create_tax_rates'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 4),
+    ['544_inv_create_sequences'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 5),
+
+    -- =========================================================================
+    -- KAFKA / AUDIT SYSTEM (560-561)
+    -- =========================================================================
+    ['560_audit_create_events'] = kafka_audit_migrations[1],
+    ['561_audit_create_outbox'] = kafka_audit_migrations[2],
 
     -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)
