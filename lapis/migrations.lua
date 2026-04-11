@@ -135,6 +135,9 @@ local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMES
 -- Invoicing
 local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-system") or {}
 
+-- Document Templates (loaded with invoicing feature)
+local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
+
 -- Kafka/Audit (always loaded - infrastructure)
 local kafka_audit_migrations = require("migrations.kafka-audit-system")
 
@@ -1223,6 +1226,14 @@ local _migrations = {
     -- =========================================================================
     ['560_audit_create_events'] = kafka_audit_migrations[1],
     ['561_audit_create_outbox'] = kafka_audit_migrations[2],
+
+    -- =========================================================================
+    -- DOCUMENT TEMPLATES (570-573)
+    -- =========================================================================
+    ['570_doc_create_templates'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 1),
+    ['571_doc_create_versions'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 2),
+    ['572_doc_create_generated'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 3),
+    ['573_doc_seed_defaults'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 4),
 
     -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)

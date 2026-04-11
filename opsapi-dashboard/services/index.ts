@@ -64,3 +64,5 @@ export {
   getWorkloadLevel,
 } from './analytics.service';
 export { menuService } from './menu.service';
+export { timesheetsService } from './timesheets.service';
+export { crmService } from './crm.service';

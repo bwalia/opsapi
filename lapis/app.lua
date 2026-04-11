@@ -408,6 +408,7 @@ load_if("timesheets", "routes.timesheets")
 -- INVOICING (Invoice generation and payments)
 -- ============================================
 load_if("invoicing", "routes.invoices")
+load_if("invoicing", "routes.document-templates")
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)
