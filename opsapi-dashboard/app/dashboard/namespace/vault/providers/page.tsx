@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Shield, Cloud, Server, Lock, FileText, Plus, RefreshCw, Trash2, Settings, ArrowLeft, CheckCircle, XCircle, Loader2, Upload, Download } from 'lucide-react';
 import { vaultProvidersService, VaultProvider, ProviderType, SyncLog } from '@/services/vault-providers.service';
-import { vaultService } from '@/services/vault.service';
+import { getVaultKey } from '@/services/vault.service';
 
 const PROVIDER_ICONS: Record<string, typeof Shield> = {
   hashicorp_vault: Shield,
@@ -73,7 +73,7 @@ export default function VaultProvidersPage() {
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const fetchIdRef = useRef(0);
 
-  const vaultKey = vaultService.getVaultKey();
+  const vaultKey = getVaultKey();
 
   const fetchProviders = useCallback(async () => {
     if (!vaultKey) return;
