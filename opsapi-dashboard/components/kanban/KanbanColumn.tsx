@@ -193,7 +193,9 @@ const KanbanColumn = memo(function KanbanColumn({
   return (
     <div
       className={cn(
-        'flex flex-col w-72 min-w-72 bg-gray-100 rounded-lg',
+        'flex flex-col bg-gray-100 rounded-lg shrink-0',
+        'w-[85vw] max-w-[22rem] snap-center',
+        'md:w-72 md:min-w-72 md:max-w-none',
         'max-h-full transition-all duration-200',
         // Highlight when dragging over this column
         isOver && 'ring-2 ring-primary-500 bg-primary-50/80 shadow-lg',
