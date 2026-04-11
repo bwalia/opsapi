@@ -268,6 +268,26 @@ export const sprintService = {
     );
     return response.data.data;
   },
+  // ============================================
+  // Backlog & Summary
+  // ============================================
+
+  /**
+   * Get product backlog (tasks not assigned to any sprint)
+   */
+  async getBacklog(projectUuid: string, params?: PaginationParams): Promise<{ data: unknown[]; meta: { total: number; page: number; per_page: number; total_pages: number } }> {
+    const queryString = buildQueryString({ page: params?.page || 1, per_page: params?.per_page || 50 });
+    const response = await apiClient.get(`/api/v2/kanban/projects/${projectUuid}/backlog${queryString}`);
+    return response.data;
+  },
+
+  /**
+   * Get sprint summary with detailed stats
+   */
+  async getSprintSummary(uuid: string): Promise<{ sprint: KanbanSprintEnhanced; status_breakdown: Array<{ status: string; count: number; points: number }>; blocked_count: number; days: { total_days: number; elapsed_days: number; remaining_days: number }; progress: number }> {
+    const response = await apiClient.get(`/api/v2/kanban/sprints/${uuid}/summary`);
+    return response.data?.data || response.data;
+  },
 };
 
 // ============================================

@@ -489,4 +489,110 @@ return function(app)
 
         return api_response(200, velocity)
     end)
+
+    -- GET /api/v2/kanban/projects/:project_uuid/backlog - Get unassigned tasks (no sprint)
+    app:get("/api/v2/kanban/projects/:project_uuid/backlog", function(self)
+        local user, err = get_current_user()
+        if not user then
+            return api_response(401, nil, err)
+        end
+
+        local project = KanbanProjectQueries.show(self.params.project_uuid)
+        if not project then
+            return api_response(404, nil, "Project not found")
+        end
+
+        if not KanbanProjectQueries.isMember(project.id, user.uuid) then
+            return api_response(403, nil, "Access denied")
+        end
+
+        local page = tonumber(self.params.page) or 1
+        local per_page = tonumber(self.params.per_page) or 50
+
+        local count_result = db.query([[
+            SELECT COUNT(*) as total FROM kanban_tasks
+            WHERE board_id IN (SELECT id FROM kanban_boards WHERE project_id = ?)
+              AND (sprint_id IS NULL OR sprint_id = 0)
+              AND deleted_at IS NULL AND archived_at IS NULL
+        ]], project.id)
+        local total = count_result and count_result[1] and tonumber(count_result[1].total) or 0
+
+        local tasks = db.query([[
+            SELECT t.*,
+                   (SELECT json_agg(json_build_object('uuid', u.uuid, 'first_name', u.first_name, 'last_name', u.last_name))
+                    FROM kanban_task_assignees ta JOIN users u ON u.uuid = ta.user_uuid WHERE ta.task_id = t.id) as assignees
+            FROM kanban_tasks t
+            WHERE t.board_id IN (SELECT id FROM kanban_boards WHERE project_id = ?)
+              AND (t.sprint_id IS NULL OR t.sprint_id = 0)
+              AND t.deleted_at IS NULL AND t.archived_at IS NULL
+            ORDER BY t.priority DESC, t.position ASC
+            LIMIT ? OFFSET ?
+        ]], project.id, per_page, (page - 1) * per_page)
+
+        return {
+            status = 200,
+            json = {
+                success = true,
+                data = tasks or {},
+                meta = {
+                    total = total,
+                    page = page,
+                    per_page = per_page,
+                    total_pages = math.ceil(total / per_page),
+                }
+            }
+        }
+    end)
+
+    -- GET /api/v2/kanban/sprints/:uuid/summary - Sprint summary with detailed stats
+    app:get("/api/v2/kanban/sprints/:uuid/summary", function(self)
+        local user, err = get_current_user()
+        if not user then
+            return api_response(401, nil, err)
+        end
+
+        local sprint = KanbanSprintQueries.show(self.params.uuid)
+        if not sprint then
+            return api_response(404, nil, "Sprint not found")
+        end
+
+        if not KanbanProjectQueries.isMember(sprint.project_id, user.uuid) then
+            return api_response(403, nil, "Access denied")
+        end
+
+        -- Task breakdown by status
+        local status_breakdown = db.query([[
+            SELECT status, COUNT(*) as count, COALESCE(SUM(story_points), 0) as points
+            FROM kanban_tasks
+            WHERE sprint_id = ? AND deleted_at IS NULL AND archived_at IS NULL
+            GROUP BY status
+        ]], sprint.id)
+
+        -- Blocked tasks
+        local blocked = db.query([[
+            SELECT COUNT(*) as count FROM kanban_tasks
+            WHERE sprint_id = ? AND status = 'blocked' AND deleted_at IS NULL
+        ]], sprint.id)
+
+        -- Days calculation
+        local days_info = nil
+        if sprint.start_date and sprint.end_date then
+            days_info = db.query([[
+                SELECT
+                    (? ::date - ? ::date) as total_days,
+                    GREATEST(0, CURRENT_DATE - ? ::date) as elapsed_days,
+                    GREATEST(0, ? ::date - CURRENT_DATE) as remaining_days
+            ]], sprint.end_date, sprint.start_date, sprint.start_date, sprint.end_date)
+        end
+
+        return api_response(200, {
+            sprint = sprint,
+            status_breakdown = status_breakdown or {},
+            blocked_count = blocked and blocked[1] and tonumber(blocked[1].count) or 0,
+            days = days_info and days_info[1] or {},
+            progress = sprint.total_points > 0
+                and math.floor((sprint.completed_points / sprint.total_points) * 100)
+                or 0,
+        })
+    end)
 end
