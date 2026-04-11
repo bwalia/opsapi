@@ -4,6 +4,18 @@
 
 local TemplateRenderer = {}
 
+-- Template compilation cache (module-level, survives across requests in same worker)
+local _template_cache = {}
+local _cache_timestamps = {}
+local CACHE_TTL = 300 -- seconds
+
+local function get_cache_key(template_str)
+    -- Simple hash: use string length + first/last chars + a few middle samples
+    local len = #template_str
+    if len < 32 then return template_str end
+    return len .. ":" .. template_str:sub(1,16) .. ":" .. template_str:sub(-16)
+end
+
 -- Constants
 local MAX_LOOP_ITERATIONS = 1000
 local MAX_TEMPLATE_SIZE = 500 * 1024  -- 500KB
@@ -561,13 +573,27 @@ function TemplateRenderer.render(template_html, data, options)
         return "<!-- template exceeds maximum size of 500KB -->"
     end
 
-    -- Tokenize
-    local tokens = tokenize(template_html)
+    -- Check cache for pre-compiled AST
+    local cache_key = get_cache_key(template_html)
+    local cache_ttl = options.cache_ttl or CACHE_TTL
+    local ast, err
+    local cached_entry = _template_cache[cache_key]
+    local cached_time = _cache_timestamps[cache_key]
+    local now = os.time()
 
-    -- Build AST
-    local ast, err = build_ast(tokens)
-    if err then
-        return "<!-- template error: " .. html_escape(err) .. " -->"
+    if cached_entry and cached_time and (now - cached_time) < cache_ttl then
+        -- Cache hit: reuse pre-compiled AST
+        ast = cached_entry
+    else
+        -- Cache miss: tokenize and build AST
+        local tokens = tokenize(template_html)
+        ast, err = build_ast(tokens)
+        if err then
+            return "<!-- template error: " .. html_escape(err) .. " -->"
+        end
+        -- Store in cache
+        _template_cache[cache_key] = ast
+        _cache_timestamps[cache_key] = now
     end
 
     -- Evaluate
@@ -655,6 +681,13 @@ function TemplateRenderer.extractVariables(template_html)
     end
 
     return variables
+end
+
+--- Clear the template compilation cache
+-- Useful for development or when templates are updated dynamically
+function TemplateRenderer.clearCache()
+    _template_cache = {}
+    _cache_timestamps = {}
 end
 
 return TemplateRenderer

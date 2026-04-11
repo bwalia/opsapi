@@ -78,6 +78,81 @@ local function log_info(msg)
 end
 
 -- ============================================================================
+-- Retry Logic
+-- ============================================================================
+
+--- Execute a function with retry and exponential backoff
+-- @param fn function The function to execute
+-- @param max_retries number Maximum number of attempts (default 3)
+-- @param delay number Initial delay in seconds (default 1)
+-- @return any result, string|nil error
+local function with_retry(fn, max_retries, delay)
+    max_retries = max_retries or 3
+    delay = delay or 1
+    local last_err
+    for attempt = 1, max_retries do
+        local ok, result, err = pcall(fn)
+        if ok and result then return result end
+        last_err = (not ok and result) or err or "unknown error"
+        if attempt < max_retries then
+            -- Use ngx.sleep if available (non-blocking), otherwise os.execute sleep
+            local has_ngx, ngx_mod = pcall(function() return ngx end)
+            if has_ngx and ngx_mod and ngx_mod.sleep then
+                ngx_mod.sleep(delay)
+            else
+                os.execute("sleep " .. delay)
+            end
+            delay = delay * 2 -- exponential backoff
+        end
+    end
+    return nil, "Failed after " .. max_retries .. " retries: " .. tostring(last_err)
+end
+
+-- ============================================================================
+-- Chrome/Chromium Headless Support
+-- ============================================================================
+
+--- Check if a Chrome/Chromium browser is available on the system
+-- @return boolean
+local function chrome_available()
+    local handle = io.popen("which chromium 2>/dev/null || which google-chrome 2>/dev/null || which chromium-browser 2>/dev/null")
+    if not handle then return false end
+    local result = handle:read("*a"):gsub("%s+", "")
+    handle:close()
+    return result ~= ""
+end
+
+--- Generate PDF using Chrome/Chromium headless mode
+-- @param html_path string Path to the input HTML file
+-- @param output_path string Path for the output PDF file
+-- @param options table {page_size}
+-- @return boolean success
+local function generateWithChrome(html_path, output_path, options)
+    options = options or {}
+    -- Find the chrome binary
+    local handle = io.popen("which chromium 2>/dev/null || which google-chrome 2>/dev/null || which chromium-browser 2>/dev/null")
+    if not handle then return false end
+    local chrome_bin = handle:read("*a"):gsub("%s+", "")
+    handle:close()
+    if chrome_bin == "" then return false end
+
+    local page_size = options.page_size or DEFAULT_PAGE_SIZE
+    local cmd = string.format(
+        "%s --headless --disable-gpu --no-sandbox --print-to-pdf=%s --no-pdf-header-footer %s",
+        chrome_bin, output_path, html_path
+    )
+    log_info("Executing Chrome: " .. cmd)
+
+    local exit_code = os.execute(cmd)
+    if exit_code ~= 0 and exit_code ~= true then
+        return false
+    end
+
+    local size = file_size(output_path)
+    return size and size > 0
+end
+
+-- ============================================================================
 -- wkhtmltopdf Integration
 -- ============================================================================
 
@@ -101,90 +176,121 @@ function PdfService.generateFromHtml(html, options)
 
     local output_path = generate_filepath("doc")
 
-    if not PdfService.isAvailable() then
-        log_warning("wkhtmltopdf not available, returning HTML file instead")
-        local html_path = output_path:gsub("%.pdf$", ".html")
-        local f, err = io.open(html_path, "w")
-        if not f then
-            return nil, 0, "Failed to write HTML fallback: " .. (err or "unknown")
-        end
-        f:write(html)
-        f:close()
-        local size = file_size(html_path) or 0
-        return html_path, size
-    end
-
-    -- Write HTML to temp file
+    -- Write HTML to temp file (needed by all tools)
     local html_path, err = write_temp_file(html, ".html")
     if not html_path then
         return nil, 0, err
     end
 
-    -- Build wkhtmltopdf command
-    local cmd_parts = { "wkhtmltopdf", "--quiet" }
+    -- Tool priority: 1) wkhtmltopdf  2) Chrome headless  3) HTML fallback
 
-    -- Page size
-    cmd_parts[#cmd_parts + 1] = "--page-size"
-    cmd_parts[#cmd_parts + 1] = options.page_size or DEFAULT_PAGE_SIZE
+    -- ---- Tool 1: wkhtmltopdf (fastest, most reliable for PDF) ----
+    if PdfService.isAvailable() then
+        local wk_result, wk_err = with_retry(function()
+            -- Build wkhtmltopdf command
+            local cmd_parts = { "wkhtmltopdf", "--quiet" }
 
-    -- Orientation
-    cmd_parts[#cmd_parts + 1] = "--orientation"
-    cmd_parts[#cmd_parts + 1] = options.orientation or DEFAULT_ORIENTATION
+            -- Page size
+            cmd_parts[#cmd_parts + 1] = "--page-size"
+            cmd_parts[#cmd_parts + 1] = options.page_size or DEFAULT_PAGE_SIZE
 
-    -- Margins
-    cmd_parts[#cmd_parts + 1] = "--margin-top"
-    cmd_parts[#cmd_parts + 1] = options.margin_top or DEFAULT_MARGIN
+            -- Orientation
+            cmd_parts[#cmd_parts + 1] = "--orientation"
+            cmd_parts[#cmd_parts + 1] = options.orientation or DEFAULT_ORIENTATION
 
-    cmd_parts[#cmd_parts + 1] = "--margin-bottom"
-    cmd_parts[#cmd_parts + 1] = options.margin_bottom or DEFAULT_MARGIN
+            -- Margins
+            cmd_parts[#cmd_parts + 1] = "--margin-top"
+            cmd_parts[#cmd_parts + 1] = options.margin_top or DEFAULT_MARGIN
 
-    cmd_parts[#cmd_parts + 1] = "--margin-left"
-    cmd_parts[#cmd_parts + 1] = options.margin_left or DEFAULT_MARGIN
+            cmd_parts[#cmd_parts + 1] = "--margin-bottom"
+            cmd_parts[#cmd_parts + 1] = options.margin_bottom or DEFAULT_MARGIN
 
-    cmd_parts[#cmd_parts + 1] = "--margin-right"
-    cmd_parts[#cmd_parts + 1] = options.margin_right or DEFAULT_MARGIN
+            cmd_parts[#cmd_parts + 1] = "--margin-left"
+            cmd_parts[#cmd_parts + 1] = options.margin_left or DEFAULT_MARGIN
 
-    -- Header HTML (write to temp file if provided)
-    if options.header_html and options.header_html ~= "" then
-        local header_path = write_temp_file(options.header_html, ".html")
-        if header_path then
-            cmd_parts[#cmd_parts + 1] = "--header-html"
-            cmd_parts[#cmd_parts + 1] = header_path
+            cmd_parts[#cmd_parts + 1] = "--margin-right"
+            cmd_parts[#cmd_parts + 1] = options.margin_right or DEFAULT_MARGIN
+
+            -- Header HTML (write to temp file if provided)
+            if options.header_html and options.header_html ~= "" then
+                local header_path = write_temp_file(options.header_html, ".html")
+                if header_path then
+                    cmd_parts[#cmd_parts + 1] = "--header-html"
+                    cmd_parts[#cmd_parts + 1] = header_path
+                end
+            end
+
+            -- Footer HTML (write to temp file if provided)
+            if options.footer_html and options.footer_html ~= "" then
+                local footer_path = write_temp_file(options.footer_html, ".html")
+                if footer_path then
+                    cmd_parts[#cmd_parts + 1] = "--footer-html"
+                    cmd_parts[#cmd_parts + 1] = footer_path
+                end
+            end
+
+            -- Input and output
+            cmd_parts[#cmd_parts + 1] = html_path
+            cmd_parts[#cmd_parts + 1] = output_path
+
+            local cmd = table.concat(cmd_parts, " ")
+            log_info("Executing: " .. cmd)
+
+            local exit_code = os.execute(cmd)
+            if exit_code ~= 0 and exit_code ~= true then
+                return nil, "wkhtmltopdf failed with exit code: " .. tostring(exit_code)
+            end
+
+            local size = file_size(output_path) or 0
+            if size == 0 then
+                return nil, "wkhtmltopdf produced empty output"
+            end
+
+            return { path = output_path, size = size }
+        end, options.max_retries or 3, options.retry_delay or 1)
+
+        if wk_result then
+            os.remove(html_path)
+            log_info("Generated PDF (wkhtmltopdf): " .. wk_result.path .. " (" .. wk_result.size .. " bytes)")
+            return wk_result.path, wk_result.size
         end
+        log_warning("wkhtmltopdf failed after retries: " .. tostring(wk_err) .. ", trying Chrome fallback")
     end
 
-    -- Footer HTML (write to temp file if provided)
-    if options.footer_html and options.footer_html ~= "" then
-        local footer_path = write_temp_file(options.footer_html, ".html")
-        if footer_path then
-            cmd_parts[#cmd_parts + 1] = "--footer-html"
-            cmd_parts[#cmd_parts + 1] = footer_path
+    -- ---- Tool 2: Chrome headless (fallback) ----
+    if chrome_available() then
+        local chrome_result, chrome_err = with_retry(function()
+            local success = generateWithChrome(html_path, output_path, options)
+            if not success then
+                return nil, "Chrome headless PDF generation failed"
+            end
+            local size = file_size(output_path) or 0
+            return { path = output_path, size = size }
+        end, options.max_retries or 2, options.retry_delay or 1)
+
+        if chrome_result then
+            os.remove(html_path)
+            log_info("Generated PDF (Chrome): " .. chrome_result.path .. " (" .. chrome_result.size .. " bytes)")
+            return chrome_result.path, chrome_result.size
         end
+        log_warning("Chrome headless failed after retries: " .. tostring(chrome_err) .. ", falling back to HTML")
     end
 
-    -- Input and output
-    cmd_parts[#cmd_parts + 1] = html_path
-    cmd_parts[#cmd_parts + 1] = output_path
-
-    local cmd = table.concat(cmd_parts, " ")
-    log_info("Executing: " .. cmd)
-
-    local exit_code = os.execute(cmd)
-
-    -- Clean up temp HTML
+    -- ---- Tool 3: HTML fallback (last resort) ----
+    log_warning("No PDF tool available, returning HTML file with warning")
     os.remove(html_path)
-
-    if exit_code ~= 0 and exit_code ~= true then
-        return nil, 0, "wkhtmltopdf failed with exit code: " .. tostring(exit_code)
+    local html_fallback_path = output_path:gsub("%.pdf$", ".html")
+    local f
+    f, err = io.open(html_fallback_path, "w")
+    if not f then
+        return nil, 0, "Failed to write HTML fallback: " .. (err or "unknown")
     end
-
-    local size = file_size(output_path) or 0
-    if size == 0 then
-        return nil, 0, "wkhtmltopdf produced empty output"
-    end
-
-    log_info("Generated PDF: " .. output_path .. " (" .. size .. " bytes)")
-    return output_path, size
+    -- Inject a warning banner into the HTML
+    local warning_banner = '<!-- WARNING: PDF generation unavailable. This is an HTML fallback. -->\n'
+    f:write(warning_banner .. html)
+    f:close()
+    local size = file_size(html_fallback_path) or 0
+    return html_fallback_path, size
 end
 
 -- ============================================================================
