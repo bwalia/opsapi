@@ -66,3 +66,19 @@ export {
 export { menuService } from './menu.service';
 export { timesheetsService } from './timesheets.service';
 export { crmService } from './crm.service';
+
+// Hospital & Care Home Management
+export { hospitalsService } from './hospitals.service';
+export { patientsService } from './patients.service';
+export {
+  carePlansService,
+  careLogsService,
+  medicationsService,
+  dailyLogsService,
+} from './care.service';
+export {
+  familyMembersService,
+  accessControlsService,
+  alertsService,
+  dementiaService,
+} from './familyAccess.service';

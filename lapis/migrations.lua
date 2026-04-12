@@ -84,6 +84,7 @@ local fix_delivery_request_constraint = load_if_enabled(ProjectConfig.FEATURES.D
 -- Hospital
 local hospital_crm_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-crm") or {}
 local hospital_care_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-care-management") or {}
+local hospital_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-menu-items") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -1305,6 +1306,12 @@ local _migrations = {
     ['451_create_daily_logs_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 10),
     ['452_create_patient_alerts_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 11),
     ['453_create_patient_audit_logs_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 12),
+
+    -- Hospital Menu Items Seeding (conditional on HOSPITAL feature)
+    ['454_seed_hospital_menu_items'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_menu_items_migrations, 1),
+    ['455_seed_hospital_modules'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_menu_items_migrations, 2),
+    ['456_grant_hospital_permissions'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_menu_items_migrations, 3),
+    ['457_enable_hospital_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_menu_items_migrations, 4),
 
     -- Custom migrations (supports per-project directories)
     ['custom_migrations'] = function()
