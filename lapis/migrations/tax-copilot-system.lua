@@ -1161,7 +1161,7 @@ return {
         print("[Tax Copilot] Created classification_training_data table with pgvector embedding")
     end,
 
-    -- 44. Seed additional transaction categories from accountant analysis
+    -- 44. Seed 9 additional transaction categories from accountant analysis
     -- Adds categories identified from real accountant-classified bank statements
     -- that were missing from the original seed (migration [6]).
     [44] = function()
@@ -1173,7 +1173,6 @@ return {
         local new_categories = {
             -- Tax-deductible expense categories
             { key = "cost_of_sales", label = "Cost of Sales", type = "EXPENSE", hmrc_key = "cost_of_goods", is_deductible = true, rate = 1.0, desc = "Direct costs of goods sold or services delivered", examples = "COGS, cost of production, direct labour costs, manufacturing costs" },
-            { key = "accountancy_fees", label = "Accountancy Fees", type = "EXPENSE", hmrc_key = "accountancy_legal", is_deductible = true, rate = 1.0, desc = "Accountancy, bookkeeping, and tax advice fees", examples = "Accountant annual fee, bookkeeper, tax return preparation, payroll bureau" },
             { key = "printing_and_reproduction", label = "Printing & Reproduction", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "Printing, photocopying, and reproduction costs", examples = "Business cards, brochures, document printing, photocopying, leaflets" },
             { key = "motor_expenses", label = "Motor Expenses", type = "EXPENSE", hmrc_key = "car_van_travel", is_deductible = true, rate = 1.0, desc = "Vehicle running costs including fuel, repairs, insurance, road tax, MOT", examples = "Shell, BP, Esso, petrol, diesel, MOT, car insurance, road tax, breakdown cover" },
             { key = "shipping_and_delivery", label = "Shipping & Delivery", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "Courier, freight, and delivery costs", examples = "DPD, DHL, FedEx, Hermes, Evri, courier delivery, freight charges, shipping" },
