@@ -38,6 +38,7 @@ ProjectConfig.FEATURES = {
     CRM = "crm",                       -- CRM: accounts, contacts, deals, pipelines
     TIMESHEETS = "timesheets",         -- Timesheet tracking and approval
     INVOICING = "invoicing",           -- Invoice generation and payments
+    ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
 }
 
 -- Define what features each project code includes
@@ -60,6 +61,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CRM,
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.ACCOUNTING,
     },
 
     -- Tax Copilot - UK Tax Return AI Agent
@@ -117,6 +119,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CRM,
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.ACCOUNTING,
         ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
@@ -264,6 +267,10 @@ function ProjectConfig.isInvoicingEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.INVOICING)
 end
 
+function ProjectConfig.isAccountingEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.ACCOUNTING)
+end
+
 -- Get project info for debugging/logging
 function ProjectConfig.getProjectInfo()
     return {
@@ -370,6 +377,15 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "invoices", name = "Invoices", description = "Invoice creation and management", category = "Finance" },
         { machine_name = "payments", name = "Payments", description = "Payment recording and tracking", category = "Finance" },
         { machine_name = "tax_rates_config", name = "Tax Rates", description = "Tax rate configuration", category = "Finance" },
+    },
+
+    -- Accounting/Bookkeeping modules
+    accounting = {
+        { machine_name = "accounting", name = "Bookkeeping", description = "Chart of accounts, journal entries, and financial reports", category = "Accounting" },
+        { machine_name = "bank_reconciliation", name = "Bank Reconciliation", description = "Import and reconcile bank transactions", category = "Accounting" },
+        { machine_name = "expense_management", name = "Expenses", description = "Expense tracking and approval", category = "Accounting" },
+        { machine_name = "vat_returns", name = "VAT Returns", description = "UK VAT return calculation and submission", category = "Accounting" },
+        { machine_name = "financial_reports", name = "Financial Reports", description = "Trial balance, balance sheet, P&L", category = "Accounting", allowed_actions = {"read"} },
     },
 }
 

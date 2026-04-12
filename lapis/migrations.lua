@@ -139,6 +139,9 @@ local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOI
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
 
+-- Accounting/Bookkeeping
+local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
+
 -- Kafka/Audit (always loaded - infrastructure)
 local kafka_audit_migrations = require("migrations.kafka-audit-system")
 
@@ -1242,6 +1245,17 @@ local _migrations = {
     ['580_vault_create_providers'] = conditional_array(ProjectConfig.FEATURES.VAULT, vault_integration_migrations, 1),
     ['581_vault_create_sync_mappings'] = conditional_array(ProjectConfig.FEATURES.VAULT, vault_integration_migrations, 2),
     ['582_vault_create_sync_logs'] = conditional_array(ProjectConfig.FEATURES.VAULT, vault_integration_migrations, 3),
+
+    -- =========================================================================
+    -- ACCOUNTING / BOOKKEEPING SYSTEM (600-606)
+    -- =========================================================================
+    ['600_acct_create_accounts'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 1),
+    ['601_acct_create_journal_entries'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 2),
+    ['602_acct_create_journal_lines'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 3),
+    ['603_acct_create_bank_transactions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 4),
+    ['604_acct_create_expenses'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 5),
+    ['605_acct_create_vat_returns'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 6),
+    ['606_acct_seed_chart_of_accounts'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 7),
 
     -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)

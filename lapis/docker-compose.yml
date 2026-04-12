@@ -30,6 +30,8 @@ services:
     environment:
       - PROJECT_CODE=${PROJECT_CODE:-all}
       - KAFKA_BROKERS=${KAFKA_BROKERS:-kafka:29092}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
     depends_on:
       postgres:
         condition: service_healthy
@@ -237,6 +239,23 @@ services:
   #     - ../node/opsapi-node:/usr/src/app
   #   env_file: "../node/opsapi-node/.env"
 
+  # Ollama - Local AI/LLM for bookkeeping assistance
+  ollama:
+    image: ollama/ollama:latest
+    container_name: opsapi-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.22
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
   # Kafka - Event streaming (Zookeeper + Kafka broker)
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -354,3 +373,4 @@ volumes:
   prometheus_data:
   grafana_data:
   minio_data:
+  ollama_data:

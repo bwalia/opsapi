@@ -412,6 +412,11 @@ load_if("invoicing", "routes.invoices")
 load_if("invoicing", "routes.document-templates")
 
 -- ============================================
+-- ACCOUNTING / BOOKKEEPING (AI-powered)
+-- ============================================
+load_if("accounting", "routes.accounting")
+
+-- ============================================
 -- CUSTOM ROUTES (loaded from external directory)
 -- ============================================
 local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
