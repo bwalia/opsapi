@@ -1199,4 +1199,48 @@ return {
 
         print("[Tax Copilot] Seeded " .. count .. " new transaction categories from accountant analysis")
     end,
+
+    -- 45. Merge overlapping categories that map to the same HMRC box.
+    -- motor_expenses → travel_expense (both travelCosts)
+    -- computer_and_internet_expenses → software_subscriptions (both adminCosts)
+    -- post_and_stationery → shipping_and_delivery (both adminCosts)
+    [45] = function()
+        -- Remap transactions that used the old category keys to the merged keys
+        local merges = {
+            { old = "motor_expenses", new = "travel_expense" },
+            { old = "computer_and_internet_expenses", new = "software_subscriptions" },
+            { old = "post_and_stationery", new = "shipping_and_delivery" },
+        }
+
+        local total_remapped = 0
+        for _, merge in ipairs(merges) do
+            local result = db.query(
+                "UPDATE tax_transactions SET category = ? WHERE category = ?",
+                merge.new, merge.old
+            )
+            local count = result and result.affected_rows or 0
+            if count > 0 then
+                print("[Tax Copilot] Remapped " .. count .. " transactions: " .. merge.old .. " → " .. merge.new)
+            end
+            total_remapped = total_remapped + count
+        end
+
+        -- Deactivate the old categories (keep for audit trail, don't delete)
+        db.query([[
+            UPDATE tax_categories SET is_active = false, updated_at = NOW()
+            WHERE key IN ('motor_expenses', 'computer_and_internet_expenses', 'post_and_stationery')
+        ]])
+
+        -- Update shipping_and_delivery to include stationery in label/description
+        db.query([[
+            UPDATE tax_categories
+            SET label = 'Postage, Shipping & Delivery',
+                description = 'Postage, stationery, courier, freight, and delivery costs',
+                examples = 'Royal Mail, DPD, DHL, FedEx, Hermes, Evri, stamps, envelopes, Staples, courier delivery, freight charges, shipping',
+                updated_at = NOW()
+            WHERE key = 'shipping_and_delivery'
+        ]])
+
+        print("[Tax Copilot] Merged 3 overlapping categories, remapped " .. total_remapped .. " transactions")
+    end,
 }
