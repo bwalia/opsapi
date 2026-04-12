@@ -1037,4 +1037,121 @@ return function(app)
             })
         end)
     ))
+
+    -- =========================================================================
+    -- HMRC EXPENSE CATEGORIES
+    -- =========================================================================
+
+    -- GET /api/v2/accounting/hmrc-categories - List all HMRC SA103F categories
+    app:get("/api/v2/accounting/hmrc-categories", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local categories = db.query([[
+                SELECT * FROM hmrc_expense_categories
+                WHERE (namespace_id = 0 OR namespace_id = ?) AND is_active = true
+                ORDER BY sort_order ASC
+            ]], self.namespace.id)
+            return api_response(200, categories or {})
+        end)
+    ))
+
+    -- PUT /api/v2/accounting/bank-transactions/:uuid/categorize - Set HMRC category and tags
+    app:put("/api/v2/accounting/bank-transactions/:uuid/categorize", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local data = parse_request_body()
+            local uuid = self.params.uuid
+
+            local txn = db.query("SELECT * FROM accounting_bank_transactions WHERE uuid = ? AND deleted_at IS NULL", uuid)
+            if not txn or #txn == 0 then return api_response(404, nil, "Transaction not found") end
+            txn = txn[1]
+
+            if tonumber(txn.namespace_id) ~= self.namespace.id then
+                return api_response(403, nil, "Access denied")
+            end
+
+            local updates = { "updated_at = NOW()" }
+            local values = {}
+
+            if data.hmrc_category_key then
+                table.insert(updates, "hmrc_category_key = ?")
+                table.insert(values, data.hmrc_category_key)
+                -- Also look up the category id
+                local cat = db.query("SELECT id FROM hmrc_expense_categories WHERE key = ? LIMIT 1", data.hmrc_category_key)
+                if cat and cat[1] then
+                    table.insert(updates, "hmrc_category_id = ?")
+                    table.insert(values, cat[1].id)
+                end
+            end
+
+            if data.tags then
+                local cjson = require("cjson")
+                table.insert(updates, "tags = ?::jsonb")
+                table.insert(values, type(data.tags) == "table" and cjson.encode(data.tags) or data.tags)
+            end
+
+            if data.user_category then
+                table.insert(updates, "user_category = ?")
+                table.insert(values, data.user_category)
+            end
+
+            if data.category then
+                table.insert(updates, "category = ?")
+                table.insert(values, data.category)
+            end
+
+            table.insert(values, uuid)
+            db.query(
+                "UPDATE accounting_bank_transactions SET " .. table.concat(updates, ", ") .. " WHERE uuid = ?",
+                unpack(values)
+            )
+
+            -- Fetch updated
+            local updated = db.query("SELECT * FROM accounting_bank_transactions WHERE uuid = ?", uuid)
+            return api_response(200, updated and updated[1])
+        end)
+    ))
+
+    -- GET /api/v2/accounting/bank-transactions/by-category - Group transactions by HMRC category
+    app:get("/api/v2/accounting/bank-transactions/by-category", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local start_date = self.params.start_date or "2026-01-01"
+            local end_date = self.params.end_date or "2026-12-31"
+
+            local result = db.query([[
+                SELECT
+                    COALESCE(bt.hmrc_category_key, 'uncategorized') as hmrc_category,
+                    COALESCE(hc.label, 'Uncategorized') as category_label,
+                    COALESCE(hc.box_number, 0) as box_number,
+                    COUNT(*) as transaction_count,
+                    SUM(ABS(bt.amount)) as total_amount,
+                    SUM(bt.vat_amount) as total_vat
+                FROM accounting_bank_transactions bt
+                LEFT JOIN hmrc_expense_categories hc ON hc.key = bt.hmrc_category_key
+                WHERE bt.namespace_id = ? AND bt.deleted_at IS NULL
+                  AND bt.transaction_date BETWEEN ? AND ?
+                  AND bt.amount < 0
+                GROUP BY bt.hmrc_category_key, hc.label, hc.box_number
+                ORDER BY total_amount DESC
+            ]], self.namespace.id, start_date, end_date)
+
+            return api_response(200, result or {})
+        end)
+    ))
+
+    -- GET /api/v2/accounting/bank-transactions/by-tag - Search transactions by tag
+    app:get("/api/v2/accounting/bank-transactions/by-tag", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local tag = self.params.tag
+            if not tag then return api_response(400, nil, "tag parameter required") end
+
+            local result = db.query([[
+                SELECT * FROM accounting_bank_transactions
+                WHERE namespace_id = ? AND deleted_at IS NULL
+                  AND tags @> ?::jsonb
+                ORDER BY transaction_date DESC
+                LIMIT 50
+            ]], self.namespace.id, '["' .. tag:gsub('"', '') .. '"]')
+
+            return api_response(200, result or {})
+        end)
+    ))
 end

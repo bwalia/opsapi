@@ -141,6 +141,7 @@ local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVO
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
+local accounting_hmrc_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-hmrc-categories") or {}
 
 -- Kafka/Audit (always loaded - infrastructure)
 local kafka_audit_migrations = require("migrations.kafka-audit-system")
@@ -1256,6 +1257,10 @@ local _migrations = {
     ['604_acct_create_expenses'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 5),
     ['605_acct_create_vat_returns'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 6),
     ['606_acct_seed_chart_of_accounts'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_system_migrations, 7),
+    ['607_acct_hmrc_categories_table'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 1),
+    ['608_acct_bank_txn_tags_columns'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 2),
+    ['609_acct_seed_hmrc_categories'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 3),
+    ['610_acct_seed_dummy_transactions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 4),
 
     -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)
