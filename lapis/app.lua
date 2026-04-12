@@ -360,6 +360,21 @@ load_if("notifications", "routes.device-tokens")
 load_if("notifications", "routes.test-notification")
 
 -- ============================================
+-- HOSPITAL & CARE HOME MANAGEMENT
+-- ============================================
+load_if("hospital", "routes.hospital-departments")
+load_if("hospital", "routes.hospital-wards")
+load_if("hospital", "routes.care-plans")
+load_if("hospital", "routes.care-logs")
+load_if("hospital", "routes.medications")
+load_if("hospital", "routes.patient-access-controls")
+load_if("hospital", "routes.family-members")
+load_if("hospital", "routes.dementia-care")
+load_if("hospital", "routes.daily-logs")
+load_if("hospital", "routes.patient-alerts")
+load_if("hospital", "routes.patient-audit-logs")
+
+-- ============================================
 -- SERVICES MODULE (GitHub Workflow Integration)
 -- ============================================
 load_if("services", "routes.services")

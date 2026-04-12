@@ -83,6 +83,7 @@ local fix_delivery_request_constraint = load_if_enabled(ProjectConfig.FEATURES.D
 
 -- Hospital
 local hospital_crm_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-crm") or {}
+local hospital_care_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-care-management") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -1290,6 +1291,20 @@ local _migrations = {
             print("Created refresh_tokens table")
         end
     end,
+
+    -- Hospital Care Management System (conditional)
+    ['442_create_departments_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 1),
+    ['443_create_wards_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 2),
+    ['444_create_rooms_beds_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 3),
+    ['445_create_care_plans_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 4),
+    ['446_create_care_logs_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 5),
+    ['447_create_medications_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 6),
+    ['448_create_patient_access_controls_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 7),
+    ['449_create_family_members_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 8),
+    ['450_create_dementia_assessments_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 9),
+    ['451_create_daily_logs_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 10),
+    ['452_create_patient_alerts_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 11),
+    ['453_create_patient_audit_logs_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_care_mgmt_migrations, 12),
 
     -- Custom migrations (supports per-project directories)
     ['custom_migrations'] = function()
