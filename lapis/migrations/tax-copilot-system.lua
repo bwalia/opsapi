@@ -1160,4 +1160,44 @@ return {
 
         print("[Tax Copilot] Created classification_training_data table with pgvector embedding")
     end,
+
+    -- 44. Seed additional transaction categories from accountant analysis
+    -- Adds categories identified from real accountant-classified bank statements
+    -- that were missing from the original seed (migration [6]).
+    [44] = function()
+        local function get_hmrc_id(key)
+            local result = db.select("id FROM tax_hmrc_categories WHERE key = ?", key)
+            return result and result[1] and result[1].id or nil
+        end
+
+        local new_categories = {
+            -- Tax-deductible expense categories
+            { key = "cost_of_sales", label = "Cost of Sales", type = "EXPENSE", hmrc_key = "cost_of_goods", is_deductible = true, rate = 1.0, desc = "Direct costs of goods sold or services delivered", examples = "COGS, cost of production, direct labour costs, manufacturing costs" },
+            { key = "accountancy_fees", label = "Accountancy Fees", type = "EXPENSE", hmrc_key = "accountancy_legal", is_deductible = true, rate = 1.0, desc = "Accountancy, bookkeeping, and tax advice fees", examples = "Accountant annual fee, bookkeeper, tax return preparation, payroll bureau" },
+            { key = "printing_and_reproduction", label = "Printing & Reproduction", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "Printing, photocopying, and reproduction costs", examples = "Business cards, brochures, document printing, photocopying, leaflets" },
+            { key = "motor_expenses", label = "Motor Expenses", type = "EXPENSE", hmrc_key = "car_van_travel", is_deductible = true, rate = 1.0, desc = "Vehicle running costs including fuel, repairs, insurance, road tax, MOT", examples = "Shell, BP, Esso, petrol, diesel, MOT, car insurance, road tax, breakdown cover" },
+            { key = "shipping_and_delivery", label = "Shipping & Delivery", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "Courier, freight, and delivery costs", examples = "DPD, DHL, FedEx, Hermes, Evri, courier delivery, freight charges, shipping" },
+            { key = "staff_welfare", label = "Staff Welfare", type = "EXPENSE", hmrc_key = "wages_staff", is_deductible = true, rate = 1.0, desc = "Staff welfare expenses (not entertainment)", examples = "Staff refreshments, first aid supplies, team building, staff gifts under HMRC limits" },
+            { key = "general_admin_expenses", label = "General Administrative Expenses", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "General office and administrative expenses not elsewhere classified", examples = "Office maintenance, waste disposal, shredding, fire extinguisher servicing" },
+            -- Non-deductible / balance sheet categories
+            { key = "directors_loan_account", label = "Directors Loan Account", type = "EXPENSE", hmrc_key = nil, is_deductible = false, rate = 0.0, desc = "Movements on directors loan account (balance sheet, not P&L)", examples = "DLA repayment, loan to director, director loan repayment" },
+            { key = "loan_repayments", label = "Loan Repayments", type = "EXPENSE", hmrc_key = nil, is_deductible = false, rate = 0.0, desc = "Capital repayments on loans (not deductible; interest portion is separate)", examples = "Bounce Back Loan repayment, bank loan repayment, commercial loan repayment" },
+            { key = "dividend_payments", label = "Dividend Payments", type = "EXPENSE", hmrc_key = nil, is_deductible = false, rate = 0.0, desc = "Dividend distributions to shareholders (not a business expense)", examples = "Interim dividend, final dividend, shareholder distribution" },
+        }
+
+        local count = 0
+        for _, cat in ipairs(new_categories) do
+            local exists = db.select("id FROM tax_categories WHERE key = ?", cat.key)
+            if not exists or #exists == 0 then
+                local hmrc_id = cat.hmrc_key and get_hmrc_id(cat.hmrc_key) or db.NULL
+                db.query([[
+                    INSERT INTO tax_categories (uuid, key, label, hmrc_category_id, is_tax_deductible, deduction_rate, type, description, examples, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ]], MigrationUtils.generateUUID(), cat.key, cat.label, hmrc_id, cat.is_deductible, cat.rate, cat.type, cat.desc, cat.examples, true)
+                count = count + 1
+            end
+        end
+
+        print("[Tax Copilot] Seeded " .. count .. " new transaction categories from accountant analysis")
+    end,
 }
