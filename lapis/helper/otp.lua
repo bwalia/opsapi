@@ -188,12 +188,19 @@ function OTP.verify(user_id, code)
     -- Normalize: strip whitespace
     code = code:gsub("%s+", "")
 
-    -- Test mode bypass: accept TEST_OTP_CODE if set (never set this in production)
-    local test_code = Global.getEnvVar("TEST_OTP_CODE")
-    if test_code and test_code ~= "" and code == test_code then
-        ngx.log(ngx.WARN, "[OTP] Test bypass used for user_id=", user_id)
-        invalidate_existing(user_id)
-        return true
+    -- Dev-only bypass: accept TEST_OTP_CODE to skip email OTP during development.
+    -- Guards: (1) only works when LAPIS_ENVIRONMENT is NOT "production",
+    --         (2) code must be at least 6 characters to prevent trivial values,
+    --         (3) still invalidates DB codes so the bypass is auditable.
+    local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
+    if env ~= "production" then
+        local test_code = os.getenv("TEST_OTP_CODE")
+        if test_code and #test_code >= 6 and code == test_code then
+            ngx.log(ngx.WARN, "[OTP] Dev bypass used for user_id=", user_id,
+                " env=", env, " ip=", ngx.var.remote_addr or "unknown")
+            invalidate_existing(user_id)
+            return true
+        end
     end
 
     -- Find the latest non-expired, non-verified code for this user
@@ -246,11 +253,12 @@ function OTP.sendToEmail(user, brand)
         return false, "Valid user with id and email is required"
     end
 
-    -- When TEST_OTP_CODE is set, the test bypass code is accepted by OTP.verify()
+    -- When TEST_OTP_CODE is set, the bypass code is accepted by OTP.verify()
     -- but we still create a real OTP and send the email so users receive the code.
-    -- This allows E2E tests to bypass with the test code while real users get emails.
-    local test_mode = Global.getEnvVar("TEST_OTP_CODE")
-    if test_mode and test_mode ~= "" then
+    -- This allows developers to bypass with the test code while real users get emails.
+    local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
+    local test_code = os.getenv("TEST_OTP_CODE")
+    if env ~= "production" and test_code and #test_code >= 6 then
         ngx.log(ngx.NOTICE, "[OTP] Test bypass enabled — real OTP will also be created and emailed for ", user.email)
     end
 

@@ -109,13 +109,13 @@ return {
 
         -- Fetch the current owner role for the system namespace
         local owner_roles = db.select(
-            "* FROM namespace_roles WHERE namespace_id = ? AND name = ?",
+            "* FROM namespace_roles WHERE namespace_id = ? AND role_name = ?",
             namespace_id, "Owner"
         )
         if #owner_roles == 0 then
             -- Try lowercase or system role variant
             owner_roles = db.select(
-                "* FROM namespace_roles WHERE namespace_id = ? AND (name = ? OR name = ?)",
+                "* FROM namespace_roles WHERE namespace_id = ? AND (role_name = ? OR role_name = ?)",
                 namespace_id, "owner", "Namespace Owner"
             )
         end

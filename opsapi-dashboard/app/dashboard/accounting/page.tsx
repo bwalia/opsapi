@@ -732,6 +732,28 @@ function AccountingPageContent() {
             ))}
           </div>
 
+          {/* Ledger Navigation */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { label: 'Money In', description: 'Record sales & receipts', href: '/dashboard/accounting/money-in', icon: <ArrowDownRight className="w-5 h-5" />, color: 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' },
+              { label: 'Money Out', description: 'Record purchases & expenses', href: '/dashboard/accounting/money-out', icon: <ArrowUpRight className="w-5 h-5" />, color: 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' },
+              { label: 'Sales Ledger', description: 'Customer invoices & aging', href: '/dashboard/accounting/sales-ledger', icon: <TrendingUp className="w-5 h-5" />, color: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' },
+              { label: 'Purchase Ledger', description: 'Supplier payments & expenses', href: '/dashboard/accounting/purchase-ledger', icon: <TrendingDown className="w-5 h-5" />, color: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' },
+            ].map((item) => (
+              <a
+                key={item.label}
+                href={item.href}
+                className={`flex items-center gap-3 p-4 rounded-xl border transition-colors ${item.color}`}
+              >
+                {item.icon}
+                <div>
+                  <span className="text-sm font-semibold block">{item.label}</span>
+                  <span className="text-xs opacity-75">{item.description}</span>
+                </div>
+              </a>
+            ))}
+          </div>
+
           {/* Recent Transactions */}
           <Card padding="none">
             <div className="px-5 py-4 border-b border-secondary-200 flex items-center justify-between">
