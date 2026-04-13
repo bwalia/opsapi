@@ -1775,4 +1775,15 @@ return {
         count = result and result[1] and result[1].cnt or 0
         print("[Tax Copilot] Seeded " .. count .. " accountant reference transactions (Client C + D)")
     end,
+
+    -- 48. Add profession/industry fields to tax_user_profiles
+    -- Needed so the AI classifier can factor in the user's business type
+    -- (e.g., "Shell £45" is deductible for a taxi driver but personal for a dev).
+    [48] = function()
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS profession VARCHAR(255)")
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS industry VARCHAR(255)")
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS business_description TEXT")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_profession ON tax_user_profiles (profession)")
+        print("[Tax Copilot] Added profession, industry, business_description to tax_user_profiles")
+    end,
 }
