@@ -297,7 +297,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
         )}
 
         {/* Navigation */}
-        <nav className="flex flex-col flex-1 p-4 overflow-hidden">
+        <nav className="flex flex-col flex-1 p-4 overflow-hidden" aria-label="Main navigation">
           <div className="flex-1 space-y-1 overflow-y-auto scrollbar-thin">
             {!isCollapsed && (
               <p className="px-3 mb-2 text-xs font-semibold text-secondary-400 uppercase tracking-wider">

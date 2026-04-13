@@ -14,6 +14,8 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, helperText, leftIcon, rightIcon, id, ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+    const errorId = error ? `${inputId}-error` : undefined;
+    const helperId = helperText && !error ? `${inputId}-helper` : undefined;
 
     return (
       <div className="w-full">
@@ -27,13 +29,15 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )}
         <div className="relative">
           {leftIcon && (
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-secondary-400">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-secondary-400" aria-hidden="true">
               {leftIcon}
             </div>
           )}
           <input
             ref={ref}
             id={inputId}
+            aria-invalid={error ? 'true' : undefined}
+            aria-describedby={errorId || helperId}
             className={cn(
               'w-full px-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
               'bg-white text-secondary-900 placeholder:text-secondary-400',
@@ -49,14 +53,14 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
           {rightIcon && (
-            <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-secondary-400">
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-secondary-400" aria-hidden="true">
               {rightIcon}
             </div>
           )}
         </div>
-        {error && <p className="mt-1.5 text-sm text-error-500">{error}</p>}
+        {error && <p id={errorId} className="mt-1.5 text-sm text-error-600" role="alert">{error}</p>}
         {helperText && !error && (
-          <p className="mt-1.5 text-sm text-secondary-500">{helperText}</p>
+          <p id={helperId} className="mt-1.5 text-sm text-secondary-500">{helperText}</p>
         )}
       </div>
     );

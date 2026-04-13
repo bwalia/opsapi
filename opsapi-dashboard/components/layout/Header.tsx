@@ -29,7 +29,7 @@ const ProfileDropdown = memo(function ProfileDropdown({
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose} aria-hidden="true" />
-      <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-secondary-200 py-2 z-20">
+      <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-secondary-200 py-2 z-20" role="menu" aria-label="User menu">
         <div className="px-4 py-3 border-b border-secondary-100">
           <p className="text-sm font-medium text-secondary-900">
             {user?.first_name} {user?.last_name}
@@ -40,16 +40,18 @@ const ProfileDropdown = memo(function ProfileDropdown({
         <div className="py-1">
           <a
             href="/dashboard/settings"
+            role="menuitem"
             className="flex items-center gap-3 px-4 py-2.5 text-sm text-secondary-700 hover:bg-secondary-50"
           >
-            <User className="w-4 h-4" />
+            <User className="w-4 h-4" aria-hidden="true" />
             Profile
           </a>
           <a
             href="/dashboard/settings"
+            role="menuitem"
             className="flex items-center gap-3 px-4 py-2.5 text-sm text-secondary-700 hover:bg-secondary-50"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-4 h-4" aria-hidden="true" />
             Settings
           </a>
         </div>
@@ -57,9 +59,10 @@ const ProfileDropdown = memo(function ProfileDropdown({
         <div className="border-t border-secondary-100 pt-1">
           <button
             onClick={onLogout}
+            role="menuitem"
             className="flex items-center gap-3 px-4 py-2.5 text-sm text-error-600 hover:bg-error-50 w-full"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-4 h-4" aria-hidden="true" />
             Sign out
           </button>
         </div>
@@ -84,9 +87,11 @@ const MobileSearchModal = memo(function MobileSearchModal({
       <div className="absolute top-0 left-0 right-0 bg-white p-4 shadow-lg">
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" />
+            <label htmlFor="mobile-search" className="sr-only">Search</label>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" aria-hidden="true" />
             <input
-              type="text"
+              id="mobile-search"
+              type="search"
               placeholder="Search anything..."
               autoFocus
               className="w-full pl-10 pr-4 py-2.5 bg-secondary-50 border border-secondary-200 rounded-lg text-sm placeholder:text-secondary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
@@ -94,7 +99,8 @@ const MobileSearchModal = memo(function MobileSearchModal({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg"
+            className="p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center"
+            aria-label="Close search"
           >
             <X className="w-5 h-5" />
           </button>
@@ -157,9 +163,11 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
             {/* Desktop Search Bar */}
             <div className="hidden sm:flex items-center">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" />
+                <label htmlFor="desktop-search" className="sr-only">Search</label>
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" aria-hidden="true" />
                 <input
-                  type="text"
+                  id="desktop-search"
+                  type="search"
                   placeholder="Search anything..."
                   className="w-48 md:w-64 lg:w-80 pl-10 pr-4 py-2 bg-secondary-50 border border-secondary-200 rounded-lg text-sm placeholder:text-secondary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                 />

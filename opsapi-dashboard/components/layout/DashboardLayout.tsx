@@ -146,7 +146,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
             <Header onMenuClick={handleSidebarOpen} />
 
             {/* Main content */}
-            <main className="p-4 sm:p-6">{children}</main>
+            <main id="main-content" className="p-4 sm:p-6">{children}</main>
           </div>
         </div>
       </PermissionsProvider>

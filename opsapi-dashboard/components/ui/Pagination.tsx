@@ -68,26 +68,27 @@ const Pagination: React.FC<PaginationProps> = ({
         className,
       )}
     >
-      <p className="text-sm text-secondary-500">
+      <p className="text-sm text-secondary-600" aria-live="polite">
         Showing{" "}
-        <span className="font-medium text-secondary-700">{startItem}</span> to{" "}
-        <span className="font-medium text-secondary-700">{endItem}</span> of{" "}
-        <span className="font-medium text-secondary-700">{totalItems}</span>{" "}
+        <span className="font-medium text-secondary-900">{startItem}</span> to{" "}
+        <span className="font-medium text-secondary-900">{endItem}</span> of{" "}
+        <span className="font-medium text-secondary-900">{totalItems}</span>{" "}
         results
       </p>
 
-      <nav className="flex items-center gap-1">
+      <nav className="flex items-center gap-1" aria-label="Pagination">
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
+          aria-label="Go to previous page"
           className={cn(
-            "p-2 rounded-lg transition-colors",
+            "p-2 rounded-lg transition-colors min-w-[40px] min-h-[40px] flex items-center justify-center",
             currentPage === 1
               ? "text-secondary-300 cursor-not-allowed"
               : "text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900",
           )}
         >
-          <ChevronLeft className="w-5 h-5" />
+          <ChevronLeft className="w-5 h-5" aria-hidden="true" />
         </button>
 
         {getPageNumbers().map((page, index) =>
@@ -95,8 +96,10 @@ const Pagination: React.FC<PaginationProps> = ({
             <button
               key={index}
               onClick={() => onPageChange(page)}
+              aria-label={`Go to page ${page}`}
+              aria-current={page === currentPage ? "page" : undefined}
               className={cn(
-                "min-w-10 h-10 px-3 rounded-lg text-sm font-medium transition-colors",
+                "min-w-[40px] h-10 px-3 rounded-lg text-sm font-medium transition-colors",
                 page === currentPage
                   ? "bg-primary-500 text-white"
                   : "text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900",
@@ -105,7 +108,7 @@ const Pagination: React.FC<PaginationProps> = ({
               {page}
             </button>
           ) : (
-            <span key={index} className="px-2 text-secondary-400">
+            <span key={index} className="px-2 text-secondary-400" aria-hidden="true">
               {page}
             </span>
           ),
@@ -114,14 +117,15 @@ const Pagination: React.FC<PaginationProps> = ({
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
+          aria-label="Go to next page"
           className={cn(
-            "p-2 rounded-lg transition-colors",
+            "p-2 rounded-lg transition-colors min-w-[40px] min-h-[40px] flex items-center justify-center",
             currentPage === totalPages
               ? "text-secondary-300 cursor-not-allowed"
               : "text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900",
           )}
         >
-          <ChevronRight className="w-5 h-5" />
+          <ChevronRight className="w-5 h-5" aria-hidden="true" />
         </button>
       </nav>
     </div>
