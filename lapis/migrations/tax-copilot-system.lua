@@ -1786,4 +1786,15 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_profession ON tax_user_profiles (profession)")
         print("[Tax Copilot] Added profession, industry, business_description to tax_user_profiles")
     end,
+
+    -- 49. Add classification metadata fields to tax_transactions
+    -- Tracks how each transaction was classified (source), its cleaned merchant name
+    -- (for pattern matching / RAG lookup), and whether it's a business expense.
+    [49] = function()
+        db.query("ALTER TABLE tax_transactions ADD COLUMN IF NOT EXISTS classification_source VARCHAR(100)")
+        db.query("ALTER TABLE tax_transactions ADD COLUMN IF NOT EXISTS cleaned_merchant_name VARCHAR(500)")
+        db.query("ALTER TABLE tax_transactions ADD COLUMN IF NOT EXISTS is_business_expense BOOLEAN DEFAULT TRUE")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_txn_cleaned_merchant ON tax_transactions (cleaned_merchant_name)")
+        print("[Tax Copilot] Added classification_source, cleaned_merchant_name, is_business_expense to tax_transactions")
+    end,
 }

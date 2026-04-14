@@ -1207,6 +1207,7 @@ local _migrations = {
     ['460_tax_create_classification_reference_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 46),
     ['461_tax_seed_accountant_reference_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 47),
     ['462_tax_add_profile_profession'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 48),
+    ['463_tax_add_classification_fields'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 49),
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)
