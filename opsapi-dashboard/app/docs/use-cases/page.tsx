@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   title: 'Use Cases — OpsAPI Docs',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default function UseCasesIndexPage() {
   return (
     <div className="space-y-6">
