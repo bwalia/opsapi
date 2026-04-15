@@ -96,7 +96,7 @@ services:
   postgres:
     container_name: opsapi-postgres-dev-db
     restart: unless-stopped
-    image: postgres:14-alpine
+    image: pgvector/pgvector:pg14
     ports:
       - "5439:5432"
     volumes:
