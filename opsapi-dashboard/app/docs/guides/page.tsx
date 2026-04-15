@@ -20,6 +20,8 @@ const firstCallJs = `const res = await fetch('${baseUrl}/api/v2/users', {
 });
 const users = await res.json();`;
 
+export const dynamic = 'force-dynamic';
+
 export default function GuidesPage() {
   return (
     <div className="space-y-10">

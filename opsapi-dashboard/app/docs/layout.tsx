@@ -9,6 +9,8 @@ export const metadata: Metadata = {
     'Developer documentation for OpsAPI — automated REST APIs on PostgreSQL.',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default async function DocsRootLayout({
   children,
 }: {

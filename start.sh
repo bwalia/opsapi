@@ -923,7 +923,11 @@ fi
 # This ensures nginx workers have PROJECT_CODE for feature-gated route loading
 export PROJECT_CODE
 
-$COMPOSE_CMD up --build -d
+if ! $COMPOSE_CMD up --build -d; then
+    echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
+    $COMPOSE_CMD logs --tail=100
+    exit 1
+fi
 
 # Wait for PostgreSQL to be ready (healthcheck-based)
 echo -e "${GREEN}[+] Waiting for PostgreSQL to be ready...${NC}"

@@ -25,6 +25,7 @@ export async function loadOpenApi(): Promise<OpenApiDoc> {
   try {
     const res = await fetch(`${base}/swagger/swagger.json`, {
       next: { revalidate: 300 },
+      signal: AbortSignal.timeout(3000),
     });
     if (res.ok) {
       return (await res.json()) as OpenApiDoc;

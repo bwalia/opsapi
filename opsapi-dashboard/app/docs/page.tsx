@@ -48,6 +48,8 @@ TOKEN=$(curl -sX POST ${baseUrl}/api/v2/auth/login \\
 curl ${baseUrl}/api/v2/users?page=1 \\
   -H "Authorization: Bearer $TOKEN"`;
 
+export const dynamic = 'force-dynamic';
+
 export default function DocsHomePage() {
   return (
     <div className="space-y-14">

@@ -8,6 +8,8 @@ export const metadata: Metadata = {
   title: 'API Reference — OpsAPI Docs',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default async function ApiIndexPage() {
   const doc = await loadOpenApi();
   const domains = parseOpenApi(doc);
