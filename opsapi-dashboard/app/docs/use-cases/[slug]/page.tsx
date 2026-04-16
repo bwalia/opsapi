@@ -20,6 +20,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: uc ? `${uc.title} — OpsAPI Docs` : 'OpsAPI Docs' };
 }
 
+export const dynamic = 'force-dynamic';
+
 export default async function UseCasePage({ params }: Params) {
   const { slug } = await params;
   const uc = useCases.find((u) => u.slug === slug);

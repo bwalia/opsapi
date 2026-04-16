@@ -23,6 +23,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
+export const dynamic = 'force-dynamic';
+
 export default async function TagPage({ params }: Params) {
   const { tag } = await params;
   const doc = await loadOpenApi();
