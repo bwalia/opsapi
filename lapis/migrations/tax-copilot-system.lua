@@ -2047,4 +2047,99 @@ return {
             to_fix
         ))
     end,
+
+    -- 55. Create hmrc_calculations table — stores the result of every HMRC
+    --     MTD ITSA preview calculation triggered via
+    --     POST /api/hmrc/calculate-preview (FastAPI, Phase D).
+    --
+    -- One row per calculation run. The Phase D orchestration endpoint
+    -- inserts a row with status='triggered' as soon as HMRC accepts the
+    -- cumulative submission, then updates it to status='ready' once the
+    -- calculation result is retrieved. Failures mark status='error' with
+    -- the error_message column populated.
+    --
+    -- Columns split into three conceptual groups:
+    --
+    --   Request context
+    --     user_uuid, business_id, tax_year, period_start, period_end
+    --     calculation_type  — 'in-year' / 'intent-to-finalise' / 'intent-to-amend'
+    --
+    --   HMRC round-trip
+    --     calculation_id    — UUID returned by HMRC's trigger endpoint
+    --     status            — 'triggered' | 'ready' | 'error'
+    --     error_message     — human-readable error if status='error'
+    --     triggered_at      — when we called HMRC's POST /trigger
+    --     retrieved_at      — when HMRC's GET /{id} returned 200
+    --     poll_attempts     — how many retrieve calls it took (1-7 typical)
+    --     raw_response      — full JSON of HMRC's calculation tree for audit
+    --
+    --   Parsed figures (from calculation.taxCalculation)
+    --     total_income_tax_and_nics_due  — the headline figure users see
+    --     total_taxable_income
+    --     income_tax_charged
+    --     class2_nics
+    --     class4_nics
+    --     personal_allowance
+    --
+    --   Aggregation stats (from the Phase B aggregator)
+    --     tx_total, tx_applied, tx_unmapped, tx_excluded_no_mtd,
+    --     tx_override_applied
+    --     — Captured alongside the figures so a user seeing a
+    --       "surprising" HMRC number can drill into why it differs from
+    --       their local Python estimate (e.g. 250 transactions
+    --       unclassified → missing from the submission).
+    --
+    -- Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    -- Safe to re-run. Purely additive — touches no existing rows.
+    [55] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_calculations (
+                id                              BIGSERIAL PRIMARY KEY,
+                uuid                            VARCHAR(64) UNIQUE NOT NULL,
+
+                -- Request context
+                user_uuid                       VARCHAR(64) NOT NULL,
+                business_id                     VARCHAR(255) NOT NULL,
+                tax_year                        VARCHAR(16) NOT NULL,
+                period_start                    DATE NOT NULL,
+                period_end                      DATE NOT NULL,
+                calculation_type                VARCHAR(32) NOT NULL DEFAULT 'in-year',
+
+                -- HMRC round-trip
+                calculation_id                  VARCHAR(64),
+                status                          VARCHAR(16) NOT NULL DEFAULT 'triggered',
+                error_message                   TEXT,
+                triggered_at                    TIMESTAMP,
+                retrieved_at                    TIMESTAMP,
+                poll_attempts                   INTEGER DEFAULT 0,
+                raw_response                    TEXT,
+
+                -- Parsed figures (NULL until status='ready')
+                total_income_tax_and_nics_due   NUMERIC(15, 2),
+                total_taxable_income             NUMERIC(15, 2),
+                income_tax_charged               NUMERIC(15, 2),
+                class2_nics                      NUMERIC(15, 2),
+                class4_nics                      NUMERIC(15, 2),
+                personal_allowance               NUMERIC(15, 2),
+
+                -- Aggregation stats (from the Phase B aggregator)
+                tx_total                         INTEGER DEFAULT 0,
+                tx_applied                       INTEGER DEFAULT 0,
+                tx_unmapped                      INTEGER DEFAULT 0,
+                tx_excluded_no_mtd               INTEGER DEFAULT 0,
+                tx_override_applied              INTEGER DEFAULT 0,
+
+                -- Audit
+                created_at                       TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at                       TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_user_uuid ON hmrc_calculations (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_business_year ON hmrc_calculations (business_id, tax_year)")
+        db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_calculations_calc_id ON hmrc_calculations (calculation_id) WHERE calculation_id IS NOT NULL")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_status ON hmrc_calculations (status)")
+
+        print("[Tax Copilot] Created hmrc_calculations table for Phase D preview-calculation round-trip")
+    end,
 }
