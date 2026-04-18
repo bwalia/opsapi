@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ExternalLink } from 'lucide-react';
 import type { ParsedDomain } from '@/lib/openapi/types';
+
+const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
 
 const topLevel = [
   { href: '/docs', label: 'Overview', matchExact: true },
@@ -52,6 +54,14 @@ export function Sidebar({ domains }: { domains: ParsedDomain[] }) {
       >
         All endpoints
       </Link>
+      <a
+        href={`${baseUrl}/swagger`}
+        target="_blank"
+        rel="noreferrer"
+        className="flex items-center gap-1.5 rounded px-2 py-1 text-secondary-700 hover:bg-secondary-100"
+      >
+        Swagger UI <ExternalLink className="h-3 w-3 text-secondary-400" />
+      </a>
 
       {domains.map((d) => {
         const open = !collapsed[d.slug];

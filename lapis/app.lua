@@ -38,6 +38,7 @@ app:get("/", function(self)
             version = "1.0.0",
             endpoints = {
                 documentation = "/swagger",
+                docs = "/docs",
                 health = "/health",
                 openapi = "/openapi.json",
                 login = "/auth/login"
