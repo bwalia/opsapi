@@ -1,9 +1,14 @@
 local lapis = require("lapis")
 local app = lapis.Application()
 local CorsMiddleware = require("middleware.cors")
+local GlobalRateLimit = require("middleware.global-rate-limit")
 
 -- Enable CORS
 CorsMiddleware.enable(app)
+
+-- Enable global rate limiting (OPSAPI_RATE_LIMIT_DEFAULT env, default 10000/minute)
+-- Also logs X-Proxy-Pop-Code so we can trace edge location per request.
+GlobalRateLimit.enable(app)
 
 -- Enable etlua
 app:enable("etlua")
