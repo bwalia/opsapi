@@ -389,6 +389,36 @@ ProjectConfig.PROJECT_MODULES = {
     },
 }
 
+-- =============================================================================
+-- DYNAMIC FEATURE REGISTRATION (used by project-loader.lua)
+-- =============================================================================
+
+--- Register a new feature dynamically from a project manifest.
+-- Called by the project-loader when it discovers projects in /projects/.
+-- @param code string Project code (e.g. "hospital_patient_manager")
+-- @param feature_list table List of feature strings this project includes
+-- @param modules table|nil RBAC module definitions for this project
+function ProjectConfig.registerFeature(code, feature_list, modules)
+    -- Add to FEATURES enum if not already present
+    local upper = code:upper()
+    if not ProjectConfig.FEATURES[upper] then
+        ProjectConfig.FEATURES[upper] = code
+    end
+
+    -- Register the project's feature set
+    if not ProjectConfig.PROJECT_FEATURES[code] then
+        ProjectConfig.PROJECT_FEATURES[code] = feature_list
+    end
+
+    -- Register RBAC modules
+    if modules and #modules > 0 then
+        ProjectConfig.PROJECT_MODULES[code] = modules
+    end
+
+    -- Reset cached features so new registrations are picked up
+    _enabled_features = nil
+end
+
 --- Get RBAC modules for current PROJECT_CODE (core + project-specific features)
 -- @return table List of module definitions
 function ProjectConfig.getProjectModules()

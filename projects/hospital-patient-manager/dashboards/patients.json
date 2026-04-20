@@ -1,0 +1,43 @@
+{
+    "page_id": "patients",
+    "title": "Patient Management",
+    "description": "View and manage patient records",
+    "layout": "table",
+    "data_source": "/api/v2/hospital-patient-manager/patients",
+    "columns": [
+        { "key": "id", "label": "ID", "type": "number", "sortable": true, "width": 60 },
+        { "key": "first_name", "label": "First Name", "type": "text", "sortable": true },
+        { "key": "last_name", "label": "Last Name", "type": "text", "sortable": true },
+        { "key": "date_of_birth", "label": "DOB", "type": "date" },
+        { "key": "nhs_number", "label": "NHS Number", "type": "text" },
+        { "key": "department_name", "label": "Department", "type": "text" },
+        { "key": "status", "label": "Status", "type": "badge", "badges": {
+            "active": { "color": "green", "label": "Active" },
+            "inactive": { "color": "red", "label": "Inactive" },
+            "discharged": { "color": "gray", "label": "Discharged" }
+        }},
+        { "key": "created_at", "label": "Registered", "type": "datetime", "sortable": true }
+    ],
+    "filters": [
+        { "key": "status", "label": "Status", "type": "select", "options": ["active", "inactive"] },
+        { "key": "department_id", "label": "Department", "type": "api_select", "source": "/api/v2/hospital-patient-manager/departments" },
+        { "key": "search", "label": "Search", "type": "text", "placeholder": "Name or NHS number..." }
+    ],
+    "actions": ["create", "edit", "delete"],
+    "create_form": {
+        "title": "Register New Patient",
+        "fields": [
+            { "key": "first_name", "label": "First Name", "type": "text", "required": true },
+            { "key": "last_name", "label": "Last Name", "type": "text", "required": true },
+            { "key": "date_of_birth", "label": "Date of Birth", "type": "date" },
+            { "key": "gender", "label": "Gender", "type": "select", "options": ["Male", "Female", "Other"] },
+            { "key": "nhs_number", "label": "NHS Number", "type": "text" },
+            { "key": "email", "label": "Email", "type": "email" },
+            { "key": "phone", "label": "Phone", "type": "tel" },
+            { "key": "department_id", "label": "Department", "type": "api_select", "source": "/api/v2/hospital-patient-manager/departments" },
+            { "key": "blood_type", "label": "Blood Type", "type": "select", "options": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
+            { "key": "allergies", "label": "Allergies", "type": "textarea" },
+            { "key": "medical_notes", "label": "Medical Notes", "type": "textarea" }
+        ]
+    }
+}

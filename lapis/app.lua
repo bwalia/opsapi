@@ -215,6 +215,9 @@ app:before_filter(function(self)
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
         uri == "/swagger/swagger.json" or uri == "/metrics" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
+        uri:match("^/api/v2/projects$") or
+        uri:match("^/api/v2/projects/[^/]+/theme") or
+        uri:match("^/api/v2/[^/]+/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
         uri:match("^/api/v2/test%-notification") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
@@ -295,6 +298,8 @@ safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
 safe_load_routes("routes.email")
+safe_load_routes("routes.project-dashboard")
+safe_load_routes("routes.project-themes")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
@@ -411,6 +416,16 @@ load_if("tax_copilot", "routes.tax-admin-transactions")
 load_if("tax_copilot", "routes.tax-profile")
 load_if("tax_copilot", "routes.tax-hmrc-auth")
 load_if("tax_copilot", "routes.profile-builder")
+load_if("tax_copilot", "routes.tax-extract")
+load_if("tax_copilot", "routes.tax-classify")
+load_if("tax_copilot", "routes.tax-reconcile")
+load_if("tax_copilot", "routes.tax-calculate")
+load_if("tax_copilot", "routes.tax-file")
+load_if("tax_copilot", "routes.tax-hmrc-data")
+load_if("tax_copilot", "routes.tax-training-data")
+load_if("tax_copilot", "routes.tax-admin")
+load_if("tax_copilot", "routes.tax-admin-categories")
+load_if("tax_copilot", "routes.tax-support")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines)
@@ -436,6 +451,20 @@ load_if("invoicing", "routes.document-templates")
 -- ACCOUNTING / BOOKKEEPING (AI-powered)
 -- ============================================
 load_if("accounting", "routes.accounting")
+
+-- ============================================
+-- PROJECT MODULE ROUTES (auto-loaded from /projects/)
+-- ============================================
+local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")
+if ok_loader then
+    local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
+    local projects = ProjectLoader.init(projects_root)
+    for _, manifest in ipairs(projects) do
+        ProjectLoader.loadRoutes(app, manifest)
+    end
+else
+    ngx.log(ngx.NOTICE, "Project loader not available: ", tostring(ProjectLoader))
+end
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)
