@@ -1608,4 +1608,45 @@ return {
         local count = result and result[1] and result[1].cnt or 0
         print("[Tax Copilot] Seeded message_catalog (" .. count .. " codes) + English translations")
     end,
+
+    -- 52. Seed notification-specific catalog codes used by the Python
+    -- send_catalog_notification helper (Phase E). Translations themselves
+    -- live in backend/app/errors/translations/*.json and are loaded on
+    -- FastAPI startup, so we do NOT seed message_translations here —
+    -- that would duplicate the source of truth.
+    --
+    -- Idempotent: ON CONFLICT (code) DO NOTHING. Safe to re-run; safe to
+    -- add more codes in a future migration.
+    [52] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+                ('NOTIF_EXTRACT_COMPLETE', 'success', 'info', NULL,
+                 'Push/toast fired by /api/extract when extraction finishes. Placeholders: {count}.'),
+                ('NOTIF_CLASSIFY_COMPLETE', 'success', 'info', NULL,
+                 'Push/toast fired by /api/classify when classification finishes. Placeholders: {count}.'),
+                ('NOTIF_HMRC_OBLIGATIONS_UPDATED', 'info', 'info', NULL,
+                 'Push fired when fetch_obligations discovers new obligations. Placeholders: {body}.')
+            ON CONFLICT (code) DO NOTHING
+        ]])
+
+        local result = db.select("COUNT(*) as cnt FROM message_catalog WHERE code LIKE 'NOTIF_%'")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded notification codes (" .. count .. " NOTIF_* rows in catalog)")
+    end,
+
+    -- 53. Seed CLASSIFY_003 — the "partial success" notice code. Attached
+    -- as a notice on the classify 200 response when cloud AI providers
+    -- failed but Ollama filled in, so the user gets a toast rather than
+    -- finding out silently. Placeholder: {fallback_count}.
+    [53] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+                ('CLASSIFY_003', 'warning', 'warn', NULL,
+                 'Attached as a notice to classify 2xx when cloud AI providers failed and Ollama filled in. Placeholder: {fallback_count}.')
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded CLASSIFY_003 partial-success notice code")
+    end,
 }
