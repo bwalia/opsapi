@@ -1,0 +1,15 @@
+{
+    "name": "Hospital Default",
+    "primary_color": "#2563eb",
+    "secondary_color": "#1e40af",
+    "accent_color": "#06b6d4",
+    "danger_color": "#dc2626",
+    "success_color": "#16a34a",
+    "warning_color": "#d97706",
+    "font_family": "Inter, system-ui, sans-serif",
+    "heading_font": "Inter, system-ui, sans-serif",
+    "border_radius": "8px",
+    "layout": "modern",
+    "sidebar_variant": "light",
+    "logo_text": "HPM"
+}

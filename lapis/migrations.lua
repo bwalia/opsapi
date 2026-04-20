@@ -1393,6 +1393,79 @@ local _migrations = {
     end,
 
     -- =========================================================================
+    -- PROJECT MIGRATIONS SYSTEM
+    -- Creates the tracking table and runs migrations for all /projects/
+    -- =========================================================================
+    ['zzy_project_migrations_table'] = function()
+        MigrationTracker.recordRan("zzy_project_migrations_table", "core")
+        db.query([[
+            CREATE TABLE IF NOT EXISTS project_migrations (
+                id SERIAL PRIMARY KEY,
+                project_code VARCHAR(100) NOT NULL,
+                migration_name VARCHAR(255) NOT NULL,
+                executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                checksum VARCHAR(64),
+                UNIQUE(project_code, migration_name)
+            )
+        ]])
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_project_migrations_code
+            ON project_migrations(project_code)
+        ]])
+
+        -- Create tenant themes table for per-project per-tenant theme overrides
+        db.query([[
+            CREATE TABLE IF NOT EXISTS project_tenant_themes (
+                id SERIAL PRIMARY KEY,
+                project_code VARCHAR(100) NOT NULL,
+                namespace_id INTEGER,
+                theme_overrides JSONB DEFAULT '{}',
+                custom_css TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(project_code, namespace_id)
+            )
+        ]])
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_project_tenant_themes_code
+            ON project_tenant_themes(project_code)
+        ]])
+    end,
+
+    ['zzx_run_project_migrations'] = function()
+        local ok, ProjectMigrator = pcall(require, "helper.project-migrator")
+        if ok then
+            local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
+            ProjectMigrator.migrateAll(projects_root)
+        else
+            print("[Migration] Project migrator not available: " .. tostring(ProjectMigrator))
+        end
+        -- Auto-delete so this re-runs on every deploy
+        db.query([[
+            CREATE OR REPLACE FUNCTION delete_zzx_project_migrations()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.name = 'zzx_run_project_migrations' THEN
+                    DELETE FROM lapis_migrations WHERE name = 'zzx_run_project_migrations';
+                    RETURN NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        ]])
+        db.query([[
+            DROP TRIGGER IF EXISTS trg_delete_zzx_project_mig ON lapis_migrations
+        ]])
+        db.query([[
+            CREATE TRIGGER trg_delete_zzx_project_mig
+            AFTER INSERT ON lapis_migrations
+            FOR EACH ROW
+            WHEN (NEW.name = 'zzx_run_project_migrations')
+            EXECUTE FUNCTION delete_zzx_project_migrations()
+        ]])
+    end,
+
+    -- =========================================================================
     -- MIGRATION SUMMARY (runs last due to alphabetical ordering)
     -- Uses a DB trigger to auto-delete its lapis_migrations record so it
     -- always re-runs on each deploy.
