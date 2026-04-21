@@ -57,7 +57,7 @@ spec:
             - name: LAPIS_ENVIRONMENT
               value: "production"
             - name: PROJECT_CODE
-              value: {{ .Values.projectCode | default "tax_copilot" | quote }}
+              value: {{ .Values.projectCode | default "all" | quote }}
             {{- if and .Values.setup .Values.setup.adminEmail }}
             - name: ADMIN_EMAIL
               value: {{ .Values.setup.adminEmail | quote }}

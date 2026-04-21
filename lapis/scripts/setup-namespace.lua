@@ -4,6 +4,11 @@
   Automatically creates a namespace from PROJECT_CODE with a super admin user.
   This script is idempotent — safe to re-run on every deployment.
 
+  Supports multi-project codes:
+    - Single code:  PROJECT_CODE=tax_copilot      → creates one namespace
+    - Multi code:   PROJECT_CODE=ecommerce,chat    → creates one namespace per code
+    - All:          PROJECT_CODE=all               → creates "system" namespace
+
   Configuration priority: function args > environment variables > defaults
 
   Usage (via lapis exec — pass config inline to bypass nginx env limitation):
@@ -15,6 +20,10 @@
         namespace_name='UK Tax Return',
         namespace_slug='uk-tax-return'
       })"
+
+  Multi-project usage (recommended for combined project codes):
+    docker exec opsapi lapis exec \
+      "require('scripts.setup-namespace').runMulti({})"
 ]]
 
 local SetupNamespace = {}
@@ -31,6 +40,43 @@ local function resolve(config, key, env_key, default)
     return default
 end
 
+--- Validate a project code against the registered list in ProjectConfig.
+--- Returns true if known, or false + list of valid codes.
+local function isKnownProjectCode(code)
+    local ProjectConfig = require("helper.project-config")
+    if not code or code == "" then
+        return false, {}
+    end
+    local valid = {}
+    for k, _ in pairs(ProjectConfig.PROJECT_FEATURES) do
+        table.insert(valid, k)
+    end
+    table.sort(valid)
+    return ProjectConfig.PROJECT_FEATURES[code] ~= nil, valid
+end
+
+--- Parse a potentially comma-separated project_code string.
+--- Returns two lists: valid codes, invalid codes (for error reporting).
+local function parseAndValidateCodes(project_code)
+    local valid_codes, invalid_codes = {}, {}
+    local seen = {}
+
+    for raw in tostring(project_code or ""):gmatch("[^,]+") do
+        local trimmed = raw:match("^%s*(.-)%s*$")
+        if trimmed and #trimmed > 0 and not seen[trimmed] then
+            seen[trimmed] = true
+            local known, _ = isKnownProjectCode(trimmed)
+            if known then
+                table.insert(valid_codes, trimmed)
+            else
+                table.insert(invalid_codes, trimmed)
+            end
+        end
+    end
+
+    return valid_codes, invalid_codes
+end
+
 function SetupNamespace.run(config)
     config = config or {}
 
@@ -41,6 +87,26 @@ function SetupNamespace.run(config)
     local project_code = resolve(config, "project_code", "PROJECT_CODE", "all")
     local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL", "admin@opsapi.com")
     local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD", "Admin@123")
+
+    -- Validate project code when run directly with a single code.
+    -- Multi-code inputs are handled by runMulti(); if one slips through here, fail fast.
+    if project_code:find(",") then
+        error("SetupNamespace.run() received a multi-code project_code '" .. project_code
+            .. "'. Use SetupNamespace.runMulti() for comma-separated codes.")
+    end
+    local known, valid = isKnownProjectCode(project_code)
+    if not known then
+        error("Unknown project_code '" .. tostring(project_code)
+            .. "'. Valid codes: " .. table.concat(valid, ", "))
+    end
+
+    -- Basic sanity checks on admin inputs (fail early, not mid-DB insert)
+    if type(admin_email) ~= "string" or not admin_email:find("@") then
+        error("Invalid admin_email '" .. tostring(admin_email) .. "' — must be a valid email address")
+    end
+    if type(admin_password) ~= "string" or #admin_password < 6 then
+        error("Invalid admin_password — must be at least 6 characters")
+    end
 
     -- Derive default namespace name/slug from project code
     local default_slug = project_code:gsub("_", "-")
@@ -345,6 +411,123 @@ function SetupNamespace.run(config)
     print("Modules:   " .. #project_modules .. " (" .. project_code .. ")")
     print("======================")
     print("")
+end
+
+--- Run namespace setup for one or more project codes.
+--- Parses comma-separated PROJECT_CODE and creates one namespace per code.
+--- For single codes (including "all"), delegates to run() directly.
+--- This is the recommended entry point for Kubernetes bootstrap and CI/CD.
+---
+--- Error handling:
+---  - Unknown codes are rejected up front. If ALL codes are invalid, aborts with error.
+---  - If SOME codes are invalid, warns and continues with the valid ones.
+---  - Each code's setup runs in an isolated pcall so one failure does not abort the rest.
+---  - Prints a structured summary of successes + failures at the end.
+---  - Re-raises with a consolidated error if any code failed, so CI/CD sees a non-zero exit.
+---
+--- @param config table Optional config overrides (admin_email, admin_password, etc.)
+--- @return table Summary { total, succeeded, failed, failures = { {code, error} } }
+function SetupNamespace.runMulti(config)
+    config = config or {}
+
+    local project_code = resolve(config, "project_code", "PROJECT_CODE", "all")
+
+    -- Single code — delegate to run() (which also does its own validation)
+    if not project_code:find(",") then
+        SetupNamespace.run(config)
+        return { total = 1, succeeded = 1, failed = 0, failures = {} }
+    end
+
+    local valid_codes, invalid_codes = parseAndValidateCodes(project_code)
+
+    print("")
+    print("=== Multi-Project Namespace Setup ===")
+    print("PROJECT_CODE: " .. project_code)
+    print("Valid codes:  " .. (#valid_codes > 0 and table.concat(valid_codes, ", ") or "(none)"))
+    if #invalid_codes > 0 then
+        print("INVALID codes (will be skipped): " .. table.concat(invalid_codes, ", "))
+    end
+    print("======================================")
+    print("")
+
+    if #valid_codes == 0 then
+        local _, all_valid = isKnownProjectCode("all")
+        error("No valid project codes in '" .. project_code .. "'. Known codes: "
+            .. table.concat(all_valid, ", "))
+    end
+
+    local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL", "admin@opsapi.com")
+    local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD", "Admin@123")
+
+    local failures = {}
+    local succeeded = 0
+
+    for i, code in ipairs(valid_codes) do
+        local code_slug = code:gsub("_", "-")
+        local code_name = code:gsub("_", " "):gsub("(%a)([%w_']*)", function(a, b)
+            return a:upper() .. b
+        end)
+
+        print("--- [" .. i .. "/" .. #valid_codes .. "] Setting up namespace: "
+            .. code_name .. " (" .. code_slug .. ") [project: " .. code .. "] ---")
+
+        local per_code_config = {
+            project_code = code,
+            admin_email = admin_email,
+            admin_password = admin_password,
+            namespace_slug = code_slug,
+            namespace_name = code_name,
+        }
+
+        local ok, err = pcall(SetupNamespace.run, per_code_config)
+        if ok then
+            succeeded = succeeded + 1
+        else
+            print("  !! FAILED setting up '" .. code .. "': " .. tostring(err))
+            table.insert(failures, { code = code, error = tostring(err) })
+        end
+    end
+
+    print("")
+    print("=== Multi-Project Setup Summary ===")
+    print("Total codes:  " .. #valid_codes)
+    print("Succeeded:    " .. succeeded)
+    print("Failed:       " .. #failures)
+    if #invalid_codes > 0 then
+        print("Skipped (unknown): " .. table.concat(invalid_codes, ", "))
+    end
+    if #failures > 0 then
+        print("Failures:")
+        for _, f in ipairs(failures) do
+            print("  - " .. f.code .. ": " .. f.error)
+        end
+    end
+    print("====================================")
+    print("")
+
+    local summary = {
+        total = #valid_codes,
+        succeeded = succeeded,
+        failed = #failures,
+        failures = failures,
+        skipped = invalid_codes,
+    }
+
+    -- Re-raise if ANY code failed — so CI/CD pipelines fail loudly rather than silently.
+    -- Unknown codes alone do NOT cause a failure (they were filtered up front with a warning).
+    if #failures > 0 then
+        error(string.format(
+            "Multi-project setup failed for %d of %d codes: %s",
+            #failures, #valid_codes,
+            table.concat((function()
+                local names = {}
+                for _, f in ipairs(failures) do table.insert(names, f.code) end
+                return names
+            end)(), ", ")
+        ))
+    end
+
+    return summary
 end
 
 return SetupNamespace

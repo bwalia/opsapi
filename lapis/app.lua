@@ -112,6 +112,43 @@ app:get("/live", function(self)
     }
 end)
 
+-- System info endpoint — reports the project configuration this pod was started with.
+-- Lets operators (and the dashboard) verify which features/routes are live without
+-- shelling into the container. Public because the dashboard may call it pre-login
+-- to render the correct menu; contains no tenant-specific data.
+app:get("/api/v2/system/info", function(self)
+    local ok_cfg, ProjectConfig = pcall(require, "helper.project-config")
+    if not ok_cfg then
+        ngx.log(ngx.ERR, "system/info: failed to load project-config: ", tostring(ProjectConfig))
+        return {
+            status = 500,
+            json = { error = "Project configuration unavailable" }
+        }
+    end
+
+    local ok_info, info_or_err = pcall(ProjectConfig.getProjectInfo)
+    if not ok_info then
+        ngx.log(ngx.ERR, "system/info: getProjectInfo failed: ", tostring(info_or_err))
+        return {
+            status = 500,
+            json = { error = "Failed to read project info" }
+        }
+    end
+
+    ngx.header["Access-Control-Allow-Origin"] = "*"
+    return {
+        status = 200,
+        json = {
+            project_code = info_or_err.project_code,
+            parsed_codes = info_or_err.project_codes,
+            enabled_features = info_or_err.enabled_features,
+            environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+            version = "1.0.0",
+            timestamp = ngx.time(),
+        }
+    }
+end)
+
 app:get("/swagger", function(self)
     return { render = "swagger" }
 end)
@@ -208,7 +245,8 @@ app:before_filter(function(self)
     -- Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
-        uri == "/swagger/swagger.json" or uri == "/metrics" or public_auth_routes[uri] or
+        uri == "/swagger/swagger.json" or uri == "/metrics" or
+        uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
         uri:match("^/api/v2/projects$") or
         uri:match("^/api/v2/projects/[^/]+/theme") or

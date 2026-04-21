@@ -24,9 +24,9 @@ on:
         type: boolean
         default: false
       PROJECT_CODE:
-        description: "Project code for migrations (e.g. tax_copilot, kisaan)"
+        description: "Project code(s) for migrations. Single (tax_copilot) or comma-separated (ecommerce,collaboration)"
         required: true
-        default: "tax_copilot"
+        default: "all"
         type: string
       ADMIN_EMAIL:
         description: "Super admin email for namespace setup"
@@ -239,7 +239,7 @@ jobs:
             --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=latest \
             --set env=${{ steps.env.outputs.TARGET_ENV }} \
-            --set projectCode=${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }} \
+            --set projectCode=${{ github.event.inputs.PROJECT_CODE || 'all' }} \
             --set setup.adminEmail=${{ github.event.inputs.ADMIN_EMAIL || '' }} \
             --set setup.adminPassword=${{ github.event.inputs.ADMIN_PASSWORD || '' }} \
             --set setup.namespaceSlug=${{ github.event.inputs.NAMESPACE_SLUG || '' }}
