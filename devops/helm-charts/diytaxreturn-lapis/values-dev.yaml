@@ -1,6 +1,6 @@
 env: dev
 app: diytaxreturn-lapis
-projectCode: tax_copilot
+projectCode: all
 
 image:
   repository: bwalia/opsapi

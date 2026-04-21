@@ -6,6 +6,10 @@ metadata:
 data:
     bootstrap-nginx.sh: |
         #!/bin/bash
+        # Fail fast on any error so readiness probe keeps failing until bootstrap succeeds.
+        # pipefail: catch failures piped through tee/etc. nounset disabled (-x instead) —
+        # some upstream images reference optional vars we do not want to mask.
+        set -eo pipefail
         set -x
 
         FILE=/app/config.lua
@@ -18,11 +22,34 @@ data:
           echo "[bootstrap] Patched nginx resolver with K8s DNS: ${KUBE_DNS}"
         fi
 
-        lapis migrate
+        echo "[bootstrap] PROJECT_CODE=${PROJECT_CODE:-<unset>}"
+        echo "[bootstrap] Running migrations..."
+        # Retry migrations up to 5 times — Postgres may not be fully ready at postStart time.
+        MIGRATE_RETRIES=5
+        MIGRATE_DELAY=6
+        attempt=1
+        while [ $attempt -le $MIGRATE_RETRIES ]; do
+          if lapis migrate; then
+            break
+          fi
+          echo "[bootstrap] Migration attempt $attempt/$MIGRATE_RETRIES failed. Retrying in ${MIGRATE_DELAY}s..."
+          attempt=$((attempt + 1))
+          sleep $MIGRATE_DELAY
+        done
+        if [ $attempt -gt $MIGRATE_RETRIES ]; then
+          echo "[bootstrap] Migrations failed after $MIGRATE_RETRIES attempts. Aborting bootstrap." >&2
+          exit 1
+        fi
         echo "==========================="
 
-        echo "[bootstrap] Running namespace setup..."
-        lapis exec "require('scripts.setup-namespace').run({})"
+        echo "[bootstrap] Running namespace setup (supports multi-project codes)..."
+        # runMulti() validates every project code, isolates per-code failures with pcall,
+        # and re-raises on partial failure so this script exits non-zero and the pod
+        # readiness probe keeps failing until an operator intervenes.
+        if ! lapis exec "require('scripts.setup-namespace').runMulti({})"; then
+          echo "[bootstrap] Namespace setup failed — check above for which project code failed." >&2
+          exit 1
+        fi
         echo "[bootstrap] Namespace setup complete."
         echo "==========================="
 
