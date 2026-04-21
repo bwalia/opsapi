@@ -1350,4 +1350,303 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_tax_txn_cleaned_merchant ON tax_transactions (cleaned_merchant_name)")
         print("[Tax Copilot] Added classification_source, cleaned_merchant_name, is_business_expense to tax_transactions")
     end,
+
+    -- ===========================================================================
+    -- 50. Error Catalog + i18n Notification System
+    -- ===========================================================================
+    -- Three tables powering a unified, multi-language error + notification system:
+    --
+    --   message_catalog       Canonical list of error / notification codes.
+    --   message_translations  Per-locale user-facing messages for each code.
+    --   error_occurrences     Audit trail linking every user-visible error back
+    --                         to the raw exception that caused it (admin only).
+    --
+    -- All primary keys are UUIDs. The `code` column on message_catalog is the
+    -- developer-facing identifier (e.g. AUTH_401, TAX_CALC_003) and is UNIQUE.
+    [50] = function()
+        -- message_catalog ------------------------------------------------------
+        db.query([[
+            CREATE TABLE IF NOT EXISTS message_catalog (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                code VARCHAR(64) NOT NULL UNIQUE,
+                category VARCHAR(16) NOT NULL DEFAULT 'error',
+                severity VARCHAR(16) NOT NULL DEFAULT 'error',
+                http_status INTEGER,
+                default_locale VARCHAR(8) NOT NULL DEFAULT 'en',
+                developer_note TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid),
+                CONSTRAINT message_catalog_category_ck
+                    CHECK (category IN ('error','warning','info','success')),
+                CONSTRAINT message_catalog_severity_ck
+                    CHECK (severity IN ('error','warn','info'))
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_catalog_code ON message_catalog (code)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_catalog_category ON message_catalog (category)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_catalog_active ON message_catalog (is_active)")
+
+        -- message_translations -------------------------------------------------
+        db.query([[
+            CREATE TABLE IF NOT EXISTS message_translations (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                catalog_uuid VARCHAR(255) NOT NULL
+                    REFERENCES message_catalog(uuid) ON DELETE CASCADE,
+                locale VARCHAR(8) NOT NULL,
+                user_message TEXT NOT NULL,
+                title VARCHAR(255),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid),
+                CONSTRAINT message_translations_catalog_locale_uk
+                    UNIQUE (catalog_uuid, locale)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_translations_catalog ON message_translations (catalog_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_translations_locale ON message_translations (locale)")
+
+        -- error_occurrences ----------------------------------------------------
+        -- Every time middleware catches an error we write one row here. Admins
+        -- browse these in /admin/errors for triage. `raw_error` and `stack_trace`
+        -- are never exposed to end users.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS error_occurrences (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                catalog_uuid VARCHAR(255)
+                    REFERENCES message_catalog(uuid) ON DELETE SET NULL,
+                code VARCHAR(64) NOT NULL,
+                correlation_id VARCHAR(64) NOT NULL,
+                raw_error TEXT,
+                stack_trace TEXT,
+                endpoint TEXT,
+                http_method VARCHAR(16),
+                http_status INTEGER,
+                user_uuid VARCHAR(255),
+                tenant_namespace VARCHAR(255),
+                request_context JSONB,
+                app_context JSONB,
+                user_agent TEXT,
+                ip_address INET,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_code_created ON error_occurrences (code, created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_correlation ON error_occurrences (correlation_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_user_created ON error_occurrences (user_uuid, created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_created ON error_occurrences (created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_tenant ON error_occurrences (tenant_namespace)")
+
+        print("[Tax Copilot] Created message_catalog, message_translations, error_occurrences")
+    end,
+
+    -- 51. Seed English catalog + translations for the initial code set.
+    -- Safe to re-run: uses ON CONFLICT (code) DO NOTHING.
+    -- Adding a new code = append a row + translation. No code change needed.
+    [51] = function()
+        -- Helper: insert a catalog row + English translation atomically.
+        -- Using a DO block so the translation can reference the generated UUID.
+        db.query([[
+            DO $$
+            DECLARE
+                v_catalog_uuid VARCHAR(255);
+                seed_row RECORD;
+            BEGIN
+                FOR seed_row IN
+                    SELECT * FROM (VALUES
+                        -- code, category, severity, http_status, title, user_message, developer_note
+                        ('SYSTEM_500', 'error', 'error', 500,
+                         'Something went wrong',
+                         'Something went wrong on our side. Please try again in a moment. If it keeps happening, contact support and share this reference.',
+                         'Unclassified exception fallback. Always accompanied by a stack trace in error_occurrences.'),
+                        ('SYSTEM_503', 'error', 'error', 503,
+                         'Service unavailable',
+                         'The service is temporarily unavailable. Please try again shortly.',
+                         'Upstream health check failed or dependency unreachable.'),
+                        ('VALIDATION_400', 'error', 'warn', 400,
+                         'Check your details',
+                         'Some of the details you entered don''t look right. Please review and try again.',
+                         'Request body / query validation failed. Include field errors in app_context.'),
+                        ('RATE_LIMIT_429', 'error', 'warn', 429,
+                         'Too many attempts',
+                         'You''ve made too many attempts. Please wait a moment and try again.',
+                         'slowapi rate limit triggered.'),
+
+                        ('AUTH_401', 'error', 'warn', 401,
+                         'Sign in required',
+                         'Please sign in to continue.',
+                         'Missing or invalid JWT.'),
+                        ('AUTH_403', 'error', 'warn', 403,
+                         'Access denied',
+                         'You don''t have permission to do that.',
+                         'Role check failed (ROLE_ADMIN / ROLE_ACCOUNTANT etc.).'),
+                        ('AUTH_EXPIRED', 'error', 'warn', 401,
+                         'Session expired',
+                         'Your session has expired. Please sign in again.',
+                         'JWT exp claim in the past.'),
+                        ('AUTH_INVALID_CREDENTIALS', 'error', 'warn', 401,
+                         'Invalid credentials',
+                         'The email or password you entered is incorrect.',
+                         'Lapis /auth/login returned 401.'),
+                        ('AUTH_ACCOUNT_LOCKED', 'error', 'error', 423,
+                         'Account locked',
+                         'Your account is temporarily locked. Please contact support.',
+                         'Too many failed login attempts.'),
+
+                        ('UPLOAD_PDF_001', 'error', 'warn', 400,
+                         'Unable to read file',
+                         'We couldn''t read the file you uploaded. Please make sure it''s a valid PDF, image, CSV or Excel file.',
+                         'Raised by pdf_processor when the uploaded bytes match no known format.'),
+                        ('UPLOAD_PDF_002', 'error', 'warn', 413,
+                         'File too large',
+                         'The file you uploaded is too large. Please upload a file smaller than {max_mb} MB.',
+                         'Exceeds settings.max_upload_size_mb.'),
+                        ('UPLOAD_PDF_003', 'error', 'warn', 415,
+                         'Unsupported file type',
+                         'We can''t process files of this type. Please upload a PDF, image, CSV or Excel file.',
+                         'Extension not in supported list.'),
+
+                        ('EXTRACT_001', 'error', 'warn', 422,
+                         'No transactions found',
+                         'We couldn''t find any transactions in this statement. Please check it''s the right file and try again.',
+                         'Extractor returned 0 transactions.'),
+                        ('EXTRACT_002', 'error', 'error', 502,
+                         'Extraction service unavailable',
+                         'We''re having trouble reading statements right now. Please try again in a few minutes.',
+                         'All LLM providers failed (Claude + OpenAI).'),
+                        ('EXTRACT_003', 'warning', 'warn', 200,
+                         'Low-confidence extraction',
+                         'We extracted your transactions but some values may need review. Please double-check before continuing.',
+                         'Confidence below 0.7.'),
+
+                        ('CLASSIFY_001', 'error', 'error', 502,
+                         'Classification service unavailable',
+                         'We couldn''t classify your transactions right now. Please try again shortly.',
+                         'All LLM providers failed during classification.'),
+                        ('CLASSIFY_002', 'error', 'warn', 404,
+                         'Statement not found',
+                         'We couldn''t find that statement. It may have been removed.',
+                         'Statement UUID not in current user''s namespace.'),
+
+                        ('RECONCILE_001', 'error', 'warn', 422,
+                         'Reconciliation failed',
+                         'We couldn''t match all your transactions. Please review and try again.',
+                         'Reconciliation rules produced unresolvable conflicts.'),
+
+                        ('TAX_CALC_001', 'error', 'warn', 422,
+                         'Calculation input incomplete',
+                         'Some required information is missing from your return. Please fill in the highlighted sections.',
+                         'Tax calculator validator rejected input.'),
+                        ('TAX_CALC_002', 'error', 'error', 500,
+                         'Calculation failed',
+                         'We couldn''t complete your tax calculation. Please try again or contact support.',
+                         'Unhandled exception in tax_calculator.'),
+                        ('TAX_CALC_003', 'warning', 'warn', 200,
+                         'Figures differ from HMRC',
+                         'Our calculation differs from HMRC''s preview. Please review the breakdown.',
+                         'Local vs. HMRC preview diff exceeded tolerance.'),
+
+                        ('HMRC_AUTH_001', 'error', 'warn', 401,
+                         'HMRC not connected',
+                         'Please connect your HMRC account to continue.',
+                         'No HMRC OAuth token on file for this user.'),
+                        ('HMRC_AUTH_002', 'error', 'warn', 401,
+                         'HMRC session expired',
+                         'Your HMRC session has expired. Please reconnect HMRC.',
+                         'HMRC returned 401; refresh token flow not yet wired.'),
+                        ('HMRC_SUBMIT_001', 'error', 'warn', 400,
+                         'HMRC rejected submission',
+                         'HMRC rejected your submission. Please review the details and try again.',
+                         'HMRC 400 RULE_* error; specific rule in app_context.'),
+                        ('HMRC_SUBMIT_002', 'error', 'error', 502,
+                         'HMRC unavailable',
+                         'HMRC is temporarily unavailable. Please try again in a few minutes.',
+                         'HMRC 5xx or timeout.'),
+                        ('HMRC_NOT_FOUND_404', 'error', 'warn', 404,
+                         'HMRC record not found',
+                         'HMRC couldn''t find the record you''re looking for. Please check your HMRC registration and try again.',
+                         'HMRC 404 MATCHING_RESOURCE_NOT_FOUND.'),
+
+                        ('NOTIF_INFO_001', 'info', 'info', NULL,
+                         'Heads up',
+                         '{message}',
+                         'Generic in-app info toast; message passed via app_context.'),
+                        ('NOTIF_WARNING_001', 'warning', 'warn', NULL,
+                         'Please review',
+                         '{message}',
+                         'Generic in-app warning; message passed via app_context.'),
+                        ('NOTIF_SUCCESS_001', 'success', 'info', NULL,
+                         'All done',
+                         'Your changes have been saved.',
+                         'Generic success toast.'),
+                        ('NOTIF_SUCCESS_002', 'success', 'info', NULL,
+                         'Submission successful',
+                         'Your submission to HMRC was successful. Reference: {reference}.',
+                         'HMRC submission receipt confirmation.')
+                    ) AS t(code, category, severity, http_status, title, user_message, developer_note)
+                LOOP
+                    INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+                    VALUES (seed_row.code, seed_row.category, seed_row.severity, seed_row.http_status, seed_row.developer_note)
+                    ON CONFLICT (code) DO NOTHING
+                    RETURNING uuid INTO v_catalog_uuid;
+
+                    -- If ON CONFLICT skipped the insert, look up the existing uuid
+                    IF v_catalog_uuid IS NULL THEN
+                        SELECT uuid INTO v_catalog_uuid FROM message_catalog WHERE code = seed_row.code;
+                    END IF;
+
+                    INSERT INTO message_translations (catalog_uuid, locale, user_message, title)
+                    VALUES (v_catalog_uuid, 'en', seed_row.user_message, seed_row.title)
+                    ON CONFLICT (catalog_uuid, locale) DO NOTHING;
+                END LOOP;
+            END $$;
+        ]])
+
+        local result = db.select("COUNT(*) as cnt FROM message_catalog")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded message_catalog (" .. count .. " codes) + English translations")
+    end,
+
+    -- 52. Seed notification-specific catalog codes used by the Python
+    -- send_catalog_notification helper (Phase E). Translations themselves
+    -- live in backend/app/errors/translations/*.json and are loaded on
+    -- FastAPI startup, so we do NOT seed message_translations here —
+    -- that would duplicate the source of truth.
+    --
+    -- Idempotent: ON CONFLICT (code) DO NOTHING. Safe to re-run; safe to
+    -- add more codes in a future migration.
+    [52] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+                ('NOTIF_EXTRACT_COMPLETE', 'success', 'info', NULL,
+                 'Push/toast fired by /api/extract when extraction finishes. Placeholders: {count}.'),
+                ('NOTIF_CLASSIFY_COMPLETE', 'success', 'info', NULL,
+                 'Push/toast fired by /api/classify when classification finishes. Placeholders: {count}.'),
+                ('NOTIF_HMRC_OBLIGATIONS_UPDATED', 'info', 'info', NULL,
+                 'Push fired when fetch_obligations discovers new obligations. Placeholders: {body}.')
+            ON CONFLICT (code) DO NOTHING
+        ]])
+
+        local result = db.select("COUNT(*) as cnt FROM message_catalog WHERE code LIKE 'NOTIF_%'")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded notification codes (" .. count .. " NOTIF_* rows in catalog)")
+    end,
+
+    -- 53. Seed CLASSIFY_003 — the "partial success" notice code. Attached
+    -- as a notice on the classify 200 response when cloud AI providers
+    -- failed but Ollama filled in, so the user gets a toast rather than
+    -- finding out silently. Placeholder: {fallback_count}.
+    [53] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+                ('CLASSIFY_003', 'warning', 'warn', NULL,
+                 'Attached as a notice to classify 2xx when cloud AI providers failed and Ollama filled in. Placeholder: {fallback_count}.')
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded CLASSIFY_003 partial-success notice code")
+    end,
 }

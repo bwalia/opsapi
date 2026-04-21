@@ -2,6 +2,7 @@ local lapis = require("lapis")
 local app = lapis.Application()
 local CorsMiddleware = require("middleware.cors")
 local GlobalRateLimit = require("middleware.global-rate-limit")
+local Errors = require("lib.errors")
 
 -- Enable CORS
 CorsMiddleware.enable(app)
@@ -14,18 +15,12 @@ GlobalRateLimit.enable(app)
 app:enable("etlua")
 app.views_prefix = "views"
 
--- Error handler
-app.handle_error = function(self, err, trace)
-    ngx.log(ngx.ERR, "Application Error: ", tostring(err))
-    ngx.log(ngx.ERR, "Stack Trace: ", tostring(trace))
-    return {
-        status = 500,
-        json = {
-            error = "Internal server error",
-            message = tostring(err)
-        }
-    }
-end
+-- Install the catalog-backed error handler. Catches:
+--   - errors raised via Errors.raise(code, ...): renders the catalog envelope
+--   - any other uncaught Lua error: maps to SYSTEM_500 + logs fully
+-- Both paths write an audit row to the shared error_occurrences table so
+-- admins see Python and Lapis events in a single dashboard view.
+Errors.install_handler(app)
 
 -- ============================================
 -- PUBLIC ROUTES - NO AUTH

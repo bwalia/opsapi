@@ -8,6 +8,7 @@ local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 local RateLimit = require("middleware.rate-limit")
+local Errors = require("lib.errors")
 local OTP = require("helper.otp")
 local RefreshToken = require("helper.refresh-token")
 
@@ -168,34 +169,26 @@ return function(app)
         local password = self.params.password
 
         if not identifier or not password then
-            return {
-                status = 400,
-                json = {
-                    error = "Email/Username and password are required"
-                }
-            }
+            return Errors.response(self, "VALIDATION_400", {
+                context = {
+                    field = not identifier and "identifier" or "password",
+                    reason = "required",
+                },
+            })
         end
 
         local user = UserQueries.verify(identifier, password)
 
         if not user then
-            return {
-                status = 401,
-                json = {
-                    error = "Invalid email/username or password"
-                }
-            }
+            return Errors.response(self, "AUTH_INVALID_CREDENTIALS")
         end
 
         -- Get user with roles
         local userWithRoles = UserQueries.show(user.uuid)
         if not userWithRoles then
-            return {
-                status = 500,
-                json = {
-                    error = "Failed to load user data"
-                }
-            }
+            return Errors.response(self, "SYSTEM_500", {
+                cause = "UserQueries.show returned nil after successful verify for uuid=" .. tostring(user.uuid),
+            })
         end
 
         -- Resolve user's internal ID for DB lookups
