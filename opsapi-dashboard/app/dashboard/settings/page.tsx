@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { User, Bell, Shield, Palette, Globe, Key, Save, Camera } from 'lucide-react';
+import Link from 'next/link';
+import { User, Bell, Shield, Palette, Key, Save, Camera, ArrowRight } from 'lucide-react';
 import { Button, Input, Card } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
 import { usersService } from '@/services';
@@ -49,12 +50,6 @@ export default function SettingsPage() {
     email_marketing: false,
     push_orders: true,
     push_messages: true,
-  });
-
-  const [appearance, setAppearance] = useState({
-    theme: 'light',
-    language: 'en',
-    timezone: 'UTC',
   });
 
   useEffect(() => {
@@ -116,17 +111,6 @@ export default function SettingsPage() {
       toast.success('Notification preferences saved');
     } catch (error) {
       toast.error('Failed to save preferences');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleAppearanceSave = async () => {
-    setIsSaving(true);
-    try {
-      toast.success('Appearance settings saved');
-    } catch (error) {
-      toast.error('Failed to save settings');
     } finally {
       setIsSaving(false);
     }
@@ -399,88 +383,30 @@ export default function SettingsPage() {
           {activeTab === 'appearance' && (
             <Card>
               <div className="p-6 border-b border-secondary-200">
-                <h2 className="text-lg font-semibold text-secondary-900">Appearance Settings</h2>
+                <h2 className="text-lg font-semibold text-secondary-900">Appearance</h2>
                 <p className="text-sm text-secondary-500 mt-1">
-                  Customize the look and feel of your dashboard
+                  Theme customization lives in its own workspace
                 </p>
               </div>
 
-              <div className="p-6 space-y-6">
-                <div>
-                  <h3 className="text-sm font-medium text-secondary-900 mb-4 flex items-center gap-2">
-                    <Palette className="w-4 h-4" />
-                    Theme
-                  </h3>
-                  <div className="flex gap-4">
-                    {['light', 'dark', 'system'].map((theme) => (
-                      <button
-                        key={theme}
-                        onClick={() => setAppearance({ ...appearance, theme })}
-                        className={`px-6 py-3 rounded-lg border-2 transition-colors capitalize ${
-                          appearance.theme === theme
-                            ? 'border-primary-500 bg-primary-50 text-primary-600'
-                            : 'border-secondary-200 hover:border-secondary-300'
-                        }`}
-                      >
-                        {theme}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-medium text-secondary-900 mb-4 flex items-center gap-2">
-                    <Globe className="w-4 h-4" />
-                    Language & Region
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
-                    <div>
-                      <label className="block text-sm font-medium text-secondary-700 mb-2">
-                        Language
-                      </label>
-                      <select
-                        value={appearance.language}
-                        onChange={(e) =>
-                          setAppearance({ ...appearance, language: e.target.value })
-                        }
-                        className="w-full px-4 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
-                      >
-                        <option value="en">English</option>
-                        <option value="es">Spanish</option>
-                        <option value="fr">French</option>
-                        <option value="de">German</option>
-                      </select>
+              <div className="p-6">
+                <Link
+                  href="/dashboard/themes"
+                  className="group flex items-center justify-between p-5 rounded-lg border border-secondary-200 hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-lg bg-primary-100 flex items-center justify-center">
+                      <Palette className="w-6 h-6 text-primary-600" />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-secondary-700 mb-2">
-                        Timezone
-                      </label>
-                      <select
-                        value={appearance.timezone}
-                        onChange={(e) =>
-                          setAppearance({ ...appearance, timezone: e.target.value })
-                        }
-                        className="w-full px-4 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
-                      >
-                        <option value="UTC">UTC</option>
-                        <option value="America/New_York">Eastern Time</option>
-                        <option value="America/Los_Angeles">Pacific Time</option>
-                        <option value="Europe/London">London</option>
-                        <option value="Asia/Kolkata">India Standard Time</option>
-                      </select>
+                      <h3 className="text-sm font-semibold text-secondary-900">Themes</h3>
+                      <p className="text-sm text-secondary-500 mt-0.5">
+                        Create, customize, and activate themes for your workspace
+                      </p>
                     </div>
                   </div>
-                </div>
-
-                <div className="flex justify-end pt-4">
-                  <Button
-                    onClick={handleAppearanceSave}
-                    isLoading={isSaving}
-                    leftIcon={<Save className="w-4 h-4" />}
-                  >
-                    Save Settings
-                  </Button>
-                </div>
+                  <ArrowRight className="w-5 h-5 text-secondary-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all" />
+                </Link>
               </div>
             </Card>
           )}

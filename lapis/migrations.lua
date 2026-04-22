@@ -1423,24 +1423,15 @@ local _migrations = {
             CREATE INDEX IF NOT EXISTS idx_project_migrations_code
             ON project_migrations(project_code)
         ]])
+    end,
 
-        -- Create tenant themes table for per-project per-tenant theme overrides
-        db.query([[
-            CREATE TABLE IF NOT EXISTS project_tenant_themes (
-                id SERIAL PRIMARY KEY,
-                project_code VARCHAR(100) NOT NULL,
-                namespace_id INTEGER,
-                theme_overrides JSONB DEFAULT '{}',
-                custom_css TEXT,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                UNIQUE(project_code, namespace_id)
-            )
-        ]])
-        db.query([[
-            CREATE INDEX IF NOT EXISTS idx_project_tenant_themes_code
-            ON project_tenant_themes(project_code)
-        ]])
+    -- =========================================================================
+    -- Theme system foundation (Phase 0): drop obsolete scaffold.
+    -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
+    -- =========================================================================
+    ['611_drop_legacy_project_tenant_themes'] = function()
+        MigrationTracker.recordRan("611_drop_legacy_project_tenant_themes", "themes")
+        db.query("DROP TABLE IF EXISTS project_tenant_themes CASCADE")
     end,
 
     ['zzx_run_project_migrations'] = function()

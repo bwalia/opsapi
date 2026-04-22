@@ -39,6 +39,9 @@ ProjectConfig.FEATURES = {
     TIMESHEETS = "timesheets",         -- Timesheet tracking and approval
     INVOICING = "invoicing",           -- Invoice generation and payments
     ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
+
+    -- Platform-level features (always-on for every preset)
+    THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
 }
 
 -- Define what features each project code includes
@@ -62,6 +65,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Tax Copilot - UK Tax Return AI Agent
@@ -71,6 +75,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TAX_COPILOT,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Ecommerce platform
@@ -81,6 +86,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Ecommerce with chat
@@ -92,6 +98,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Full collaboration platform
@@ -103,6 +110,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.VAULT,
         ProjectConfig.FEATURES.SERVICES,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Hospital CRM
@@ -111,6 +119,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.HOSPITAL,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Business/Professional Services
@@ -123,12 +132,14 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.KANBAN,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Minimal core only (just auth system + menu for dashboard)
     core_only = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 }
 
@@ -271,6 +282,10 @@ function ProjectConfig.isAccountingEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.ACCOUNTING)
 end
 
+function ProjectConfig.isThemesEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.THEMES)
+end
+
 -- Get project info for debugging/logging
 function ProjectConfig.getProjectInfo()
     return {
@@ -386,6 +401,11 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "expense_management", name = "Expenses", description = "Expense tracking and approval", category = "Accounting" },
         { machine_name = "vat_returns", name = "VAT Returns", description = "UK VAT return calculation and submission", category = "Accounting" },
         { machine_name = "financial_reports", name = "Financial Reports", description = "Trial balance, balance sheet, P&L", category = "Accounting", allowed_actions = {"read"} },
+    },
+
+    -- Theme system (platform-level; always on)
+    themes = {
+        { machine_name = "themes", name = "Themes", description = "Create, customize, activate, and publish themes for your workspace", category = "Appearance", is_system = true, allowed_actions = {"access", "read", "create", "update", "delete", "manage", "activate", "publish"} },
     },
 }
 
