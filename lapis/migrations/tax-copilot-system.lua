@@ -1649,4 +1649,13 @@ return {
         ]])
         print("[Tax Copilot] Seeded CLASSIFY_003 partial-success notice code")
     end,
+
+    -- 54. Add profile_type to classification_training_data
+    -- Records which business profile was active during classification,
+    -- enabling per-profile accuracy analysis and RAG boosting.
+    [54] = function()
+        db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS profile_type VARCHAR(100)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_ctd_profile_type ON classification_training_data (profile_type)")
+        print("[Tax Copilot] Added profile_type to classification_training_data")
+    end,
 }
