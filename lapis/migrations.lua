@@ -148,6 +148,9 @@ local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVO
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
 local accounting_hmrc_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-hmrc-categories") or {}
 
+-- Theme system (platform-level; enabled for every preset)
+local theme_system_migrations = load_if_enabled(ProjectConfig.FEATURES.THEMES, "migrations.theme-system") or {}
+
 -- Kafka/Audit (always loaded - infrastructure)
 local kafka_audit_migrations = require("migrations.kafka-audit-system")
 
@@ -1284,6 +1287,20 @@ local _migrations = {
     ['610_acct_seed_dummy_transactions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 4),
 
     -- =========================================================================
+    -- Theme System (Phase 1) — tables for multi-tenant theming
+    -- 611 is reserved by phase 0 (drop legacy scaffold).
+    -- 621-627 create the new schema; preset seeding runs as zzw_ so it
+    -- re-applies on every deploy and picks up newly-added presets.
+    -- =========================================================================
+    ['621_create_themes_table']             = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 1),
+    ['622_create_theme_tokens_table']       = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 2),
+    ['623_create_theme_revisions_table']    = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 3),
+    ['624_create_namespace_active_themes']  = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 4),
+    ['625_create_theme_installations']      = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 5),
+    ['626_create_theme_assets']             = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 6),
+    ['627_create_theme_triggers']           = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 7),
+
+    -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)
     -- =========================================================================
     ['440_create_refresh_tokens'] = function()
@@ -1432,6 +1449,50 @@ local _migrations = {
     ['611_drop_legacy_project_tenant_themes'] = function()
         MigrationTracker.recordRan("611_drop_legacy_project_tenant_themes", "themes")
         db.query("DROP TABLE IF EXISTS project_tenant_themes CASCADE")
+    end,
+
+    -- =========================================================================
+    -- Re-seed platform theme presets on every deploy (zzw_ runs before zzx_).
+    -- Idempotent upsert; safe to re-apply. Uses the same auto-delete trigger
+    -- pattern as zzx/zzz so new presets added to helper.theme-presets pick up
+    -- without migration bumps.
+    -- =========================================================================
+    ['zzw_reseed_theme_presets'] = function()
+        MigrationTracker.recordRan("zzw_reseed_theme_presets", ProjectConfig.FEATURES.THEMES)
+        if not ProjectConfig.isThemesEnabled() then
+            return
+        end
+
+        local seed_fn = theme_system_migrations and theme_system_migrations[8]
+        if seed_fn then
+            local ok, err = pcall(seed_fn)
+            if not ok then
+                print("[theme-system] preset seed failed: " .. tostring(err))
+            end
+        end
+
+        db.query([[
+            CREATE OR REPLACE FUNCTION delete_zzw_reseed_theme_presets()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.name = 'zzw_reseed_theme_presets' THEN
+                    DELETE FROM lapis_migrations WHERE name = 'zzw_reseed_theme_presets';
+                    RETURN NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        ]])
+        db.query([[
+            DROP TRIGGER IF EXISTS trg_delete_zzw_reseed_theme_presets ON lapis_migrations
+        ]])
+        db.query([[
+            CREATE TRIGGER trg_delete_zzw_reseed_theme_presets
+            AFTER INSERT ON lapis_migrations
+            FOR EACH ROW
+            WHEN (NEW.name = 'zzw_reseed_theme_presets')
+            EXECUTE FUNCTION delete_zzw_reseed_theme_presets()
+        ]])
     end,
 
     ['zzx_run_project_migrations'] = function()
