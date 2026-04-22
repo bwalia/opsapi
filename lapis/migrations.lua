@@ -86,6 +86,9 @@ local hospital_crm_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL,
 local hospital_care_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-care-management") or {}
 local hospital_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-menu-items") or {}
 
+-- Tax Copilot menu items
+local tax_copilot_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-copilot-menu-items") or {}
+
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
 local push_notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS,
@@ -1212,6 +1215,12 @@ local _migrations = {
     ['465_seed_error_catalog_english'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 51),
     ['466_seed_notification_catalog_codes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 52),
     ['467_seed_classify_partial_code'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 53),
+
+    -- Tax Copilot menu items (468-471)
+    ['468_seed_tax_menu_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 1),
+    ['469_seed_tax_modules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 2),
+    ['470_grant_tax_permissions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 3),
+    ['471_enable_tax_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 4),
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)
