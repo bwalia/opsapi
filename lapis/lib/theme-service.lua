@@ -33,12 +33,22 @@ local ThemeRevisionQueries = require("queries.ThemeRevisionQueries")
 local ThemeValidator = require("lib.theme-validator")
 local ThemeResolver = require("lib.theme-resolver")
 local CssSanitizer = require("helper.css-sanitizer")
+local ThemeCache = require("helper.theme-cache")
 
 local ThemeService = {}
 
 -- =============================================================================
 -- Internal helpers
 -- =============================================================================
+
+-- Best-effort cache invalidation on any change that affects the rendered CSS
+-- served to a namespace. Called after activation, update, revert, install.
+local function invalidate_cache_for_theme(theme, namespace_id)
+    if not theme then return end
+    pcall(function()
+        ThemeCache.invalidate(namespace_id, theme.project_code)
+    end)
+end
 
 local function fail(status, err, extras)
     local out = { ok = false, status = status, error = err }
@@ -308,6 +318,7 @@ function ThemeService.update(namespace_id, user_id, uuid, input)
         return fail(500, "failed to update theme: " .. tostring(txn_err))
     end
 
+    invalidate_cache_for_theme(theme, namespace_id)
     return ok(ThemeQueries.getById(theme.id))
 end
 
@@ -346,6 +357,7 @@ function ThemeService.activate(namespace_id, project_code, user_id, uuid)
         return fail(500, "failed to activate theme: " .. tostring(txn_err))
     end
 
+    invalidate_cache_for_theme(theme, namespace_id)
     return ok({
         theme_uuid = theme.uuid,
         theme_id   = theme.id,
