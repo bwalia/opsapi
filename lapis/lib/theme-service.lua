@@ -196,7 +196,7 @@ function ThemeService.create(namespace_id, project_code, user_id, input)
             ) VALUES (?, ?, ?, ?, ?, ?, 'private', false, ?, NOW(), NOW())
             RETURNING *
         ]], namespace_id, project_code, input.name, slug, input.description or "",
-            parent_id, user_id)
+            parent_id or db.NULL, user_id or db.NULL)
         theme = inserted and inserted[1]
         if not theme then
             error("failed to insert theme row")
@@ -206,7 +206,7 @@ function ThemeService.create(namespace_id, project_code, user_id, input)
         db.query([[
             INSERT INTO theme_tokens (theme_id, tokens, custom_css, updated_at)
             VALUES (?, ?::jsonb, ?, NOW())
-        ]], theme.id, tokens_json, css)
+        ]], theme.id, tokens_json, css or "")
 
         ThemeRevisionQueries.create(theme.id, tokens_json, css, user_id, "created")
 
@@ -348,7 +348,7 @@ function ThemeService.activate(namespace_id, project_code, user_id, uuid)
             DO UPDATE SET theme_id = EXCLUDED.theme_id,
                           activated_by = EXCLUDED.activated_by,
                           activated_at = NOW()
-        ]], namespace_id, project_code, theme.id, user_id)
+        ]], namespace_id, project_code, theme.id, user_id or db.NULL)
         db.query("COMMIT")
     end)
 

@@ -9,7 +9,14 @@
  * Font: Inter (Google Fonts) with system-ui fallback
  */
 
-@theme inline {
+/*
+ * NOTE: `@theme` (not `@theme inline`) so Tailwind utilities compile to
+ * `var(--color-...)` references instead of baking the hex literal in.
+ * That lets the runtime theme CSS at /api/v2/themes/active/styles.css
+ * override the palette per-tenant. The values below remain the default
+ * palette when no active theme is set.
+ */
+@theme {
   /* Primary Color Scale - #ff004e base */
   --color-primary-50: #fff0f3;
   --color-primary-100: #ffe0e8;

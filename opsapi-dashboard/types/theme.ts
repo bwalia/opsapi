@@ -9,7 +9,7 @@ export interface Theme {
   slug: string;
   description?: string | null;
   visibility: ThemeVisibility;
-  is_platform: boolean;
+  is_system: boolean;
   is_active: boolean;
   parent_uuid?: string | null;
   source_uuid?: string | null;

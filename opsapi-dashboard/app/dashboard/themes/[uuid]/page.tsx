@@ -154,7 +154,7 @@ function ThemeEditorContent() {
   }
 
   const theme = detail.theme;
-  const readOnly = !canUpdate('themes') || theme.is_platform;
+  const readOnly = !canUpdate('themes') || theme.is_system;
   const groupKeys = Object.keys(schema);
   const currentGroupSchema = schema[activeGroup] || {};
 
@@ -178,7 +178,7 @@ function ThemeEditorContent() {
                   Active
                 </Badge>
               )}
-              {theme.is_platform && <Badge variant="info">Platform</Badge>}
+              {theme.is_system && <Badge variant="info">Platform</Badge>}
               <span className="text-xs text-secondary-500">v{theme.version}</span>
             </div>
           </div>

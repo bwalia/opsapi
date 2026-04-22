@@ -27,6 +27,14 @@ function ThemesPageContent() {
   const [createForm, setCreateForm] = useState({ name: '', description: '', from_preset_slug: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // When presets load, default the dropdown so the backend always gets a
+  // valid starting point (it requires colors.primary + colors.secondary).
+  useEffect(() => {
+    if (presets.length > 0 && !createForm.from_preset_slug) {
+      setCreateForm((f) => ({ ...f, from_preset_slug: presets[0].slug }));
+    }
+  }, [presets, createForm.from_preset_slug]);
+
   const [confirmDelete, setConfirmDelete] = useState<Theme | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -104,9 +112,13 @@ function ThemesPageContent() {
     }
   };
 
-  const handleCreate = async () => {
+  const handleCreate = useCallback(async () => {
     if (!createForm.name.trim()) {
       toast.error('Theme name is required');
+      return;
+    }
+    if (!createForm.from_preset_slug) {
+      toast.error('Pick a preset to start from');
       return;
     }
     setIsSubmitting(true);
@@ -114,7 +126,7 @@ function ThemesPageContent() {
       const result = await themesService.create({
         name: createForm.name.trim(),
         description: createForm.description.trim() || undefined,
-        from_preset_slug: createForm.from_preset_slug || undefined,
+        from_preset_slug: createForm.from_preset_slug,
       });
       toast.success('Theme created');
       setCreateOpen(false);
@@ -128,7 +140,10 @@ function ThemesPageContent() {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [createForm.name, createForm.description, createForm.from_preset_slug, fetchAll]);
+
+  const handleCloseCreate = useCallback(() => setCreateOpen(false), []);
+  const handleCloseDeleteDialog = useCallback(() => setConfirmDelete(null), []);
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -211,7 +226,7 @@ function ThemesPageContent() {
 
       <Modal
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={handleCloseCreate}
         title="Create new theme"
         size="md"
       >
@@ -236,23 +251,26 @@ function ThemesPageContent() {
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">
-              Start from preset (optional)
+              Start from preset
             </label>
             <select
               className="w-full border border-secondary-300 rounded-md px-3 py-2 text-sm"
               value={createForm.from_preset_slug}
               onChange={(e) => setCreateForm({ ...createForm, from_preset_slug: e.target.value })}
             >
-              <option value="">Blank</option>
+              {presets.length === 0 && <option value="">Loading presets…</option>}
               {presets.map((p) => (
                 <option key={p.slug} value={p.slug}>
                   {p.name}
                 </option>
               ))}
             </select>
+            <p className="text-xs text-secondary-500 mt-1">
+              Required. You can customize every token after creation.
+            </p>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
+            <Button variant="secondary" onClick={handleCloseCreate}>
               Cancel
             </Button>
             <Button onClick={handleCreate} disabled={isSubmitting}>
@@ -264,7 +282,7 @@ function ThemesPageContent() {
 
       <ConfirmDialog
         isOpen={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
+        onClose={handleCloseDeleteDialog}
         onConfirm={handleDelete}
         title="Delete theme"
         message={`Are you sure you want to delete "${confirmDelete?.name}"? This cannot be undone.`}
@@ -368,7 +386,7 @@ function ThemeGrid({
                       Duplicate
                     </Button>
                   )}
-                  {onDelete && !theme.is_platform && !theme.is_active && (
+                  {onDelete && !theme.is_system && !theme.is_active && (
                     <Button size="sm" variant="danger" onClick={() => onDelete(theme)}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>

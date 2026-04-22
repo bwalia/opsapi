@@ -333,7 +333,7 @@ return {
                             visibility = 'public', is_system = true, updated_at = NOW()
                         WHERE id = ?
                     ]], preset.name, preset.description or "",
-                        preset.preview_image_url, theme_id)
+                        preset.preview_image_url or "", theme_id)
                 else
                     local inserted = db.query([[
                         INSERT INTO themes (
@@ -344,7 +344,7 @@ return {
                         )
                         RETURNING id
                     ]], project_code, preset.name, preset.slug,
-                        preset.description or "", preset.preview_image_url)
+                        preset.description or "", preset.preview_image_url or "")
                     theme_id = inserted and inserted[1] and inserted[1].id
                 end
 
