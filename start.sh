@@ -337,10 +337,12 @@ validate_project_code() {
     local input="$1"
     local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business core_only"
 
-    # Split on commas and validate each individual code
-    local IFS=','
-    local codes
-    read -ra codes <<< "$input"
+    # Split input on commas (save/restore IFS so the inner loop still
+    # splits VALID_CODES on spaces)
+    local saved_ifs="$IFS"
+    IFS=',' read -ra codes <<< "$input"
+    IFS="$saved_ifs"
+
     for code in "${codes[@]}"; do
         # Trim whitespace
         code=$(echo "$code" | xargs)
