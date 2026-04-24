@@ -155,7 +155,6 @@ CATEGORY_MAP = {
 
     # Additional for health & safety (Client A/B)
     "cost of goods sold": ("cost_of_sales", "costOfGoods", True),
-    "services": ("income_sales", "", False),
 }
 
 # ============================================================================
@@ -204,7 +203,7 @@ def clean_merchant(description: str) -> str:
     text = _CORP_SUFFIX.sub("", text)
     text = re.sub(r"\s*,\s*$", "", text)
     text = re.sub(r"^\s*,\s*", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip().upper()
     return text if text else original
 
 
@@ -383,10 +382,11 @@ def parse_numbers_file(src: dict) -> list[dict]:
         transaction_type = "CREDIT" if amount > 0 else "DEBIT"
         amount_abs = abs(amount)
 
-        # Clean description — prefer Payee if available and non-empty
+        # Clean the bank description (used for deterministic matching).
+        # Payee name is stored in description_raw for context but NOT used
+        # as the primary description — the rule engine matches against what
+        # the merchant cleaner produces from the bank text.
         raw_desc = str(desc_raw).strip()
-        if payee_raw and str(payee_raw).strip():
-            raw_desc = str(payee_raw).strip()
         cleaned = clean_merchant(raw_desc)
         if not cleaned:
             skipped["empty_after_clean"] += 1
