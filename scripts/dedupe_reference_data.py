@@ -25,6 +25,22 @@ from numbers_parser import Document
 # ============================================================================
 SOURCES = [
     {
+        "file": "/Users/sukhvirsingh/Downloads/Bank statements/For Client A.numbers",
+        "source_file_label": "For Client A.numbers",
+        "client_business_type": "health_and_safety",
+        "user_profile_type": "limited_company",
+        "industry": "health_and_safety",
+        "reasoning_suffix": "for health and safety business",
+    },
+    {
+        "file": "/Users/sukhvirsingh/Downloads/Bank statements/For Client B.numbers",
+        "source_file_label": "For Client B.numbers",
+        "client_business_type": "health_and_safety",
+        "user_profile_type": "limited_company",
+        "industry": "health_and_safety",
+        "reasoning_suffix": "for health and safety business",
+    },
+    {
         "file": "/Users/sukhvirsingh/Downloads/Bank statements/For Client C.numbers",
         "source_file_label": "For Client C.numbers",
         "client_business_type": "amazon_seller",
@@ -136,6 +152,9 @@ CATEGORY_MAP = {
 
     # Split expense — internal money movement, treat as transfer
     "split expense": ("transfer", "", False),
+
+    # Additional for health & safety (Client A/B)
+    "cost of goods sold": ("cost_of_sales", "costOfGoods", True),
 }
 
 # ============================================================================
@@ -184,7 +203,7 @@ def clean_merchant(description: str) -> str:
     text = _CORP_SUFFIX.sub("", text)
     text = re.sub(r"\s*,\s*$", "", text)
     text = re.sub(r"^\s*,\s*", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip().upper()
     return text if text else original
 
 
@@ -308,7 +327,9 @@ def parse_numbers_file(src: dict) -> list[dict]:
     date_col = idx("date")
     desc_col = idx("description")
     amount_col = idx("amount")
-    payee_col = idx("payee")
+    spent_col = idx("spent")
+    received_col = idx("received")
+    payee_col = idx("payee") or idx("from/to")
     cat_col = None
     for i, h in enumerate(headers):
         hl = h.lower()
@@ -316,12 +337,27 @@ def parse_numbers_file(src: dict) -> list[dict]:
             cat_col = i
             break
 
+    # Determine if this file uses Spent/Received or single Amount column
+    uses_split_amount = (amount_col is None and spent_col is not None)
+
     rows = []
     skipped = Counter()
     for r in range(1, table.num_rows):
         date_raw = table.cell(r, date_col).value if date_col is not None else None
         desc_raw = table.cell(r, desc_col).value if desc_col is not None else None
-        amount_raw = table.cell(r, amount_col).value if amount_col is not None else None
+
+        if uses_split_amount:
+            spent_raw = table.cell(r, spent_col).value if spent_col is not None else None
+            recv_raw = table.cell(r, received_col).value if received_col is not None else None
+            spent = float(spent_raw) if spent_raw else 0.0
+            recv = float(recv_raw) if recv_raw else 0.0
+            if spent == 0 and recv == 0:
+                skipped["missing_amount"] += 1
+                continue
+            amount_raw = -spent if spent > 0 else recv
+        else:
+            amount_raw = table.cell(r, amount_col).value if amount_col is not None else None
+
         payee_raw = table.cell(r, payee_col).value if payee_col is not None else None
         cat_raw = table.cell(r, cat_col).value if cat_col is not None else None
 
@@ -346,10 +382,11 @@ def parse_numbers_file(src: dict) -> list[dict]:
         transaction_type = "CREDIT" if amount > 0 else "DEBIT"
         amount_abs = abs(amount)
 
-        # Clean description — prefer Payee if available and non-empty
+        # Clean the bank description (used for deterministic matching).
+        # Payee name is stored in description_raw for context but NOT used
+        # as the primary description — the rule engine matches against what
+        # the merchant cleaner produces from the bank text.
         raw_desc = str(desc_raw).strip()
-        if payee_raw and str(payee_raw).strip():
-            raw_desc = str(payee_raw).strip()
         cleaned = clean_merchant(raw_desc)
         if not cleaned:
             skipped["empty_after_clean"] += 1
@@ -426,9 +463,22 @@ def format_row(row: dict) -> str:
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--clients", help="Comma-separated client letters to include (e.g. a,b or c,d). Default: all.")
+    args = parser.parse_args()
+
+    sources = SOURCES
+    if args.clients:
+        client_letters = [c.strip().upper() for c in args.clients.split(",")]
+        sources = [s for s in SOURCES if any(f"Client {cl}" in s["source_file_label"] for cl in client_letters)]
+        if not sources:
+            sys.stderr.write(f"No sources matched --clients={args.clients}\n")
+            sys.exit(1)
+
     all_rows = []
     all_skipped = Counter()
-    for src in SOURCES:
+    for src in sources:
         rows, skipped = parse_numbers_file(src)
         sys.stderr.write(f"{src['client_business_type']}: parsed {len(rows)} rows, "
                          f"skipped {sum(skipped.values())}\n")
@@ -457,18 +507,29 @@ def main():
     # Sort for readable output
     deduped.sort(key=lambda r: (r["client_business_type"], r["source_file"], r["row_index"]))
 
-    # Output
+    # Output full INSERT statement with ON CONFLICT
+    profiles = ", ".join(by_profile.keys())
     print(f"-- AUTO-GENERATED by scripts/dedupe_reference_data.py")
     print(f"-- {len(deduped)} deduped rows (from {len(all_rows)} parsed, "
           f"{sum(all_skipped.values())} skipped as unmappable)")
     print(f"-- Strategy: amount-banded dedup (small <£50, medium £50-200, large £200+)")
-    print(f"-- Source: Client C (amazon_seller) + Client D (construction_company) Numbers files")
+    print(f"-- Profiles: {profiles}")
     print()
+    print("INSERT INTO classification_reference_data (")
+    print("    uuid, description, description_raw,")
+    print("    amount, transaction_type, transaction_date,")
+    print("    category, hmrc_category, confidence,")
+    print("    is_tax_deductible, reasoning, original_label,")
+    print("    client_business_type, user_profile_type, industry,")
+    print("    source_file, row_index,")
+    print("    namespace_id, created_at, updated_at")
+    print(") VALUES")
     for i, row in enumerate(deduped):
         line = format_row(row)
         if i < len(deduped) - 1:
             line += ","
         print(line)
+    print("ON CONFLICT (source_file, row_index) DO NOTHING")
 
 
 if __name__ == "__main__":

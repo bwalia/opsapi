@@ -1658,4 +1658,20 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_ctd_profile_type ON classification_training_data (profile_type)")
         print("[Tax Copilot] Added profile_type to classification_training_data")
     end,
+
+    -- 55. Seed health_and_safety reference data (Client A + B)
+    -- 209 deduped accountant-classified transactions for the health & safety profile.
+    -- Uses ON CONFLICT so existing C+D data (migration 47) is untouched.
+    [55] = function()
+        local sql_path = debug.getinfo(1, "S").source:match("@(.*/)")
+            .. "sql/048_seed_health_safety_reference_data.sql"
+        local f = assert(io.open(sql_path, "r"))
+        local sql = f:read("*a")
+        f:close()
+
+        db.query(sql)
+        local result = db.select("COUNT(*) as cnt FROM classification_reference_data WHERE client_business_type = 'health_and_safety'")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded " .. count .. " health_and_safety reference transactions (Client A + B)")
+    end,
 }
