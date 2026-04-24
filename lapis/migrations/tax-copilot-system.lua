@@ -1674,4 +1674,35 @@ return {
         local count = result and result[1] and result[1].cnt or 0
         print("[Tax Copilot] Seeded " .. count .. " health_and_safety reference transactions (Client A + B)")
     end,
+
+    -- 56. Create classification_profiles table
+    -- Stores business profile configurations created via the admin UI.
+    -- Filesystem profiles (amazon_seller, etc.) continue to work alongside DB profiles.
+    [56] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS classification_profiles (
+                id SERIAL PRIMARY KEY,
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                profile_key VARCHAR(100) NOT NULL UNIQUE,
+                display_name VARCHAR(255) NOT NULL,
+                industry VARCHAR(100),
+                user_profile_type VARCHAR(100) DEFAULT 'limited_company',
+                category_affinity JSONB DEFAULT '{}',
+                personal_indicators JSONB DEFAULT '[]',
+                excluded_categories JSONB DEFAULT '[]',
+                rules_markdown TEXT,
+                keyword_rules JSONB DEFAULT '[]',
+                category_mappings JSONB DEFAULT '{}',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                namespace_id INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_profile_key ON classification_profiles (profile_key)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_industry ON classification_profiles (industry)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_is_active ON classification_profiles (is_active)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_namespace_id ON classification_profiles (namespace_id)")
+        print("[Tax Copilot] Created classification_profiles table")
+    end,
 }
