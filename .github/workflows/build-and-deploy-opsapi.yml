@@ -37,14 +37,10 @@ on:
           - opsapi
           - opsapi-kisaan
       PROJECT_CODE:
-        type: choice
-        description: "Please select the project Code"
-        default: "opsapi"
+        type: string
+        description: "Project code(s) for migrations. Single (tax_copilot) or comma-separated (ecommerce,collaboration)"
+        default: "all"
         required: true
-        options:
-          - opsapi
-          - kisaan
-          - tax-copilot
 
 env:
   PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}

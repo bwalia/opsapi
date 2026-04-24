@@ -19,7 +19,26 @@ local schema = require("lapis.db.schema")
 local types = schema.types
 local db = require("lapis.db")
 
-return {
+local function table_exists(name)
+    local result = db.query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = ?) as exists", name)
+    return result and result[1] and result[1].exists
+end
+
+-- Guard: hospital-crm migrations (47-53) create `hospitals` but sort AFTER
+-- these (442-453) lexicographically. If `hospitals` isn't there yet, skip so
+-- the migrator doesn't abort on the FK — hospital-crm will run next, and a
+-- subsequent deploy (or PROJECT_CODE=all on a clean DB) brings these in.
+local function require_hospitals(fn)
+    return function(...)
+        if not table_exists("hospitals") then
+            print("[hospital-care-management] `hospitals` table missing — skipping (hospital-crm not yet run)")
+            return
+        end
+        return fn(...)
+    end
+end
+
+local migrations = {
     -- =========================================================================
     -- [1] Departments
     -- =========================================================================
@@ -529,3 +548,9 @@ return {
         schema.create_index("patient_audit_logs", "access_context")
     end
 }
+
+for i, fn in pairs(migrations) do
+    migrations[i] = require_hospitals(fn)
+end
+
+return migrations

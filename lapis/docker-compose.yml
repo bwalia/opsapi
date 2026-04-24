@@ -25,6 +25,7 @@ services:
       - "4010:80"
     volumes:
       - .:/app
+      - ../projects:/app/projects
       - ./logs:/var/log/nginx
     env_file: ".env"
     environment:

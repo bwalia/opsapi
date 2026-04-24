@@ -86,6 +86,9 @@ local hospital_crm_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL,
 local hospital_care_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-care-management") or {}
 local hospital_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-menu-items") or {}
 
+-- Tax Copilot menu items
+local tax_copilot_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-copilot-menu-items") or {}
+
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
 local push_notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS,
@@ -1207,13 +1210,30 @@ local _migrations = {
     ['460_tax_create_classification_reference_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 46),
     ['461_tax_seed_accountant_reference_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 47),
     ['462_tax_add_profile_profession'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 48),
-    ['463_tax_add_classification_fields']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 49),
-    ['464_tax_add_mtd_field_name_column']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 50),
-    ['465_tax_backfill_mtd_field_name']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 51),
-    ['466_tax_add_new_mtd_categories']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 52),
-    ['467_tax_add_mtd_check_constraint']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 53),
-    ['468_tax_normalise_categories_type']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 54),
-    ['469_tax_create_hmrc_calculations']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 55),
+    ['463_tax_add_classification_fields'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 49),
+
+    -- Error catalog + i18n notification system (from main)
+    ['464_create_error_catalog_schema'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 50),
+    ['465_seed_error_catalog_english'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 51),
+    ['466_seed_notification_catalog_codes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 52),
+    ['467_seed_classify_partial_code'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 53),
+
+    -- Tax Copilot menu items (468-471, from main)
+    ['468_seed_tax_menu_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 1),
+    ['469_seed_tax_modules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 2),
+    ['470_grant_tax_permissions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 3),
+    ['471_enable_tax_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 4),
+    ['472_tax_training_data_profile_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 54),
+
+    -- HMRC MTD API field bridging + calculations (from hmrc-mtd-preview-calc branch).
+    -- Renumbered from 464-469 → 473-478 during merge to sit after main's migrations.
+    -- The corresponding tax_copilot_migrations step indices shifted from 50-55 → 55-60.
+    ['473_tax_add_mtd_field_name_column']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 55),
+    ['474_tax_backfill_mtd_field_name']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 56),
+    ['475_tax_add_new_mtd_categories']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 57),
+    ['476_tax_add_mtd_check_constraint']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 58),
+    ['477_tax_normalise_categories_type']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 59),
+    ['478_tax_create_hmrc_calculations']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 60),
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)
@@ -1394,6 +1414,79 @@ local _migrations = {
             end
         end
 
+    end,
+
+    -- =========================================================================
+    -- PROJECT MIGRATIONS SYSTEM
+    -- Creates the tracking table and runs migrations for all /projects/
+    -- =========================================================================
+    ['zzy_project_migrations_table'] = function()
+        MigrationTracker.recordRan("zzy_project_migrations_table", "core")
+        db.query([[
+            CREATE TABLE IF NOT EXISTS project_migrations (
+                id SERIAL PRIMARY KEY,
+                project_code VARCHAR(100) NOT NULL,
+                migration_name VARCHAR(255) NOT NULL,
+                executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                checksum VARCHAR(64),
+                UNIQUE(project_code, migration_name)
+            )
+        ]])
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_project_migrations_code
+            ON project_migrations(project_code)
+        ]])
+
+        -- Create tenant themes table for per-project per-tenant theme overrides
+        db.query([[
+            CREATE TABLE IF NOT EXISTS project_tenant_themes (
+                id SERIAL PRIMARY KEY,
+                project_code VARCHAR(100) NOT NULL,
+                namespace_id INTEGER,
+                theme_overrides JSONB DEFAULT '{}',
+                custom_css TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(project_code, namespace_id)
+            )
+        ]])
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_project_tenant_themes_code
+            ON project_tenant_themes(project_code)
+        ]])
+    end,
+
+    ['zzx_run_project_migrations'] = function()
+        local ok, ProjectMigrator = pcall(require, "helper.project-migrator")
+        if ok then
+            local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
+            ProjectMigrator.migrateAll(projects_root)
+        else
+            print("[Migration] Project migrator not available: " .. tostring(ProjectMigrator))
+        end
+        -- Auto-delete so this re-runs on every deploy
+        db.query([[
+            CREATE OR REPLACE FUNCTION delete_zzx_project_migrations()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.name = 'zzx_run_project_migrations' THEN
+                    DELETE FROM lapis_migrations WHERE name = 'zzx_run_project_migrations';
+                    RETURN NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        ]])
+        db.query([[
+            DROP TRIGGER IF EXISTS trg_delete_zzx_project_mig ON lapis_migrations
+        ]])
+        db.query([[
+            CREATE TRIGGER trg_delete_zzx_project_mig
+            AFTER INSERT ON lapis_migrations
+            FOR EACH ROW
+            WHEN (NEW.name = 'zzx_run_project_migrations')
+            EXECUTE FUNCTION delete_zzx_project_migrations()
+        ]])
     end,
 
     -- =========================================================================

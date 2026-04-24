@@ -53,17 +53,10 @@ on:
         required: false
 
       PROJECT_CODE:
-        type: choice
-        description: "Project code for conditional migrations"
-        default: "tax_copilot"
+        type: string
+        description: "Project code(s) for migrations. Single (tax_copilot) or comma-separated (ecommerce,collaboration)"
+        default: "all"
         required: true
-        options:
-          - all
-          - tax_copilot
-          - ecommerce
-          - collaboration
-          - hospital
-          - core_only
 
       ADMIN_EMAIL:
         type: string
@@ -138,7 +131,7 @@ jobs:
           TARGET_ENV="int"
           PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
           RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
-          PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
+          PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'all' }}"
           APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
           API_URL="${PROTOCOL}://${TARGET_ENV}-api.${APEX_DOMAIN}"
 
@@ -326,7 +319,7 @@ jobs:
           TARGET_ENV="test"
           PROTOCOL="${{ github.event.inputs.PROTOCOL || 'https' }}"
           RESET_DB="${{ github.event.inputs.RESET_DB || 'false' }}"
-          PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'tax_copilot' }}"
+          PROJECT_CODE="${{ github.event.inputs.PROJECT_CODE || 'all' }}"
           APEX_DOMAIN="${{ github.event.inputs.APEX_DOMAIN || 'diytaxreturn.co.uk' }}"
           API_URL="${PROTOCOL}://${TARGET_ENV}-api.${APEX_DOMAIN}"
 

@@ -1,26 +1,26 @@
 local lapis = require("lapis")
 local app = lapis.Application()
 local CorsMiddleware = require("middleware.cors")
+local GlobalRateLimit = require("middleware.global-rate-limit")
+local Errors = require("lib.errors")
 
 -- Enable CORS
 CorsMiddleware.enable(app)
+
+-- Enable global rate limiting (OPSAPI_RATE_LIMIT_DEFAULT env, default 10000/minute)
+-- Also logs X-Proxy-Pop-Code so we can trace edge location per request.
+GlobalRateLimit.enable(app)
 
 -- Enable etlua
 app:enable("etlua")
 app.views_prefix = "views"
 
--- Error handler
-app.handle_error = function(self, err, trace)
-    ngx.log(ngx.ERR, "Application Error: ", tostring(err))
-    ngx.log(ngx.ERR, "Stack Trace: ", tostring(trace))
-    return {
-        status = 500,
-        json = {
-            error = "Internal server error",
-            message = tostring(err)
-        }
-    }
-end
+-- Install the catalog-backed error handler. Catches:
+--   - errors raised via Errors.raise(code, ...): renders the catalog envelope
+--   - any other uncaught Lua error: maps to SYSTEM_500 + logs fully
+-- Both paths write an audit row to the shared error_occurrences table so
+-- admins see Python and Lapis events in a single dashboard view.
+Errors.install_handler(app)
 
 -- ============================================
 -- PUBLIC ROUTES - NO AUTH
@@ -33,6 +33,7 @@ app:get("/", function(self)
             version = "1.0.0",
             endpoints = {
                 documentation = "/swagger",
+                docs = "/docs",
                 health = "/health",
                 openapi = "/openapi.json",
                 login = "/auth/login"
@@ -107,6 +108,43 @@ app:get("/live", function(self)
             alive = true,
             timestamp = ngx.time(),
             uptime_seconds = ngx.now()
+        }
+    }
+end)
+
+-- System info endpoint — reports the project configuration this pod was started with.
+-- Lets operators (and the dashboard) verify which features/routes are live without
+-- shelling into the container. Public because the dashboard may call it pre-login
+-- to render the correct menu; contains no tenant-specific data.
+app:get("/api/v2/system/info", function(self)
+    local ok_cfg, ProjectConfig = pcall(require, "helper.project-config")
+    if not ok_cfg then
+        ngx.log(ngx.ERR, "system/info: failed to load project-config: ", tostring(ProjectConfig))
+        return {
+            status = 500,
+            json = { error = "Project configuration unavailable" }
+        }
+    end
+
+    local ok_info, info_or_err = pcall(ProjectConfig.getProjectInfo)
+    if not ok_info then
+        ngx.log(ngx.ERR, "system/info: getProjectInfo failed: ", tostring(info_or_err))
+        return {
+            status = 500,
+            json = { error = "Failed to read project info" }
+        }
+    end
+
+    ngx.header["Access-Control-Allow-Origin"] = "*"
+    return {
+        status = 200,
+        json = {
+            project_code = info_or_err.project_code,
+            parsed_codes = info_or_err.project_codes,
+            enabled_features = info_or_err.enabled_features,
+            environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+            version = "1.0.0",
+            timestamp = ngx.time(),
         }
     }
 end)
@@ -207,8 +245,12 @@ app:before_filter(function(self)
     -- Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
-        uri == "/swagger/swagger.json" or uri == "/metrics" or public_auth_routes[uri] or
+        uri == "/swagger/swagger.json" or uri == "/metrics" or
+        uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
+        uri:match("^/api/v2/projects$") or
+        uri:match("^/api/v2/projects/[^/]+/theme") or
+        uri:match("^/api/v2/[^/]+/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
         uri:match("^/api/v2/test%-notification") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
@@ -289,6 +331,8 @@ safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
 safe_load_routes("routes.email")
+safe_load_routes("routes.project-dashboard")
+safe_load_routes("routes.project-themes")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
@@ -405,6 +449,16 @@ load_if("tax_copilot", "routes.tax-admin-transactions")
 load_if("tax_copilot", "routes.tax-profile")
 load_if("tax_copilot", "routes.tax-hmrc-auth")
 load_if("tax_copilot", "routes.profile-builder")
+load_if("tax_copilot", "routes.tax-extract")
+load_if("tax_copilot", "routes.tax-classify")
+load_if("tax_copilot", "routes.tax-reconcile")
+load_if("tax_copilot", "routes.tax-calculate")
+load_if("tax_copilot", "routes.tax-file")
+load_if("tax_copilot", "routes.tax-hmrc-data")
+load_if("tax_copilot", "routes.tax-training-data")
+load_if("tax_copilot", "routes.tax-admin")
+load_if("tax_copilot", "routes.tax-admin-categories")
+load_if("tax_copilot", "routes.tax-support")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines)
@@ -430,6 +484,20 @@ load_if("invoicing", "routes.document-templates")
 -- ACCOUNTING / BOOKKEEPING (AI-powered)
 -- ============================================
 load_if("accounting", "routes.accounting")
+
+-- ============================================
+-- PROJECT MODULE ROUTES (auto-loaded from /projects/)
+-- ============================================
+local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")
+if ok_loader then
+    local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
+    local projects = ProjectLoader.init(projects_root)
+    for _, manifest in ipairs(projects) do
+        ProjectLoader.loadRoutes(app, manifest)
+    end
+else
+    ngx.log(ngx.NOTICE, "Project loader not available: ", tostring(ProjectLoader))
+end
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)

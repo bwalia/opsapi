@@ -8,14 +8,17 @@
     <style>
         body { margin: 0; padding: 0; }
         .topbar { background-color: #1b1b1d; padding: 10px 0; }
-        .topbar-wrapper { max-width: 1460px; margin: 0 auto; padding: 0 20px; }
+        .topbar-wrapper { max-width: 1460px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; }
         .topbar-wrapper .link { color: #fff; text-decoration: none; font-size: 1.5rem; font-weight: bold; }
+        .topbar-wrapper .docs-link { color: #a0aec0; text-decoration: none; font-size: 0.875rem; padding: 6px 14px; border: 1px solid #4a5568; border-radius: 6px; transition: all 0.15s; }
+        .topbar-wrapper .docs-link:hover { color: #fff; border-color: #718096; background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
     <div class="topbar">
         <div class="topbar-wrapper">
             <a class="link" href="/"><span>OpsAPI Documentation</span></a>
+            <a class="docs-link" href="/docs">Developer Docs</a>
         </div>
     </div>
     <div id="swagger-ui"></div>
