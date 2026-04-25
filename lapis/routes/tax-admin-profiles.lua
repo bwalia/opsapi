@@ -19,7 +19,11 @@ local function isAdmin(user)
     if not user then return false end
     local roles = user.roles or ""
     if type(roles) == "string" then
-        return roles:match("admin") ~= nil or roles:match("tax_admin") ~= nil
+        -- Exact match: split on comma and check each role
+        for role in roles:gmatch("[^,]+") do
+            local trimmed = role:match("^%s*(.-)%s*$")
+            if trimmed == "administrative" or trimmed == "tax_admin" then return true end
+        end
     end
     if type(roles) == "table" then
         for _, r in ipairs(roles) do
@@ -407,6 +411,11 @@ return function(app)
             local csv_content = body.csv_content
             if not csv_content or csv_content == "" then
                 return { status = 400, json = { error = "csv_content is required" } }
+            end
+
+            -- Reject oversized uploads (10MB limit)
+            if #csv_content > 10 * 1024 * 1024 then
+                return { status = 413, json = { error = "CSV content too large (max 10MB)" } }
             end
 
             -- Parse custom mappings from profile
