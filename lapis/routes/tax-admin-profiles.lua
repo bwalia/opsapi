@@ -437,12 +437,21 @@ return function(app)
                 return { status = 413, json = { error = "CSV content too large (max 50MB)" } }
             end
 
-            -- Parse custom mappings from profile
+            -- Strip UTF-8 BOM if present
+            if csv_content:sub(1, 3) == "\xEF\xBB\xBF" then
+                csv_content = csv_content:sub(4)
+            end
+
+            -- Parse custom mappings from profile (JSONB may be string or table)
             local custom_mappings = {}
             if profile.category_mappings then
-                local ok, decoded = pcall(cjson.decode, profile.category_mappings)
-                if ok and type(decoded) == "table" then
-                    custom_mappings = decoded
+                if type(profile.category_mappings) == "table" then
+                    custom_mappings = profile.category_mappings
+                elseif type(profile.category_mappings) == "string" then
+                    local ok, decoded = pcall(cjson.decode, profile.category_mappings)
+                    if ok and type(decoded) == "table" then
+                        custom_mappings = decoded
+                    end
                 end
             end
 
@@ -614,8 +623,12 @@ return function(app)
             if body.new_mappings and type(body.new_mappings) == "table" then
                 local existing_mappings = {}
                 if profile.category_mappings then
-                    local ok, decoded = pcall(cjson.decode, profile.category_mappings)
-                    if ok then existing_mappings = decoded end
+                    if type(profile.category_mappings) == "table" then
+                        existing_mappings = profile.category_mappings
+                    elseif type(profile.category_mappings) == "string" then
+                        local ok, decoded = pcall(cjson.decode, profile.category_mappings)
+                        if ok and type(decoded) == "table" then existing_mappings = decoded end
+                    end
                 end
                 for k, v in pairs(body.new_mappings) do
                     existing_mappings[k:lower()] = v
