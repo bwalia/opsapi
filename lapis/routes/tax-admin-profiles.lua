@@ -413,9 +413,9 @@ return function(app)
                 return { status = 400, json = { error = "csv_content is required" } }
             end
 
-            -- Reject oversized uploads (10MB limit)
-            if #csv_content > 10 * 1024 * 1024 then
-                return { status = 413, json = { error = "CSV content too large (max 10MB)" } }
+            -- Reject oversized uploads (50MB limit)
+            if #csv_content > 50 * 1024 * 1024 then
+                return { status = 413, json = { error = "CSV content too large (max 50MB)" } }
             end
 
             -- Parse custom mappings from profile
