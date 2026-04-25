@@ -116,8 +116,20 @@ local CATEGORY_MAP = {
 
 local function parseJSON(self)
     local ok, result = pcall(function()
-        local body = ngx.req.read_body()
+        ngx.req.read_body()
         local data = ngx.req.get_body_data()
+        -- When body exceeds client_body_buffer_size, OpenResty writes
+        -- it to a temp file and get_body_data() returns nil.
+        if not data or data == "" then
+            local file = ngx.req.get_body_file()
+            if file then
+                local f = io.open(file, "r")
+                if f then
+                    data = f:read("*a")
+                    f:close()
+                end
+            end
+        end
         if not data or data == "" then return {} end
         return cjson.decode(data)
     end)
