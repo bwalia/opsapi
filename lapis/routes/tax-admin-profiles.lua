@@ -177,9 +177,9 @@ local function mapCategory(prefix, label, custom_mappings)
     -- Global map
     if CATEGORY_MAP[key] then return CATEGORY_MAP[key] end
 
-    -- Fuzzy substring
+    -- Fuzzy: key contains a known label (forward only, no reverse)
     for substr, result in pairs(CATEGORY_MAP) do
-        if key:find(substr, 1, true) or substr:find(key, 1, true) then
+        if #key >= 4 and key:find(substr, 1, true) then
             return result
         end
     end
@@ -198,7 +198,14 @@ local function cleanMerchant(desc)
     if not desc or desc == "" then return "" end
     local text = desc:match("^%s*(.-)%s*$") or desc
     text = text:gsub("^TRANSFER%s+VIA%s+FASTER%s+PAYMENT%s+TO%s+", "")
-    text = text:gsub("^[VIS|BP|DD|SO|CR|FPI|BGC|FPO|TFR|DR|STO|DEB]+%s+", "")
+    -- Strip payment prefixes (longest first to avoid partial matches)
+    for _, pfx in ipairs({"FPI", "FPO", "BGC", "TFR", "STO", "DEB", "VIS", "DD", "SO", "CR", "DR", "BP"}) do
+        local pattern = "^" .. pfx .. "%s+"
+        if text:match(pattern) then
+            text = text:gsub(pattern, "", 1)
+            break
+        end
+    end
     text = text:gsub("%*[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]+", "")
     text = text:gsub("%*", " ")
     text = text:gsub("%s+CD%s+%d%d%d%d", "")
