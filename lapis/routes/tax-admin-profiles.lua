@@ -482,7 +482,7 @@ return function(app)
                             closing = line:find('"', closing + 2)
                         end
                         if closing then
-                            table.insert(fields, line:sub(pos + 1, closing - 1):gsub('""', '"'))
+                            table.insert(fields, (line:sub(pos + 1, closing - 1):gsub('""', '"')))
                             pos = closing + 2 -- skip closing quote + comma
                         else
                             table.insert(fields, line:sub(pos + 1))
