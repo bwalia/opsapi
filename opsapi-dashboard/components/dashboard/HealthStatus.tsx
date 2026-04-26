@@ -317,7 +317,7 @@ const ServiceCheckCard = memo(function ServiceCheckCard({ check }: { check: Heal
   };
 
   return (
-    <div className="bg-white border border-secondary-200 rounded-lg overflow-hidden">
+    <div className="bg-surface border border-secondary-200 rounded-lg overflow-hidden">
       {/* Header */}
       <button
         onClick={toggleExpand}

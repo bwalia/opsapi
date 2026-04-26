@@ -275,29 +275,29 @@ function ThemeService.update(namespace_id, user_id, uuid, input)
         end
 
         if tokens_changed or css_changed then
+            local existing_tokens = ThemeQueries.getTokens(theme.id)
             local final_tokens_json, final_css
 
             if tokens_changed then
                 final_tokens_json = encode_tokens(input.tokens)
+            elseif existing_tokens and existing_tokens.tokens then
+                final_tokens_json = type(existing_tokens.tokens) == "string"
+                    and existing_tokens.tokens
+                    or cjson.encode(existing_tokens.tokens)
             else
-                local existing = ThemeQueries.getTokens(theme.id)
-                final_tokens_json = (existing and existing.tokens) and
-                    (type(existing.tokens) == "string" and existing.tokens or cjson.encode(existing.tokens))
-                    or "{}"
+                final_tokens_json = "{}"
             end
 
             if css_changed then
                 final_css = clean_css or ""
             else
-                local existing = ThemeQueries.getTokens(theme.id)
-                final_css = (existing and existing.custom_css) or ""
+                final_css = (existing_tokens and existing_tokens.custom_css) or ""
             end
 
-            local existing_tokens = ThemeQueries.getTokens(theme.id)
             if existing_tokens then
                 db.query([[
                     UPDATE theme_tokens
-                    SET tokens = ?::jsonb, custom_css = ?
+                    SET tokens = ?::jsonb, custom_css = ?, updated_at = NOW()
                     WHERE theme_id = ?
                 ]], final_tokens_json, final_css, theme.id)
             else

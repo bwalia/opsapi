@@ -176,7 +176,7 @@ export default function SettingsPage() {
                     <div className="w-20 h-20 gradient-primary rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-lg shadow-primary-500/25">
                       {getInitials(user?.first_name, user?.last_name)}
                     </div>
-                    <button className="absolute bottom-0 right-0 p-1.5 bg-white border border-secondary-200 rounded-full shadow-sm hover:bg-secondary-50 transition-colors">
+                    <button className="absolute bottom-0 right-0 p-1.5 bg-surface border border-secondary-200 rounded-full shadow-sm hover:bg-secondary-50 transition-colors">
                       <Camera className="w-4 h-4 text-secondary-600" />
                     </button>
                   </div>

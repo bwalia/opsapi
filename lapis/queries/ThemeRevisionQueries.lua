@@ -56,7 +56,7 @@ function ThemeRevisionQueries.create(theme_id, tokens_json, custom_css, user_id,
         INSERT INTO theme_revisions (theme_id, tokens, custom_css, changed_by, change_note)
         VALUES (?, ?::jsonb, ?, ?, ?)
         RETURNING *
-    ]], theme_id, tokens_json or "{}", custom_css or "", user_id, note)
+    ]], theme_id, tokens_json or "{}", custom_css or "", user_id or db.NULL, note or "")
 
     -- Prune older rows beyond the cap
     db.query([[

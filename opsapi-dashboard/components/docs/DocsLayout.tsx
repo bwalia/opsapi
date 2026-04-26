@@ -13,7 +13,7 @@ export function DocsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-white text-secondary-900">
+    <div className="min-h-screen bg-surface text-secondary-900">
       <header className="sticky top-0 z-40 border-b border-secondary-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4">
           <Link href="/docs" className="flex items-center gap-2">

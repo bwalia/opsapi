@@ -193,7 +193,7 @@ export const GlobalTimerWidget = memo(function GlobalTimerWidget({
   return (
     <div
       className={cn(
-        'fixed bottom-6 right-6 bg-white rounded-xl shadow-xl border border-secondary-200 z-40 overflow-hidden transition-all',
+        'fixed bottom-6 right-6 bg-surface rounded-xl shadow-xl border border-secondary-200 z-40 overflow-hidden transition-all',
         isExpanded ? 'w-80' : 'w-auto',
         className
       )}

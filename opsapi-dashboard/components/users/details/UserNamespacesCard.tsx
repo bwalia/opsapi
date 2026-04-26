@@ -86,7 +86,7 @@ const UserNamespacesCard: React.FC<UserNamespacesCardProps> = memo(function User
             className="flex items-center gap-3 p-4 bg-secondary-50 hover:bg-secondary-100 rounded-lg border border-secondary-100 transition-colors group"
           >
             {/* Logo */}
-            <div className="w-10 h-10 rounded-lg bg-white border border-secondary-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            <div className="w-10 h-10 rounded-lg bg-surface border border-secondary-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
               {ns.namespace_logo ? (
                 <img
                   src={ns.namespace_logo}

@@ -239,7 +239,7 @@ const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
               <button
                 onClick={() => onRestore(v.version)}
                 disabled={isRestoring}
-                className="px-3 py-1.5 text-xs font-medium text-primary-600 bg-white border border-primary-300 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-primary-600 bg-surface border border-primary-300 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
               >
                 Restore
               </button>
@@ -640,7 +640,7 @@ function TemplateBuilderContent() {
       {/* ================================================================ */}
       {/* TOP BAR                                                          */}
       {/* ================================================================ */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-secondary-200 bg-white shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-secondary-200 bg-surface shrink-0">
         {/* Left side */}
         <div className="flex items-center gap-3">
           <button
@@ -692,7 +692,7 @@ function TemplateBuilderContent() {
 
           <button
             onClick={handlePreviewPdf}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             <Eye className="w-4 h-4" />
             Preview PDF
@@ -701,7 +701,7 @@ function TemplateBuilderContent() {
           {!template.is_default && (
             <button
               onClick={handleSetDefault}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
               title="Set as default"
             >
               <Star className="w-4 h-4" />
@@ -710,7 +710,7 @@ function TemplateBuilderContent() {
 
           <button
             onClick={handleClone}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
             title="Clone template"
           >
             <Copy className="w-4 h-4" />
@@ -718,7 +718,7 @@ function TemplateBuilderContent() {
 
           <button
             onClick={handleShowVersions}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
             title="Version history"
           >
             <History className="w-4 h-4" />
@@ -757,7 +757,7 @@ function TemplateBuilderContent() {
                     value={variableSearch}
                     onChange={(e) => setVariableSearch(e.target.value)}
                     placeholder="Filter variables..."
-                    className="w-full pl-8 pr-2 py-1.5 text-xs border border-secondary-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                    className="w-full pl-8 pr-2 py-1.5 text-xs border border-secondary-200 rounded-md bg-surface focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                   />
                 </div>
 
@@ -788,7 +788,7 @@ function TemplateBuilderContent() {
                           <button
                             key={v.path}
                             onClick={() => handleInsertVariable(v.path)}
-                            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-white hover:shadow-sm transition-all group"
+                            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-surface hover:shadow-sm transition-all group"
                             title={`${v.description} - Example: ${v.example}`}
                           >
                             <span className="font-mono text-primary-700 group-hover:text-primary-800">
@@ -826,7 +826,7 @@ function TemplateBuilderContent() {
                   <button
                     key={snippet.name}
                     onClick={() => handleInsertSnippet(snippet.html)}
-                    className="w-full text-left px-2.5 py-2 rounded-md hover:bg-white hover:shadow-sm transition-all"
+                    className="w-full text-left px-2.5 py-2 rounded-md hover:bg-surface hover:shadow-sm transition-all"
                   >
                     <p className="text-xs font-medium text-secondary-800">{snippet.name}</p>
                     <p className="text-[10px] text-secondary-400 mt-0.5">{snippet.description}</p>
@@ -842,7 +842,7 @@ function TemplateBuilderContent() {
         {/* ============================================================== */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Tabs */}
-          <div className="flex items-center border-b border-secondary-200 bg-white px-4 shrink-0">
+          <div className="flex items-center border-b border-secondary-200 bg-surface px-4 shrink-0">
             <button
               onClick={() => setActiveEditorTab('html')}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
@@ -926,7 +926,7 @@ function TemplateBuilderContent() {
                         setTemplateCss(e.target.value);
                         markDirty();
                       }}
-                      className="w-full h-full pt-7 px-3 pb-3 font-mono text-xs text-secondary-800 bg-white border-none outline-none resize-none"
+                      className="w-full h-full pt-7 px-3 pb-3 font-mono text-xs text-secondary-800 bg-surface border-none outline-none resize-none"
                       style={{ tabSize: 2, lineHeight: '1.6' }}
                       spellCheck={false}
                       placeholder="/* Custom CSS styles */"
@@ -943,7 +943,7 @@ function TemplateBuilderContent() {
                   </div>
                 ) : (
                   <div
-                    className="bg-white shadow-lg"
+                    className="bg-surface shadow-lg"
                     style={{
                       width: pageOrientation === 'landscape' ? '297mm' : '210mm',
                       minHeight: pageOrientation === 'landscape' ? '210mm' : '297mm',
@@ -971,7 +971,7 @@ function TemplateBuilderContent() {
         {/* ============================================================== */}
         {/* RIGHT PANEL - Properties & Settings                            */}
         {/* ============================================================== */}
-        <div className="w-[280px] border-l border-secondary-200 overflow-y-auto bg-white shrink-0">
+        <div className="w-[280px] border-l border-secondary-200 overflow-y-auto bg-surface shrink-0">
           <div className="p-4 space-y-5">
             {/* Template Info */}
             <section>
@@ -1037,7 +1037,7 @@ function TemplateBuilderContent() {
                         setPageSize(e.target.value);
                         markDirty();
                       }}
-                      className="w-full px-2 py-1.5 text-sm border border-secondary-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                      className="w-full px-2 py-1.5 text-sm border border-secondary-200 rounded-md bg-surface focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                     >
                       <option value="A4">A4</option>
                       <option value="Letter">Letter</option>
@@ -1052,7 +1052,7 @@ function TemplateBuilderContent() {
                         setPageOrientation(e.target.value);
                         markDirty();
                       }}
-                      className="w-full px-2 py-1.5 text-sm border border-secondary-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                      className="w-full px-2 py-1.5 text-sm border border-secondary-200 rounded-md bg-surface focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                     >
                       <option value="portrait">Portrait</option>
                       <option value="landscape">Landscape</option>
@@ -1182,7 +1182,7 @@ function TemplateBuilderContent() {
                       setFontFamily(e.target.value);
                       markDirty();
                     }}
-                    className="w-full px-2 py-1.5 text-sm border border-secondary-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                    className="w-full px-2 py-1.5 text-sm border border-secondary-200 rounded-md bg-surface focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                   >
                     <option value="Inter, sans-serif">Inter</option>
                     <option value="Arial, sans-serif">Arial</option>

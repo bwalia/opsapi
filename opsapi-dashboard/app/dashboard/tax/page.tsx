@@ -39,7 +39,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color, onClick 
 
   return (
     <div
-      className={`bg-white rounded-xl border border-secondary-200 p-5 shadow-sm ${onClick ? 'cursor-pointer hover:border-primary-300 transition-colors' : ''}`}
+      className={`bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm ${onClick ? 'cursor-pointer hover:border-primary-300 transition-colors' : ''}`}
       onClick={onClick}
     >
       <div className="flex items-center justify-between">
@@ -208,7 +208,7 @@ function TaxDashboardContent() {
             <div
               key={action.path}
               onClick={() => router.push(action.path)}
-              className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm cursor-pointer hover:border-primary-300 hover:shadow-md transition-all"
+              className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm cursor-pointer hover:border-primary-300 hover:shadow-md transition-all"
             >
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${action.color} mb-3`}>
                 {action.icon}

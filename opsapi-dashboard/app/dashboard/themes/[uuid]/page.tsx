@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { ArrowLeft, Save, Check, History, Eye, Code } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft, Save, Check, History, Eye, Code, Copy, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { Button, Card, Input, Textarea, Badge } from '@/components/ui';
@@ -22,8 +22,11 @@ const COLOR_SCALE_KEYS = ['50', '100', '200', '300', '400', '500', '600', '700',
 
 function ThemeEditorContent() {
   const params = useParams();
+  const router = useRouter();
   const themeUuid = params.uuid as string;
-  const { canUpdate } = usePermissions();
+  const { canUpdate, canCreate } = usePermissions();
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
 
   const [detail, setDetail] = useState<ThemeDetail | null>(null);
   const [schema, setSchema] = useState<ThemeSchema | null>(null);
@@ -54,15 +57,18 @@ function ThemeEditorContent() {
       setCustomCss(detailRes.custom_css || '');
       setName(detailRes.theme.name);
       setDescription(detailRes.theme.description || '');
-      const groups = Object.keys(schemaRes || {});
-      if (groups.length && !activeGroup) setActiveGroup(groups[0]);
+      setActiveGroup((prev) => {
+        if (prev) return prev;
+        const groups = Object.keys(schemaRes || {});
+        return groups[0] || '';
+      });
     } catch (err) {
       console.error('Failed to load theme', err);
-      toast.error('Failed to load theme');
+      toast.error(describeApiError(err, 'Failed to load theme'));
     } finally {
       setIsLoading(false);
     }
-  }, [themeUuid, activeGroup]);
+  }, [themeUuid]);
 
   useEffect(() => {
     loadTheme();
@@ -88,7 +94,7 @@ function ThemeEditorContent() {
   };
 
   const handleSave = async () => {
-    if (!detail) return;
+    if (!detail || isSaving) return;
     setIsSaving(true);
     try {
       const updated = await themesService.update(themeUuid, {
@@ -102,20 +108,27 @@ function ThemeEditorContent() {
       setChangeNote('');
       toast.success('Theme saved');
       setPreviewKey((k) => k + 1);
-    } catch {
-      toast.error('Failed to save theme');
+    } catch (err) {
+      toast.error(describeApiError(err, 'Failed to save theme'));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleActivate = async () => {
+    if (isActivating) return;
+    setIsActivating(true);
     try {
       await themesService.activate(themeUuid);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('theme:activated'));
+      }
       toast.success('Theme activated');
       loadTheme();
-    } catch {
-      toast.error('Failed to activate theme');
+    } catch (err) {
+      toast.error(describeApiError(err, 'Failed to activate theme'));
+    } finally {
+      setIsActivating(false);
     }
   };
 
@@ -124,8 +137,30 @@ function ThemeEditorContent() {
       const rows = await themesService.listRevisions(themeUuid);
       setRevisions(rows);
       setShowRevisions(true);
-    } catch {
-      toast.error('Failed to load revisions');
+    } catch (err) {
+      toast.error(describeApiError(err, 'Failed to load revisions'));
+    }
+  };
+
+  const handleDuplicateAndEdit = async () => {
+    if (!detail || isDuplicating) return;
+    if (!canCreate('themes')) {
+      toast.error('You do not have permission to create themes');
+      return;
+    }
+    setIsDuplicating(true);
+    try {
+      const copy = await themesService.duplicate(themeUuid, `${detail.theme.name} (custom)`);
+      if (copy?.theme?.uuid) {
+        toast.success('Duplicate created — now editable');
+        router.push(`/dashboard/themes/${copy.theme.uuid}`);
+      } else {
+        toast.error('Duplicate created but UUID missing — refresh to see it');
+      }
+    } catch (err) {
+      toast.error(describeApiError(err, 'Failed to duplicate theme'));
+    } finally {
+      setIsDuplicating(false);
     }
   };
 
@@ -136,8 +171,8 @@ function ThemeEditorContent() {
       setShowRevisions(false);
       loadTheme();
       setPreviewKey((k) => k + 1);
-    } catch {
-      toast.error('Failed to revert');
+    } catch (err) {
+      toast.error(describeApiError(err, 'Failed to revert'));
     }
   };
 
@@ -189,8 +224,13 @@ function ThemeEditorContent() {
             Revisions
           </Button>
           {!theme.is_active && (
-            <Button variant="secondary" size="sm" onClick={handleActivate}>
-              Activate
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleActivate}
+              disabled={isActivating}
+            >
+              {isActivating ? 'Activating…' : 'Activate'}
             </Button>
           )}
           {!readOnly && (
@@ -201,6 +241,31 @@ function ThemeEditorContent() {
           )}
         </div>
       </div>
+
+      {theme.is_system && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+          <Lock className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-amber-900">
+              This is a platform preset — it&apos;s read-only
+            </div>
+            <p className="text-sm text-amber-800 mt-0.5">
+              Platform presets can&apos;t be edited directly. Duplicate this theme to create an
+              editable copy where you can customize every color, font, and token.
+            </p>
+          </div>
+          {canCreate('themes') && (
+            <Button
+              onClick={handleDuplicateAndEdit}
+              disabled={isDuplicating}
+              className="flex-shrink-0"
+            >
+              <Copy className="w-4 h-4 mr-1" />
+              {isDuplicating ? 'Duplicating…' : 'Duplicate to customize'}
+            </Button>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
         <div className="lg:col-span-3 space-y-4">
@@ -539,12 +604,39 @@ function normalizeHex(v: unknown): string | null {
   return null;
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function describeApiError(err: unknown, fallback: string): string {
+  const status = (err as { response?: { status?: number }; status?: number })?.response?.status
+    ?? (err as { status?: number })?.status;
+  const serverMessage = (err as {
+    response?: { data?: { error?: string; message?: string } };
+  })?.response?.data?.error
+    ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+  if (status === 401) return 'Session expired — please sign in again';
+  if (status === 403) return 'You do not have permission to perform this action';
+  if (status === 404) return 'Theme not found (it may have been deleted)';
+  if (status === 409) return serverMessage || 'Conflict — the theme was updated elsewhere';
+  if (status === 422) return serverMessage || 'Validation failed — check your inputs';
+  if (status && status >= 500) return 'Server error — please try again in a moment';
+  if (serverMessage) return serverMessage;
+  return fallback;
+}
+
 function buildPreviewDoc(cssUrl: string): string {
+  const safeHref = escapeHtmlAttribute(cssUrl);
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8"/>
-<link rel="stylesheet" href="${cssUrl}"/>
+<link rel="stylesheet" href="${safeHref}"/>
 <style>
   body { margin:0; padding:24px; font-family: var(--ops-font-body, system-ui, sans-serif); background: var(--ops-color-background, #fff); color: var(--ops-color-foreground, #0f172a); }
   .card { background:#fff; border-radius:12px; padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.06); border:1px solid #e2e8f0; margin-bottom:16px; }

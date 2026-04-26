@@ -73,7 +73,7 @@ const Modal: React.FC<ModalProps> = ({
         ref={modalRef}
         tabIndex={-1}
         className={cn(
-          'relative w-full bg-white rounded-2xl shadow-2xl my-8 max-h-[90vh] flex flex-col',
+          'relative w-full bg-surface-elevated rounded-2xl shadow-2xl my-8 max-h-[90vh] flex flex-col',
           sizes[size]
         )}
       >

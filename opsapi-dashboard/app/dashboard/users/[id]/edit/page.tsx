@@ -74,7 +74,7 @@ export default function UserEditPage() {
     return (
       <div className="space-y-6">
         {/* Header skeleton */}
-        <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden animate-pulse">
+        <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden animate-pulse">
           <div className="h-20 bg-secondary-200" />
           <div className="px-6 pb-6">
             <div className="flex items-start justify-between -mt-8">

@@ -68,6 +68,14 @@ ThemeTokenSchema.SCHEMA = {
             type = "color", default = "#0f172a",
             ui = { label = "Foreground", group = "Surface", order = 2, hint = "Default text color" },
         },
+        surface = {
+            type = "color", default = "#ffffff",
+            ui = { label = "Surface", group = "Surface", order = 3, hint = "Card, sidebar, header base color" },
+        },
+        surface_elevated = {
+            type = "color", default = "#ffffff",
+            ui = { label = "Surface (elevated)", group = "Surface", order = 4, hint = "Modals, dropdowns, popovers" },
+        },
         success = {
             type = "color", default = "#10b981",
             ui = { label = "Success", group = "Semantic", order = 1 },

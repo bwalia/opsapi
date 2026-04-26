@@ -310,7 +310,7 @@ const InviteMemberModal = ({ isOpen, onClose, onInvite, existingMemberUuids, isL
                 autoFocus
               />
               {(searchResults.length > 0 || isSearching) && (
-                <div className="absolute z-10 mt-1 w-full bg-white rounded-lg border border-secondary-200 shadow-lg max-h-60 overflow-auto">
+                <div className="absolute z-10 mt-1 w-full bg-surface rounded-lg border border-secondary-200 shadow-lg max-h-60 overflow-auto">
                   {isSearching ? (
                     <div className="p-4 text-center text-secondary-500">
                       <div className="animate-spin inline-block w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full" />

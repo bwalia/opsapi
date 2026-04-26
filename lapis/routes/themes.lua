@@ -132,26 +132,18 @@ return function(app)
     -- Resolve namespace identity from request even when auth is skipped (used
     -- by /active/styles.css so public pages can still pick up the right CSS).
     local function resolve_public_namespace(self)
-        local ok_resolver, resolver = pcall(require, "middleware.namespace")
-        if ok_resolver and resolver.resolveFromRequest then
-            local ns = resolver.resolveFromRequest(self)
+        local headers = ngx.req.get_headers() or {}
+        local slug = headers["x-namespace-slug"] or (self.params and self.params.namespace)
+        local id   = tonumber(headers["x-namespace-id"] or (self.params and self.params.namespace_id))
+        local ok_nq, NamespaceQueries = pcall(require, "queries.NamespaceQueries")
+        if not ok_nq or not NamespaceQueries then return nil end
+        if id and NamespaceQueries.show then
+            local ns = NamespaceQueries.show(id)
             if ns then return ns end
         end
-        -- Fallback: header lookup
-        local headers = ngx.req.get_headers() or {}
-        local slug = headers["x-namespace-slug"] or self.params.namespace
-        local id   = tonumber(headers["x-namespace-id"] or self.params.namespace_id)
-        if id then
-            local NamespaceQueries = pcall(require, "queries.NamespaceQueries") and require("queries.NamespaceQueries") or nil
-            if NamespaceQueries and NamespaceQueries.getById then
-                return NamespaceQueries.getById(id)
-            end
-        end
-        if slug then
-            local NamespaceQueries = pcall(require, "queries.NamespaceQueries") and require("queries.NamespaceQueries") or nil
-            if NamespaceQueries and NamespaceQueries.getBySlug then
-                return NamespaceQueries.getBySlug(slug)
-            end
+        if slug and NamespaceQueries.findBySlug then
+            local ns = NamespaceQueries.findBySlug(slug)
+            if ns then return ns end
         end
         return nil
     end

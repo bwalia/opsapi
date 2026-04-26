@@ -243,19 +243,19 @@ function TransactionsContent() {
 
       {/* Stats row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-secondary-200 p-4">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4">
           <p className="text-xs text-secondary-500">Page Income</p>
           <p className="text-lg font-bold text-green-600">{formatCurrency(stats.income, 'GBP', 'en-GB')}</p>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-4">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4">
           <p className="text-xs text-secondary-500">Page Expenses</p>
           <p className="text-lg font-bold text-red-600">{formatCurrency(stats.expenses, 'GBP', 'en-GB')}</p>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-4">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4">
           <p className="text-xs text-secondary-500">Verified</p>
           <p className="text-lg font-bold text-secondary-900">{stats.verified} / {stats.total}</p>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-4">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4">
           <p className="text-xs text-secondary-500">Total Records</p>
           <p className="text-lg font-bold text-secondary-900">{total}</p>
         </div>

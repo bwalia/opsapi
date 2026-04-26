@@ -154,7 +154,7 @@ export const InvitationNotificationBell = memo(function InvitationNotificationBe
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-xl border border-secondary-200 overflow-hidden z-50"
+          className="absolute right-0 mt-2 w-96 bg-surface rounded-xl shadow-xl border border-secondary-200 overflow-hidden z-50"
         >
           {/* Header */}
           <div className="px-4 py-3 border-b border-secondary-100 bg-secondary-50">

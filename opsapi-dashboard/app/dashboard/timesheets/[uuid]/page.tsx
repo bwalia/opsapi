@@ -128,7 +128,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({ isOpen, onClose, onSaved,
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               required
             />
           </div>
@@ -140,7 +140,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({ isOpen, onClose, onSaved,
               min="0.25"
               value={hours}
               onChange={(e) => setHours(e.target.value)}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               placeholder="0.00"
               required
             />
@@ -153,7 +153,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({ isOpen, onClose, onSaved,
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white resize-none"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface resize-none"
             placeholder="What did you work on?"
           />
         </div>
@@ -165,7 +165,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({ isOpen, onClose, onSaved,
               type="text"
               value={projectReference}
               onChange={(e) => setProjectReference(e.target.value)}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               placeholder="e.g., PROJ-001"
             />
           </div>
@@ -175,7 +175,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({ isOpen, onClose, onSaved,
               type="text"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               placeholder="e.g., Development"
             />
           </div>
@@ -198,7 +198,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({ isOpen, onClose, onSaved,
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -261,7 +261,7 @@ const RejectModal: React.FC<RejectModalProps> = ({ isOpen, onClose, onRejected, 
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={4}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white resize-none"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface resize-none"
             placeholder="Please explain why this timesheet is being rejected..."
             required
           />
@@ -270,7 +270,7 @@ const RejectModal: React.FC<RejectModalProps> = ({ isOpen, onClose, onRejected, 
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -497,7 +497,7 @@ function TimesheetDetailContent() {
         </div>
         <button
           onClick={fetchTimesheet}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
           Refresh
@@ -506,7 +506,7 @@ function TimesheetDetailContent() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-secondary-500">Total Hours</p>
@@ -519,7 +519,7 @@ function TimesheetDetailContent() {
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-secondary-500">Billable Hours</p>
@@ -532,7 +532,7 @@ function TimesheetDetailContent() {
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-secondary-500">Entries</p>
@@ -543,7 +543,7 @@ function TimesheetDetailContent() {
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-secondary-500">Status</p>
@@ -583,7 +583,7 @@ function TimesheetDetailContent() {
                     setEditEntry(null);
                     setIsEntryModalOpen(true);
                   }}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
                 >
                   <Plus className="w-4 h-4" />
                   Add Entry
@@ -599,7 +599,7 @@ function TimesheetDetailContent() {
                 <button
                   onClick={handleDelete}
                   disabled={isActioning}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-surface border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                   Delete
@@ -624,7 +624,7 @@ function TimesheetDetailContent() {
                 <button
                   onClick={() => setIsRejectModalOpen(true)}
                   disabled={isActioning}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-surface border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
                 >
                   <XCircle className="w-4 h-4" />
                   Reject

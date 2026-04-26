@@ -40,7 +40,7 @@ const NamespaceHeader: React.FC<NamespaceHeaderProps> = memo(function NamespaceH
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl border border-secondary-200 p-6 animate-pulse">
+      <div className="bg-surface rounded-xl border border-secondary-200 p-6 animate-pulse">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-xl bg-secondary-200" />
           <div className="flex-1 space-y-2">
@@ -53,7 +53,7 @@ const NamespaceHeader: React.FC<NamespaceHeaderProps> = memo(function NamespaceH
   }
 
   return (
-    <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+    <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
       {/* Banner */}
       <div
         className={cn(
@@ -69,7 +69,7 @@ const NamespaceHeader: React.FC<NamespaceHeaderProps> = memo(function NamespaceH
         <div className="flex items-start justify-between -mt-10">
           <div className="flex items-end gap-4">
             {/* Logo */}
-            <div className="w-20 h-20 rounded-xl bg-white border-4 border-white shadow-md flex items-center justify-center overflow-hidden">
+            <div className="w-20 h-20 rounded-xl bg-surface border-4 border-white shadow-md flex items-center justify-center overflow-hidden">
               {namespace.logo_url ? (
                 <img
                   src={namespace.logo_url}

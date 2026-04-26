@@ -62,7 +62,7 @@ function Table<T>({
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl border border-secondary-200 p-12" role="status">
+      <div className="bg-surface rounded-xl border border-secondary-200 p-12" role="status">
         <div className="flex flex-col items-center justify-center gap-3">
           <Loader2 className="w-8 h-8 text-primary-500 animate-spin" aria-hidden="true" />
           <p className="text-secondary-500 text-sm">Loading data...</p>
@@ -72,7 +72,7 @@ function Table<T>({
   }
 
   return (
-    <div className={cn('bg-white rounded-xl border border-secondary-200 overflow-hidden', className)}>
+    <div className={cn('bg-surface rounded-xl border border-secondary-200 overflow-hidden', className)}>
       <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={caption || 'Data table'}>
         <table className="w-full">
           {caption && <caption className="sr-only">{caption}</caption>}
