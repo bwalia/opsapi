@@ -1659,10 +1659,370 @@ return {
         print("[Tax Copilot] Added profile_type to classification_training_data")
     end,
 
-    -- 55. Seed health_and_safety reference data (Client A + B)
+    -- ===========================================================================
+    -- Merge note (hmrc-mtd-preview-calc branch):
+    -- Steps 55-60 below were originally numbered 50-55 on the feature branch,
+    -- and their corresponding lapis keys 464-469. Shifted by +5 / +9 respectively
+    -- during the merge with origin/main so they sit AFTER the error-catalog and
+    -- menu-items migrations added on main (steps 50-54, keys 464-472).
+    -- ===========================================================================
+
+    -- 55. Add mtd_field_name and mtd_section columns to tax_hmrc_categories
+    --
+    -- Bridges our internal SA103F-paper category keys (e.g. "cost_of_goods", "wages_staff")
+    -- to the actual HMRC Making Tax Digital (MTD) ITSA API JSON field names
+    -- (e.g. "costOfGoods", "wagesAndStaffCosts") used by:
+    --   PUT /individuals/business/self-employment/{nino}/{businessId}/cumulative/{taxYear}
+    --
+    -- Without this mapping, our category keys cannot be sent to HMRC's API directly.
+    --
+    -- mtd_field_name : the camelCase JSON key HMRC expects, or NULL when the category
+    --                  is not part of the MTD period submission body
+    --                  (e.g. use_of_home, capital_allowances are submitted separately
+    --                  via the annual submission endpoint, not the cumulative one).
+    -- mtd_section    : which JSON object on the request body the field belongs to —
+    --                  'periodIncome', 'periodExpenses', 'periodDisallowableExpenses',
+    --                  or NULL for fields that don't go in any period section.
+    --
+    -- Idempotent: ADD COLUMN IF NOT EXISTS is safe to re-run on existing customer DBs.
+    -- Backfill is performed in migration [56].
+    [55] = function()  -- lapis key: 473_tax_add_mtd_field_name_column
+        db.query("ALTER TABLE tax_hmrc_categories ADD COLUMN IF NOT EXISTS mtd_field_name VARCHAR(64)")
+        db.query("ALTER TABLE tax_hmrc_categories ADD COLUMN IF NOT EXISTS mtd_section VARCHAR(32)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_hmrc_categories_mtd_field_name ON tax_hmrc_categories (mtd_field_name)")
+        print("[Tax Copilot] Added mtd_field_name and mtd_section columns to tax_hmrc_categories")
+    end,
+
+    -- 56. Backfill mtd_field_name and mtd_section for the 14 existing rows seeded in [4].
+    --
+    -- Maps each internal SA103F category key to the camelCase JSON field name expected
+    -- by HMRC's MTD ITSA Self-Employment Business API v5.0 cumulative endpoint.
+    --
+    -- HMRC API reference:
+    --   PUT /individuals/business/self-employment/{nino}/{businessId}/cumulative/{taxYear}
+    --   Request body:
+    --     periodIncome   : { turnover, other }
+    --     periodExpenses : { costOfGoods, paymentsToSubcontractors, wagesAndStaffCosts,
+    --                        carVanTravelExpenses, premisesRunningCosts, maintenanceCosts,
+    --                        adminCosts, businessEntertainmentCosts, advertisingCosts,
+    --                        interestOnBankOtherLoans, financeCharges, irrecoverableDebts,
+    --                        professionalFees, depreciation, otherExpenses }
+    --
+    -- Notes on individual rows:
+    --   - 'interest_finance' is mapped to 'interestOnBankOtherLoans' as the primary target.
+    --     The FastAPI aggregator splits this row's amount between interestOnBankOtherLoans
+    --     and financeCharges at submission time when finer detail is available.
+    --   - 'use_of_home' and 'capital_allowances' remain NULL: they are submitted via the
+    --     annual submission endpoint (PUT .../annual/{taxYear}) under 'allowances', not
+    --     the cumulative period endpoint. They will be wired in a later migration when
+    --     annual submissions are implemented.
+    --
+    -- Idempotent: each UPDATE is guarded by `WHERE mtd_field_name IS NULL` so a manually
+    -- corrected value on a customer DB is never overwritten. Re-running this migration
+    -- after the columns are populated is a no-op.
+    [56] = function()
+        local mappings = {
+            { key = "turnover",            mtd_field = "turnover",                 section = "periodIncome"   },
+            { key = "other_income",        mtd_field = "other",                    section = "periodIncome"   },
+            { key = "cost_of_goods",       mtd_field = "costOfGoods",              section = "periodExpenses" },
+            { key = "car_van_travel",      mtd_field = "carVanTravelExpenses",     section = "periodExpenses" },
+            { key = "wages_staff",         mtd_field = "wagesAndStaffCosts",       section = "periodExpenses" },
+            { key = "rent_rates",          mtd_field = "premisesRunningCosts",     section = "periodExpenses" },
+            { key = "repairs_maintenance", mtd_field = "maintenanceCosts",         section = "periodExpenses" },
+            { key = "accountancy_legal",   mtd_field = "professionalFees",         section = "periodExpenses" },
+            { key = "interest_finance",    mtd_field = "interestOnBankOtherLoans", section = "periodExpenses" },
+            { key = "telephone_office",    mtd_field = "adminCosts",               section = "periodExpenses" },
+            { key = "other_expenses",      mtd_field = "otherExpenses",            section = "periodExpenses" },
+            { key = "depreciation",        mtd_field = "depreciation",             section = "periodExpenses" },
+            -- use_of_home and capital_allowances intentionally omitted — they are part of the
+            -- annual submission, not the period/cumulative submission. They remain NULL.
+        }
+
+        local updated = 0
+        for _, m in ipairs(mappings) do
+            db.query([[
+                UPDATE tax_hmrc_categories
+                   SET mtd_field_name = ?,
+                       mtd_section    = ?,
+                       updated_at     = NOW()
+                 WHERE key             = ?
+                   AND mtd_field_name IS NULL
+            ]], m.mtd_field, m.section, m.key)
+            updated = updated + 1
+        end
+
+        print(string.format(
+            "[Tax Copilot] Backfilled mtd_field_name / mtd_section for %d tax_hmrc_categories rows",
+            updated
+        ))
+    end,
+
+    -- 57. Insert 4 new HMRC categories that exist in the MTD ITSA cumulative endpoint
+    -- but were missing from the paper SA103F taxonomy we originally seeded in [4].
+    --
+    -- These rows cover HMRC MTD API fields that our original 14 categories did not
+    -- map to cleanly. Each row is inserted with mtd_field_name / mtd_section already
+    -- populated so the aggregator can immediately submit transactions classified
+    -- against them.
+    --
+    -- Box codes:
+    --   The `box` column is UNIQUE in tax_hmrc_categories (from migration [3]).
+    --   The original 14 rows use plain numeric box numbers (15, 17, 19, ...).
+    --   These 4 new rows use synthetic suffixed codes (20a, 25b, 27a, 29a) to stay
+    --   unique while visually grouping them near their nearest SA103F neighbour.
+    --   The `box` column is informational once mtd_field_name exists — the MTD field
+    --   name is the authoritative HMRC identifier going forward.
+    --
+    -- Safety:
+    --   Uses INSERT ... ON CONFLICT (key) DO NOTHING so re-running the migration
+    --   is a no-op. Does NOT touch any existing row. Does NOT alter any FK in
+    --   tax_categories — the aggregator applies the mapping override at code level
+    --   (per the agreed decision #2 on interest_finance, generalised).
+    [57] = function()
+        local new_categories = {
+            {
+                key            = "subcontractor_payments",
+                box            = "20a",
+                label          = "Payments to Subcontractors",
+                description    = "Payments to CIS and non-CIS subcontractors (construction, trades, agency staff)",
+                is_deductible  = true,
+                mtd_field_name = "paymentsToSubcontractors",
+                mtd_section    = "periodExpenses",
+            },
+            {
+                key            = "entertainment_costs",
+                box            = "25b",
+                label          = "Business Entertainment",
+                description    = "Client and business entertainment costs (not tax deductible — captured for completeness)",
+                is_deductible  = false,
+                mtd_field_name = "businessEntertainmentCosts",
+                mtd_section    = "periodExpenses",
+            },
+            {
+                key            = "advertising_marketing",
+                box            = "27a",
+                label          = "Advertising and Marketing",
+                description    = "Advertising, marketing, promotional and sponsorship costs",
+                is_deductible  = true,
+                mtd_field_name = "advertisingCosts",
+                mtd_section    = "periodExpenses",
+            },
+            {
+                key            = "bad_debts",
+                box            = "29a",
+                label          = "Irrecoverable Debts",
+                description    = "Bad debts and other irrecoverable amounts written off during the period",
+                is_deductible  = true,
+                mtd_field_name = "irrecoverableDebts",
+                mtd_section    = "periodExpenses",
+            },
+        }
+
+        local inserted = 0
+        for _, cat in ipairs(new_categories) do
+            db.query([[
+                INSERT INTO tax_hmrc_categories
+                    (uuid, key, box, label, description, is_tax_deductible, is_active,
+                     mtd_field_name, mtd_section, created_at, updated_at)
+                VALUES
+                    (gen_random_uuid()::text, ?, ?, ?, ?, ?, true, ?, ?, NOW(), NOW())
+                ON CONFLICT (key) DO NOTHING
+            ]], cat.key, cat.box, cat.label, cat.description,
+                cat.is_deductible, cat.mtd_field_name, cat.mtd_section)
+            inserted = inserted + 1
+        end
+
+        print(string.format(
+            "[Tax Copilot] Inserted up to %d new MTD HMRC categories (ON CONFLICT DO NOTHING)",
+            inserted
+        ))
+    end,
+
+    -- 58. Add CHECK constraint enforcing the mtd_field_name / mtd_section invariant:
+    --     either BOTH are NULL (category not part of MTD period submission)
+    --     or BOTH are populated (category maps to a specific MTD JSON field).
+    --
+    -- Why:
+    --   Protects against half-populated state where an admin saves only one of the
+    --   two columns through the UI. Having mtd_field_name without mtd_section (or
+    --   vice versa) would silently break the aggregator.
+    --
+    -- Safety:
+    --   All existing rows after migration [55] and [56] already satisfy this
+    --   invariant:
+    --     - 12 backfilled rows have BOTH populated
+    --     - use_of_home and capital_allowances have BOTH NULL (annual submission)
+    --     - 4 new rows from [57] have BOTH populated
+    --   So the constraint is safe to add without re-writing any data.
+    --
+    -- Idempotent:
+    --   Wrapped in pcall + "constraint already exists" detection. Postgres does not
+    --   support `ADD CONSTRAINT IF NOT EXISTS` on CHECK constraints directly, so we
+    --   catch the duplicate error.
+    [58] = function()
+        local ok, err = pcall(function()
+            db.query([[
+                ALTER TABLE tax_hmrc_categories
+                ADD CONSTRAINT chk_tax_hmrc_categories_mtd_fields_both_or_neither
+                CHECK (
+                    (mtd_field_name IS NULL     AND mtd_section IS NULL)
+                 OR (mtd_field_name IS NOT NULL AND mtd_section IS NOT NULL)
+                )
+            ]])
+        end)
+
+        if ok then
+            print("[Tax Copilot] Added CHECK constraint chk_tax_hmrc_categories_mtd_fields_both_or_neither")
+        elseif err and tostring(err):match("already exists") then
+            print("[Tax Copilot] CHECK constraint chk_tax_hmrc_categories_mtd_fields_both_or_neither already exists, skipping")
+        else
+            -- Unknown error — re-raise so the migration fails visibly.
+            error(err)
+        end
+    end,
+
+    -- 59. Normalise tax_categories.type casing to lowercase.
+    --
+    -- Historical seed data (migration [6]) inserted type as 'EXPENSE' / 'INCOME'
+    -- (uppercase), but every downstream consumer in FastAPI expects lowercase:
+    --   - backend/app/models/category.py CategoryType enum: "income" / "expense"
+    --   - backend/app/services/category_service.py compares `== "expense"`
+    --   - backend/app/core/categories.py compares `== "income"`
+    --   - backend/app/api/categories.py list filter does `type == type_filter.lower()`
+    --
+    -- The uppercase rows were never reachable by the lowercase filters, and
+    -- the admin "filter by type" dropdown has silently been returning near-zero
+    -- results. This migration aligns the stored values with what the code
+    -- already expects.
+    --
+    -- Idempotent: the WHERE clause only touches rows that aren't already
+    -- lowercase, so re-running updates zero rows.
+    [59] = function()
+        -- Count first so the log message is meaningful
+        local before = db.query([[
+            SELECT COUNT(*) AS n FROM tax_categories WHERE type <> LOWER(type)
+        ]])
+        local to_fix = (before and before[1] and tonumber(before[1].n)) or 0
+
+        db.query([[
+            UPDATE tax_categories
+               SET type       = LOWER(type),
+                   updated_at = NOW()
+             WHERE type <> LOWER(type)
+        ]])
+
+        print(string.format(
+            "[Tax Copilot] Normalised tax_categories.type casing to lowercase (%d rows updated)",
+            to_fix
+        ))
+    end,
+
+    -- 60. Create hmrc_calculations table — stores the result of every HMRC
+    --     MTD ITSA preview calculation triggered via
+    --     POST /api/hmrc/calculate-preview (FastAPI, Phase D).
+    --
+    -- One row per calculation run. The Phase D orchestration endpoint
+    -- inserts a row with status='triggered' as soon as HMRC accepts the
+    -- cumulative submission, then updates it to status='ready' once the
+    -- calculation result is retrieved. Failures mark status='error' with
+    -- the error_message column populated.
+    --
+    -- Columns split into three conceptual groups:
+    --
+    --   Request context
+    --     user_uuid, business_id, tax_year, period_start, period_end
+    --     calculation_type  — 'in-year' / 'intent-to-finalise' / 'intent-to-amend'
+    --
+    --   HMRC round-trip
+    --     calculation_id    — UUID returned by HMRC's trigger endpoint
+    --     status            — 'triggered' | 'ready' | 'error'
+    --     error_message     — human-readable error if status='error'
+    --     triggered_at      — when we called HMRC's POST /trigger
+    --     retrieved_at      — when HMRC's GET /{id} returned 200
+    --     poll_attempts     — how many retrieve calls it took (1-7 typical)
+    --     raw_response      — full JSON of HMRC's calculation tree for audit
+    --
+    --   Parsed figures (from calculation.taxCalculation)
+    --     total_income_tax_and_nics_due  — the headline figure users see
+    --     total_taxable_income
+    --     income_tax_charged
+    --     class2_nics
+    --     class4_nics
+    --     personal_allowance
+    --
+    --   Aggregation stats (from the Phase B aggregator)
+    --     tx_total, tx_applied, tx_unmapped, tx_excluded_no_mtd,
+    --     tx_override_applied
+    --     — Captured alongside the figures so a user seeing a
+    --       "surprising" HMRC number can drill into why it differs from
+    --       their local Python estimate (e.g. 250 transactions
+    --       unclassified → missing from the submission).
+    --
+    -- Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    -- Safe to re-run. Purely additive — touches no existing rows.
+    [60] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_calculations (
+                id                              BIGSERIAL PRIMARY KEY,
+                uuid                            VARCHAR(64) UNIQUE NOT NULL,
+
+                -- Request context
+                user_uuid                       VARCHAR(64) NOT NULL,
+                business_id                     VARCHAR(255) NOT NULL,
+                tax_year                        VARCHAR(16) NOT NULL,
+                period_start                    DATE NOT NULL,
+                period_end                      DATE NOT NULL,
+                calculation_type                VARCHAR(32) NOT NULL DEFAULT 'in-year',
+
+                -- HMRC round-trip
+                calculation_id                  VARCHAR(64),
+                status                          VARCHAR(16) NOT NULL DEFAULT 'triggered',
+                error_message                   TEXT,
+                triggered_at                    TIMESTAMP,
+                retrieved_at                    TIMESTAMP,
+                poll_attempts                   INTEGER DEFAULT 0,
+                raw_response                    TEXT,
+
+                -- Parsed figures (NULL until status='ready')
+                total_income_tax_and_nics_due   NUMERIC(15, 2),
+                total_taxable_income             NUMERIC(15, 2),
+                income_tax_charged               NUMERIC(15, 2),
+                class2_nics                      NUMERIC(15, 2),
+                class4_nics                      NUMERIC(15, 2),
+                personal_allowance               NUMERIC(15, 2),
+
+                -- Aggregation stats (from the Phase B aggregator)
+                tx_total                         INTEGER DEFAULT 0,
+                tx_applied                       INTEGER DEFAULT 0,
+                tx_unmapped                      INTEGER DEFAULT 0,
+                tx_excluded_no_mtd               INTEGER DEFAULT 0,
+                tx_override_applied              INTEGER DEFAULT 0,
+
+                -- Audit
+                created_at                       TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at                       TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_user_uuid ON hmrc_calculations (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_business_year ON hmrc_calculations (business_id, tax_year)")
+        db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_calculations_calc_id ON hmrc_calculations (calculation_id) WHERE calculation_id IS NOT NULL")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_status ON hmrc_calculations (status)")
+
+        print("[Tax Copilot] Created hmrc_calculations table for Phase D preview-calculation round-trip")
+    end,
+
+    -- ===========================================================================
+    -- Merge note (continued):
+    -- Steps 61-62 below were originally numbered 55-56 on origin/main, with
+    -- lapis keys 473-474. Renumbered during this merge to sit AFTER the
+    -- hmrc-mtd-preview-calc branch's steps 55-60 (lapis keys 473-478).
+    -- ===========================================================================
+
+    -- 61. Seed health_and_safety reference data (Client A + B)
     -- 209 deduped accountant-classified transactions for the health & safety profile.
     -- Uses ON CONFLICT so existing C+D data (migration 47) is untouched.
-    [55] = function()
+    [61] = function()
         local sql_path = debug.getinfo(1, "S").source:match("@(.*/)")
             .. "sql/048_seed_health_safety_reference_data.sql"
         local f = assert(io.open(sql_path, "r"))
@@ -1675,10 +2035,10 @@ return {
         print("[Tax Copilot] Seeded " .. count .. " health_and_safety reference transactions (Client A + B)")
     end,
 
-    -- 56. Create classification_profiles table
+    -- 62. Create classification_profiles table
     -- Stores business profile configurations created via the admin UI.
     -- Filesystem profiles (amazon_seller, etc.) continue to work alongside DB profiles.
-    [56] = function()
+    [62] = function()
         db.query([[
             CREATE TABLE IF NOT EXISTS classification_profiles (
                 id SERIAL PRIMARY KEY,

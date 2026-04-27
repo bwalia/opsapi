@@ -1211,19 +1211,35 @@ local _migrations = {
     ['461_tax_seed_accountant_reference_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 47),
     ['462_tax_add_profile_profession'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 48),
     ['463_tax_add_classification_fields'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 49),
+
+    -- Error catalog + i18n notification system (from main)
     ['464_create_error_catalog_schema'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 50),
     ['465_seed_error_catalog_english'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 51),
     ['466_seed_notification_catalog_codes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 52),
     ['467_seed_classify_partial_code'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 53),
 
-    -- Tax Copilot menu items (468-471)
+    -- Tax Copilot menu items (468-471, from main)
     ['468_seed_tax_menu_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 1),
     ['469_seed_tax_modules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 2),
     ['470_grant_tax_permissions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 3),
     ['471_enable_tax_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 4),
     ['472_tax_training_data_profile_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 54),
-    ['473_tax_seed_health_safety_reference'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 55),
-    ['474_tax_create_classification_profiles'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 56),
+
+    -- HMRC MTD API field bridging + calculations (from hmrc-mtd-preview-calc branch).
+    -- Renumbered from 464-469 → 473-478 during merge to sit after main's migrations.
+    -- The corresponding tax_copilot_migrations step indices shifted from 50-55 → 55-60.
+    ['473_tax_add_mtd_field_name_column']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 55),
+    ['474_tax_backfill_mtd_field_name']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 56),
+    ['475_tax_add_new_mtd_categories']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 57),
+    ['476_tax_add_mtd_check_constraint']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 58),
+    ['477_tax_normalise_categories_type']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 59),
+    ['478_tax_create_hmrc_calculations']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 60),
+
+    -- Reference data + classification profiles (from main, post-MTD merge).
+    -- Renumbered from 473-474 → 479-480 to sit after the MTD migrations.
+    -- The corresponding tax_copilot_migrations step indices shifted from 55-56 → 61-62.
+    ['479_tax_seed_health_safety_reference']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 61),
+    ['480_tax_create_classification_profiles']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 62),
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)
