@@ -458,6 +458,7 @@ load_if("tax_copilot", "routes.tax-hmrc-data")
 load_if("tax_copilot", "routes.tax-training-data")
 load_if("tax_copilot", "routes.tax-admin")
 load_if("tax_copilot", "routes.tax-admin-categories")
+load_if("tax_copilot", "routes.tax-admin-profiles")
 load_if("tax_copilot", "routes.tax-support")
 
 -- ============================================

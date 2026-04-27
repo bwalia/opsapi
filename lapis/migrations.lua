@@ -1235,6 +1235,12 @@ local _migrations = {
     ['477_tax_normalise_categories_type']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 59),
     ['478_tax_create_hmrc_calculations']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 60),
 
+    -- Reference data + classification profiles (from main, post-MTD merge).
+    -- Renumbered from 473-474 → 479-480 to sit after the MTD migrations.
+    -- The corresponding tax_copilot_migrations step indices shifted from 55-56 → 61-62.
+    ['479_tax_seed_health_safety_reference']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 61),
+    ['480_tax_create_classification_profiles']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 62),
+
     -- =========================================================================
     -- CRM SYSTEM (500-509)
     -- =========================================================================

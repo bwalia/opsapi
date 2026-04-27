@@ -2011,4 +2011,58 @@ return {
 
         print("[Tax Copilot] Created hmrc_calculations table for Phase D preview-calculation round-trip")
     end,
+
+    -- ===========================================================================
+    -- Merge note (continued):
+    -- Steps 61-62 below were originally numbered 55-56 on origin/main, with
+    -- lapis keys 473-474. Renumbered during this merge to sit AFTER the
+    -- hmrc-mtd-preview-calc branch's steps 55-60 (lapis keys 473-478).
+    -- ===========================================================================
+
+    -- 61. Seed health_and_safety reference data (Client A + B)
+    -- 209 deduped accountant-classified transactions for the health & safety profile.
+    -- Uses ON CONFLICT so existing C+D data (migration 47) is untouched.
+    [61] = function()
+        local sql_path = debug.getinfo(1, "S").source:match("@(.*/)")
+            .. "sql/048_seed_health_safety_reference_data.sql"
+        local f = assert(io.open(sql_path, "r"))
+        local sql = f:read("*a")
+        f:close()
+
+        db.query(sql)
+        local result = db.select("COUNT(*) as cnt FROM classification_reference_data WHERE client_business_type = 'health_and_safety'")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded " .. count .. " health_and_safety reference transactions (Client A + B)")
+    end,
+
+    -- 62. Create classification_profiles table
+    -- Stores business profile configurations created via the admin UI.
+    -- Filesystem profiles (amazon_seller, etc.) continue to work alongside DB profiles.
+    [62] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS classification_profiles (
+                id SERIAL PRIMARY KEY,
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                profile_key VARCHAR(100) NOT NULL UNIQUE,
+                display_name VARCHAR(255) NOT NULL,
+                industry VARCHAR(100),
+                user_profile_type VARCHAR(100) DEFAULT 'limited_company',
+                category_affinity JSONB DEFAULT '{}',
+                personal_indicators JSONB DEFAULT '[]',
+                excluded_categories JSONB DEFAULT '[]',
+                rules_markdown TEXT,
+                keyword_rules JSONB DEFAULT '[]',
+                category_mappings JSONB DEFAULT '{}',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                namespace_id INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_profile_key ON classification_profiles (profile_key)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_industry ON classification_profiles (industry)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_is_active ON classification_profiles (is_active)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_namespace_id ON classification_profiles (namespace_id)")
+        print("[Tax Copilot] Created classification_profiles table")
+    end,
 }
