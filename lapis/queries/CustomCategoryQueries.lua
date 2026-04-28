@@ -309,8 +309,13 @@ function CustomCategoryQueries.promote(uuid, opts)
                   tostring(opts.hmrc_category_uuid))
         end
 
-        -- 1. Create the new system tax_categories row
-        local new_cat = db.insert("tax_categories", {
+        -- 1. Create the new system tax_categories row.
+        --
+        -- `db.insert` without a `returning` opt returns only the affected-
+        -- rows count (not the inserted row), so `new_cat.id` would be nil
+        -- and the promoted_to_category_id back-link below would silently
+        -- store NULL. Pass `{returning = "*"}` to get the full row back.
+        local insert_result = db.insert("tax_categories", {
             uuid = Global.generateStaticUUID(),
             key = opts.system_key,
             label = opts.system_label,
@@ -323,7 +328,11 @@ function CustomCategoryQueries.promote(uuid, opts)
             is_active = true,
             created_at = db.raw("NOW()"),
             updated_at = db.raw("NOW()"),
-        })
+        }, { returning = "*" })
+        if not insert_result or not insert_result[1] then
+            error("Failed to create promoted tax_categories row")
+        end
+        local new_cat = insert_result[1]
 
         -- 2. Identify which custom rows to promote
         local affected_customs
