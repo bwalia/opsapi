@@ -2065,4 +2065,215 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_cp_namespace_id ON classification_profiles (namespace_id)")
         print("[Tax Copilot] Created classification_profiles table")
     end,
+
+    -- ===========================================================================
+    -- Issue #308 — User-created custom categories + audit trail (April 2026)
+    --
+    -- Adds the schema needed for two connected features:
+    --
+    --   1. Two global flags admin can toggle:
+    --        - allow_user_category_editing  (gate the classify-page picker for
+    --                                        non-admin users)
+    --        - allow_user_custom_categories (further gate "+ Add custom" entry)
+    --      Both default OFF — the system is admin-only until an admin flips
+    --      them on. Settings live in a key/value table so future toggles are
+    --      data, not migrations.
+    --
+    --   2. User-scoped custom categories ("Bee Supplies", "Restoration Parts"):
+    --      created by users on the classify page, moderated by admin via the
+    --      admin dashboard, optionally promoted to system-wide categories
+    --      when multiple users keep creating the same name.
+    --
+    --   3. Append-only audit log on every category change so admin can see
+    --      who changed what and when. Retention is enforced server-side
+    --      (tax_transaction_audit_retention_days config) so the table stays
+    --      bounded.
+    --
+    --   4. Denormalised "who last touched this" pointers on tax_transactions
+    --      for cheap classify-page badge rendering (no JOIN to the audit log
+    --      on every page render).
+    -- ===========================================================================
+
+    -- 63. Create tax_app_settings table (key/value store for global toggles)
+    [63] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_app_settings (
+                id              SERIAL PRIMARY KEY,
+                setting_key     VARCHAR(100) UNIQUE NOT NULL,
+                setting_value   JSONB NOT NULL,
+                setting_type    VARCHAR(20) NOT NULL
+                                CHECK (setting_type IN ('boolean','integer','string','object','array')),
+                description     TEXT NOT NULL,
+                category        VARCHAR(50) NOT NULL DEFAULT 'general',
+                is_admin_only   BOOLEAN NOT NULL DEFAULT TRUE,
+                updated_by_user_uuid VARCHAR(255),
+                updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_tas_category ON tax_app_settings(category)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tas_is_admin_only ON tax_app_settings(is_admin_only)")
+
+        -- Seed the two flags introduced by issue #308. ON CONFLICT DO NOTHING so
+        -- re-running the migration is idempotent; admin's value (if changed)
+        -- is never overwritten.
+        local seeds = {
+            {
+                key  = "allow_user_category_editing",
+                val  = "false",
+                type = "boolean",
+                cat  = "classification",
+                desc = "When true, non-admin users can change a transaction's category on the classify page. When false, only admins can edit categories.",
+                public = true,
+            },
+            {
+                key  = "allow_user_custom_categories",
+                val  = "false",
+                type = "boolean",
+                cat  = "classification",
+                desc = "When true, users can additionally create their own custom category names on the classify page. Requires allow_user_category_editing to also be true. Custom categories are user-scoped until an admin moderates them.",
+                public = true,
+            },
+        }
+        for _, s in ipairs(seeds) do
+            db.query([[
+                INSERT INTO tax_app_settings
+                    (setting_key, setting_value, setting_type, description, category, is_admin_only)
+                VALUES (?, ?::jsonb, ?, ?, ?, ?)
+                ON CONFLICT (setting_key) DO NOTHING
+            ]], s.key, s.val, s.type, s.desc, s.cat, not s.public)
+        end
+        print("[Tax Copilot] Created tax_app_settings table and seeded #308 flags")
+    end,
+
+    -- 64. Create tax_user_custom_categories table
+    [64] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_user_custom_categories (
+                id              SERIAL PRIMARY KEY,
+                uuid            VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+                user_uuid       VARCHAR(255) NOT NULL,
+                namespace_id    INTEGER NOT NULL DEFAULT 0,
+
+                name            VARCHAR(100) NOT NULL,
+                key_normalized  VARCHAR(120) NOT NULL,
+
+                status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                                CHECK (status IN ('pending','approved','rejected','promoted')),
+
+                mapped_to_category_id      INTEGER NULL,
+                mapped_to_hmrc_category_id INTEGER NULL,
+
+                admin_notes        TEXT NULL,
+                reviewed_by_user_uuid VARCHAR(255) NULL,
+                reviewed_at        TIMESTAMP NULL,
+
+                promoted_to_category_id INTEGER NULL,
+                promoted_at        TIMESTAMP NULL,
+                promoted_by_user_uuid VARCHAR(255) NULL,
+
+                usage_count        INTEGER NOT NULL DEFAULT 0,
+
+                is_active          BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+
+                UNIQUE (user_uuid, key_normalized),
+
+                CONSTRAINT fk_tucc_mapped_category
+                    FOREIGN KEY (mapped_to_category_id)
+                    REFERENCES tax_categories(id) ON DELETE SET NULL,
+                CONSTRAINT fk_tucc_mapped_hmrc
+                    FOREIGN KEY (mapped_to_hmrc_category_id)
+                    REFERENCES tax_hmrc_categories(id) ON DELETE SET NULL,
+                CONSTRAINT fk_tucc_promoted_category
+                    FOREIGN KEY (promoted_to_category_id)
+                    REFERENCES tax_categories(id) ON DELETE SET NULL
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_user_uuid ON tax_user_custom_categories(user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_namespace_id ON tax_user_custom_categories(namespace_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_status ON tax_user_custom_categories(status)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_mapped_to ON tax_user_custom_categories(mapped_to_category_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_key_normalized ON tax_user_custom_categories(key_normalized)")
+        -- Composite index supporting "find duplicate names across users" admin query
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_key_status ON tax_user_custom_categories(key_normalized, status)")
+        print("[Tax Copilot] Created tax_user_custom_categories table")
+    end,
+
+    -- 65. Create tax_transaction_audit table (append-only history)
+    [65] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_transaction_audit (
+                id              BIGSERIAL PRIMARY KEY,
+                transaction_uuid VARCHAR(255) NOT NULL,
+                user_uuid       VARCHAR(255) NOT NULL,
+                user_role       VARCHAR(20) NOT NULL
+                                CHECK (user_role IN ('user','admin','accountant','ai','system')),
+
+                action          VARCHAR(50) NOT NULL,
+
+                old_value       JSONB,
+                new_value       JSONB,
+
+                source          VARCHAR(20) NOT NULL DEFAULT 'web'
+                                CHECK (source IN ('web','ios','admin','api','classifier','reconciler')),
+                ip_address      VARCHAR(64) NULL,
+                user_agent      VARCHAR(500) NULL,
+                correlation_id  VARCHAR(255) NULL,
+
+                namespace_id    INTEGER NOT NULL DEFAULT 0,
+                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_transaction_uuid ON tax_transaction_audit(transaction_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_user_uuid ON tax_transaction_audit(user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_created_at ON tax_transaction_audit(created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_action ON tax_transaction_audit(action)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_namespace_id ON tax_transaction_audit(namespace_id)")
+        print("[Tax Copilot] Created tax_transaction_audit table (append-only)")
+    end,
+
+    -- 66. Add denormalised pointers + custom category FK to tax_transactions
+    [66] = function()
+        db.query([[
+            ALTER TABLE tax_transactions
+                ADD COLUMN IF NOT EXISTS modified_by_user_uuid VARCHAR(255) NULL,
+                ADD COLUMN IF NOT EXISTS modified_by_role      VARCHAR(20) NULL,
+                ADD COLUMN IF NOT EXISTS modified_at           TIMESTAMP NULL,
+                ADD COLUMN IF NOT EXISTS custom_category_uuid  VARCHAR(255) NULL
+        ]])
+        -- Constraint added separately so the migration succeeds even when the
+        -- column already exists from a prior partial run (ALTER ... ADD CHECK
+        -- without a column name).
+        local check_exists = db.select([[
+            1 FROM information_schema.check_constraints
+            WHERE constraint_name = 'chk_tax_transactions_modified_by_role'
+        ]])
+        if not check_exists or #check_exists == 0 then
+            db.query([[
+                ALTER TABLE tax_transactions
+                ADD CONSTRAINT chk_tax_transactions_modified_by_role
+                CHECK (modified_by_role IS NULL
+                       OR modified_by_role IN ('user','admin','accountant','ai','system'))
+            ]])
+        end
+
+        local fk_exists = db.select([[
+            1 FROM information_schema.table_constraints
+            WHERE constraint_name = 'fk_tax_transactions_custom_category'
+        ]])
+        if not fk_exists or #fk_exists == 0 then
+            db.query([[
+                ALTER TABLE tax_transactions
+                ADD CONSTRAINT fk_tax_transactions_custom_category
+                FOREIGN KEY (custom_category_uuid)
+                REFERENCES tax_user_custom_categories(uuid) ON DELETE SET NULL
+            ]])
+        end
+
+        db.query("CREATE INDEX IF NOT EXISTS idx_tx_modified_by_user ON tax_transactions(modified_by_user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tx_custom_category ON tax_transactions(custom_category_uuid)")
+        print("[Tax Copilot] Added modified_by_* + custom_category_uuid columns to tax_transactions")
+    end,
 }
