@@ -1260,6 +1260,7 @@ local _migrations = {
     ['483_tax_create_transaction_audit']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 65),
     ['484_tax_add_transaction_audit_columns']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 66),
     ['485_tax_grant_custom_categories_permissions']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 5),
+    ['486_tax_seed_max_custom_categories_setting']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 67),
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)

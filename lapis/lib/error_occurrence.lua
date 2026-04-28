@@ -129,11 +129,17 @@ end
 --   ip_address       string
 --   self             table   Lapis request (used to auto-fill the above)
 function Occurrence.record(args)
+    -- The UUID is generated up-front and returned to the caller so the
+    -- error envelope can include `occurrence_uuid`, giving admin a deep
+    -- link to /admin/errors/occurrences/<uuid> from the user's toast.
+    -- Mirrors the FastAPI catalog handler's behaviour.
+    local row_uuid = require("helper.global").generateUUID()
+
     local ok, err = pcall(function()
         local self = args.self
 
         local row = {
-            uuid = require("helper.global").generateUUID(),
+            uuid = row_uuid,
             code = args.code or "SYSTEM_500",
             catalog_uuid = args.catalog_uuid,
             correlation_id = args.correlation_id or require("helper.global").generateUUID(),
@@ -174,9 +180,13 @@ function Occurrence.record(args)
 
     if not ok then
         -- Logging a warning is as loud as we ever get. Failing audit must
-        -- not surface to the user.
+        -- not surface to the user. Returns nil so the caller knows the
+        -- envelope shouldn't carry an occurrence_uuid (the row didn't
+        -- actually land in the table).
         ngx.log(ngx.WARN, "error_occurrence: insert failed: ", tostring(err))
+        return nil
     end
+    return row_uuid
 end
 
 

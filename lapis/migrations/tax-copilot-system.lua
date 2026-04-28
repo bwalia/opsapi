@@ -2276,4 +2276,32 @@ return {
         db.query("CREATE INDEX IF NOT EXISTS idx_tx_custom_category ON tax_transactions(custom_category_uuid)")
         print("[Tax Copilot] Added modified_by_* + custom_category_uuid columns to tax_transactions")
     end,
+
+    -- 67. Seed max_custom_categories_per_user setting (issue #308 user side).
+    --
+    -- Per-user creation cap that admins can tune at runtime without a code
+    -- change. Default 20 matches the issue's suggested limit. Stored in
+    -- tax_app_settings as an admin-only integer so it doesn't leak through
+    -- /api/settings/public — the user-side POST endpoint reads it directly
+    -- from the cached settings_service to enforce the cap.
+    --
+    -- ON CONFLICT DO NOTHING so re-running the migration on a system that
+    -- already has the row (e.g. an admin tuned the value to 50) doesn't
+    -- silently reset their override.
+    [67] = function()
+        db.query([[
+            INSERT INTO tax_app_settings
+                (setting_key, setting_value, setting_type, description, category, is_admin_only)
+            VALUES (
+                'max_custom_categories_per_user',
+                '20'::jsonb,
+                'integer',
+                'Maximum number of custom categories a single user can have at once. The user-side POST endpoint rejects creation beyond this cap. Promoted/rejected customs do not count toward the limit.',
+                'classification',
+                TRUE
+            )
+            ON CONFLICT (setting_key) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded max_custom_categories_per_user = 20 (admin-tunable)")
+    end,
 }
