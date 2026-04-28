@@ -301,7 +301,7 @@ export default function MoneyOutPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Total Spent</p>
@@ -315,7 +315,7 @@ export default function MoneyOutPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">VAT Reclaimable</p>
@@ -329,7 +329,7 @@ export default function MoneyOutPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Entries</p>
@@ -359,9 +359,9 @@ export default function MoneyOutPage() {
       <div className="bg-secondary-50 rounded-xl border border-secondary-200 p-4">
         <h3 className="text-sm font-semibold text-secondary-700 mb-2">Quick Tips</h3>
         <ul className="text-xs text-secondary-500 space-y-1">
-          <li><kbd className="px-1.5 py-0.5 bg-white border border-secondary-200 rounded text-xs font-mono">Tab</kbd> Move to next cell</li>
-          <li><kbd className="px-1.5 py-0.5 bg-white border border-secondary-200 rounded text-xs font-mono">Enter</kbd> Save row and move down</li>
-          <li><kbd className="px-1.5 py-0.5 bg-white border border-secondary-200 rounded text-xs font-mono">Esc</kbd> Deselect current cell</li>
+          <li><kbd className="px-1.5 py-0.5 bg-surface border border-secondary-200 rounded text-xs font-mono">Tab</kbd> Move to next cell</li>
+          <li><kbd className="px-1.5 py-0.5 bg-surface border border-secondary-200 rounded text-xs font-mono">Enter</kbd> Save row and move down</li>
+          <li><kbd className="px-1.5 py-0.5 bg-surface border border-secondary-200 rounded text-xs font-mono">Esc</kbd> Deselect current cell</li>
           <li>VAT is automatically calculated from the gross amount at the selected rate</li>
           <li>HMRC categories are available in the Category dropdown for SA103F compliance</li>
         </ul>

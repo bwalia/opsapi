@@ -65,7 +65,7 @@ const PrioritySelect = memo(function PrioritySelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as KanbanTaskPriority)}
-        className="w-full px-3 py-2 pr-10 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent appearance-none bg-white"
+        className="w-full px-3 py-2 pr-10 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent appearance-none bg-surface"
       >
         {PRIORITIES.map((priority) => (
           <option key={priority.value} value={priority.value}>
@@ -113,9 +113,9 @@ const MemberSelect = memo(function MemberSelect({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-3 py-2 text-sm text-left border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 hover:bg-gray-50 flex items-center justify-between"
+        className="w-full px-3 py-2 text-sm text-left border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 hover:bg-secondary-50 flex items-center justify-between"
       >
-        <span className="text-gray-700">
+        <span className="text-secondary-700">
           {selectedMembers.length > 0
             ? selectedMembers.map((m) => m.user?.first_name || 'User').join(', ')
             : 'Select assignees...'}
@@ -126,20 +126,20 @@ const MemberSelect = memo(function MemberSelect({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          <div className="absolute z-20 w-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
             {members.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-gray-500">No members available</div>
+              <div className="px-3 py-2 text-sm text-secondary-500">No members available</div>
             ) : (
               members.map((member) => (
                 <button
                   key={member.user_uuid}
                   type="button"
                   onClick={() => toggleMember(member.user_uuid)}
-                  className={`w-full px-3 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2 ${
+                  className={`w-full px-3 py-2 text-sm text-left hover:bg-secondary-50 flex items-center gap-2 ${
                     selectedUuids.includes(member.user_uuid) ? 'bg-primary-50' : ''
                   }`}
                 >
-                  <div className="w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center text-xs font-medium text-gray-600">
+                  <div className="w-6 h-6 rounded-full bg-secondary-300 flex items-center justify-center text-xs font-medium text-secondary-600">
                     {member.user?.first_name?.[0] || 'U'}
                   </div>
                   <span>
@@ -190,7 +190,7 @@ const LabelSelect = memo(function LabelSelect({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-3 py-2 text-sm text-left border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 hover:bg-gray-50 flex items-center justify-between"
+        className="w-full px-3 py-2 text-sm text-left border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 hover:bg-secondary-50 flex items-center justify-between"
       >
         <div className="flex flex-wrap gap-1">
           {selectedLabels.length > 0 ? (
@@ -204,7 +204,7 @@ const LabelSelect = memo(function LabelSelect({
               </span>
             ))
           ) : (
-            <span className="text-gray-500">Select labels...</span>
+            <span className="text-secondary-500">Select labels...</span>
           )}
         </div>
         {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -213,16 +213,16 @@ const LabelSelect = memo(function LabelSelect({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          <div className="absolute z-20 w-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
             {labels.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-gray-500">No labels available</div>
+              <div className="px-3 py-2 text-sm text-secondary-500">No labels available</div>
             ) : (
               labels.map((label) => (
                 <button
                   key={label.id}
                   type="button"
                   onClick={() => toggleLabel(label.id)}
-                  className={`w-full px-3 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2 ${
+                  className={`w-full px-3 py-2 text-sm text-left hover:bg-secondary-50 flex items-center gap-2 ${
                     selectedIds.includes(label.id) ? 'bg-primary-50' : ''
                   }`}
                 >
@@ -354,7 +354,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Title - Required */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             Task Title <span className="text-red-500">*</span>
           </label>
           <Input
@@ -369,7 +369,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
 
         {/* Description */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             <FileText size={14} className="inline mr-1" />
             Description
           </label>
@@ -379,21 +379,21 @@ const CreateTaskModal = memo(function CreateTaskModal({
             onChange={handleChange}
             placeholder="Add a more detailed description..."
             rows={3}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           />
         </div>
 
         {/* Column & Priority Row */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">
               Column
             </label>
             <select
               name="column_id"
               value={formData.column_id || ''}
               onChange={handleChange}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             >
               {columns.map((col) => (
                 <option key={col.id} value={col.id}>
@@ -404,7 +404,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">
               <Flag size={14} className="inline mr-1" />
               Priority
             </label>
@@ -418,7 +418,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
         {/* Dates Row */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">
               <Calendar size={14} className="inline mr-1" />
               Start Date
             </label>
@@ -431,7 +431,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">
               <Calendar size={14} className="inline mr-1" />
               Due Date
             </label>
@@ -447,7 +447,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
 
         {/* Assignees */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             <User size={14} className="inline mr-1" />
             Assignees
           </label>
@@ -460,7 +460,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
 
         {/* Labels */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             <Tag size={14} className="inline mr-1" />
             Labels
           </label>
@@ -475,7 +475,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
         <button
           type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+          className="flex items-center gap-2 text-sm text-secondary-600 hover:text-secondary-900"
         >
           {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           Advanced Options
@@ -483,11 +483,11 @@ const CreateTaskModal = memo(function CreateTaskModal({
 
         {/* Advanced Options */}
         {showAdvanced && (
-          <div className="space-y-4 pt-4 border-t border-gray-200">
+          <div className="space-y-4 pt-4 border-t border-secondary-200">
             {/* Story Points & Time Estimate */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">
                   <Target size={14} className="inline mr-1" />
                   Story Points
                 </label>
@@ -502,7 +502,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">
                   <Clock size={14} className="inline mr-1" />
                   Time Estimate (minutes)
                 </label>
@@ -519,7 +519,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
 
             {/* Budget */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-secondary-700 mb-1">
                 Budget
               </label>
               <Input
@@ -535,14 +535,14 @@ const CreateTaskModal = memo(function CreateTaskModal({
 
             {/* Status */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-secondary-700 mb-1">
                 Initial Status
               </label>
               <select
                 name="status"
                 value={formData.status || 'open'}
                 onChange={handleChange}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               >
                 {STATUSES.map((status) => (
                   <option key={status.value} value={status.value}>
@@ -555,7 +555,7 @@ const CreateTaskModal = memo(function CreateTaskModal({
         )}
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+        <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
           <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
             Cancel
           </Button>

@@ -172,7 +172,7 @@ function ReportsContent() {
               </div>
 
               {/* Table */}
-              <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+              <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-secondary-50 border-b border-secondary-200">
@@ -223,7 +223,7 @@ function ReportsContent() {
               No HMRC box data available. Classify your transactions first.
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+            <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
               <div className="p-4 border-b border-secondary-200 bg-secondary-50">
                 <h3 className="font-semibold text-secondary-900">SA103F Self-Employment (Full)</h3>
                 <p className="text-sm text-secondary-500">Tax Year {taxYear}/{Number(taxYear) + 1}</p>
@@ -262,7 +262,7 @@ function ReportsContent() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+              <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-secondary-50 border-b border-secondary-200">
@@ -322,19 +322,19 @@ function ReportsContent() {
             <div className="space-y-6">
               {/* Summary cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white rounded-xl border border-secondary-200 p-5">
+                <div className="bg-surface rounded-xl border border-secondary-200 p-5">
                   <p className="text-sm text-secondary-500">Total Income</p>
                   <p className="text-2xl font-bold text-secondary-900">
                     {formatCurrency(Number(taxCalculation.total_income), 'GBP', 'en-GB')}
                   </p>
                 </div>
-                <div className="bg-white rounded-xl border border-secondary-200 p-5">
+                <div className="bg-surface rounded-xl border border-secondary-200 p-5">
                   <p className="text-sm text-secondary-500">Allowable Expenses</p>
                   <p className="text-2xl font-bold text-secondary-900">
                     {formatCurrency(Number(taxCalculation.total_expenses), 'GBP', 'en-GB')}
                   </p>
                 </div>
-                <div className="bg-white rounded-xl border border-secondary-200 p-5">
+                <div className="bg-surface rounded-xl border border-secondary-200 p-5">
                   <p className="text-sm text-secondary-500">Taxable Income</p>
                   <p className="text-2xl font-bold text-secondary-900">
                     {formatCurrency(Number(taxCalculation.taxable_income), 'GBP', 'en-GB')}
@@ -350,7 +350,7 @@ function ReportsContent() {
 
               {/* Tax bands */}
               {taxCalculation.tax_bands && taxCalculation.tax_bands.length > 0 && (
-                <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+                <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
                   <div className="p-4 border-b border-secondary-200 bg-secondary-50">
                     <h3 className="font-semibold text-secondary-900">Income Tax Bands</h3>
                   </div>

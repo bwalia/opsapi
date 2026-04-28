@@ -249,7 +249,7 @@ app:before_filter(function(self)
         uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
         uri:match("^/api/v2/projects$") or
-        uri:match("^/api/v2/projects/[^/]+/theme") or
+        uri:match("^/api/v2/themes/active/styles%.css$") or
         uri:match("^/api/v2/[^/]+/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
         uri:match("^/api/v2/test%-notification") then
@@ -332,12 +332,16 @@ safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
 safe_load_routes("routes.email")
 safe_load_routes("routes.project-dashboard")
-safe_load_routes("routes.project-themes")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
 -- ============================================
 load_if("menu", "routes.menu")
+
+-- ============================================
+-- THEME SYSTEM (multi-tenant theming)
+-- ============================================
+load_if("themes", "routes.themes")
 
 -- ============================================
 -- ECOMMERCE (stores, products, orders, payments)

@@ -61,7 +61,7 @@ interface BoardColumn {
 }
 
 const BOARD_COLUMNS: BoardColumn[] = [
-  { key: 'todo', label: 'To Do', statuses: ['open'], color: 'bg-gray-400' },
+  { key: 'todo', label: 'To Do', statuses: ['open'], color: 'bg-secondary-400' },
   { key: 'in_progress', label: 'In Progress', statuses: ['in_progress'], color: 'bg-blue-500' },
   { key: 'in_review', label: 'In Review', statuses: ['review'], color: 'bg-purple-500' },
   { key: 'done', label: 'Done', statuses: ['completed'], color: 'bg-green-500' },
@@ -74,7 +74,7 @@ const PRIORITY_DOT_COLORS: Record<string, string> = {
   high: 'bg-orange-500',
   medium: 'bg-yellow-500',
   low: 'bg-green-500',
-  none: 'bg-gray-400',
+  none: 'bg-secondary-400',
 };
 
 // ============================================
@@ -85,10 +85,10 @@ const LoadingSkeleton = () => (
   <div className="flex gap-4 p-6 animate-pulse">
     {[1, 2, 3, 4].map((i) => (
       <div key={i} className="w-72 flex-shrink-0">
-        <div className="h-10 bg-gray-200 rounded-lg mb-4" />
+        <div className="h-10 bg-secondary-200 rounded-lg mb-4" />
         <div className="space-y-3">
           {[1, 2, 3].map((j) => (
-            <div key={j} className="h-28 bg-gray-200 rounded-lg" />
+            <div key={j} className="h-28 bg-secondary-200 rounded-lg" />
           ))}
         </div>
       </div>
@@ -118,7 +118,7 @@ const SprintSelector = React.memo(function SprintSelector({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+        className="flex items-center gap-2 px-3 py-2 bg-surface border border-secondary-200 rounded-lg hover:bg-secondary-50 transition-colors"
       >
         <Target size={16} />
         <span className="font-medium text-sm">
@@ -135,9 +135,9 @@ const SprintSelector = React.memo(function SprintSelector({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-1 w-72 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20 max-h-80 overflow-y-auto">
+          <div className="absolute left-0 mt-1 w-72 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20 max-h-80 overflow-y-auto">
             {sprints.length === 0 && (
-              <div className="px-3 py-4 text-sm text-gray-500 text-center">
+              <div className="px-3 py-4 text-sm text-secondary-500 text-center">
                 No sprints yet
               </div>
             )}
@@ -149,8 +149,8 @@ const SprintSelector = React.memo(function SprintSelector({
                   setIsOpen(false);
                 }}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50',
-                  sprint.uuid === currentSprintUuid && 'bg-gray-50 font-medium'
+                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50',
+                  sprint.uuid === currentSprintUuid && 'bg-secondary-50 font-medium'
                 )}
               >
                 <Target size={14} />
@@ -185,7 +185,7 @@ const ViewToggle = React.memo(function ViewToggle({ currentView, onChange }: Vie
   ];
 
   return (
-    <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+    <div className="flex items-center bg-secondary-100 rounded-lg p-0.5">
       {views.map((view) => (
         <button
           key={view.key}
@@ -193,8 +193,8 @@ const ViewToggle = React.memo(function ViewToggle({ currentView, onChange }: Vie
           className={cn(
             'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
             currentView === view.key
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-600 hover:text-gray-900'
+              ? 'bg-surface text-secondary-900 shadow-sm'
+              : 'text-secondary-600 hover:text-secondary-900'
           )}
         >
           {view.icon}
@@ -221,7 +221,7 @@ const TaskCard = React.memo(function TaskCard({ task, onDragStart, onClick }: Ta
       draggable
       onDragStart={(e) => onDragStart(e, task)}
       onClick={() => onClick(task)}
-      className="bg-white border border-gray-200 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group"
+      className="bg-surface border border-secondary-200 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group"
     >
       {/* Labels */}
       {task.labels && task.labels.length > 0 && (
@@ -239,13 +239,13 @@ const TaskCard = React.memo(function TaskCard({ task, onDragStart, onClick }: Ta
       )}
 
       {/* Title */}
-      <p className="text-sm font-medium text-gray-900 mb-2 line-clamp-2">
+      <p className="text-sm font-medium text-secondary-900 mb-2 line-clamp-2">
         {task.title}
       </p>
 
       {/* Description snippet */}
       {task.description && (
-        <p className="text-xs text-gray-500 mb-2 line-clamp-1">
+        <p className="text-xs text-secondary-500 mb-2 line-clamp-1">
           {task.description}
         </p>
       )}
@@ -267,7 +267,7 @@ const TaskCard = React.memo(function TaskCard({ task, onDragStart, onClick }: Ta
           )}
 
           {/* Task number */}
-          <span className="text-xs text-gray-400">#{task.task_number}</span>
+          <span className="text-xs text-secondary-400">#{task.task_number}</span>
         </div>
 
         <div className="flex items-center gap-1">
@@ -284,13 +284,13 @@ const TaskCard = React.memo(function TaskCard({ task, onDragStart, onClick }: Ta
                 </div>
               ))}
               {task.assignees.length > 2 && (
-                <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-xs font-medium border-2 border-white">
+                <div className="w-6 h-6 rounded-full bg-secondary-200 text-secondary-600 flex items-center justify-center text-xs font-medium border-2 border-white">
                   +{task.assignees.length - 2}
                 </div>
               )}
             </div>
           ) : (
-            <User size={14} className="text-gray-300" />
+            <User size={14} className="text-secondary-300" />
           )}
         </div>
       </div>
@@ -325,26 +325,26 @@ const BoardColumnComponent = React.memo(function BoardColumnComponent({
 
   return (
     <div
-      className="flex-shrink-0 w-[280px] flex flex-col bg-gray-50 rounded-lg"
+      className="flex-shrink-0 w-[280px] flex flex-col bg-secondary-50 rounded-lg"
       onDragOver={onDragOver}
       onDrop={(e) => onDrop(e, column)}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-200">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-secondary-200">
         <div className="flex items-center gap-2">
           <div className={cn('w-2.5 h-2.5 rounded-full', column.color)} />
-          <span className="text-sm font-semibold text-gray-700">{column.label}</span>
-          <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full font-medium">
+          <span className="text-sm font-semibold text-secondary-700">{column.label}</span>
+          <span className="text-xs bg-secondary-200 text-secondary-600 px-1.5 py-0.5 rounded-full font-medium">
             {tasks.length}
           </span>
         </div>
         <div className="flex items-center gap-1">
           {totalPoints > 0 && (
-            <span className="text-xs text-gray-500">{totalPoints} pts</span>
+            <span className="text-xs text-secondary-500">{totalPoints} pts</span>
           )}
           <button
             onClick={() => onAddTask(column.statuses[0])}
-            className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+            className="p-1 rounded hover:bg-secondary-200 text-secondary-400 hover:text-secondary-600 transition-colors"
           >
             <Plus size={14} />
           </button>
@@ -362,7 +362,7 @@ const BoardColumnComponent = React.memo(function BoardColumnComponent({
           />
         ))}
         {tasks.length === 0 && (
-          <div className="flex items-center justify-center h-24 text-xs text-gray-400">
+          <div className="flex items-center justify-center h-24 text-xs text-secondary-400">
             No tasks
           </div>
         )}
@@ -416,23 +416,23 @@ const SprintInfoBanner = React.memo(function SprintInfoBanner({
         {/* Sprint name and info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-base font-bold text-gray-900 truncate">{sprint.name}</h2>
+            <h2 className="text-base font-bold text-secondary-900 truncate">{sprint.name}</h2>
             <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', getSprintStatusColor(sprint.status))}>
               {getSprintStatusLabel(sprint.status)}
             </span>
           </div>
           {sprint.goal && (
-            <p className="text-xs text-gray-500 line-clamp-1 mb-2">{sprint.goal}</p>
+            <p className="text-xs text-secondary-500 line-clamp-1 mb-2">{sprint.goal}</p>
           )}
 
           {/* Date range progress bar */}
           {sprint.start_date && sprint.end_date && (
             <div>
-              <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+              <div className="flex items-center justify-between text-xs text-secondary-500 mb-1">
                 <span>{formatSprintDateRange(sprint.start_date, sprint.end_date)}</span>
                 <span>{daysElapsed} / {totalDays} days</span>
               </div>
-              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className="h-1.5 bg-secondary-200 rounded-full overflow-hidden">
                 <div
                   className={cn('h-full rounded-full transition-all', progressColor)}
                   style={{ width: `${dayProgress}%` }}
@@ -445,24 +445,24 @@ const SprintInfoBanner = React.memo(function SprintInfoBanner({
         {/* Stats */}
         <div className="flex items-center gap-4 flex-shrink-0">
           <div className="text-center">
-            <div className="text-lg font-bold text-gray-900">
+            <div className="text-lg font-bold text-secondary-900">
               {stats ? `${stats.completed_points}/${stats.total_points}` : '-'}
             </div>
-            <div className="text-xs text-gray-500">Story Points</div>
+            <div className="text-xs text-secondary-500">Story Points</div>
           </div>
           <div className="text-center">
-            <div className="text-lg font-bold text-gray-900">
+            <div className="text-lg font-bold text-secondary-900">
               {stats ? `${stats.completed_tasks}/${stats.total_tasks}` : '-'}
             </div>
-            <div className="text-xs text-gray-500">Tasks</div>
+            <div className="text-xs text-secondary-500">Tasks</div>
           </div>
           <div className="text-center">
-            <div className="text-lg font-bold text-gray-900">{daysRemaining}</div>
-            <div className="text-xs text-gray-500">Days Left</div>
+            <div className="text-lg font-bold text-secondary-900">{daysRemaining}</div>
+            <div className="text-xs text-secondary-500">Days Left</div>
           </div>
           <div className="text-center">
-            <div className="text-lg font-bold text-gray-900">{pointsProgress}%</div>
-            <div className="text-xs text-gray-500">Complete</div>
+            <div className="text-lg font-bold text-secondary-900">{pointsProgress}%</div>
+            <div className="text-xs text-secondary-500">Complete</div>
           </div>
         </div>
 
@@ -546,61 +546,61 @@ const CreateSprintModal = React.memo(function CreateSprintModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Create New Sprint</h2>
+      <div className="relative bg-surface rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
+        <h2 className="text-lg font-bold text-secondary-900 mb-4">Create New Sprint</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sprint Name *</label>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Sprint Name *</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., Sprint 12"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
               autoFocus
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Goal</label>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Goal</label>
             <textarea
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               placeholder="What do you want to achieve in this sprint?"
               rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <label className="block text-sm font-medium text-secondary-700 mb-1">Start Date</label>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <label className="block text-sm font-medium text-secondary-700 mb-1">End Date</label>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Capacity (Story Points)</label>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Capacity (Story Points)</label>
             <input
               type="number"
               value={capacityPoints}
               onChange={(e) => setCapacityPoints(parseInt(e.target.value) || 0)}
               min={0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
             />
           </div>
 
@@ -666,27 +666,27 @@ const CompleteSprintModal = React.memo(function CompleteSprintModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Complete Sprint: {sprint.name}</h2>
+      <div className="relative bg-surface rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-bold text-secondary-900 mb-4">Complete Sprint: {sprint.name}</h2>
 
         {/* Summary */}
-        <div className="bg-gray-50 rounded-lg p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Sprint Summary</h3>
+        <div className="bg-secondary-50 rounded-lg p-4 mb-4">
+          <h3 className="text-sm font-semibold text-secondary-700 mb-2">Sprint Summary</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <span className="text-gray-500">Completed:</span>
+              <span className="text-secondary-500">Completed:</span>
               <span className="ml-1 font-medium text-green-700">{completedTasks} tasks</span>
             </div>
             <div>
-              <span className="text-gray-500">Remaining:</span>
+              <span className="text-secondary-500">Remaining:</span>
               <span className="ml-1 font-medium text-orange-700">{remainingTasks} tasks</span>
             </div>
             <div>
-              <span className="text-gray-500">Points Done:</span>
+              <span className="text-secondary-500">Points Done:</span>
               <span className="ml-1 font-medium">{stats?.completed_points || 0}</span>
             </div>
             <div>
-              <span className="text-gray-500">Points Left:</span>
+              <span className="text-secondary-500">Points Left:</span>
               <span className="ml-1 font-medium">{stats?.remaining_points || 0}</span>
             </div>
           </div>
@@ -695,7 +695,7 @@ const CompleteSprintModal = React.memo(function CompleteSprintModal({
         {/* Remaining tasks handling */}
         {remainingTasks > 0 && (
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-secondary-700 mb-2">
               Move {remainingTasks} remaining task{remainingTasks > 1 ? 's' : ''} to:
             </label>
             <div className="flex gap-3">
@@ -727,33 +727,33 @@ const CompleteSprintModal = React.memo(function CompleteSprintModal({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">What went well?</label>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">What went well?</label>
             <textarea
               value={wentWell}
               onChange={(e) => setWentWell(e.target.value)}
               rows={3}
               placeholder="Team accomplishments, good practices..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">What to improve?</label>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">What to improve?</label>
             <textarea
               value={toImprove}
               onChange={(e) => setToImprove(e.target.value)}
               rows={3}
               placeholder="Blockers, issues encountered..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Action Items</label>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Action Items</label>
             <textarea
               value={actionItems}
               onChange={(e) => setActionItems(e.target.value)}
               rows={2}
               placeholder="Concrete steps for next sprint..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
             />
           </div>
 
@@ -852,27 +852,27 @@ const BacklogView = React.memo(function BacklogView({
   return (
     <div className="flex-1 flex gap-4 p-6 overflow-hidden">
       {/* Product Backlog */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white rounded-lg border border-gray-200">
-        <div className="p-3 border-b border-gray-200">
+      <div className="flex-1 flex flex-col min-w-0 bg-surface rounded-lg border border-secondary-200">
+        <div className="p-3 border-b border-secondary-200">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-bold text-gray-900">Product Backlog</h3>
-            <span className="text-xs text-gray-500">{filteredBacklog.length} tasks</span>
+            <h3 className="text-sm font-bold text-secondary-900">Product Backlog</h3>
+            <span className="text-xs text-secondary-500">{filteredBacklog.length} tasks</span>
           </div>
           <div className="flex gap-2">
             <div className="flex-1 relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary-400" />
               <input
                 type="text"
                 value={searchValue}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                className="w-full pl-8 pr-3 py-1.5 text-xs border border-secondary-200 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
               />
             </div>
             <select
               value={priorityFilter}
               onChange={(e) => onPriorityFilterChange(e.target.value)}
-              className="text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:ring-1 focus:ring-primary-500 outline-none"
+              className="text-xs border border-secondary-200 rounded-md px-2 py-1.5 focus:ring-1 focus:ring-primary-500 outline-none"
             >
               <option value="">All priorities</option>
               <option value="critical">Critical</option>
@@ -890,7 +890,7 @@ const BacklogView = React.memo(function BacklogView({
         </div>
         <div className="flex-1 overflow-y-auto">
           {filteredBacklog.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-sm text-gray-400">
+            <div className="flex items-center justify-center h-32 text-sm text-secondary-400">
               {backlogTasks.length === 0 ? 'No tasks in backlog' : 'No matching tasks'}
             </div>
           ) : (
@@ -898,7 +898,7 @@ const BacklogView = React.memo(function BacklogView({
               <div
                 key={task.uuid}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2 border-b border-gray-100 hover:bg-gray-50 cursor-pointer text-sm',
+                  'flex items-center gap-3 px-3 py-2 border-b border-secondary-100 hover:bg-secondary-50 cursor-pointer text-sm',
                   selectedBacklog.has(task.uuid) && 'bg-primary-50'
                 )}
               >
@@ -906,16 +906,16 @@ const BacklogView = React.memo(function BacklogView({
                   type="checkbox"
                   checked={selectedBacklog.has(task.uuid)}
                   onChange={() => toggleBacklogSelection(task.uuid)}
-                  className="rounded border-gray-300 text-primary-500"
+                  className="rounded border-secondary-300 text-primary-500"
                 />
                 <span className={cn('w-2 h-2 rounded-full flex-shrink-0', PRIORITY_DOT_COLORS[task.priority])} />
                 <span
-                  className="flex-1 truncate text-gray-900"
+                  className="flex-1 truncate text-secondary-900"
                   onClick={() => onTaskClick(task)}
                 >
                   {task.title}
                 </span>
-                <span className="text-xs text-gray-500 flex-shrink-0">
+                <span className="text-xs text-secondary-500 flex-shrink-0">
                   {task.story_points != null ? `${task.story_points} SP` : '-'}
                 </span>
               </div>
@@ -947,16 +947,16 @@ const BacklogView = React.memo(function BacklogView({
       </div>
 
       {/* Sprint Backlog */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white rounded-lg border border-gray-200">
-        <div className="p-3 border-b border-gray-200">
+      <div className="flex-1 flex flex-col min-w-0 bg-surface rounded-lg border border-secondary-200">
+        <div className="p-3 border-b border-secondary-200">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-bold text-gray-900">
+            <h3 className="text-sm font-bold text-secondary-900">
               Sprint Backlog {sprint ? `- ${sprint.name}` : ''}
             </h3>
-            <span className="text-xs text-gray-500">{sprintTasks.length} tasks</span>
+            <span className="text-xs text-secondary-500">{sprintTasks.length} tasks</span>
           </div>
           {/* Capacity indicator */}
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-secondary-500">
             <span>{totalSprintPoints} story points planned</span>
           </div>
           {selectedSprint.size > 0 && (
@@ -968,8 +968,8 @@ const BacklogView = React.memo(function BacklogView({
         </div>
         <div className="flex-1 overflow-y-auto">
           {sprintTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 text-sm text-gray-400">
-              <Target size={24} className="mb-2 text-gray-300" />
+            <div className="flex flex-col items-center justify-center h-32 text-sm text-secondary-400">
+              <Target size={24} className="mb-2 text-secondary-300" />
               {sprint ? 'No tasks in this sprint' : 'Select a sprint first'}
             </div>
           ) : (
@@ -977,7 +977,7 @@ const BacklogView = React.memo(function BacklogView({
               <div
                 key={task.uuid}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2 border-b border-gray-100 hover:bg-gray-50 cursor-pointer text-sm',
+                  'flex items-center gap-3 px-3 py-2 border-b border-secondary-100 hover:bg-secondary-50 cursor-pointer text-sm',
                   selectedSprint.has(task.uuid) && 'bg-primary-50'
                 )}
               >
@@ -985,11 +985,11 @@ const BacklogView = React.memo(function BacklogView({
                   type="checkbox"
                   checked={selectedSprint.has(task.uuid)}
                   onChange={() => toggleSprintSelection(task.uuid)}
-                  className="rounded border-gray-300 text-primary-500"
+                  className="rounded border-secondary-300 text-primary-500"
                 />
                 <span className={cn('w-2 h-2 rounded-full flex-shrink-0', PRIORITY_DOT_COLORS[task.priority])} />
                 <span
-                  className="flex-1 truncate text-gray-900"
+                  className="flex-1 truncate text-secondary-900"
                   onClick={() => onTaskClick(task)}
                 >
                   {task.title}
@@ -998,11 +998,11 @@ const BacklogView = React.memo(function BacklogView({
                   'text-xs px-1.5 py-0.5 rounded-full flex-shrink-0',
                   task.status === 'completed' ? 'bg-green-100 text-green-700' :
                   task.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
-                  'bg-gray-100 text-gray-600'
+                  'bg-secondary-100 text-secondary-600'
                 )}>
                   {task.status === 'in_progress' ? 'In Progress' : task.status === 'completed' ? 'Done' : task.status === 'review' ? 'Review' : 'To Do'}
                 </span>
-                <span className="text-xs text-gray-500 flex-shrink-0">
+                <span className="text-xs text-secondary-500 flex-shrink-0">
                   {task.story_points != null ? `${task.story_points} SP` : '-'}
                 </span>
               </div>
@@ -1370,7 +1370,7 @@ export default function SprintBoardPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 bg-white">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-secondary-200 bg-surface">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -1381,10 +1381,10 @@ export default function SprintBoardPage() {
           </Button>
 
           <div>
-            <h1 className="text-lg font-bold text-gray-900">
+            <h1 className="text-lg font-bold text-secondary-900">
               {currentProject?.name || 'Loading...'}
             </h1>
-            <p className="text-xs text-gray-500">Sprint Board</p>
+            <p className="text-xs text-secondary-500">Sprint Board</p>
           </div>
         </div>
 
@@ -1438,9 +1438,9 @@ export default function SprintBoardPage() {
         {/* No sprints empty state */}
         {!isLoading && sprints.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <Target size={48} className="text-gray-300 mb-4" />
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">No Sprints Yet</h2>
-            <p className="text-sm text-gray-500 mb-4 max-w-md">
+            <Target size={48} className="text-secondary-300 mb-4" />
+            <h2 className="text-lg font-semibold text-secondary-900 mb-2">No Sprints Yet</h2>
+            <p className="text-sm text-secondary-500 mb-4 max-w-md">
               Create your first sprint to start organizing your work into time-boxed iterations.
             </p>
             <Button variant="primary" size="sm" onClick={() => setIsCreateSprintOpen(true)}>
@@ -1479,7 +1479,7 @@ export default function SprintBoardPage() {
           <>
             {backlogLoading ? (
               <div className="flex items-center justify-center h-64">
-                <Loader2 size={24} className="animate-spin text-gray-400" />
+                <Loader2 size={24} className="animate-spin text-secondary-400" />
               </div>
             ) : (
               <BacklogView
@@ -1502,11 +1502,11 @@ export default function SprintBoardPage() {
         {/* Burndown View - redirect to dedicated page */}
         {!isLoading && sprints.length > 0 && (viewMode === 'burndown' || viewMode === 'velocity') && (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <BarChart3 size={48} className="text-gray-300 mb-4" />
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">
+            <BarChart3 size={48} className="text-secondary-300 mb-4" />
+            <h2 className="text-lg font-semibold text-secondary-900 mb-2">
               {viewMode === 'burndown' ? 'Sprint Burndown Chart' : 'Velocity Chart'}
             </h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-secondary-500 mb-4">
               View detailed charts and analytics for your sprints.
             </p>
             <Button

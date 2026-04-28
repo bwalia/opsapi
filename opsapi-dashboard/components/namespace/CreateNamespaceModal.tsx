@@ -135,7 +135,7 @@ const SelectDropdown = memo(function SelectDropdown<T extends string>({
           disabled={disabled}
           className={cn(
             'w-full flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
-            'bg-white text-secondary-900',
+            'bg-surface text-secondary-900',
             'focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500',
             'disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed',
             error
@@ -162,7 +162,7 @@ const SelectDropdown = memo(function SelectDropdown<T extends string>({
         </button>
 
         {isOpen && (
-          <div className="absolute z-50 mt-1 w-full bg-white border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
+          <div className="absolute z-50 mt-1 w-full bg-surface border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
             {options.map((option) => (
               <button
                 key={option.value}
@@ -305,7 +305,7 @@ const OwnerSearchDropdown = memo(function OwnerSearchDropdown({
         )}
 
         {isOpen && (searchQuery.length >= 2 || users.length > 0) && (
-          <div className="absolute z-50 mt-1 w-full bg-white border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
+          <div className="absolute z-50 mt-1 w-full bg-surface border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
             {isLoading ? (
               <div className="px-4 py-3 text-sm text-secondary-500 text-center">
                 Searching...
@@ -547,7 +547,7 @@ const CreateNamespaceModal: React.FC<CreateNamespaceModalProps> = memo(
                 disabled={isSubmitting}
                 className={cn(
                   'w-full px-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
-                  'bg-white text-secondary-900 placeholder:text-secondary-400',
+                  'bg-surface text-secondary-900 placeholder:text-secondary-400',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500',
                   'disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed',
                   'border-secondary-300 hover:border-secondary-400 resize-none'

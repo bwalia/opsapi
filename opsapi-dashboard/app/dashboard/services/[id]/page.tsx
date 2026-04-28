@@ -559,7 +559,7 @@ export default function ServiceDetailsPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden animate-pulse">
+        <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden animate-pulse">
           <div className="h-24 bg-secondary-200" />
           <div className="px-6 pb-6">
             <div className="flex items-start gap-4 -mt-8">
@@ -665,7 +665,7 @@ export default function ServiceDetailsPage() {
       )}
 
       {/* Header */}
-      <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+      <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
         <div
           className={cn(
             "h-24",
@@ -1193,7 +1193,7 @@ export default function ServiceDetailsPage() {
           </Card>
 
           {/* Variables - IMPORTANT: These ARE sent to GitHub */}
-          <Card className="p-6 border-2 border-primary-300 bg-white">
+          <Card className="p-6 border-2 border-primary-300 bg-surface">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-primary-500 flex items-center justify-center">

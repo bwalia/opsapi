@@ -48,7 +48,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => {
   };
 
   return (
-    <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+    <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-secondary-500">{title}</p>
@@ -219,7 +219,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({ isOpen, onClose
             <select
               value={formData.currency}
               onChange={(e) => setFormData((prev) => ({ ...prev, currency: e.target.value }))}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             >
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
@@ -261,7 +261,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({ isOpen, onClose
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -510,7 +510,7 @@ function InvoicesPageContent() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => fetchInvoices()}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -578,7 +578,7 @@ function InvoicesPageContent() {
                   setStatusFilter(e.target.value as InvoiceStatus | 'all');
                   setCurrentPage(1);
                 }}
-                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
               >
                 {INVOICE_STATUS_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -595,7 +595,7 @@ function InvoicesPageContent() {
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-colors ${
                 showFilters || hasActiveFilters
                   ? 'bg-primary-50 text-primary-600 border border-primary-200'
-                  : 'text-secondary-700 bg-white border border-secondary-300 hover:bg-secondary-50'
+                  : 'text-secondary-700 bg-surface border border-secondary-300 hover:bg-secondary-50'
               }`}
             >
               <Filter className="w-4 h-4" />
@@ -630,7 +630,7 @@ function InvoicesPageContent() {
                     setDateFrom(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                  className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
                   placeholder="From"
                 />
                 <span className="text-secondary-400">to</span>
@@ -641,7 +641,7 @@ function InvoicesPageContent() {
                     setDateTo(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                  className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
                   placeholder="To"
                 />
               </div>

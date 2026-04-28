@@ -88,7 +88,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color, subtitle
   };
 
   return (
-    <div className={`rounded-xl border p-5 shadow-sm bg-white ${colors[color].split(' ').slice(2).join(' ')}`}>
+    <div className={`rounded-xl border p-5 shadow-sm bg-surface ${colors[color].split(' ').slice(2).join(' ')}`}>
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-secondary-500">{title}</p>
@@ -664,7 +664,7 @@ function AccountingPageContent() {
         </div>
         <button
           onClick={() => { fetchDashboardData(); if (activeTab === 'transactions') fetchTransactions(); if (activeTab === 'expenses') fetchExpenses(); if (activeTab === 'accounts') fetchAccounts(); if (activeTab === 'reports') fetchReport(reportSubTab); }}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
         >
           <RefreshCw className={`w-4 h-4 ${statsLoading ? 'animate-spin' : ''}`} />
           Refresh
@@ -698,7 +698,7 @@ function AccountingPageContent() {
           {statsLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="bg-white rounded-xl border p-5 shadow-sm">
+                <div key={i} className="bg-surface rounded-xl border p-5 shadow-sm">
                   <Skeleton className="h-4 w-24 mb-3" />
                   <Skeleton className="h-8 w-32" />
                 </div>
@@ -861,7 +861,7 @@ function AccountingPageContent() {
                 <select
                   value={txReconciledFilter}
                   onChange={(e) => { setTxReconciledFilter(e.target.value); setTxPage(1); }}
-                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
                 >
                   <option value="all">All</option>
                   <option value="yes">Reconciled</option>
@@ -983,7 +983,7 @@ function AccountingPageContent() {
                 <select
                   value={expStatusFilter}
                   onChange={(e) => { setExpStatusFilter(e.target.value); setExpPage(1); }}
-                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
                 >
                   <option value="all">All Status</option>
                   <option value="pending">Pending</option>
@@ -1093,7 +1093,7 @@ function AccountingPageContent() {
                 onClick={() => setReportSubTab(sub.key)}
                 className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                   reportSubTab === sub.key
-                    ? 'bg-white text-secondary-900 shadow-sm'
+                    ? 'bg-surface text-secondary-900 shadow-sm'
                     : 'text-secondary-500 hover:text-secondary-700'
                 }`}
               >
@@ -1110,14 +1110,14 @@ function AccountingPageContent() {
                 type="date"
                 value={reportDateFrom}
                 onChange={(e) => setReportDateFrom(e.target.value)}
-                className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               />
               <span className="text-secondary-400">to</span>
               <input
                 type="date"
                 value={reportDateTo}
                 onChange={(e) => setReportDateTo(e.target.value)}
-                className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               />
               <button
                 onClick={() => fetchReport(reportSubTab)}
@@ -1478,7 +1478,7 @@ function AccountingPageContent() {
             className="w-full h-48 px-3 py-2 border border-secondary-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none"
           />
           <div className="flex justify-end gap-3">
-            <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
+            <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
               Cancel
             </button>
             <button
@@ -1509,7 +1509,7 @@ function AccountingPageContent() {
             <select
               value={reconcileAccountId || ''}
               onChange={(e) => setReconcileAccountId(e.target.value ? parseInt(e.target.value) : null)}
-              className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             >
               <option value="">Select account...</option>
               {accounts.map((a) => (
@@ -1518,7 +1518,7 @@ function AccountingPageContent() {
             </select>
           </div>
           <div className="flex justify-end gap-3">
-            <button onClick={() => { setReconcileModalOpen(false); setReconcileTarget(null); }} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
+            <button onClick={() => { setReconcileModalOpen(false); setReconcileTarget(null); }} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
               Cancel
             </button>
             <button
@@ -1542,7 +1542,7 @@ function AccountingPageContent() {
                 type="date"
                 value={expenseForm.expense_date}
                 onChange={(e) => setExpenseForm((f) => ({ ...f, expense_date: e.target.value }))}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               />
             </div>
             <div>
@@ -1573,7 +1573,7 @@ function AccountingPageContent() {
               <select
                 value={expenseForm.category}
                 onChange={(e) => setExpenseForm((f) => ({ ...f, category: e.target.value }))}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               >
                 <option value="">Select category...</option>
                 {expenseAccounts.length > 0 ? (
@@ -1596,7 +1596,7 @@ function AccountingPageContent() {
               <select
                 value={expenseForm.vat_rate}
                 onChange={(e) => setExpenseForm((f) => ({ ...f, vat_rate: e.target.value }))}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               >
                 <option value="0">0% (Exempt)</option>
                 <option value="5">5% (Reduced)</option>
@@ -1624,7 +1624,7 @@ function AccountingPageContent() {
               AI Categorize
             </button>
             <div className="flex gap-3">
-              <button onClick={() => setExpenseModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
+              <button onClick={() => setExpenseModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
                 Cancel
               </button>
               <button
@@ -1659,7 +1659,7 @@ function AccountingPageContent() {
               <select
                 value={accountForm.account_type}
                 onChange={(e) => setAccountForm((f) => ({ ...f, account_type: e.target.value as AccountingAccount['account_type'] }))}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               >
                 <option value="asset">Asset</option>
                 <option value="liability">Liability</option>
@@ -1684,7 +1684,7 @@ function AccountingPageContent() {
             <select
               value={accountForm.parent_id}
               onChange={(e) => setAccountForm((f) => ({ ...f, parent_id: e.target.value }))}
-              className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             >
               <option value="">None (top level)</option>
               {accounts.filter((a) => a.account_type === accountForm.account_type).map((a) => (
@@ -1703,7 +1703,7 @@ function AccountingPageContent() {
             />
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setAccountModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
+            <button onClick={() => setAccountModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
               Cancel
             </button>
             <button
@@ -1728,7 +1728,7 @@ function AccountingPageContent() {
                 type="date"
                 value={journalForm.entry_date}
                 onChange={(e) => setJournalForm((f) => ({ ...f, entry_date: e.target.value }))}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               />
             </div>
             <div>
@@ -1780,7 +1780,7 @@ function AccountingPageContent() {
                       newLines[idx] = { ...newLines[idx], account_id: e.target.value };
                       setJournalLines(newLines);
                     }}
-                    className="col-span-5 px-2 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                    className="col-span-5 px-2 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
                   >
                     <option value="">Select...</option>
                     {accounts.map((a) => (
@@ -1835,7 +1835,7 @@ function AccountingPageContent() {
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setJournalModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
+            <button onClick={() => setJournalModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
               Cancel
             </button>
             <button
@@ -1861,7 +1861,7 @@ function AccountingPageContent() {
                 type="date"
                 value={vatPeriodStart}
                 onChange={(e) => setVatPeriodStart(e.target.value)}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               />
             </div>
             <div>
@@ -1870,12 +1870,12 @@ function AccountingPageContent() {
                 type="date"
                 value={vatPeriodEnd}
                 onChange={(e) => setVatPeriodEnd(e.target.value)}
-                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+                className="w-full px-3 py-2.5 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
               />
             </div>
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setVatModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
+            <button onClick={() => setVatModalOpen(false)} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">
               Cancel
             </button>
             <button

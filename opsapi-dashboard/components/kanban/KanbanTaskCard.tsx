@@ -48,7 +48,7 @@ const PriorityIcon = memo(function PriorityIcon({
     case 'low':
       return <ArrowDown {...iconProps} className={cn(iconProps.className, 'text-blue-500')} />;
     default:
-      return <Circle {...iconProps} className={cn(iconProps.className, 'text-gray-400')} />;
+      return <Circle {...iconProps} className={cn(iconProps.className, 'text-secondary-400')} />;
   }
 });
 
@@ -85,7 +85,7 @@ const AssigneeAvatars = memo(function AssigneeAvatars({
         );
       })}
       {remaining > 0 && (
-        <div className="w-6 h-6 rounded-full bg-gray-100 text-gray-600 text-xs font-medium flex items-center justify-center border-2 border-white">
+        <div className="w-6 h-6 rounded-full bg-secondary-100 text-secondary-600 text-xs font-medium flex items-center justify-center border-2 border-white">
           +{remaining}
         </div>
       )}
@@ -124,7 +124,7 @@ const LabelTags = memo(function LabelTags({
         </span>
       ))}
       {remaining > 0 && (
-        <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+        <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-secondary-100 text-secondary-600">
           +{remaining}
         </span>
       )}
@@ -159,8 +159,8 @@ const DueDateBadge = memo(function DueDateBadge({
         'flex items-center gap-1 text-xs',
         overdue && 'text-red-600',
         dueSoon && !overdue && 'text-orange-600',
-        !overdue && !dueSoon && 'text-gray-500',
-        isCompleted && 'text-gray-400 line-through'
+        !overdue && !dueSoon && 'text-secondary-500',
+        isCompleted && 'text-secondary-400 line-through'
       )}
     >
       <Calendar size={12} />
@@ -197,7 +197,7 @@ const TaskMetadata = memo(function TaskMetadata({ task }: { task: KanbanTask }) 
   }
 
   return (
-    <div className="flex items-center gap-3 text-xs text-gray-500">
+    <div className="flex items-center gap-3 text-xs text-secondary-500">
       {showComments && (
         <div className="flex items-center gap-1" title={`${task.comment_count} comments`}>
           <MessageSquare size={12} />
@@ -281,7 +281,7 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
       onKeyDown={handleKeyDown}
       style={combinedStyle}
       className={cn(
-        'relative bg-white rounded-lg border shadow-sm p-3 cursor-pointer transition-all duration-200',
+        'relative bg-surface rounded-lg border shadow-sm p-3 cursor-pointer transition-all duration-200',
         'hover:shadow-md hover:border-primary-200',
         'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
         isDragging && 'shadow-lg opacity-40 scale-[0.98] border-primary-300',
@@ -296,11 +296,11 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
         {...dragHandleProps}
         className={cn(
           'absolute top-2 right-2 p-1 rounded transition-all cursor-grab active:cursor-grabbing',
-          'md:opacity-0 md:hover:opacity-100 hover:bg-gray-100',
+          'md:opacity-0 md:hover:opacity-100 hover:bg-secondary-100',
           'touch-none' // Prevent scroll interference on touch
         )}
       >
-        <GripVertical size={14} className="text-gray-400" />
+        <GripVertical size={14} className="text-secondary-400" />
       </div>
 
       {/* Cover Image */}
@@ -318,13 +318,13 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
       <LabelTags labels={task.labels} />
 
       {/* Title */}
-      <h4 className="font-medium text-gray-900 text-sm mt-2 line-clamp-2">
+      <h4 className="font-medium text-secondary-900 text-sm mt-2 line-clamp-2">
         {task.title}
       </h4>
 
       {/* Task Number & Priority */}
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs text-gray-400 font-mono">#{task.task_number}</span>
+        <span className="text-xs text-secondary-400 font-mono">#{task.task_number}</span>
         <PriorityIcon priority={task.priority} />
       </div>
 
@@ -341,15 +341,15 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
       </div>
 
       {/* Footer: Assignees & Story Points */}
-      <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+      <div className="flex items-center justify-between mt-3 pt-2 border-t border-secondary-100">
         <AssigneeAvatars assignees={task.assignees} />
         {task.story_points && task.story_points > 0 && (
-          <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+          <span className="text-xs font-medium text-secondary-500 bg-secondary-100 px-2 py-0.5 rounded">
             {task.story_points} pts
           </span>
         )}
         {!task.assignees?.length && !task.story_points && (
-          <div className="flex items-center text-gray-400">
+          <div className="flex items-center text-secondary-400">
             <User size={14} />
           </div>
         )}

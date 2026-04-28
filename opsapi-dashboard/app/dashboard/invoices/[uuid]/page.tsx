@@ -152,7 +152,7 @@ const AddLineItemModal: React.FC<AddLineItemModalProps> = ({ isOpen, onClose, on
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -265,7 +265,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
           <select
             value={formData.payment_method}
             onChange={(e) => setFormData((prev) => ({ ...prev, payment_method: e.target.value }))}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
           >
             <option value="bank_transfer">Bank Transfer</option>
             <option value="credit_card">Credit Card</option>
@@ -302,7 +302,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -426,7 +426,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
             <select
               value={formData.currency}
               onChange={(e) => setFormData((prev) => ({ ...prev, currency: e.target.value }))}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             >
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
@@ -464,7 +464,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -592,7 +592,7 @@ function InvoiceDetailContent() {
             <div className="w-32 h-4 bg-secondary-200 rounded animate-pulse" />
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-6">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-6">
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="w-full h-8 bg-secondary-100 rounded animate-pulse" />
@@ -648,7 +648,7 @@ function InvoiceDetailContent() {
           {canEdit && (
             <button
               onClick={() => setIsEditModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
             >
               <Edit2 className="w-4 h-4" />
               Edit
@@ -696,7 +696,7 @@ function InvoiceDetailContent() {
       {/* Invoice Details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Customer Info */}
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <h3 className="font-medium text-secondary-900 mb-3">Customer Information</h3>
           <div className="space-y-2 text-sm">
             <div>
@@ -713,7 +713,7 @@ function InvoiceDetailContent() {
         </div>
 
         {/* Invoice Info */}
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <h3 className="font-medium text-secondary-900 mb-3">Invoice Details</h3>
           <div className="space-y-2 text-sm">
             <div>
@@ -738,7 +738,7 @@ function InvoiceDetailContent() {
         </div>
 
         {/* Amount Summary */}
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <h3 className="font-medium text-secondary-900 mb-3">Amount Summary</h3>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
@@ -770,7 +770,7 @@ function InvoiceDetailContent() {
       </div>
 
       {/* Line Items */}
-      <div className="bg-white rounded-xl border border-secondary-200 shadow-sm">
+      <div className="bg-surface rounded-xl border border-secondary-200 shadow-sm">
         <div className="flex items-center justify-between p-5 border-b border-secondary-200">
           <h3 className="font-medium text-secondary-900">Line Items</h3>
           {canAddItems && (
@@ -846,7 +846,7 @@ function InvoiceDetailContent() {
       </div>
 
       {/* Payments */}
-      <div className="bg-white rounded-xl border border-secondary-200 shadow-sm">
+      <div className="bg-surface rounded-xl border border-secondary-200 shadow-sm">
         <div className="flex items-center justify-between p-5 border-b border-secondary-200">
           <h3 className="font-medium text-secondary-900">Payments</h3>
           {canRecordPayment && (

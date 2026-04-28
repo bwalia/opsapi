@@ -349,7 +349,7 @@ const SecretDetail: React.FC<SecretDetailProps> = ({
                     className="flex items-center justify-between p-3 bg-secondary-50 rounded-lg"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-white rounded-full">
+                      <div className="p-2 bg-surface rounded-full">
                         <User className="w-4 h-4 text-secondary-400" />
                       </div>
                       <div>

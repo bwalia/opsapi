@@ -337,12 +337,13 @@ validate_project_code() {
     local input="$1"
     local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business core_only"
 
-    # Split input on commas (save/restore IFS so the inner loop still
-    # splits VALID_CODES on spaces)
-    local saved_ifs="$IFS"
+    # Split on commas and validate each individual code.
+    # NOTE: scope IFS=',' to just the `read` so the whitespace-split loop below
+    # over $VALID_CODES still works. `local IFS=','` at function scope would
+    # make every later word-split in this function comma-delimited, which
+    # caused "all" to be rejected even though it is in the whitelist.
+    local codes
     IFS=',' read -ra codes <<< "$input"
-    IFS="$saved_ifs"
-
     for code in "${codes[@]}"; do
         # Trim whitespace
         code=$(echo "$code" | xargs)

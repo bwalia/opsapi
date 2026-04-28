@@ -50,7 +50,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => {
   };
 
   return (
-    <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+    <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-secondary-500">{title}</p>
@@ -130,7 +130,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
             type="date"
             value={periodStart}
             onChange={(e) => setPeriodStart(e.target.value)}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             required
           />
         </div>
@@ -140,7 +140,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
             type="date"
             value={periodEnd}
             onChange={(e) => setPeriodEnd(e.target.value)}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             required
           />
         </div>
@@ -150,7 +150,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white resize-none"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface resize-none"
             placeholder="Add any notes about this timesheet..."
           />
         </div>
@@ -158,7 +158,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -221,7 +221,7 @@ const RejectTimesheetModal: React.FC<RejectTimesheetModalProps> = ({ isOpen, onC
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={4}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white resize-none"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface resize-none"
             placeholder="Please explain why this timesheet is being rejected..."
             required
           />
@@ -230,7 +230,7 @@ const RejectTimesheetModal: React.FC<RejectTimesheetModalProps> = ({ isOpen, onC
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -581,7 +581,7 @@ function TimesheetsPageContent() {
         <div className="flex items-center gap-3">
           <button
             onClick={handleRefresh}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading || isLoadingApproval ? 'animate-spin' : ''}`} />
             Refresh
@@ -665,7 +665,7 @@ function TimesheetsPageContent() {
                     setStatusFilter(e.target.value as TimesheetStatus | 'all');
                     setCurrentPage(1);
                   }}
-                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
                 >
                   {TIMESHEET_STATUS_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>

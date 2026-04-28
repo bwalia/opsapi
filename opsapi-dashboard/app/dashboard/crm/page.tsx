@@ -60,7 +60,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => {
   };
 
   return (
-    <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+    <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-secondary-500">{title}</p>
@@ -205,7 +205,7 @@ const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, onClose
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Creating...' : 'Create Account'}</button>
         </div>
       </form>
@@ -290,7 +290,7 @@ const CreateContactModal: React.FC<CreateContactModalProps> = ({ isOpen, onClose
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Creating...' : 'Create Contact'}</button>
         </div>
       </form>
@@ -363,7 +363,7 @@ const CreateDealModal: React.FC<CreateDealModalProps> = ({ isOpen, onClose, onSu
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Stage</label>
             <div className="relative">
-              <select name="stage" value={formData.stage} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer">
+              <select name="stage" value={formData.stage} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
                 {DEAL_STAGE_OPTIONS.filter((o) => o.value !== 'all').map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -381,11 +381,11 @@ const CreateDealModal: React.FC<CreateDealModalProps> = ({ isOpen, onClose, onSu
           </div>
           <div className="col-span-2">
             <label className="block text-sm font-medium text-secondary-700 mb-1">Expected Close Date</label>
-            <input name="expected_close_date" type="date" value={formData.expected_close_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white" />
+            <input name="expected_close_date" type="date" value={formData.expected_close_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface" />
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Creating...' : 'Create Deal'}</button>
         </div>
       </form>
@@ -451,7 +451,7 @@ const CreateActivityModal: React.FC<CreateActivityModalProps> = ({ isOpen, onClo
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Type</label>
             <div className="relative">
-              <select name="type" value={formData.type} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer">
+              <select name="type" value={formData.type} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
                 {ACTIVITY_TYPE_OPTIONS.filter((o) => o.value !== 'all').map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -461,12 +461,12 @@ const CreateActivityModal: React.FC<CreateActivityModalProps> = ({ isOpen, onClo
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Due Date</label>
-            <input name="due_date" type="date" value={formData.due_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white" />
+            <input name="due_date" type="date" value={formData.due_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface" />
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Related To</label>
             <div className="relative">
-              <select name="related_type" value={formData.related_type} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer">
+              <select name="related_type" value={formData.related_type} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
                 <option value="">None</option>
                 <option value="account">Account</option>
                 <option value="contact">Contact</option>
@@ -485,7 +485,7 @@ const CreateActivityModal: React.FC<CreateActivityModalProps> = ({ isOpen, onClo
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Creating...' : 'Create Activity'}</button>
         </div>
       </form>
@@ -1036,7 +1036,7 @@ function CrmPageContent() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => fetchData()}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -1115,7 +1115,7 @@ function CrmPageContent() {
               <select
                 value={statusFilter}
                 onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
               >
                 {ACCOUNT_STATUS_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1131,7 +1131,7 @@ function CrmPageContent() {
               <select
                 value={stageFilter}
                 onChange={(e) => { setStageFilter(e.target.value); setCurrentPage(1); }}
-                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
               >
                 {DEAL_STAGE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1147,7 +1147,7 @@ function CrmPageContent() {
               <select
                 value={typeFilter}
                 onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
-                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer"
+                className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
               >
                 {ACTIVITY_TYPE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
