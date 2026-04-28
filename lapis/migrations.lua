@@ -1245,6 +1245,26 @@ local _migrations = {
     ['480_tax_create_classification_profiles']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 62),
 
     -- =========================================================================
+    -- Issue #308 — User-created custom categories + audit trail (April 2026)
+    -- =========================================================================
+    -- Schema (tax_copilot_migrations[63]-[66]):
+    --   481  → tax_app_settings table + seed allow_user_category_editing /
+    --          allow_user_custom_categories flags (both default false)
+    --   482  → tax_user_custom_categories table (user-scoped customs with
+    --          status enum + mapping/promotion FK columns)
+    --   483  → tax_transaction_audit table (append-only history)
+    --   484  → modified_by_*, custom_category_uuid columns on tax_transactions
+    --
+    -- Permissions (tax_copilot_menu_items_migrations[5]):
+    --   485  → register tax_app_settings + tax_custom_categories modules and
+    --          grant access to admin/owner/accountant roles
+    ['481_tax_create_app_settings']                  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 63),
+    ['482_tax_create_user_custom_categories']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 64),
+    ['483_tax_create_transaction_audit']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 65),
+    ['484_tax_add_transaction_audit_columns']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 66),
+    ['485_tax_grant_custom_categories_permissions']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 5),
+
+    -- =========================================================================
     -- CRM SYSTEM (500-509)
     -- =========================================================================
     ['500_crm_create_pipelines'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 1),

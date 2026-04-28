@@ -230,4 +230,101 @@ return {
             end
         end
     end,
+
+    -- =========================================================================
+    -- [5] Issue #308 — Register new permission modules for app settings + custom
+    -- categories moderation. Slots into the existing RBAC pattern (modules
+    -- table + namespace_roles.permissions JSONB).
+    --
+    -- After this migration runs, the admin/roles UI auto-picks up:
+    --   - tax_app_settings    — global settings (the two #308 flags + future)
+    --   - tax_custom_categories — user-created custom category moderation
+    --
+    -- Owner/admin roles automatically get full access; tax_accountant gets
+    -- read+update on custom categories (can moderate) but not on settings
+    -- (can't change global toggles).
+    -- =========================================================================
+    [5] = function()
+        local cjson_ok, cjson = pcall(require, "cjson")
+        if not cjson_ok then return end
+
+        local MigrationUtils = require("helper.migration-utils")
+        local timestamp = MigrationUtils.getCurrentTimestamp()
+
+        local modules = {
+            { machine_name = "tax_app_settings",      name = "Tax App Settings",      description = "Global tax-copilot settings (feature flags, retention, etc.)", priority = 36 },
+            { machine_name = "tax_custom_categories", name = "Tax Custom Categories", description = "Moderation of user-created custom categories (issue #308)",  priority = 37 },
+        }
+        for _, mod in ipairs(modules) do
+            local existing = db.select("* FROM modules WHERE machine_name = ?", mod.machine_name)
+            if #existing == 0 then
+                db.insert("modules", {
+                    uuid = MigrationUtils.generateUUID(),
+                    machine_name = mod.machine_name,
+                    name = mod.name,
+                    description = mod.description,
+                    priority = mod.priority,
+                    created_at = timestamp,
+                    updated_at = timestamp,
+                })
+                print("[Tax Copilot] Registered module: " .. mod.machine_name)
+            end
+        end
+
+        -- Grant full access to owner + admin roles. Pattern matches phase [3].
+        local privileged_roles = db.select([[
+            * FROM namespace_roles
+            WHERE role_name IN ('Owner', 'owner', 'Namespace Owner',
+                                'admin', 'Admin', 'administrative', 'tax_admin')
+        ]])
+        local full_actions = { "create", "read", "update", "delete", "manage" }
+
+        for _, role in ipairs(privileged_roles) do
+            local perms = {}
+            if role.permissions and role.permissions ~= "" then
+                local ok, decoded = pcall(cjson.decode, role.permissions)
+                if ok and type(decoded) == "table" then perms = decoded end
+            end
+
+            -- Only grant if not already explicitly set, so admins who
+            -- pruned a role's permissions don't have them silently re-added.
+            if not perms.tax_app_settings then
+                perms.tax_app_settings = full_actions
+            end
+            if not perms.tax_custom_categories then
+                perms.tax_custom_categories = full_actions
+            end
+
+            db.update("namespace_roles", {
+                permissions = cjson.encode(perms),
+            }, { id = role.id })
+        end
+
+        -- Grant accountant roles read + update on customs (moderation), but
+        -- NOT on app_settings — accountants shouldn't be able to flip the
+        -- global feature flags that control whether users can edit categories.
+        local accountant_roles = db.select([[
+            * FROM namespace_roles
+            WHERE role_name IN ('tax_accountant', 'accountant', 'Tax Accountant')
+        ]])
+        local moderate_actions = { "read", "update" }
+
+        for _, role in ipairs(accountant_roles) do
+            local perms = {}
+            if role.permissions and role.permissions ~= "" then
+                local ok, decoded = pcall(cjson.decode, role.permissions)
+                if ok and type(decoded) == "table" then perms = decoded end
+            end
+
+            if not perms.tax_custom_categories then
+                perms.tax_custom_categories = moderate_actions
+            end
+
+            db.update("namespace_roles", {
+                permissions = cjson.encode(perms),
+            }, { id = role.id })
+        end
+
+        print("[Tax Copilot] Granted permissions for tax_app_settings + tax_custom_categories")
+    end,
 }
