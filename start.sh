@@ -533,12 +533,35 @@ prompt_environment() {
     done
 }
 
+# Function to get Frontend URL based on environment
+# Pattern: local → http://localhost:3033, prod → https://domain, other → https://{env}.domain
+get_frontend_url() {
+    local env="$1"
+    local proto="$2"
+
+    case "$env" in
+        local)
+            echo "http://localhost:3033"
+            ;;
+        prod)
+            local prod_proto="${proto:-https}"
+            echo "${prod_proto}://${BASE_DOMAIN}"
+            ;;
+        *)
+            local remote_proto="${proto:-https}"
+            echo "${remote_proto}://${env}.${BASE_DOMAIN}"
+            ;;
+    esac
+}
+
 # Function to check and update .env file
 check_and_update_env() {
     local target_env="$1"
     local proto="$2"
     local api_url
     api_url=$(get_api_url "$target_env" "$proto")
+    local frontend_url
+    frontend_url=$(get_frontend_url "$target_env" "$proto")
 
     if [[ -z "$api_url" ]]; then
         echo -e "${RED}[!] Error: Invalid environment '$target_env'${NC}"
@@ -557,7 +580,7 @@ check_and_update_env() {
     fi
 
     # Variables to check and update
-    local vars_to_check=("NEXT_PUBLIC_API_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
+    local vars_to_check=("NEXT_PUBLIC_API_URL" "FRONTEND_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
     local needs_update=false
     local updates_made=()
 
@@ -579,6 +602,9 @@ check_and_update_env() {
         case "$var" in
             NEXT_PUBLIC_API_URL)
                 expected_value="$api_url"
+                ;;
+            FRONTEND_URL)
+                expected_value="$frontend_url"
                 ;;
             GOOGLE_REDIRECT_URI)
                 expected_value="${api_url}/auth/google/callback"
@@ -636,6 +662,13 @@ check_and_update_env() {
                 echo "NEXT_PUBLIC_API_URL=${api_url}" >> "$ENV_FILE"
             fi
 
+            # Update FRONTEND_URL
+            if grep -q "^FRONTEND_URL=" "$ENV_FILE"; then
+                sed -i.tmp "s|^FRONTEND_URL=.*|FRONTEND_URL=${frontend_url}|" "$ENV_FILE"
+            else
+                echo "FRONTEND_URL=${frontend_url}" >> "$ENV_FILE"
+            fi
+
             # Update GOOGLE_REDIRECT_URI
             if grep -q "^GOOGLE_REDIRECT_URI=" "$ENV_FILE"; then
                 sed -i.tmp "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback|" "$ENV_FILE"
@@ -659,6 +692,7 @@ check_and_update_env() {
             # Show updated values
             echo -e "${CYAN}Updated values:${NC}"
             echo -e "  NEXT_PUBLIC_API_URL=${api_url}"
+            echo -e "  FRONTEND_URL=${frontend_url}"
             echo -e "  GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback"
             echo -e "  KEYCLOAK_REDIRECT_URI=${api_url}/auth/callback"
             echo ""
