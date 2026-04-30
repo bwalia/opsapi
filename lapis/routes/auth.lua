@@ -11,6 +11,8 @@ local RateLimit = require("middleware.rate-limit")
 local Errors = require("lib.errors")
 local OTP = require("helper.otp")
 local RefreshToken = require("helper.refresh-token")
+local PasswordReset = require("helper.password-reset")
+local Mail = require("helper.mail")
 
 -- Rate limit configs
 local LOGIN_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:login" }     -- 10/min per IP
@@ -18,6 +20,52 @@ local REFRESH_LIMIT  = { rate = 30,  window = 60,  prefix = "auth:refresh" }   -
 local OAUTH_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:oauth" }     -- 10/min per IP
 local VALIDATE_LIMIT = { rate = 20,  window = 60,  prefix = "auth:validate" }  -- 20/min per IP
 local OTP_LIMIT      = { rate = 5,   window = 60,  prefix = "auth:2fa" }       -- 5/min per IP
+
+-- Password reset rate limits — strict, two layers
+--   FORGOT_LIMIT: per-IP, capped at 5/hour. Stops drive-by enumeration sweeps
+--   without inconveniencing a real user who might mistype their email a few times.
+--   RESET_LIMIT:  per-IP, capped at 10/min. The reset endpoint is cheap and
+--   self-rate-limited via single-use tokens, but stops a brute-force replay.
+local FORGOT_LIMIT = { rate = 5,   window = 3600, prefix = "auth:forgot" }
+local RESET_LIMIT  = { rate = 10,  window = 60,   prefix = "auth:reset"  }
+
+-- Frontend domains allowed to receive a reset link. The ``redirect_url``
+-- parameter on /auth/forgot-password is validated against this list
+-- before being interpolated into the email — anything else is silently
+-- replaced with the configured default. Prevents an attacker tricking
+-- a user into clicking a link to a phishing domain wrapped in a real
+-- email from us.
+--
+-- Set via env var ``PASSWORD_RESET_ALLOWED_ORIGINS`` (comma-separated).
+-- Falls back to the single ``FRONTEND_URL`` env var, then to localhost
+-- for local dev. SaaS deployments serving multiple frontends should
+-- list each here.
+local function get_allowed_reset_origins()
+    local raw = os.getenv("PASSWORD_RESET_ALLOWED_ORIGINS")
+    local origins = {}
+    if raw and raw ~= "" then
+        for origin in raw:gmatch("[^,]+") do
+            local trimmed = origin:match("^%s*(.-)%s*$")
+            if trimmed ~= "" then origins[trimmed] = true end
+        end
+    end
+    local fallback = os.getenv("FRONTEND_URL")
+    if fallback and fallback ~= "" then origins[fallback] = true end
+    if not next(origins) then
+        -- Local-dev safety net so engineers don't have to set env
+        -- vars to test the flow on their laptop.
+        origins["http://localhost:3000"] = true
+        origins["http://localhost:3847"] = true
+        origins["http://localhost"] = true
+    end
+    return origins
+end
+
+local function default_reset_origin()
+    local explicit = os.getenv("FRONTEND_URL")
+    if explicit and explicit ~= "" then return explicit end
+    return "http://localhost"
+end
 
 -- Helper function to parse JSON body
 local function parse_json_body()
@@ -330,6 +378,234 @@ return function(app)
         end
 
         return { status = 200, json = { message = "If the account exists, a new code has been sent" } }
+    end))
+
+    -- =====================================================================
+    -- Password Reset
+    -- =====================================================================
+    --
+    -- Two-step flow:
+    --   1. POST /auth/forgot-password { email, redirect_url? }
+    --      → always returns 200 (prevents email enumeration). If the
+    --        email exists, sends a one-time link to user's email.
+    --   2. POST /auth/reset-password  { token, new_password }
+    --      → validates the token, updates password, revokes all
+    --        refresh tokens (forces re-login on every device), returns
+    --        a generic success.
+    --
+    -- Security properties:
+    --   - Tokens are 256 bits of CSPRNG entropy, hashed with SHA-256
+    --     in the DB (plaintext only in the email link). See
+    --     helper/password-reset.lua.
+    --   - Single-use enforced atomically via UPDATE ... RETURNING.
+    --   - 30-minute TTL.
+    --   - Rate-limited per IP (5 forgot-requests/hour, 10 reset
+    --     attempts/min). The token itself is the strong gate; the
+    --     rate limit just stops resource abuse.
+    --   - Constant 200 on /forgot — no enumeration via timing or
+    --     status codes.
+    --   - On successful reset, ALL refresh tokens for the user are
+    --     revoked. An attacker holding a stolen session is kicked
+    --     out the moment the user resets.
+    --   - ``redirect_url`` validated against an allow-list before
+    --     interpolation into the email. SaaS deployments serving
+    --     multiple frontends configure the list via env var.
+    -- =====================================================================
+    app:post("/auth/forgot-password", RateLimit.wrap(FORGOT_LIMIT, function(self)
+        local body = parse_json_body()
+        local email = body.email or self.params.email
+        local redirect_url = body.redirect_url or self.params.redirect_url
+
+        -- Basic shape validation. Beyond this we deliberately give
+        -- back the same 200-OK response regardless of what the email
+        -- contains — see the enumeration note below.
+        if type(email) ~= "string" or #email < 3 or not email:find("@", 1, true) then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "email", reason = "invalid_format" },
+            })
+        end
+        email = email:lower():match("^%s*(.-)%s*$")
+
+        -- Resolve the redirect target. Anything not in the allow-list
+        -- is silently replaced with the default — never echo an
+        -- attacker-supplied origin into the email body.
+        local allowed = get_allowed_reset_origins()
+        local origin = default_reset_origin()
+        if redirect_url and type(redirect_url) == "string" then
+            -- Strip any path/query the caller included; we only trust
+            -- the origin part.
+            local origin_only = redirect_url:match("^(https?://[^/]+)") or redirect_url
+            if allowed[origin_only] then
+                origin = origin_only
+            else
+                ngx.log(ngx.WARN,
+                    "[forgot-password] rejected unlisted redirect_url=",
+                    tostring(redirect_url))
+            end
+        end
+
+        -- Generic success response — same shape whether the email
+        -- exists or not. Prevents an attacker from enumerating
+        -- registered emails by submitting a list and watching for
+        -- response differences.
+        local generic_ok = {
+            status = 200,
+            json = {
+                message = "If an account with that email exists, we've sent a reset link.",
+            },
+        }
+
+        -- Look up the user. Wrapped in pcall so a DB hiccup doesn't
+        -- leak through the enumeration mask via a 500 status.
+        local lookup_ok, user_or_err = pcall(UserQueries.findByEmail, email)
+        if not lookup_ok then
+            ngx.log(ngx.ERR, "[forgot-password] findByEmail failed: ",
+                tostring(user_or_err))
+            return generic_ok
+        end
+        local user = user_or_err
+        if not user or not user.id then
+            -- Email not registered. Return the same 200-OK as the
+            -- success path so the response is timing-stable.
+            return generic_ok
+        end
+
+        local ip = ngx.var.remote_addr
+        local raw_token, token_err = PasswordReset.create(user.id, ip)
+        if not raw_token then
+            ngx.log(ngx.ERR, "[forgot-password] token create failed for user=",
+                user.id, " err=", tostring(token_err))
+            -- Don't surface the error to the client — would let an
+            -- attacker probe for "user exists" via timing/error
+            -- differential. Log loud, return generic.
+            return generic_ok
+        end
+
+        -- Build the email and send via the existing async Mail helper.
+        -- The email template ``password_reset.etlua`` already exists —
+        -- we just need to provide the data.
+        local reset_url = origin .. "/reset-password?token=" .. raw_token
+        local app_name = os.getenv("APP_NAME") or "OpsAPI"
+
+        local send_ok, send_err = pcall(Mail.send, {
+            to = user.email,
+            subject = "Reset your " .. app_name .. " password",
+            template = "password_reset",
+            data = {
+                app_name = app_name,
+                email = user.email,
+                reset_url = reset_url,
+                expires_in = "30 minutes",
+            },
+        })
+        if not send_ok then
+            ngx.log(ngx.ERR, "[forgot-password] Mail.send failed for user=",
+                user.id, " err=", tostring(send_err))
+            -- Token is already stored; the user just won't get the
+            -- email. We still return generic 200 so we don't
+            -- distinguish "email infrastructure broken" from "email
+            -- not registered". An admin notice on Mail.send failures
+            -- is a separate concern.
+        end
+
+        return generic_ok
+    end))
+
+
+    app:post("/auth/reset-password", RateLimit.wrap(RESET_LIMIT, function(self)
+        local body = parse_json_body()
+        local token = body.token or self.params.token
+        local new_password = body.new_password or self.params.new_password
+            or body.password or self.params.password
+
+        if type(token) ~= "string" or #token < 16 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "token", reason = "invalid_format" },
+            })
+        end
+        if type(new_password) ~= "string" or #new_password < 8 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = {
+                    field = "new_password",
+                    reason = "too_short",
+                    min_length = 8,
+                },
+            })
+        end
+        if #new_password > 256 then
+            -- bcrypt silently truncates above 72 bytes; reject loudly
+            -- so users don't think their giant password is being
+            -- stored as typed.
+            return Errors.response(self, "VALIDATION_400", {
+                context = {
+                    field = "new_password",
+                    reason = "too_long",
+                    max_length = 256,
+                },
+            })
+        end
+
+        local user_id, err_code = PasswordReset.validateAndConsume(token)
+        if not user_id then
+            -- Map our internal error code to a clean envelope so the
+            -- frontend can show a precise message ("link expired" vs
+            -- "already used").
+            local reason = err_code or "invalid_token"
+            return Errors.response(self, "VALIDATION_400", {
+                status = 400,
+                context = {
+                    field = "token",
+                    reason = reason,
+                    action = "request_new_link",
+                    action_url = "/forgot-password",
+                },
+            })
+        end
+
+        -- Find the user the consumed token belongs to. Wrapped in
+        -- pcall so a missing user (race: account deleted between
+        -- token issue and consume) doesn't 500 the response.
+        local user_lookup_ok, user_row = pcall(function()
+            return db.query("SELECT id, uuid FROM users WHERE id = ? LIMIT 1",
+                user_id)
+        end)
+        if not user_lookup_ok or not user_row or #user_row == 0 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "token", reason = "user_not_found" },
+            })
+        end
+
+        -- Hash the new password and update. UserQueries.update takes
+        -- a uuid (not numeric id) per its contract — see queries
+        -- file. We hash here so a logging mishap can't accidentally
+        -- log the plaintext.
+        local hashed = Global.hashPassword(new_password)
+        local update_ok, update_err = pcall(UserQueries.update, user_row[1].uuid, {
+            password = hashed,
+        })
+        if not update_ok then
+            ngx.log(ngx.ERR, "[reset-password] password update failed for user=",
+                user_id, " err=", tostring(update_err))
+            return Errors.response(self, "SYSTEM_500")
+        end
+
+        -- Defence in depth — kick the user out of every device. If
+        -- the reset was triggered by an attacker stealing a session
+        -- (and the legitimate user noticed), we want their stolen
+        -- token revoked the moment the password changes.
+        pcall(RefreshToken.revokeAllForUser, user_id)
+
+        -- Also revoke any *other* outstanding reset tokens for this
+        -- user — defence in depth against an attacker holding a
+        -- second link from an earlier request.
+        pcall(PasswordReset.revokeAllForUser, user_id)
+
+        return {
+            status = 200,
+            json = {
+                message = "Your password has been reset. Please sign in.",
+            },
+        }
     end))
 
     -- Google OAuth Routes

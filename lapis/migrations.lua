@@ -1264,6 +1264,56 @@ local _migrations = {
     ['484_tax_add_transaction_audit_columns']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 66),
     ['485_tax_grant_custom_categories_permissions']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 5),
     ['486_tax_seed_max_custom_categories_setting']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 67),
+    ['488_tax_seed_auth_email_taken_code']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 68),
+
+    -- =========================================================================
+    -- CORE AUTH: Password reset tokens
+    -- =========================================================================
+    -- Used by POST /auth/forgot-password (insert) and POST /auth/reset-password
+    -- (validate + consume). Core SaaS auth — not feature-gated, every
+    -- deployment of opsapi gets it.
+    --
+    -- Design notes:
+    --   - ``token_hash`` stores the SHA-256 hex of the random token. The
+    --     plaintext token only ever lives in the email link sent to the
+    --     user — a DB leak alone cannot be used to reset passwords.
+    --   - ``user_id`` FK with ON DELETE CASCADE so deleting a user
+    --     automatically cleans up their pending tokens.
+    --   - ``used_at`` enforces single-use. Validation requires
+    --     ``used_at IS NULL`` AND ``expires_at > NOW()``.
+    --   - ``ip_address`` recorded for audit + future per-IP rate
+    --     refinements. Plain varchar so IPv4/IPv6 fit cleanly.
+    --   - Unique index on ``token_hash`` because a hash collision would
+    --     be catastrophic — guard at the schema level too.
+    -- =========================================================================
+    ['487_create_password_reset_tokens'] = function()
+        local exists = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'password_reset_tokens'
+        ]])
+        if #exists == 0 then
+            -- Note: lapis ``types.varchar`` and ``types.time`` default
+            -- to NOT NULL. Use ``{ null = true }`` for the columns
+            -- that must be nullable (used_at represents "not yet
+            -- used", ip_address may be absent for command-line/admin
+            -- triggered resets).
+            schema.create_table("password_reset_tokens", {
+                { "id",         types.serial },
+                { "user_id",    types.integer },
+                { "token_hash", types.varchar },
+                { "expires_at", types.time },
+                { "used_at",    types.time({ null = true }) },
+                { "ip_address", types.varchar({ null = true }) },
+                { "created_at", types.time },
+                "PRIMARY KEY (id)",
+                "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            })
+            schema.create_index("password_reset_tokens", "token_hash",
+                { unique = true })
+            schema.create_index("password_reset_tokens", "user_id")
+            print("Created password_reset_tokens table")
+        end
+    end,
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)
