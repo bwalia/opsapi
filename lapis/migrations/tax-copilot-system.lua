@@ -2304,4 +2304,35 @@ return {
         ]])
         print("[Tax Copilot] Seeded max_custom_categories_per_user = 20 (admin-tunable)")
     end,
+
+    -- 68. Seed AUTH_EMAIL_TAKEN error code.
+    --
+    -- Used by /api/v2/register when the email is already registered
+    -- (UNIQUE(email) violation). Migrating the legacy
+    -- ``{error: "Email already registered"}`` 409 response to the
+    -- catalog envelope unlocks: translatable message, occurrence_uuid,
+    -- "send to support" deep-link, and ``context.action_url`` so the
+    -- frontend can render a "Sign in instead" button.
+    --
+    -- Seeded here (alongside other AUTH_* codes from phase 50) for
+    -- consistency. Once we extract the catalog into shared infra, this
+    -- and the other AUTH_* codes belong in a generic-auth migration
+    -- file rather than tax-copilot-specific.
+    --
+    -- The matching translation lives in
+    -- ``backend/app/errors/translations/en.json`` (Python loads it on
+    -- startup via translation_loader). Adding the catalog row here
+    -- gives Lapis what it needs to resolve the code; the translation
+    -- file gives Python what it needs to render the user-facing text.
+    [68] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES (
+                'AUTH_EMAIL_TAKEN', 'error', 'warn', 409,
+                'Register endpoint hit a UNIQUE(email) violation. Frontend should highlight the email field and offer a Sign In link.'
+            )
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded AUTH_EMAIL_TAKEN error code")
+    end,
 }

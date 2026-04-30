@@ -4,6 +4,7 @@ local Validation = require("helper.validations")
 local jwt = require("resty.jwt")
 local Global = require("helper.global")
 local db = require("lapis.db")
+local Errors = require("lib.errors")
 
 -- Auto-assign new user to the active project namespace
 local function assignUserToNamespace(user_id, user_uuid)
@@ -82,7 +83,13 @@ return function(app)
                 params.role = "member"
             end
             if not allowed_roles[params.role] then
-                return { json = { error = "Invalid registration role" }, status = 400 }
+                return Errors.response(self, "VALIDATION_400", {
+                    context = {
+                        field = "role",
+                        reason = "invalid_value",
+                        provided = params.role,
+                    },
+                })
             end
 
             local success, err = pcall(function()
@@ -90,12 +97,35 @@ return function(app)
             end)
 
             if not success then
-                return { json = { error = "Validation failed: " .. tostring(err) }, status = 400 }
+                -- ``err`` here is the message thrown by Validation.createUser
+                -- (e.g. "Email is required" / "Password must be ..."). We
+                -- don't have a dedicated catalog code per validation
+                -- subtype yet, so wrap the human message in
+                -- ``context.detail`` — the frontend's parseAppError reads
+                -- the catalog message; if the toast needs the specific
+                -- reason we can render context.detail inline.
+                return Errors.response(self, "VALIDATION_400", {
+                    context = {
+                        reason = "validation_failed",
+                        detail = tostring(err),
+                    },
+                })
             end
 
             local existing_user = UserQueries.findByEmail(params.email)
             if existing_user then
-                return { json = { error = "Email already registered" }, status = 409 }
+                -- 409 Conflict via the catalog so the frontend toast +
+                -- the inline-field error highlighter both have what
+                -- they need (code + context.field). action_url lets
+                -- the UI render a "Sign in instead" button.
+                return Errors.response(self, "AUTH_EMAIL_TAKEN", {
+                    context = {
+                        field = "email",
+                        reason = "already_registered",
+                        action = "sign_in",
+                        action_url = "/login",
+                    },
+                })
             end
 
             local user = UserQueries.create(params)
@@ -108,7 +138,9 @@ return function(app)
             local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
             if not JWT_SECRET_KEY then
                 ngx.log(ngx.ERR, "JWT_SECRET_KEY not configured")
-                return { json = { error = "Server configuration error" }, status = 500 }
+                return Errors.response(self, "SYSTEM_500", {
+                    cause = "JWT_SECRET_KEY not configured",
+                })
             end
 
             local jwt_payload = {
