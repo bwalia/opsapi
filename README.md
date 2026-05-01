@@ -386,20 +386,20 @@ once a tenant is configured.
 
 ```
 ┌─────────┐     1. POST /auth/forgot-password         ┌─────────┐
-│ Browser │ ─────{email, redirect_url}──────────────► │ OpsAPI  │
+│ Browser │ ─────{email}─────────────────────────────► │ OpsAPI  │
 └─────────┘                                            └─────────┘
                                                             │
                                               2. Look up user → namespace
                                                  → allow-list of origins
                                                             │
-                                              3. Validate redirect_url
-                                                 against allow-list
+                                              3. Pick primary
+                                                 (= first entry in list)
                                                             │
                                               4. Generate 32-byte CSPRNG
                                                  token, store SHA-256(token)
                                                             │
                                               5. Send email with link:
-                                                 ${origin}/reset-password
+                                                 ${primary}/reset-password
                                                  ?token=${plaintext_token}
                                                             │
 ┌─────────┐    User clicks email link             ◄──────────┘
@@ -418,21 +418,27 @@ once a tenant is configured.
                                               9. 200 OK
 ```
 
-### Where the email link points: namespace allow-list
+### Where the email link points: primary always wins
 
-The frontend sends `redirect_url` (its own origin) in the request body.
-OpsAPI validates it against the user's namespace allow-list before
-interpolating it into the email link. This stops an attacker submitting
-a forgot-password for someone else's email with `redirect_url:
-"https://evil.com"` — the link mailed to the real user would otherwise
-point at the attacker's site.
+The reset-link destination is the **namespace primary** — the first
+entry in `namespaces.allowed_redirect_origins`. Admins set it through
+the admin UI; OpsAPI does not honour any caller-supplied `redirect_url`
+when picking the destination. This means:
 
-**Allow-list lookup priority:**
+- **Admin-controlled, not caller-controlled.** Changing where reset
+  emails land is a UI action, not a code change. Phishing attempts that
+  POST forgot-password with `redirect_url: "https://evil.com"` cannot
+  redirect the email link to the attacker's site.
+- **Predictable for tenants.** Whatever the admin marks as primary in
+  the UI is exactly where every reset email points — no surprise
+  echo-back to whichever frontend the request originated from.
 
-1. **`namespaces.allowed_redirect_origins`** (primary, multi-tenant SaaS source of truth)
-   — `TEXT[]` column populated per tenant. The first entry is the
-   canonical primary used as fallback when the request's `redirect_url`
-   isn't in the list.
+**Origin lookup priority:**
+
+1. **`namespaces.allowed_redirect_origins[1]`** (primary, multi-tenant SaaS source of truth)
+   — `TEXT[]` column populated per tenant. Position 1 is authoritative;
+   subsequent entries are reserved for future use cases (e.g. OAuth
+   callback aliases) and do not affect password-reset routing.
 
 2. **`PASSWORD_RESET_ALLOWED_ORIGINS` + `FRONTEND_URL` env vars** (bootstrap fallback)
    — used only when the user's namespace has an empty/NULL column.
@@ -469,10 +475,12 @@ SET allowed_redirect_origins = ARRAY[
 WHERE slug = 'tax-copilot';
 ```
 
-**C — Admin UI (planned, not yet shipped):**
-A future PR adds an "Allowed redirect URLs" tab in `/admin/settings`
-so tenant owners can manage their own list without DB access. The DB
-column is the same; the UI is just CRUD.
+**C — Admin UI (`/admin/settings` → "Frontend URLs" tab):**
+Platform admins manage the per-namespace list with no DB access:
+add/remove URLs, drag the primary to position 1, save. The first
+entry is automatically used as the primary destination for reset
+emails. Backed by `GET`/`PUT
+/api/v2/admin/namespaces/:uuid/redirect-origins`.
 
 ### Security properties
 
@@ -486,7 +494,7 @@ column is the same; the UI is just CRUD.
 | **Rate limit** | `/forgot-password` 5/hour per IP, `/reset-password` 10/min per IP — token itself is the strong gate, rate limit is anti-abuse |
 | **Refresh-token revocation** | On successful reset, every `refresh_tokens` row for the user is revoked — kicks attackers out of any stolen sessions |
 | **Multi-pending-token cleanup** | Re-requesting forgot-password invalidates earlier unconsumed tokens; consuming a token invalidates siblings |
-| **Phishing-domain protection** | The user-supplied `redirect_url` is validated against the namespace allow-list before being interpolated into the email body |
+| **Phishing-domain protection** | Email destination is the admin-configured namespace primary; `redirect_url` from the client is ignored, so an attacker cannot steer the email link to a phishing domain |
 
 ### Verifying it locally
 
@@ -495,22 +503,21 @@ column is the same; the UI is just CRUD.
 docker exec opsapi-postgres-dev-db psql -U pguser -d opsapi-diytaxreturn \
   -c "SELECT slug, allowed_redirect_origins FROM namespaces;"
 
-# 2. Trigger forgot-password with an allow-listed origin
+# 2. Trigger forgot-password — destination is always the namespace primary,
+#    regardless of any redirect_url the caller sends
 curl -X POST http://localhost/opsapi/auth/forgot-password \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@taxreturn.uk","redirect_url":"http://localhost"}'
+  -d '{"email":"admin@taxreturn.uk"}'
 
-# 3. Trigger with a NON-allow-listed origin (attacker simulation) —
-#    should return 200 (enumeration-safe) but log a WARN and use the
-#    namespace's primary origin in the email
+# 3. Even when an attacker sends a phishing redirect_url, the email link
+#    still points at the configured primary (server ignores redirect_url)
 curl -X POST http://localhost/opsapi/auth/forgot-password \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@taxreturn.uk","redirect_url":"https://attacker.com"}'
 
-# 4. Confirm the WARN was logged
-tail -50 lapis/logs/error.log | grep "forgot-password"
-# Expected: "[forgot-password] redirect_url not in allow-list, using primary;
-#            requested=https://attacker.com primary=http://localhost user_id=..."
+# 4. Confirm by inspecting the latest reset-link in the email log /
+#    queue — it should be ${primary}/reset-password?token=... where
+#    ${primary} matches allowed_redirect_origins[1] from step 1.
 
 # 5. Synthesise a token for QA (skips the actual email send)
 docker exec opsapi-postgres-dev-db psql -U pguser -d opsapi-diytaxreturn -c "
