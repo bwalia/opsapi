@@ -617,6 +617,31 @@ helm upgrade --install opsapi ./devops/helm-charts/opsapi \
   --namespace <namespace> --create-namespace
 ```
 
+##### Per-environment frontend URL (required for password reset emails)
+
+Each `values-<env>.yaml` MUST set `frontendUrl` to the canonical frontend
+origin for that environment. The deployment template injects it as
+`FRONTEND_URL`, which migration 489 uses to bootstrap
+`namespaces.allowed_redirect_origins` on first run AND the runtime
+fallback uses if any namespace's column is empty.
+
+```yaml
+# values-acc.yaml example
+frontendUrl: "https://acc.diytaxreturn.co.uk"
+# optional comma-separated extras for multi-frontend tenants:
+# passwordResetAllowedOrigins: "https://acc-alt.diytaxreturn.co.uk"
+```
+
+Without this, password reset emails will contain `http://localhost`
+links — a WARN log fires in production. See [Password Reset Flow](#password-reset-flow).
+After first deploy, verify the bootstrap landed:
+
+```bash
+kubectl -n <namespace> exec deploy/diytaxreturn-lapis -- \
+  psql $DATABASE_URL -c \
+  "SELECT slug, allowed_redirect_origins FROM namespaces;"
+```
+
 #### OpsAPI Node
 
 ```bash
