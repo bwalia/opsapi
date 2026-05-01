@@ -522,6 +522,32 @@ function NamespaceQueries.getUserDefaultNamespace(user_id)
     return nil
 end
 
+--- Return the namespace's allow-list of frontend origins for redirect
+-- emails (password reset, future invitation links, etc.).
+--
+-- Schema: ``namespaces.allowed_redirect_origins TEXT[]``. Stored as
+-- canonical origins (``scheme://host[:port]``); migration 489 also
+-- bootstraps it from FRONTEND_URL + PASSWORD_RESET_ALLOWED_ORIGINS env
+-- vars when first added.
+--
+-- Returns an empty Lua array (NOT nil) when the column is unset, so
+-- callers can safely iterate without nil-guards.
+--
+-- @param namespace_id number
+-- @return table  array of origin strings (possibly empty)
+function NamespaceQueries.getAllowedRedirectOrigins(namespace_id)
+    if not namespace_id then return {} end
+    local rows = db.query(
+        "SELECT allowed_redirect_origins FROM namespaces WHERE id = ? LIMIT 1",
+        namespace_id
+    )
+    if not rows or #rows == 0 then return {} end
+    local arr = rows[1].allowed_redirect_origins
+    if type(arr) ~= "table" then return {} end
+    return arr
+end
+
+
 --- Get user's permissions in a namespace
 -- @param user_id number User ID
 -- @param namespace_id number Namespace ID
