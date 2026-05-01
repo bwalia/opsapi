@@ -156,7 +156,7 @@ export default function NamespacePage() {
           {isNamespaceOwner && (
             <Link
               href="/dashboard/namespace/settings"
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
             >
               <Settings className="w-4 h-4" />
               Settings

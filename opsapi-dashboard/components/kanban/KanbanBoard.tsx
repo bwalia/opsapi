@@ -8,6 +8,7 @@ import {
   closestCorners,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -58,34 +59,34 @@ const BoardHeader = memo(function BoardHeader({
   const [showSearch, setShowSearch] = useState(false);
 
   return (
-    <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200">
-      <div className="flex items-center gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{boardName}</h1>
-          <p className="text-sm text-gray-500">{projectName}</p>
+    <div className="flex items-center justify-between gap-2 px-3 md:px-6 py-3 md:py-4 bg-surface border-b border-secondary-200">
+      <div className="flex items-center gap-2 md:gap-4 min-w-0">
+        <div className="min-w-0">
+          <h1 className="text-lg md:text-xl font-bold text-secondary-900 truncate">{boardName}</h1>
+          <p className="text-xs md:text-sm text-secondary-500 truncate">{projectName}</p>
         </div>
-        <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+        <span className="hidden sm:inline-block text-xs md:text-sm text-secondary-500 bg-secondary-100 px-2 py-1 rounded whitespace-nowrap">
           {taskCount} tasks
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 md:gap-2 shrink-0">
         {/* Search */}
         {showSearch ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2">
             <Input
               type="text"
               placeholder="Search tasks..."
               value={searchValue || ''}
               onChange={(e) => onSearchChange?.(e.target.value)}
-              className="w-64"
+              className="w-40 md:w-64"
             />
             <button
               onClick={() => {
                 setShowSearch(false);
                 onSearchChange?.('');
               }}
-              className="p-2 text-gray-500 hover:text-gray-700"
+              className="p-2 text-secondary-500 hover:text-secondary-700"
             >
               <X size={18} />
             </button>
@@ -155,7 +156,7 @@ const AddColumn = memo(function AddColumn({ onAdd, isLoading }: AddColumnProps) 
     return (
       <button
         onClick={() => setIsAdding(true)}
-        className="flex-shrink-0 w-72 min-w-72 h-fit p-4 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:text-gray-700 hover:border-gray-400 hover:bg-gray-100 transition-colors"
+        className="flex-shrink-0 w-[85vw] max-w-[22rem] md:w-72 md:min-w-72 md:max-w-none snap-center h-fit p-4 bg-secondary-50 border-2 border-dashed border-secondary-300 rounded-lg text-secondary-500 hover:text-secondary-700 hover:border-secondary-400 hover:bg-secondary-100 transition-colors"
       >
         <div className="flex items-center justify-center gap-2">
           <Plus size={20} />
@@ -166,14 +167,14 @@ const AddColumn = memo(function AddColumn({ onAdd, isLoading }: AddColumnProps) 
   }
 
   return (
-    <div className="flex-shrink-0 w-72 min-w-72 bg-gray-100 rounded-lg p-3">
+    <div className="flex-shrink-0 w-[85vw] max-w-[22rem] md:w-72 md:min-w-72 md:max-w-none snap-center bg-secondary-100 rounded-lg p-3">
       <form onSubmit={handleSubmit}>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Column name..."
-          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           autoFocus
           disabled={isLoading}
         />
@@ -211,12 +212,12 @@ const EmptyState = memo(function EmptyState({
   onAddColumn: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center h-96 text-gray-500">
-      <div className="w-16 h-16 mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-        <Plus size={32} className="text-gray-400" />
+    <div className="flex flex-col items-center justify-center h-96 text-secondary-500">
+      <div className="w-16 h-16 mb-4 rounded-full bg-secondary-100 flex items-center justify-center">
+        <Plus size={32} className="text-secondary-400" />
       </div>
       <h3 className="text-lg font-medium mb-2">No columns yet</h3>
-      <p className="text-sm text-gray-400 mb-4">
+      <p className="text-sm text-secondary-400 mb-4">
         Create your first column to start organizing tasks
       </p>
       <Button onClick={onAddColumn}>
@@ -275,6 +276,13 @@ const KanbanBoard = memo(function KanbanBoard({
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8, // 8px movement required before drag starts
+      },
+    }),
+    // Long-press to drag on touch devices, so swipe-scrolling the board still works
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,
+        tolerance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -467,7 +475,7 @@ const KanbanBoard = memo(function KanbanBoard({
   );
 
   return (
-    <div className={cn('flex flex-col h-full bg-gray-50', className)}>
+    <div className={cn('flex flex-col h-full bg-secondary-50', className)}>
       {/* Board Header */}
       <BoardHeader
         boardName={board.name}
@@ -482,7 +490,7 @@ const KanbanBoard = memo(function KanbanBoard({
       />
 
       {/* Board Content with DnD Context */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-6 snap-x snap-mandatory md:snap-none scroll-smooth">
         {sortedColumns.length === 0 ? (
           <EmptyState onAddColumn={() => handleAddColumn({ name: 'To Do' })} />
         ) : (
@@ -493,7 +501,7 @@ const KanbanBoard = memo(function KanbanBoard({
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-4 h-full">
+            <div className="flex gap-3 md:gap-4 h-full">
               {/* Columns */}
               {filteredColumns.map((column) => (
                 <KanbanColumn

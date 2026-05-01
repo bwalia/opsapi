@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
+#   namespace: {{ .Values.targetNS }}
+data:
+    bootstrap-nginx.sh: |
+        #!/bin/bash
+        # Fail fast on any error so readiness probe keeps failing until bootstrap succeeds.
+        # pipefail: catch failures piped through tee/etc. nounset disabled (-x instead) —
+        # some upstream images reference optional vars we do not want to mask.
+        set -eo pipefail
+        set -x
+
+        FILE=/app/config.lua
+        cp /tmp/secrets/config.lua $FILE
+
+        # Patch nginx resolver to include K8s CoreDNS for internal service resolution
+        KUBE_DNS=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
+        if [ -n "$KUBE_DNS" ] && [ -f /app/nginx.conf ]; then
+          sed -i "s/resolver 8.8.8.8 8.8.4.4/resolver ${KUBE_DNS} 8.8.8.8 8.8.4.4/" /app/nginx.conf
+          echo "[bootstrap] Patched nginx resolver with K8s DNS: ${KUBE_DNS}"
+        fi
+
+        echo "[bootstrap] PROJECT_CODE=${PROJECT_CODE:-<unset>}"
+        echo "[bootstrap] Running migrations..."
+        # Retry migrations up to 5 times — Postgres may not be fully ready at postStart time.
+        MIGRATE_RETRIES=5
+        MIGRATE_DELAY=6
+        attempt=1
+        while [ $attempt -le $MIGRATE_RETRIES ]; do
+          if lapis migrate; then
+            break
+          fi
+          echo "[bootstrap] Migration attempt $attempt/$MIGRATE_RETRIES failed. Retrying in ${MIGRATE_DELAY}s..."
+          attempt=$((attempt + 1))
+          sleep $MIGRATE_DELAY
+        done
+        if [ $attempt -gt $MIGRATE_RETRIES ]; then
+          echo "[bootstrap] Migrations failed after $MIGRATE_RETRIES attempts. Aborting bootstrap." >&2
+          exit 1
+        fi
+        echo "==========================="
+
+        echo "[bootstrap] Running namespace setup (supports multi-project codes)..."
+        # runMulti() validates every project code, isolates per-code failures with pcall,
+        # and re-raises on partial failure so this script exits non-zero and the pod
+        # readiness probe keeps failing until an operator intervenes.
+        if ! lapis exec "require('scripts.setup-namespace').runMulti({})"; then
+          echo "[bootstrap] Namespace setup failed — check above for which project code failed." >&2
+          exit 1
+        fi
+        echo "[bootstrap] Namespace setup complete."
+        echo "==========================="
+
+        mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
+        chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
+        cp /app/api-docs/swagger.json /tmp/swagger.json
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-pg-backup-{{ .Release.Namespace }}
+#   namespace: {{ .Values.targetNS }} kubectl get configmap opsapi-pg-backup-test -n test -o yaml
+data:
+    backup-database.sh: |
+      #!/bin/bash
+      set -x
+      TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+      BACKUP_FILE="backup_$TIMESTAMP.sql.gz"
+
+      pg_dump -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -F c | gzip > "/tmp/$BACKUP_FILE"
+
+      # Install MinIO Client
+      curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+      chmod +x mc && mv mc /usr/local/bin/
+
+      # Configure MinIO and upload backup
+      mc alias set myminio "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+      mc cp "/tmp/$BACKUP_FILE" myminio/"$MINIO_BUCKET"/"$BACKUP_FILE"
+
+      # Cleanup
+      rm -f "/tmp/$BACKUP_FILE"

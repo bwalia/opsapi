@@ -88,7 +88,7 @@ function NamespaceAuditLogQueries.getByNamespace(namespace_id, params)
 
     -- Count query
     local count_query = "SELECT COUNT(*) as total FROM namespace_audit_logs WHERE " .. where_clause
-    local count_result = db.query(count_query, unpack(args))
+    local count_result = db.query(count_query, table.unpack(args))
     local total = tonumber(count_result and count_result[1] and count_result[1].total) or 0
 
     -- Data query with user info
@@ -115,7 +115,7 @@ function NamespaceAuditLogQueries.getByNamespace(namespace_id, params)
     table.insert(data_args, per_page)
     table.insert(data_args, offset)
 
-    local results = db.query(data_query, unpack(data_args))
+    local results = db.query(data_query, table.unpack(data_args))
 
     -- Parse JSON fields
     for _, entry in ipairs(results or {}) do

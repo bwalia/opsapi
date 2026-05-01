@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+data:
+  bootstrap_node.sh: |
+      #!/bin/bash
+      set -x
+      mkdir -p uploads
+      FILE=/app/.env
+      cp /tmp/secrets/.env $FILE
+      if [ -f "$FILE" ]; then
+          echo "Env vars file $FILE exists."
+          echo "Running Node.js app..."
+      else
+          echo "Env vars file $FILE does not exist. Exiting."
+          exit 1
+      fi

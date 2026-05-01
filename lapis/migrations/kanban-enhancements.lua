@@ -82,7 +82,7 @@ return {
             { "billed_amount", "DECIMAL(12,2) DEFAULT NULL" },
             { "invoice_id", types.varchar({ null = true }) },
             -- Status
-            { "status", types.varchar({ default = "'logged'" }) }, -- logged, approved, invoiced
+            { "status", types.varchar({ default = "logged" }) }, -- logged, approved, invoiced
             { "approved_by", types.varchar({ null = true }) },
             { "approved_at", types.time({ null = true }) },
             -- Metadata
@@ -205,7 +205,7 @@ return {
             { "is_push_sent", types.boolean({ default = false }) },
             { "push_sent_at", types.time({ null = true }) },
             -- Priority and grouping
-            { "priority", types.varchar({ default = "'normal'" }) }, -- low, normal, high, urgent
+            { "priority", types.varchar({ default = "normal" }) }, -- low, normal, high, urgent
             { "group_key", types.varchar({ null = true }) }, -- For grouping similar notifications
             -- Metadata
             { "metadata", "JSONB DEFAULT '{}'" },
@@ -346,14 +346,14 @@ return {
             -- Per-type settings
             { "preferences", "JSONB DEFAULT '{}'" },
             -- Digest settings
-            { "digest_frequency", types.varchar({ default = "'instant'" }) }, -- instant, hourly, daily, weekly
+            { "digest_frequency", types.varchar({ default = "instant" }) }, -- instant, hourly, daily, weekly
             { "digest_hour", types.integer({ default = 9 }) }, -- Hour of day for digest (0-23)
             { "digest_day", types.integer({ default = 1 }) }, -- Day of week for weekly digest (0=Sun)
             -- Quiet hours
             { "quiet_hours_enabled", types.boolean({ default = false }) },
             { "quiet_hours_start", types.integer({ null = true }) }, -- Hour of day (0-23)
             { "quiet_hours_end", types.integer({ null = true }) },
-            { "timezone", types.varchar({ default = "'UTC'" }) },
+            { "timezone", types.varchar({ default = "UTC" }) },
             -- Timestamps
             { "created_at", types.time({ default = db.raw("NOW()") }) },
             { "updated_at", types.time({ default = db.raw("NOW()") }) },

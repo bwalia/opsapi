@@ -266,7 +266,7 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
                 disabled={isSubmitting || isLoadingRoles}
                 className={cn(
                   'w-full flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
-                  'bg-white text-secondary-900',
+                  'bg-surface text-secondary-900',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500',
                   'disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed',
                   errors.role
@@ -301,7 +301,7 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
 
               {/* Dropdown Menu */}
               {isRoleDropdownOpen && (
-                <div className="absolute z-50 mt-1 w-full bg-white border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
+                <div className="absolute z-50 mt-1 w-full bg-surface border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
                   {roles.map((role) => (
                     <button
                       key={role.uuid || role.id}

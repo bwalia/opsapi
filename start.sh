@@ -57,28 +57,38 @@ show_help() {
     echo "  Example: -e staging -P http   -> http://staging-api.${BASE_DOMAIN}"
     echo ""
     echo -e "${BLUE}Project Codes (for conditional migrations):${NC}"
-    echo "  all          - All features (default, backward compatible)"
-    echo "  tax_copilot  - UK Tax Return AI Agent (core + tax tables only)"
-    echo "  ecommerce    - E-commerce platform (core + stores, products, orders)"
-    echo "  collaboration - Chat + Kanban + Services"
-    echo "  hospital     - Hospital CRM"
-    echo "  core_only    - Just authentication tables"
+    echo "  all            - All features (default, backward compatible)"
+    echo "  tax_copilot    - UK Tax Return AI Agent (core + tax tables only)"
+    echo "  ecommerce      - E-commerce platform (core + stores, products, orders)"
+    echo "  ecommerce_chat - E-commerce + Chat"
+    echo "  collaboration  - Chat + Kanban + Services"
+    echo "  hospital       - Hospital CRM"
+    echo "  business       - CRM + Timesheets + Invoicing + Accounting + Kanban"
+    echo "  core_only      - Just authentication tables"
+    echo ""
+    echo -e "${BLUE}Multi-Project (comma-separated):${NC}"
+    echo "  Combine multiple project codes to enable features from each:"
+    echo "  ecommerce,collaboration   - E-commerce + Chat + Kanban + Vault"
+    echo "  tax_copilot,business      - Tax filing + CRM + Invoicing"
+    echo "  Each code creates its own namespace with appropriate roles/modules."
     echo ""
     echo -e "${BLUE}Examples:${NC}"
-    echo "  ./start.sh                    # Interactive mode (prompts)"
-    echo "  ./start.sh -e local           # Local development environment"
-    echo "  ./start.sh -e dev -a          # Dev environment, auto git (https)"
-    echo "  ./start.sh -e dev -P http     # Dev environment with HTTP"
-    echo "  ./start.sh -e remote -n       # Remote environment, no git ops"
-    echo "  ./start.sh -e staging -a      # Custom 'staging' environment"
-    echo "  ./start.sh --env=prod -a      # Prod environment, auto mode"
-    echo "  ./start.sh -c -e dev          # Just check/update .env for dev"
-    echo "  ./start.sh -r                 # Reset database (fresh start)"
-    echo "  ./start.sh -e remote -n -C    # CI/CD deployment (no dev mounts)"
-    echo "  ./start.sh -j tax_copilot     # Only create tax-related tables"
-    echo "  ./start.sh -e local -j tax_copilot -r  # Fresh tax_copilot setup"
-    echo "  ./start.sh -d myapp.com -e prod -n  # Deploy with custom apex domain"
-    echo "  ./start.sh -d kisaan.com -e dev -a  # Dev environment on kisaan.com"
+    echo "  ./start.sh                              # Interactive mode (prompts)"
+    echo "  ./start.sh -e local           	         # Local development environment"
+    echo "  ./start.sh -e dev -a                     # Dev environment, auto git (https)"
+    echo "  ./start.sh -e dev -P http                # Dev environment with HTTP"
+    echo "  ./start.sh -e remote -n                  # Remote environment, no git ops"
+    echo "  ./start.sh -e staging -a                 # Custom 'staging' environment"
+    echo "  ./start.sh --env=prod -a                 # Prod environment, auto mode"
+    echo "  ./start.sh -c -e dev                     # Just check/update .env for dev"
+    echo "  ./start.sh -r                            # Reset database (fresh start)"
+    echo "  ./start.sh -e remote -n -C               # CI/CD deployment (no dev mounts)"
+    echo "  ./start.sh -j tax_copilot                # Only create tax-related tables"
+    echo "  ./start.sh -j ecommerce,collaboration    # Multi-project: combined features"
+    echo "  ./start.sh -j business                   # Business/Professional Services"
+    echo "  ./start.sh -e local -j tax_copilot -r    # Fresh tax_copilot setup"
+    echo "  ./start.sh -d myapp.com -e prod -n       # Deploy with custom apex domain"
+    echo "  ./start.sh -d kisaan.com -e dev -a       # Dev environment on kisaan.com"
     echo ""
 }
 
@@ -322,29 +332,55 @@ validate_protocol() {
     esac
 }
 
-# Function to validate project code
+# Function to validate project code (supports comma-separated multi-project codes)
 validate_project_code() {
-    local code="$1"
-    case "$code" in
-        all|tax_copilot|ecommerce|ecommerce_chat|collaboration|hospital|core_only) return 0 ;;
-        *) return 1 ;;
-    esac
+    local input="$1"
+    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business core_only"
+
+    # Split on commas and validate each individual code.
+    # NOTE: scope IFS=',' to just the `read` so the whitespace-split loop below
+    # over $VALID_CODES still works. `local IFS=','` at function scope would
+    # make every later word-split in this function comma-delimited, which
+    # caused "all" to be rejected even though it is in the whitelist.
+    local codes
+    IFS=',' read -ra codes <<< "$input"
+    for code in "${codes[@]}"; do
+        # Trim whitespace
+        code=$(echo "$code" | xargs)
+        if [[ -z "$code" ]]; then
+            continue
+        fi
+        local found=false
+        for valid in $VALID_CODES; do
+            if [[ "$code" == "$valid" ]]; then
+                found=true
+                break
+            fi
+        done
+        if ! $found; then
+            echo -e "${RED}[!] Unknown project code: '$code'${NC}" >&2
+            return 1
+        fi
+    done
+    return 0
 }
 
 # Function to prompt for project code selection
 prompt_project_code() {
     echo -e "${CYAN}Select project code for conditional migrations:${NC}" >&2
-    echo "  1) all          - All features (default, backward compatible)" >&2
-    echo "  2) tax_copilot  - UK Tax Return AI Agent (core + tax tables only)" >&2
-    echo "  3) ecommerce    - E-commerce platform (core + stores, products, orders)" >&2
-    echo "  4) collaboration - Chat + Kanban + Services" >&2
-    echo "  5) hospital     - Hospital CRM" >&2
-    echo "  6) core_only    - Just authentication tables" >&2
+    echo "  1) all            - All features (default, backward compatible)" >&2
+    echo "  2) tax_copilot    - UK Tax Return AI Agent (core + tax tables only)" >&2
+    echo "  3) ecommerce      - E-commerce platform (core + stores, products, orders)" >&2
+    echo "  4) collaboration  - Chat + Kanban + Services" >&2
+    echo "  5) hospital       - Hospital CRM" >&2
+    echo "  6) core_only      - Just authentication tables" >&2
+    echo "  7) business       - CRM + Timesheets + Invoicing + Accounting + Kanban" >&2
+    echo "  8) custom combo   - Enter comma-separated codes (e.g. ecommerce,collaboration)" >&2
     echo "" >&2
 
     local choice
     while true; do
-        read -p "Enter choice [1-6] or press Enter for default (all): " choice
+        read -p "Enter choice [1-8] or press Enter for default (all): " choice
         case "$choice" in
             ""|1|all)
                 echo "all"
@@ -370,8 +406,31 @@ prompt_project_code() {
                 echo "core_only"
                 return 0
                 ;;
+            7|business)
+                echo "business"
+                return 0
+                ;;
+            8|custom)
+                echo -e "${CYAN}Enter comma-separated project codes:${NC}" >&2
+                echo -e "${BLUE}  Valid codes: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, core_only${NC}" >&2
+                echo -e "${BLUE}  Example: ecommerce,collaboration${NC}" >&2
+                local custom_codes
+                read -p "Project codes: " custom_codes
+                if validate_project_code "$custom_codes"; then
+                    echo "$custom_codes"
+                    return 0
+                else
+                    echo -e "${YELLOW}Invalid project code(s). Please try again.${NC}" >&2
+                fi
+                ;;
             *)
-                echo -e "${YELLOW}Invalid choice. Please enter 1-6 or a valid project code.${NC}" >&2
+                # Allow direct entry of valid code(s) including comma-separated
+                if validate_project_code "$choice"; then
+                    echo "$choice"
+                    return 0
+                else
+                    echo -e "${YELLOW}Invalid choice. Please enter 1-8 or valid project code(s).${NC}" >&2
+                fi
                 ;;
         esac
     done
@@ -474,12 +533,35 @@ prompt_environment() {
     done
 }
 
+# Function to get Frontend URL based on environment
+# Pattern: local → http://localhost:3033, prod → https://domain, other → https://{env}.domain
+get_frontend_url() {
+    local env="$1"
+    local proto="$2"
+
+    case "$env" in
+        local)
+            echo "http://localhost:3033"
+            ;;
+        prod)
+            local prod_proto="${proto:-https}"
+            echo "${prod_proto}://${BASE_DOMAIN}"
+            ;;
+        *)
+            local remote_proto="${proto:-https}"
+            echo "${remote_proto}://${env}.${BASE_DOMAIN}"
+            ;;
+    esac
+}
+
 # Function to check and update .env file
 check_and_update_env() {
     local target_env="$1"
     local proto="$2"
     local api_url
     api_url=$(get_api_url "$target_env" "$proto")
+    local frontend_url
+    frontend_url=$(get_frontend_url "$target_env" "$proto")
 
     if [[ -z "$api_url" ]]; then
         echo -e "${RED}[!] Error: Invalid environment '$target_env'${NC}"
@@ -498,7 +580,7 @@ check_and_update_env() {
     fi
 
     # Variables to check and update
-    local vars_to_check=("NEXT_PUBLIC_API_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
+    local vars_to_check=("NEXT_PUBLIC_API_URL" "FRONTEND_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
     local needs_update=false
     local updates_made=()
 
@@ -520,6 +602,9 @@ check_and_update_env() {
         case "$var" in
             NEXT_PUBLIC_API_URL)
                 expected_value="$api_url"
+                ;;
+            FRONTEND_URL)
+                expected_value="$frontend_url"
                 ;;
             GOOGLE_REDIRECT_URI)
                 expected_value="${api_url}/auth/google/callback"
@@ -577,6 +662,13 @@ check_and_update_env() {
                 echo "NEXT_PUBLIC_API_URL=${api_url}" >> "$ENV_FILE"
             fi
 
+            # Update FRONTEND_URL
+            if grep -q "^FRONTEND_URL=" "$ENV_FILE"; then
+                sed -i.tmp "s|^FRONTEND_URL=.*|FRONTEND_URL=${frontend_url}|" "$ENV_FILE"
+            else
+                echo "FRONTEND_URL=${frontend_url}" >> "$ENV_FILE"
+            fi
+
             # Update GOOGLE_REDIRECT_URI
             if grep -q "^GOOGLE_REDIRECT_URI=" "$ENV_FILE"; then
                 sed -i.tmp "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback|" "$ENV_FILE"
@@ -600,6 +692,7 @@ check_and_update_env() {
             # Show updated values
             echo -e "${CYAN}Updated values:${NC}"
             echo -e "  NEXT_PUBLIC_API_URL=${api_url}"
+            echo -e "  FRONTEND_URL=${frontend_url}"
             echo -e "  GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback"
             echo -e "  KEYCLOAK_REDIRECT_URI=${api_url}/auth/callback"
             echo ""
@@ -701,7 +794,8 @@ if [[ -n "$PROJECT_CODE" ]]; then
         echo -e "${BLUE}[i] Project code from argument: ${CYAN}${PROJECT_CODE}${NC}"
     else
         echo -e "${RED}[!] Invalid project code: '$PROJECT_CODE'${NC}"
-        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, core_only${NC}"
+        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, core_only${NC}"
+        echo -e "${YELLOW}[!] Combine with commas: ecommerce,collaboration${NC}"
         exit 1
     fi
 else
@@ -760,13 +854,14 @@ echo -e "${GREEN}[+] Namespace Configuration${NC}"
 echo ""
 
 # Derive defaults from project code
-DEFAULT_NS_SLUG=$(echo "$PROJECT_CODE" | sed 's/_/-/g')
-DEFAULT_NS_NAME=$(echo "$PROJECT_CODE" | sed 's/_/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
-
-# For "all" project code, use "system" namespace
-if [[ "$PROJECT_CODE" == "all" ]]; then
+# For multi-project (comma-separated) or "all", use "system" namespace as the default
+# Each individual code will get its own namespace during the setup phase
+if [[ "$PROJECT_CODE" == "all" ]] || [[ "$PROJECT_CODE" == *","* ]]; then
     DEFAULT_NS_SLUG="system"
     DEFAULT_NS_NAME="System"
+else
+    DEFAULT_NS_SLUG=$(echo "$PROJECT_CODE" | sed 's/_/-/g')
+    DEFAULT_NS_NAME=$(echo "$PROJECT_CODE" | sed 's/_/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
 fi
 
 if [[ -n "$NAMESPACE_NAME" ]]; then
@@ -923,45 +1018,53 @@ fi
 # This ensures nginx workers have PROJECT_CODE for feature-gated route loading
 export PROJECT_CODE
 
-$COMPOSE_CMD up --build -d
+if ! $COMPOSE_CMD up --build -d; then
+    echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
+    $COMPOSE_CMD logs --tail=100
+    exit 1
+fi
 
 # Wait for PostgreSQL to be ready (healthcheck-based)
 echo -e "${GREEN}[+] Waiting for PostgreSQL to be ready...${NC}"
-MAX_RETRIES=30
+PG_RETRIES=60
 RETRY_COUNT=0
 PG_CONTAINER="opsapi-postgres-dev-db"
 
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+while [ $RETRY_COUNT -lt $PG_RETRIES ]; do
     if docker exec "$PG_CONTAINER" pg_isready -U pguser > /dev/null 2>&1; then
         echo -e "${GREEN}[+] PostgreSQL is ready!${NC}"
         break
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo -e "${YELLOW}  Waiting for PostgreSQL... (${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+    echo -e "${YELLOW}  Waiting for PostgreSQL... (${RETRY_COUNT}/${PG_RETRIES})${NC}"
     sleep 2
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo -e "${RED}[!] PostgreSQL failed to start after ${MAX_RETRIES} attempts. Exiting.${NC}"
+if [ $RETRY_COUNT -eq $PG_RETRIES ]; then
+    echo -e "${RED}[!] PostgreSQL failed to start after ${PG_RETRIES} attempts. Exiting.${NC}"
     echo -e "${YELLOW}[!] Check logs: docker logs ${PG_CONTAINER}${NC}"
     exit 1
 fi
 
 # Also wait for the opsapi container (nginx/lapis) to be ready
+# Accept both 200 and 503 — 503 means OpenResty is running but DB isn't connected yet,
+# which is fine since migrations run after this step.
 echo -e "${GREEN}[+] Waiting for OpsAPI container to be ready...${NC}"
+OPSAPI_RETRIES=60
 RETRY_COUNT=0
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if docker exec "$CONTAINER_NAME" curl -sf http://127.0.0.1/health > /dev/null 2>&1; then
-        echo -e "${GREEN}[+] OpsAPI container is ready!${NC}"
+while [ $RETRY_COUNT -lt $OPSAPI_RETRIES ]; do
+    HTTP_CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/health 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "503" ]; then
+        echo -e "${GREEN}[+] OpsAPI container is ready! (HTTP $HTTP_CODE)${NC}"
         break
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo -e "${YELLOW}  Waiting for OpsAPI... (${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+    echo -e "${YELLOW}  Waiting for OpsAPI... (${RETRY_COUNT}/${OPSAPI_RETRIES})${NC}"
     sleep 2
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo -e "${RED}[!] OpsAPI container failed to start after ${MAX_RETRIES} attempts. Exiting.${NC}"
+if [ $RETRY_COUNT -eq $OPSAPI_RETRIES ]; then
+    echo -e "${RED}[!] OpsAPI container failed to start after ${OPSAPI_RETRIES} attempts. Exiting.${NC}"
     echo -e "${YELLOW}[!] Check logs: docker logs ${CONTAINER_NAME}${NC}"
     exit 1
 fi
@@ -975,32 +1078,74 @@ else
     docker exec -e "PROJECT_CODE=$PROJECT_CODE" -it "$CONTAINER_NAME" lapis migrate
 fi
 
-# Run namespace setup - creates namespace with admin user
+# Run namespace setup - creates namespace(s) with admin user
 # Seeds project-specific modules and creates default roles
+# For multi-project codes (comma-separated), creates one namespace per code
 # Note: config is passed inline as a Lua table because lapis exec runs inside
 # an nginx worker process which does not inherit docker exec -e environment vars.
-echo -e "${GREEN}[+] Setting up namespace '${NAMESPACE_NAME}' (${NAMESPACE_SLUG}) for ${PROJECT_CODE}...${NC}"
 
-# Escape single quotes in password for safe Lua string embedding
-ESCAPED_PASSWORD=$(echo "$ADMIN_PASSWORD" | sed "s/'/\\\\'/g")
+# Escape single quotes in strings for safe Lua string embedding
+lua_escape() {
+    printf '%s' "$1" | sed "s/'/\\\\'/g"
+}
+ESCAPED_PASSWORD=$(lua_escape "$ADMIN_PASSWORD")
+ESCAPED_EMAIL=$(lua_escape "$ADMIN_EMAIL")
+ESCAPED_NS_NAME=$(lua_escape "$NAMESPACE_NAME")
+ESCAPED_NS_SLUG=$(lua_escape "$NAMESPACE_SLUG")
+ESCAPED_PROJECT_CODE=$(lua_escape "$PROJECT_CODE")
 
-SETUP_LUA_CMD="require('scripts.setup-namespace').run({ \
-  project_code='${PROJECT_CODE}', \
-  admin_email='${ADMIN_EMAIL}', \
-  admin_password='${ESCAPED_PASSWORD}', \
-  namespace_name='${NAMESPACE_NAME}', \
-  namespace_slug='${NAMESPACE_SLUG}' \
-})"
+# Helper function to run a lapis exec command inside the container.
+# Returns the container's exit code so callers can react to failures.
+run_lapis_exec() {
+    local lua_cmd="$1"
+    if $CI_MODE; then
+        docker exec \
+            -e PROJECT_CODE="$PROJECT_CODE" \
+            "$CONTAINER_NAME" lapis exec "$lua_cmd"
+    else
+        docker exec \
+            -e PROJECT_CODE="$PROJECT_CODE" \
+            -it "$CONTAINER_NAME" lapis exec "$lua_cmd"
+    fi
+}
 
-if $CI_MODE; then
-    docker exec \
-        -e PROJECT_CODE=$PROJECT_CODE \
-        $CONTAINER_NAME lapis exec "$SETUP_LUA_CMD"
+# ============================================
+# Namespace setup
+# ============================================
+# Delegate the single-vs-multi branching to the Lua runMulti() entry point.
+# It validates each code against ProjectConfig, isolates per-code failures
+# with pcall, and re-raises a consolidated error so this shell sees a non-zero
+# exit on partial failure. That keeps CI/CD pipelines honest.
+if [[ "$PROJECT_CODE" == *","* ]]; then
+    echo -e "${GREEN}[+] Multi-project mode detected: ${CYAN}${PROJECT_CODE}${NC}"
+    echo ""
+
+    SETUP_LUA_CMD="require('scripts.setup-namespace').runMulti({ \
+      project_code='${ESCAPED_PROJECT_CODE}', \
+      admin_email='${ESCAPED_EMAIL}', \
+      admin_password='${ESCAPED_PASSWORD}' \
+    })"
 else
-    docker exec \
-        -e PROJECT_CODE=$PROJECT_CODE \
-        -it $CONTAINER_NAME lapis exec "$SETUP_LUA_CMD"
+    echo -e "${GREEN}[+] Setting up namespace '${NAMESPACE_NAME}' (${NAMESPACE_SLUG}) for ${PROJECT_CODE}...${NC}"
+
+    SETUP_LUA_CMD="require('scripts.setup-namespace').run({ \
+      project_code='${ESCAPED_PROJECT_CODE}', \
+      admin_email='${ESCAPED_EMAIL}', \
+      admin_password='${ESCAPED_PASSWORD}', \
+      namespace_name='${ESCAPED_NS_NAME}', \
+      namespace_slug='${ESCAPED_NS_SLUG}' \
+    })"
 fi
+
+if ! run_lapis_exec "$SETUP_LUA_CMD"; then
+    echo ""
+    echo -e "${RED}[!] Namespace setup failed. Inspect container logs:${NC}"
+    echo -e "${YELLOW}    docker logs ${CONTAINER_NAME}${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}[+] Namespace setup completed successfully${NC}"
 
 sleep 5
 

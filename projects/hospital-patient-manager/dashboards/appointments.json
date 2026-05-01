@@ -1,0 +1,42 @@
+{
+    "page_id": "appointments",
+    "title": "Appointment Schedule",
+    "description": "View and manage patient appointments",
+    "layout": "table",
+    "data_source": "/api/v2/hospital-patient-manager/appointments",
+    "columns": [
+        { "key": "id", "label": "ID", "type": "number", "width": 60 },
+        { "key": "patient_first_name", "label": "Patient", "type": "computed", "template": "{patient_first_name} {patient_last_name}" },
+        { "key": "doctor_name", "label": "Doctor", "type": "text" },
+        { "key": "department_name", "label": "Department", "type": "text" },
+        { "key": "appointment_type", "label": "Type", "type": "badge" },
+        { "key": "scheduled_at", "label": "Scheduled", "type": "datetime", "sortable": true },
+        { "key": "duration_minutes", "label": "Duration", "type": "number", "suffix": " min" },
+        { "key": "status", "label": "Status", "type": "badge", "badges": {
+            "scheduled": { "color": "blue", "label": "Scheduled" },
+            "completed": { "color": "green", "label": "Completed" },
+            "cancelled": { "color": "red", "label": "Cancelled" },
+            "no_show": { "color": "yellow", "label": "No Show" }
+        }}
+    ],
+    "filters": [
+        { "key": "status", "label": "Status", "type": "select", "options": ["scheduled", "completed", "cancelled", "no_show"] },
+        { "key": "department_id", "label": "Department", "type": "api_select", "source": "/api/v2/hospital-patient-manager/departments" },
+        { "key": "date_from", "label": "From", "type": "date" },
+        { "key": "date_to", "label": "To", "type": "date" }
+    ],
+    "actions": ["create", "edit"],
+    "create_form": {
+        "title": "Schedule Appointment",
+        "fields": [
+            { "key": "patient_id", "label": "Patient", "type": "api_select", "source": "/api/v2/hospital-patient-manager/patients", "required": true },
+            { "key": "doctor_name", "label": "Doctor", "type": "text" },
+            { "key": "department_id", "label": "Department", "type": "api_select", "source": "/api/v2/hospital-patient-manager/departments" },
+            { "key": "appointment_type", "label": "Type", "type": "select", "options": ["consultation", "follow_up", "emergency", "surgery", "lab_test", "imaging"] },
+            { "key": "scheduled_at", "label": "Date & Time", "type": "datetime", "required": true },
+            { "key": "duration_minutes", "label": "Duration (minutes)", "type": "number", "default": 30 },
+            { "key": "reason", "label": "Reason", "type": "textarea" },
+            { "key": "notes", "label": "Notes", "type": "textarea" }
+        ]
+    }
+}

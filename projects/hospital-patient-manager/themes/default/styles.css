@@ -1,0 +1,65 @@
+/* Hospital Patient Manager - Custom Styles */
+
+:root {
+    --project-primary: #2563eb;
+    --project-secondary: #1e40af;
+    --project-accent: #06b6d4;
+    --project-danger: #dc2626;
+    --project-success: #16a34a;
+    --project-warning: #d97706;
+    --project-bg: #f8fafc;
+    --project-surface: #ffffff;
+    --project-border: #e2e8f0;
+    --project-text: #1e293b;
+    --project-text-muted: #64748b;
+    --project-radius: 8px;
+}
+
+/* Patient status badges */
+.badge-active {
+    background-color: #dcfce7;
+    color: #166534;
+    border-radius: 9999px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.badge-inactive {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border-radius: 9999px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.badge-discharged {
+    background-color: #f1f5f9;
+    color: #475569;
+    border-radius: 9999px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* Appointment status badges */
+.badge-scheduled {
+    background-color: #dbeafe;
+    color: #1e40af;
+}
+
+.badge-completed {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.badge-cancelled {
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+.badge-no-show {
+    background-color: #fef3c7;
+    color: #92400e;
+}

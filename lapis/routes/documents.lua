@@ -78,7 +78,7 @@ local FILE_CATEGORIES = {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "text/plain", "text/csv"
+            "text/plain", "text/markdown", "text/csv"
         },
         max_size = 25 * 1024 * 1024, -- 25MB for documents
         description = "Document files (PDF, Word, Excel, PowerPoint, etc.)"
@@ -395,11 +395,16 @@ local function handleFileUpload(file, options)
 
     -- Upload file using MinIO client
     local minio = MinioClient.getDefault()
-    local url, err, metadata = minio:upload(file, {
+    local minio_options = {
         bucket = bucket,
         prefix = prefix,
         metadata = options.metadata
-    })
+    }
+    -- Pass through a custom object_key when provided (skips UUID + date path generation)
+    if options.object_key then
+        minio_options.object_key = options.object_key
+    end
+    local url, err, metadata = minio:upload(file, minio_options)
 
     if not url then
         return nil, nil, "File upload failed: " .. (err or "Unknown error")
@@ -712,6 +717,19 @@ return function(app)
             user_uuid = self.current_user and self.current_user.uuid,
             namespace_uuid = self.current_user and self.current_user.namespace and self.current_user.namespace.uuid
         }
+
+        -- Optional: caller can provide a custom filename to use as the object key,
+        -- skipping the auto-generated UUID. The prefix is prepended when provided.
+        -- Example: object_name="e2e-report-2026-03-09.md", prefix="e2e-reports"
+        --          → stored as "e2e-reports/e2e-report-2026-03-09.md"
+        if self.params.object_name and self.params.object_name ~= "" then
+            local name = self.params.object_name
+            if prefix and prefix ~= "" and prefix ~= "uploads" then
+                upload_options.object_key = prefix .. "/" .. name
+            else
+                upload_options.object_key = name
+            end
+        end
 
         local url, metadata, upload_err = handleFileUpload(file, upload_options)
 

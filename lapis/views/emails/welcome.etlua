@@ -1,0 +1,13 @@
+<h2>Welcome, <%= user_name or "there" %>!</h2>
+
+<p>Thanks for signing up for <strong><%= app_name %></strong>. We're excited to have you on board.</p>
+
+<% if login_url then %>
+  <p style="text-align: center; margin: 28px 0;">
+    <a href="<%= login_url %>" class="btn">Get Started</a>
+  </p>
+<% end %>
+
+<p>If you have any questions, feel free to reach out to our support team.</p>
+
+<p>Cheers,<br>The <%= app_name %> Team</p>

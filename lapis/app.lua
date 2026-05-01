@@ -1,26 +1,26 @@
 local lapis = require("lapis")
 local app = lapis.Application()
 local CorsMiddleware = require("middleware.cors")
+local GlobalRateLimit = require("middleware.global-rate-limit")
+local Errors = require("lib.errors")
 
 -- Enable CORS
 CorsMiddleware.enable(app)
+
+-- Enable global rate limiting (OPSAPI_RATE_LIMIT_DEFAULT env, default 10000/minute)
+-- Also logs X-Proxy-Pop-Code so we can trace edge location per request.
+GlobalRateLimit.enable(app)
 
 -- Enable etlua
 app:enable("etlua")
 app.views_prefix = "views"
 
--- Error handler
-app.handle_error = function(self, err, trace)
-    ngx.log(ngx.ERR, "Application Error: ", tostring(err))
-    ngx.log(ngx.ERR, "Stack Trace: ", tostring(trace))
-    return {
-        status = 500,
-        json = {
-            error = "Internal server error",
-            message = tostring(err)
-        }
-    }
-end
+-- Install the catalog-backed error handler. Catches:
+--   - errors raised via Errors.raise(code, ...): renders the catalog envelope
+--   - any other uncaught Lua error: maps to SYSTEM_500 + logs fully
+-- Both paths write an audit row to the shared error_occurrences table so
+-- admins see Python and Lapis events in a single dashboard view.
+Errors.install_handler(app)
 
 -- ============================================
 -- PUBLIC ROUTES - NO AUTH
@@ -33,6 +33,7 @@ app:get("/", function(self)
             version = "1.0.0",
             endpoints = {
                 documentation = "/swagger",
+                docs = "/docs",
                 health = "/health",
                 openapi = "/openapi.json",
                 login = "/auth/login"
@@ -107,6 +108,43 @@ app:get("/live", function(self)
             alive = true,
             timestamp = ngx.time(),
             uptime_seconds = ngx.now()
+        }
+    }
+end)
+
+-- System info endpoint — reports the project configuration this pod was started with.
+-- Lets operators (and the dashboard) verify which features/routes are live without
+-- shelling into the container. Public because the dashboard may call it pre-login
+-- to render the correct menu; contains no tenant-specific data.
+app:get("/api/v2/system/info", function(self)
+    local ok_cfg, ProjectConfig = pcall(require, "helper.project-config")
+    if not ok_cfg then
+        ngx.log(ngx.ERR, "system/info: failed to load project-config: ", tostring(ProjectConfig))
+        return {
+            status = 500,
+            json = { error = "Project configuration unavailable" }
+        }
+    end
+
+    local ok_info, info_or_err = pcall(ProjectConfig.getProjectInfo)
+    if not ok_info then
+        ngx.log(ngx.ERR, "system/info: getProjectInfo failed: ", tostring(info_or_err))
+        return {
+            status = 500,
+            json = { error = "Failed to read project info" }
+        }
+    end
+
+    ngx.header["Access-Control-Allow-Origin"] = "*"
+    return {
+        status = 200,
+        json = {
+            project_code = info_or_err.project_code,
+            parsed_codes = info_or_err.project_codes,
+            enabled_features = info_or_err.enabled_features,
+            environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+            version = "1.0.0",
+            timestamp = ngx.time(),
         }
     }
 end)
@@ -194,17 +232,25 @@ app:before_filter(function(self)
         ["/auth/reset-password"] = true,
         ["/auth/verify-email"] = true,
         ["/auth/resend-verification"] = true,
-        ["/auth/refresh"] = true,  -- Handles its own token validation
-        ["/auth/google"] = true,  -- Google OAuth initiation
-        ["/auth/google/callback"] = true,  -- Google OAuth callback
+        ["/auth/refresh"] = true,         -- Handles its own token validation
+        ["/auth/2fa/verify"] = true,      -- 2FA OTP verification (pre-auth)
+        ["/auth/2fa/resend"] = true,      -- 2FA resend OTP (pre-auth)
+        ["/auth/google"] = true,          -- Google OAuth initiation
+        ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
+        ["/auth/hmrc/callback"] = true,   -- HMRC MTD OAuth callback
+        ["/auth/logout"] = true,         -- Logout (revokes refresh token)
     }
 
     -- Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
-        uri == "/swagger/swagger.json" or uri == "/metrics" or public_auth_routes[uri] or
+        uri == "/swagger/swagger.json" or uri == "/metrics" or
+        uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
+        uri:match("^/api/v2/projects$") or
+        uri:match("^/api/v2/themes/active/styles%.css$") or
+        uri:match("^/api/v2/[^/]+/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
         uri:match("^/api/v2/test%-notification") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
@@ -218,6 +264,11 @@ app:before_filter(function(self)
         -- Populate self.current_user from ngx.ctx.user for Lapis routes
         if ngx.ctx.user then
             self.current_user = ngx.ctx.user
+            -- Ensure user has a default namespace (lazy assignment on first request)
+            local ns_ok, ns_resolver = pcall(require, "helper.namespace-resolver")
+            if ns_ok then
+                pcall(ns_resolver.resolve, self.current_user)
+            end
         end
     end
 end)
@@ -265,6 +316,7 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- CORE ROUTES (always loaded — core tables exist for all projects)
 -- ============================================
 safe_load_routes("routes.auth")
+safe_load_routes("routes.pin")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
 safe_load_routes("routes.roles")
@@ -278,11 +330,18 @@ safe_load_routes("routes.projects")
 safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
+safe_load_routes("routes.email")
+safe_load_routes("routes.project-dashboard")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
 -- ============================================
 load_if("menu", "routes.menu")
+
+-- ============================================
+-- THEME SYSTEM (multi-tenant theming)
+-- ============================================
+load_if("themes", "routes.themes")
 
 -- ============================================
 -- ECOMMERCE (stores, products, orders, payments)
@@ -349,6 +408,21 @@ load_if("notifications", "routes.device-tokens")
 load_if("notifications", "routes.test-notification")
 
 -- ============================================
+-- HOSPITAL & CARE HOME MANAGEMENT
+-- ============================================
+load_if("hospital", "routes.hospital-departments")
+load_if("hospital", "routes.hospital-wards")
+load_if("hospital", "routes.care-plans")
+load_if("hospital", "routes.care-logs")
+load_if("hospital", "routes.medications")
+load_if("hospital", "routes.patient-access-controls")
+load_if("hospital", "routes.family-members")
+load_if("hospital", "routes.dementia-care")
+load_if("hospital", "routes.daily-logs")
+load_if("hospital", "routes.patient-alerts")
+load_if("hospital", "routes.patient-audit-logs")
+
+-- ============================================
 -- SERVICES MODULE (GitHub Workflow Integration)
 -- ============================================
 load_if("services", "routes.services")
@@ -357,6 +431,7 @@ load_if("services", "routes.services")
 -- SECRET VAULT
 -- ============================================
 load_if("vault", "routes.secret-vault")
+load_if("vault", "routes.vault-providers")
 
 -- ============================================
 -- BANK TRANSACTIONS
@@ -370,6 +445,67 @@ load_if("tax_copilot", "routes.tax-bank-accounts")
 load_if("tax_copilot", "routes.tax-statements")
 load_if("tax_copilot", "routes.tax-transactions")
 load_if("tax_copilot", "routes.tax-upload")
+load_if("tax_copilot", "routes.tax-dashboard")
+load_if("tax_copilot", "routes.tax-settings")
+load_if("tax_copilot", "routes.tax-reports")
+load_if("tax_copilot", "routes.tax-rates")
+load_if("tax_copilot", "routes.tax-admin-transactions")
+load_if("tax_copilot", "routes.tax-profile")
+load_if("tax_copilot", "routes.tax-hmrc-auth")
+load_if("tax_copilot", "routes.profile-builder")
+load_if("tax_copilot", "routes.tax-extract")
+load_if("tax_copilot", "routes.tax-classify")
+load_if("tax_copilot", "routes.tax-reconcile")
+load_if("tax_copilot", "routes.tax-calculate")
+load_if("tax_copilot", "routes.tax-file")
+load_if("tax_copilot", "routes.tax-hmrc-data")
+load_if("tax_copilot", "routes.tax-training-data")
+load_if("tax_copilot", "routes.tax-admin")
+load_if("tax_copilot", "routes.tax-admin-categories")
+load_if("tax_copilot", "routes.tax-admin-profiles")
+load_if("tax_copilot", "routes.tax-app-settings")
+load_if("tax_copilot", "routes.tax-admin-custom-categories")
+load_if("tax_copilot", "routes.tax-custom-categories")
+load_if("tax_copilot", "routes.tax-support")
+
+-- ============================================
+-- CRM (Accounts, Contacts, Deals, Pipelines)
+-- ============================================
+load_if("crm", "routes.crm-pipelines")
+load_if("crm", "routes.crm-accounts")
+load_if("crm", "routes.crm-contacts")
+load_if("crm", "routes.crm-deals")
+load_if("crm", "routes.crm-activities")
+
+-- ============================================
+-- TIMESHEETS (Time tracking and approval)
+-- ============================================
+load_if("timesheets", "routes.timesheets")
+
+-- ============================================
+-- INVOICING (Invoice generation and payments)
+-- ============================================
+load_if("invoicing", "routes.invoices")
+load_if("invoicing", "routes.document-templates")
+
+-- ============================================
+-- ACCOUNTING / BOOKKEEPING (AI-powered)
+-- ============================================
+load_if("accounting", "routes.accounting")
+
+-- ============================================
+-- PROJECT MODULE ROUTES (auto-loaded from /projects/)
+-- ============================================
+local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")
+if ok_loader then
+    local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
+    local projects = ProjectLoader.init(projects_root)
+    for _, manifest in ipairs(projects) do
+        ProjectLoader.loadRoutes(app, manifest)
+    end
+else
+    ngx.log(ngx.NOTICE, "Project loader not available: ", tostring(ProjectLoader))
+end
 
 -- ============================================
 -- CUSTOM ROUTES (loaded from external directory)
@@ -378,14 +514,18 @@ local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
 if custom_routes_dir then
     ngx.log(ngx.NOTICE, "Loading custom routes from: ", custom_routes_dir)
     local custom_route_files = io.popen("ls " .. custom_routes_dir .. "/*.lua")
-    for file in custom_route_files:lines() do
-        local route_name = file:match(".*/(.*)%.lua$")
-        if route_name then
-            local full_route_path = custom_routes_dir .. "." .. route_name
-            safe_load_routes(full_route_path)
+    if custom_route_files ~= nil then
+        for file in custom_route_files:lines() do
+            local route_name = file:match(".*/(.*)%.lua$")
+            if route_name then
+                local full_route_path = custom_routes_dir .. "." .. route_name
+                safe_load_routes(full_route_path)
+            end
         end
+        custom_route_files:close()
+    else
+        ngx.log(ngx.ERR, "Failed to list custom routes in directory: ", custom_routes_dir)
     end
-    custom_route_files:close()
 else
     ngx.log(ngx.NOTICE, "No custom routes directory specified.")
 end

@@ -1,0 +1,50 @@
+env: int
+app: diytaxreturn-lapis
+projectCode: all
+
+# ─── Password reset email link target ─────────────────────────────────
+# Canonical frontend origin for this environment. Migration 489 uses
+# this to bootstrap ``namespaces.allowed_redirect_origins`` on first
+# run; runtime path also falls back to it if any namespace's column
+# is empty. See README.md → Password Reset Flow.
+#
+# Note: int currently runs on a docker-compose host (192.168.1.193),
+# not k3s. This value applies if/when int migrates to k3s. For the
+# docker-compose deployment, FRONTEND_URL is set by start.sh.
+frontendUrl: "https://int.diytaxreturn.co.uk"
+# passwordResetAllowedOrigins: ""
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: wslproxy
+  annotations: {}
+  hosts: []
+  tls: []
+
+database:
+  host: "10.96.129.108"
+
+externalSecret:
+  enabled: false
+
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80

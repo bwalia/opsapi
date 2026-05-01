@@ -58,11 +58,23 @@ function TaxStatementQueries.create(data, user)
         data.uuid = Global.generateUUID()
     end
 
+    -- Resolve namespace_id: inherit from bank account, or from user's default namespace
+    local namespace_id = data.namespace_id
+    if not namespace_id or namespace_id == 0 then
+        namespace_id = bank_account.namespace_id
+    end
+    if not namespace_id or namespace_id == 0 then
+        local ns = db.query("SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = ? LIMIT 1", user_id)
+        if ns and #ns > 0 and ns[1].default_namespace_id then
+            namespace_id = ns[1].default_namespace_id
+        end
+    end
+
     local statement = TaxStatements:create({
         uuid = data.uuid,
         bank_account_id = bank_account.id,
         user_id = user_id,
-        namespace_id = data.namespace_id,
+        namespace_id = namespace_id or 0,
         minio_bucket = data.minio_bucket,
         minio_object_key = data.minio_object_key,
         file_name = data.file_name,
@@ -113,6 +125,13 @@ function TaxStatementQueries.all(params, user)
     local where_parts = { "s.user_id = ?" }
     local where_values = { user_id }
 
+    -- Namespace isolation: filter by user's default namespace if available
+    local ns_rows = db.query("SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = ? LIMIT 1", user_id)
+    if ns_rows and #ns_rows > 0 and ns_rows[1].default_namespace_id and tonumber(ns_rows[1].default_namespace_id) > 0 then
+        table.insert(where_parts, "s.namespace_id = ?")
+        table.insert(where_values, tonumber(ns_rows[1].default_namespace_id))
+    end
+
     if params.bank_account_id then
         table.insert(where_parts, "ba.uuid = ?")
         table.insert(where_values, params.bank_account_id)
@@ -126,6 +145,20 @@ function TaxStatementQueries.all(params, user)
     if params.workflow_step then
         table.insert(where_parts, "s.workflow_step = ?")
         table.insert(where_values, params.workflow_step)
+    end
+
+    if params.tax_year then
+        table.insert(where_parts, "s.tax_year = ?")
+        table.insert(where_values, params.tax_year)
+    end
+
+    if params.search and params.search ~= "" then
+        table.insert(where_parts, "(s.file_name ILIKE ? OR ba.bank_name ILIKE ? OR ba.account_name ILIKE ? OR s.uuid::text ILIKE ?)")
+        local pattern = "%" .. params.search .. "%"
+        table.insert(where_values, pattern)
+        table.insert(where_values, pattern)
+        table.insert(where_values, pattern)
+        table.insert(where_values, pattern)
     end
 
     local where_clause = table.concat(where_parts, " AND ")

@@ -1,0 +1,19 @@
+<h2>Verification Code</h2>
+
+<p>Hi <%= user_name or "there" %>,</p>
+
+<p>Use the following code to verify your identity and access your <strong><%= app_name or "account" %></strong> admin dashboard:</p>
+
+<div class="code-box"><%= otp_code or "------" %></div>
+
+<% if expires_in then %>
+  <div class="info-box">
+    This code expires in <strong><%= expires_in %></strong>. If you didn't request this code, please ignore this email or contact support immediately.
+  </div>
+<% end %>
+
+<hr class="divider">
+
+<p style="font-size: 13px; color: #9ca3af; margin-bottom: 0;">
+  For your security, never share this code with anyone. Our team will never ask you for this code.
+</p>

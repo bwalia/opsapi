@@ -190,7 +190,7 @@ export const InviteMemberModal = memo(function InviteMemberModal({
       />
 
       {/* Modal */}
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+      <div className="relative bg-surface rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-secondary-200">
           <div className="flex items-center gap-3">
@@ -237,7 +237,7 @@ export const InviteMemberModal = memo(function InviteMemberModal({
                 className={cn(
                   'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                   mode === 'search'
-                    ? 'bg-white text-secondary-900 shadow-sm'
+                    ? 'bg-surface text-secondary-900 shadow-sm'
                     : 'text-secondary-600 hover:text-secondary-900'
                 )}
               >
@@ -250,7 +250,7 @@ export const InviteMemberModal = memo(function InviteMemberModal({
                 className={cn(
                   'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                   mode === 'email'
-                    ? 'bg-white text-secondary-900 shadow-sm'
+                    ? 'bg-surface text-secondary-900 shadow-sm'
                     : 'text-secondary-600 hover:text-secondary-900'
                 )}
               >

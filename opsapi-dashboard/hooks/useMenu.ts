@@ -48,6 +48,8 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Building2: icons.Building2,
     Rocket: icons.Rocket,
     Kanban: icons.Kanban,
+    Heart: icons.Heart,
+    Calculator: icons.Calculator,
     HelpCircle: icons.HelpCircle,
   };
   return ICON_MAP;

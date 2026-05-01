@@ -32,7 +32,7 @@ local function buildDomainPatterns()
     for domain in domains_env:gmatch("[^,]+") do
         domain = domain:match("^%s*(.-)%s*$") -- trim whitespace
         if domain ~= "" then
-            local escaped = domain:gsub("%.", "%%.")
+            local escaped = domain:gsub("%.", "%%."):gsub("%-", "%%-")
             table.insert(patterns, "^https?://" .. escaped .. "$")
             table.insert(patterns, "^https?://.*%." .. escaped .. "$")
             table.insert(patterns, "^https?://" .. escaped .. ":%d+$")

@@ -191,6 +191,11 @@ export function getStatusColor(status: string): string {
     inactive: 'bg-secondary-500/10 text-secondary-600',
     draft: 'bg-warning-500/10 text-warning-600',
     archived: 'bg-secondary-500/10 text-secondary-600',
+    // Timesheet statuses
+    submitted: 'bg-info-500/10 text-info-600',
+    approved: 'bg-success-500/10 text-success-600',
+    rejected: 'bg-error-500/10 text-error-600',
+    void: 'bg-secondary-500/10 text-secondary-600',
   };
 
   return statusColors[status.toLowerCase()] || 'bg-secondary-500/10 text-secondary-600';

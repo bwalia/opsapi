@@ -43,17 +43,33 @@ jobs:
         env:
           KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
         run: |
+          if [ -z "$KUBECONFIG_BASE64" ]; then
+            echo "::error::KUBE_CONFIG_DATA_K3S secret is not set. Please configure the Kubernetes config secret."
+            exit 1
+          fi
           echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
-          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
           echo "Kubeconfig decoded and exported successfully."
 
       - name: Retrieve PostgreSQL Credentials from Kubernetes
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
+          # Verify kubectl can reach the cluster
+          if ! kubectl cluster-info --request-timeout=10s > /dev/null 2>&1; then
+            echo "::error::Cannot connect to Kubernetes cluster. Check KUBE_CONFIG_DATA_K3S secret."
+            exit 1
+          fi
+
+          # Verify the secret exists
+          if ! kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} > /dev/null 2>&1; then
+            echo "::error::Secret 'opsapi-secrets' not found in namespace '${{ env.TARGET_ENV }}'"
+            echo "::error::Available secrets in namespace:"
+            kubectl get secrets -n ${{ env.TARGET_ENV }} --no-headers 2>/dev/null | awk '{print "  - "$1}' || true
+            exit 1
+          fi
 
           # Debug: list available keys in the secret
           echo "Available secret keys:"
-          kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data}" | python3 -c "import sys,json; print('\n'.join(json.loads(sys.stdin.read()).keys()))"
+          kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data}" | python3 -c "import sys,json; print('\n'.join(json.loads(sys.stdin.read()).keys()))" 2>/dev/null || echo "(could not parse keys)"
 
           PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_HOST}" | base64 --decode)
           PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_PORT}" | base64 --decode)

@@ -16,6 +16,11 @@ local JWTHelper = {}
 --- permissions from the DB. Short expiry limits the stale-permission window.
 local DEFAULT_EXPIRATION = 60 * 60
 
+--- Grace period for token refresh (7 days in seconds).
+--- Allows refreshing expired tokens within this window (e.g., after closing browser).
+--- The user still needs to re-login after this period.
+local REFRESH_GRACE_PERIOD = 7 * 24 * 60 * 60
+
 --- Get JWT secret key from environment
 -- @return string The JWT secret key
 local function getSecretKey()
@@ -185,7 +190,9 @@ function JWTHelper.hasNamespace(token)
 end
 
 --- Refresh a token with extended expiration
--- Re-validates user and roles from DB to prevent stale/revoked access
+-- Re-validates user and roles from DB to prevent stale/revoked access.
+-- Allows expired tokens within REFRESH_GRACE_PERIOD (7 days) to be refreshed,
+-- so users don't get logged out after closing the browser for a few hours.
 -- @param token string The JWT token
 -- @param expiration number|nil New expiration in seconds
 -- @return string|nil New token or nil if invalid/deactivated
@@ -193,8 +200,34 @@ function JWTHelper.refreshToken(token, expiration)
     local db = require("lapis.db")
 
     local result = JWTHelper.verifyToken(token)
+
+    -- If token is invalid, check if it's just expired within the grace period.
+    -- We verify the signature manually (HMAC check) but allow expired exp claim.
     if not result.valid then
-        return nil
+        -- Use resty.jwt to decode and check signature without exp validation
+        local secret = getSecretKey()
+        local jwt_obj = jwt:verify(secret, token, {
+            lifetime_grace_period = REFRESH_GRACE_PERIOD
+        })
+
+        if not jwt_obj.verified or not jwt_obj.payload then
+            return nil
+        end
+
+        local payload = jwt_obj.payload
+        if not payload.exp or not payload.iss or payload.iss ~= "opsapi" then
+            return nil
+        end
+
+        -- Double-check: must be expired but within grace period
+        local now = ngx.time()
+        if payload.exp > now then
+            -- Not expired — verification failed for another reason, reject
+            return nil
+        end
+
+        -- Use the decoded payload's userinfo for the refresh
+        result.payload = payload
     end
 
     local userinfo = result.payload.userinfo

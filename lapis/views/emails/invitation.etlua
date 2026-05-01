@@ -1,0 +1,33 @@
+<h2>You've been invited!</h2>
+
+<p>
+  <strong><%= inviter_name or "Someone" %></strong> has invited you to join
+  <strong><%= namespace_name or "a workspace" %></strong> on <%= app_name %>.
+</p>
+
+<% if role_name then %>
+  <div class="info-box">
+    You'll be joining as: <strong><%= role_name %></strong>
+  </div>
+<% end %>
+
+<% if message then %>
+  <p style="font-style: italic; color: #6b7280; border-left: 3px solid #e5e7eb; padding-left: 12px;">
+    "<%= message %>"
+  </p>
+<% end %>
+
+<% if accept_url then %>
+  <p style="text-align: center; margin: 28px 0;">
+    <a href="<%= accept_url %>" class="btn">Accept Invitation</a>
+  </p>
+  <p style="font-size: 13px; color: #9ca3af; text-align: center;">
+    Or copy this link: <%= accept_url %>
+  </p>
+<% end %>
+
+<% if expires_in then %>
+  <p style="font-size: 13px; color: #9ca3af;">
+    This invitation expires in <strong><%= expires_in %></strong>.
+  </p>
+<% end %>

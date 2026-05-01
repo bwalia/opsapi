@@ -25,6 +25,7 @@ RUN luarocks install lua-resty-string
 RUN luarocks install base64
 RUN luarocks install lua-resty-jwt
 RUN luarocks install payments
+RUN luarocks install lua-resty-mail
 
 RUN apk add mysql-client
 RUN apk add postgresql-client

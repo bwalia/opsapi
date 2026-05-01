@@ -114,7 +114,10 @@ function Global.encryptSecret(secret)
 
     local secretKey, secretIV = validateEncryptionConfig()
     local AES = require("resty.aes")
-    local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
+
+    -- Auto-detect cipher size from key length: 16 bytes → AES-128, 32 bytes → AES-256
+    local cipher_size = #secretKey >= 32 and 256 or 128
+    local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(cipher_size, "cbc"), {
         iv = secretIV
     }), "Failed to initialize AES encryption")
 
@@ -135,7 +138,10 @@ function Global.decryptSecret(encodedSecret)
 
     local secretKey, secretIV = validateEncryptionConfig()
     local AES = require("resty.aes")
-    local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(128, "cbc"), {
+
+    -- Auto-detect cipher size from key length: 16 bytes → AES-128, 32 bytes → AES-256
+    local cipher_size = #secretKey >= 32 and 256 or 128
+    local aesInstance = assert(AES:new(secretKey, nil, AES.cipher(cipher_size, "cbc"), {
         iv = secretIV
     }), "Failed to initialize AES decryption")
 

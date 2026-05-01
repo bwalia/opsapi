@@ -148,7 +148,7 @@ const UserEditForm: React.FC<UserEditFormProps> = memo(function UserEditForm({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+      <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
         {/* Banner */}
         <div className="h-20 bg-gradient-to-r from-primary-500 to-primary-600" />
 
@@ -157,7 +157,7 @@ const UserEditForm: React.FC<UserEditFormProps> = memo(function UserEditForm({
           <div className="flex items-start justify-between -mt-8">
             <div className="flex items-end gap-4">
               {/* Avatar */}
-              <div className="w-16 h-16 rounded-xl bg-white border-4 border-white shadow-md flex items-center justify-center overflow-hidden">
+              <div className="w-16 h-16 rounded-xl bg-surface border-4 border-white shadow-md flex items-center justify-center overflow-hidden">
                 <div className="w-full h-full gradient-primary flex items-center justify-center text-white font-bold text-xl">
                   {getInitials(formData.first_name, formData.last_name)}
                 </div>
@@ -289,7 +289,7 @@ const UserEditForm: React.FC<UserEditFormProps> = memo(function UserEditForm({
                       rows={3}
                       className={cn(
                         'w-full pl-10 pr-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
-                        'bg-white text-secondary-900 placeholder-secondary-400',
+                        'bg-surface text-secondary-900 placeholder-secondary-400',
                         'focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500',
                         'disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed',
                         'border-secondary-300 hover:border-secondary-400',
@@ -330,7 +330,7 @@ const UserEditForm: React.FC<UserEditFormProps> = memo(function UserEditForm({
                 >
                   <span
                     className={cn(
-                      'inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm',
+                      'inline-block h-4 w-4 transform rounded-full bg-surface transition-transform shadow-sm',
                       formData.active ? 'translate-x-6' : 'translate-x-1'
                     )}
                   />

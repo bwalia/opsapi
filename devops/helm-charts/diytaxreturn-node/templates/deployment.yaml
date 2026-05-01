@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      volumes:
+        - name: env-file
+          secret:
+            secretName: {{ .Release.Name }}-env
+        - name: bootstrap
+          configMap:
+            name: {{ .Release.Name }}-bootstrap
+      containers:
+        - name: {{ .Release.Name }}
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "cp /tmp/configmap/bootstrap_node.sh /usr/local/bin/bootstrap_node.sh && chmod +x /usr/local/bin/bootstrap_node.sh && sh /usr/local/bin/bootstrap_node.sh"]          
+          volumeMounts:
+            - name: env-file
+              mountPath: /tmp/secrets                
+            - name: bootstrap
+              mountPath: /tmp/configmap

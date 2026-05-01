@@ -12,6 +12,56 @@ local Model = require("lapis.db.model").Model
 local Namespaces = Model:extend("namespaces")
 local NamespaceQueries = {}
 
+--- Derive a sensible default ``allowed_redirect_origins`` for a freshly
+-- created namespace from environment variables, mirroring the bootstrap
+-- logic in migration 489.
+--
+-- Why this exists
+--   Without this, ``NamespaceQueries.create`` leaves the column NULL,
+--   so the runtime fallback in /auth/forgot-password kicks in for every
+--   new tenant and every tenant ends up sharing the global env-var
+--   FRONTEND_URL. Populating the column at create-time gives admins
+--   a visible default they can later override via SQL or the (planned)
+--   admin UI, and lets us eventually drop the runtime env-var fallback
+--   entirely once every namespace has its column populated.
+--
+-- Multi-tenant caveat (intentional, not a bug)
+--   The default is whatever ``FRONTEND_URL`` /
+--   ``PASSWORD_RESET_ALLOWED_ORIGINS`` happen to be set to on the
+--   opsapi instance — typically the URL of the FIRST tenant. For
+--   subsequent tenants on a multi-tenant instance, callers MUST pass
+--   their own ``allowed_redirect_origins`` in the ``data`` table to
+--   override this default. See the route handlers in
+--   ``routes/namespaces.lua`` for the recommended pattern: derive
+--   from the request's X-Forwarded-Host or accept an explicit
+--   parameter from the admin UI.
+--
+-- @return table  array of canonicalised origin strings (possibly empty)
+local function derive_default_allowed_origins()
+    local frontend_url = os.getenv("FRONTEND_URL")
+    local extra_csv = os.getenv("PASSWORD_RESET_ALLOWED_ORIGINS")
+
+    local origins = {}
+    local seen = {}
+    local function add(o)
+        if not o or o == "" then return end
+        local trimmed = o:match("^%s*(.-)%s*$")
+        -- Canonicalise: strip path/query/fragment, keep scheme + host[:port].
+        -- Same canonicalisation applied at runtime in routes/auth.lua so
+        -- comparisons are apples-to-apples.
+        local canon = trimmed:match("^(https?://[^/]+)") or trimmed
+        if canon == "" or seen[canon] then return end
+        seen[canon] = true
+        table.insert(origins, canon)
+    end
+    add(frontend_url)
+    if extra_csv and extra_csv ~= "" then
+        for o in extra_csv:gmatch("[^,]+") do add(o) end
+    end
+    return origins
+end
+
+
 --- Generate a unique slug from name
 -- @param name string The namespace name
 -- @return string The generated slug
@@ -39,7 +89,18 @@ local function generateSlug(name)
 end
 
 --- Create a new namespace
--- @param data table { name, slug?, description?, domain?, logo_url?, plan?, settings?, max_users?, max_stores?, owner_user_id? }
+-- @param data table {
+--   name, slug?, description?, domain?, logo_url?, plan?, settings?,
+--   max_users?, max_stores?, owner_user_id?,
+--   allowed_redirect_origins? — array of canonical origin strings
+--     (``scheme://host[:port]``) that this namespace's password-reset
+--     emails are allowed to link to. If omitted, defaults to the value
+--     derived from FRONTEND_URL + PASSWORD_RESET_ALLOWED_ORIGINS env
+--     vars (same shape as migration 489's bootstrap). For multi-tenant
+--     deployments the caller SHOULD pass this explicitly so each
+--     tenant gets its own URL — see the helper docstring above for
+--     the rationale.
+-- }
 -- @return table The created namespace
 function NamespaceQueries.create(data)
     local timestamp = Global.getCurrentTimestamp()
@@ -48,6 +109,17 @@ function NamespaceQueries.create(data)
     local slug = data.slug
     if not slug or slug == "" then
         slug = generateSlug(data.name)
+    end
+
+    -- Resolve the allow-list. Caller-supplied wins; an explicit empty
+    -- table is respected (treated as "deliberately empty"); only
+    -- ``nil`` (key absent) triggers the env-var fallback. Distinguishes
+    -- "I want no origins" from "I forgot to pass any" — important when
+    -- an admin UI explicitly clears the list to lock the namespace
+    -- out of password-reset emails.
+    local allowed_origins = data.allowed_redirect_origins
+    if allowed_origins == nil then
+        allowed_origins = derive_default_allowed_origins()
     end
 
     local namespace_data = {
@@ -67,6 +139,15 @@ function NamespaceQueries.create(data)
         created_at = timestamp,
         updated_at = timestamp
     }
+
+    -- Only set the array column when we actually have origins. An
+    -- empty Lua table sent to Postgres TEXT[] becomes ``{}`` (empty
+    -- array), which the runtime treats the same as NULL — but the
+    -- DB column allows NULL too, so this is just clarity for any
+    -- admin querying the table later.
+    if #allowed_origins > 0 then
+        namespace_data.allowed_redirect_origins = db.array(allowed_origins)
+    end
 
     return Namespaces:create(namespace_data, { returning = "*" })
 end
@@ -521,6 +602,135 @@ function NamespaceQueries.getUserDefaultNamespace(user_id)
 
     return nil
 end
+
+--- Validate + canonicalise a list of frontend origin strings.
+--
+-- Rules:
+--   - Must be ``http://`` or ``https://`` only — rejects ``javascript:``,
+--     ``data:``, ``file:``, etc. that would be useful for XSS pivots
+--     in an email link.
+--   - Path/query/fragment stripped — only the origin (scheme + host
+--     + optional port) is stored.
+--   - Whitespace trimmed.
+--   - Duplicates removed (preserves first-seen order).
+--   - Empty list is allowed (admin can intentionally disable password
+--     reset for a namespace); caller can enforce non-empty if desired.
+--
+-- Returns ``(canonicalised_array, nil)`` on success or
+-- ``(nil, error_message)`` on validation failure (first bad entry
+-- wins so the message points at the actual offender).
+local function validate_origins(input)
+    if type(input) ~= "table" then
+        return nil, "expected an array of URL strings"
+    end
+    local out = {}
+    local seen = {}
+    for i, raw in ipairs(input) do
+        if type(raw) ~= "string" then
+            return nil, ("entry #%d is not a string"):format(i)
+        end
+        local trimmed = raw:match("^%s*(.-)%s*$")
+        if trimmed == "" then
+            return nil, ("entry #%d is empty"):format(i)
+        end
+        -- Strict scheme check: only http/https. The match anchors the
+        -- whole string so embedded ``http://`` inside ``javascript:..``
+        -- can't sneak through.
+        local canon = trimmed:match("^(https?://[^/%s]+)")
+        if not canon or canon == "" then
+            return nil, ("entry #%d is not a valid http(s) origin: %s")
+                :format(i, trimmed)
+        end
+        -- Reject anything more than the canonical origin — if the
+        -- input still has trailing path/query that we stripped, fine,
+        -- silently keep just the origin. But we already trimmed
+        -- whitespace; the regex eats nothing past the host so any
+        -- residue (path) gets dropped naturally.
+        if not seen[canon] then
+            seen[canon] = true
+            table.insert(out, canon)
+        end
+    end
+    return out, nil
+end
+
+
+--- Replace the namespace's ``allowed_redirect_origins`` with a
+-- validated array. Used by the admin UI's "Frontend URLs" settings
+-- panel.
+--
+-- Validation is centralised here (not at the route layer) so any
+-- caller — admin UI, future bulk-import script, programmatic
+-- onboarding — gets the same guarantees.
+--
+-- @param id string|number ID or UUID of the namespace
+-- @param origins table  array of URL strings (validated + canonicalised)
+-- @return table|nil  the updated namespace row, or nil on failure
+-- @return string|nil error message on failure
+function NamespaceQueries.updateAllowedRedirectOrigins(id, origins)
+    local validated, err = validate_origins(origins or {})
+    if not validated then
+        return nil, err
+    end
+
+    local namespace = NamespaceQueries.show(id)
+    if not namespace then
+        return nil, "namespace not found"
+    end
+
+    -- ``db.array({})`` for empty arrays is also accepted by the
+    -- driver — produces the empty Postgres array literal ``{}``.
+    -- Distinct from NULL (which the runtime treats as "use env-var
+    -- fallback"), an empty array means "explicitly no origins
+    -- allowed" — admin chose to disable password reset for this
+    -- namespace.
+    -- Empty input collapses to NULL in the column. Postgres can't
+    -- handle ``ARRAY[]`` without an explicit cast, and treating
+    -- "empty admin input" the same as "never configured" simplifies
+    -- the runtime fallback contract: NULL = use env-var FRONTEND_URL.
+    -- An admin who wants to fully disable password reset for a
+    -- tenant clears the env var separately.
+    if #validated == 0 then
+        namespace:update({
+            allowed_redirect_origins = db.raw("NULL"),
+            updated_at = Global.getCurrentTimestamp(),
+        })
+    else
+        namespace:update({
+            allowed_redirect_origins = db.array(validated),
+            updated_at = Global.getCurrentTimestamp(),
+        })
+    end
+
+    return namespace
+end
+
+
+--- Return the namespace's allow-list of frontend origins for redirect
+-- emails (password reset, future invitation links, etc.).
+--
+-- Schema: ``namespaces.allowed_redirect_origins TEXT[]``. Stored as
+-- canonical origins (``scheme://host[:port]``); migration 489 also
+-- bootstraps it from FRONTEND_URL + PASSWORD_RESET_ALLOWED_ORIGINS env
+-- vars when first added.
+--
+-- Returns an empty Lua array (NOT nil) when the column is unset, so
+-- callers can safely iterate without nil-guards.
+--
+-- @param namespace_id number
+-- @return table  array of origin strings (possibly empty)
+function NamespaceQueries.getAllowedRedirectOrigins(namespace_id)
+    if not namespace_id then return {} end
+    local rows = db.query(
+        "SELECT allowed_redirect_origins FROM namespaces WHERE id = ? LIMIT 1",
+        namespace_id
+    )
+    if not rows or #rows == 0 then return {} end
+    local arr = rows[1].allowed_redirect_origins
+    if type(arr) ~= "table" then return {} end
+    return arr
+end
+
 
 --- Get user's permissions in a namespace
 -- @param user_id number User ID

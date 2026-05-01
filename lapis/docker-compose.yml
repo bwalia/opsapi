@@ -7,7 +7,7 @@ services:
       container_name: opsapi-gatus
       restart: unless-stopped
       ports:
-        - "8888:8080"
+        - "8877:8080"
       depends_on:
       - minio
       - adminer
@@ -25,10 +25,14 @@ services:
       - "4010:80"
     volumes:
       - .:/app
+      - ../projects:/app/projects
       - ./logs:/var/log/nginx
     env_file: ".env"
     environment:
       - PROJECT_CODE=${PROJECT_CODE:-all}
+      - KAFKA_BROKERS=${KAFKA_BROKERS:-kafka:29092}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,6 +159,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_DOMAIN: test-s3.diytaxreturn.co.uk,test-s3-cli.diytaxreturn.co.uk
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -180,6 +185,7 @@ services:
 
       echo 'Creating buckets...';
       mc mb local/opsapi --ignore-existing;
+      mc mb local/opsapi-diytaxreturn --ignore-existing;
       mc mb local/documents --ignore-existing;
       mc mb local/avatars --ignore-existing;
       mc mb local/attachments --ignore-existing;
@@ -189,6 +195,7 @@ services:
 
       echo 'Setting bucket policies...';
       mc anonymous set public local/opsapi;
+      mc anonymous set public local/opsapi-diytaxreturn;
       mc anonymous set public local/documents;
       mc anonymous set public local/avatars;
       mc anonymous set public local/attachments;
@@ -232,6 +239,66 @@ services:
   #   volumes:
   #     - ../node/opsapi-node:/usr/src/app
   #   env_file: "../node/opsapi-node/.env"
+
+  # Ollama - Local AI/LLM for bookkeeping assistance
+  ollama:
+    image: ollama/ollama:latest
+    container_name: opsapi-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.22
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # Kafka - Event streaming (Zookeeper + Kafka broker)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: opsapi-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.20
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: opsapi-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      opsapi-network:
+        ipv4_address: 172.71.0.21
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   # Prometheus - Metrics collection and alerting
   prometheus:
@@ -307,3 +374,4 @@ volumes:
   prometheus_data:
   grafana_data:
   minio_data:
+  ollama_data:

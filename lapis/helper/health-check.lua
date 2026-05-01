@@ -7,6 +7,70 @@ local http = require("resty.http")
 
 local HealthCheck = {}
 
+-- ── DNS resolution helper (mirrors minio.lua logic) ──────────────────────────
+-- In K8s, resty.http can't resolve .svc.cluster.local hostnames via the nginx
+-- resolver. This helper uses resty.dns.resolver to query CoreDNS directly,
+-- then replaces the hostname in the URL with the resolved IP.
+local _dns_cache = {}
+local DNS_CACHE_TTL = 30
+
+local function is_kubernetes()
+    local f = io.open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
+    if f then f:close(); return true end
+    return false
+end
+
+local function resolve_for_health_check(url)
+    if not url or url == "" then return url end
+    if not is_kubernetes() then return url end
+
+    -- Extract hostname from URL: http://hostname:port/path
+    local scheme, host, port, path = url:match("^(https?)://([^:/]+):?(%d*)(.*)")
+    if not host then return url end
+    if host:match("^%d+%.%d+%.%d+%.%d+$") then return url end -- already IP
+
+    -- Check cache
+    local cached = _dns_cache[host]
+    if cached and cached.expires > ngx.now() then
+        local resolved_url = scheme .. "://" .. cached.ip .. (port ~= "" and (":" .. port) or "") .. path
+        return resolved_url
+    end
+
+    -- Get nameservers from /etc/resolv.conf (skip 127.x.x.x)
+    local nameservers = {}
+    local f = io.open("/etc/resolv.conf", "r")
+    if f then
+        for line in f:lines() do
+            local ns = line:match("^nameserver%s+(%S+)")
+            if ns and not ns:match("^127%.") then
+                nameservers[#nameservers + 1] = ns
+            end
+        end
+        f:close()
+    end
+    if #nameservers == 0 then return url end
+
+    -- Resolve using resty.dns.resolver
+    local ok_mod, dns = pcall(require, "resty.dns.resolver")
+    if not ok_mod then return url end
+
+    local r, err = dns:new({ nameservers = nameservers, retrans = 2, timeout = 2000 })
+    if not r then return url end
+
+    local answers, err = r:query(host, { qtype = r.TYPE_A })
+    if not answers or answers.errcode then return url end
+
+    for _, ans in ipairs(answers) do
+        if ans.type == r.TYPE_A and ans.address then
+            _dns_cache[host] = { ip = ans.address, expires = ngx.now() + DNS_CACHE_TTL }
+            local resolved_url = scheme .. "://" .. ans.address .. (port ~= "" and (":" .. port) or "") .. path
+            return resolved_url
+        end
+    end
+
+    return url
+end
+
 -- Get database connection status
 function HealthCheck.checkDatabase()
     local start_time = ngx.now()
@@ -80,47 +144,53 @@ function HealthCheck.checkDatabase()
     return status
 end
 
--- Check Redis connection (if configured)
+-- Check Redis connection (only when REDIS_ENABLED=true)
 function HealthCheck.checkRedis()
+    local redis_enabled = os.getenv("REDIS_ENABLED")
+    if redis_enabled ~= "true" and redis_enabled ~= "1" then
+        return {
+            name = "redis",
+            status = "skipped",
+            response_time_ms = 0,
+            details = { enabled = false, message = "Redis is disabled (REDIS_ENABLED is not true)" }
+        }
+    end
+
     local start_time = ngx.now()
     local status = {
         name = "redis",
         status = "healthy",
         response_time_ms = 0,
-        details = {}
+        details = { enabled = true }
     }
 
     local success, result = pcall(function()
         local red = redis:new()
         red:set_timeout(1000) -- 1 second timeout
 
-        -- Try to connect to Redis
         local ok, err = red:connect(os.getenv("REDIS_HOST") or "127.0.0.1",
-                                    tonumber(os.getenv("REDIS_PORT")) or 6379)
+            tonumber(os.getenv("REDIS_PORT")) or 6379)
 
         if not ok then
             error("Connection failed: " .. tostring(err))
         end
 
-        -- Test PING command
-        local res, err = red:ping()
+        local res, ping_err = red:ping()
         if not res then
-            error("PING failed: " .. tostring(err))
+            error("PING failed: " .. tostring(ping_err))
         end
 
-        -- Get Redis info
-        local info, err = red:info("server")
+        local info = red:info("server")
 
-        -- Close connection
         red:set_keepalive(10000, 100)
 
-        return { connected = true, ping = res, info = info }
+        return { enabled = true, connected = true, ping = res, info = info }
     end)
 
     status.response_time_ms = math.floor((ngx.now() - start_time) * 1000)
 
     if not success then
-        status.status = "degraded"  -- Redis is optional, so degraded instead of unhealthy
+        status.status = "degraded"
         status.error = "Redis not available: " .. tostring(result)
         status.details.connected = false
         return status
@@ -131,6 +201,9 @@ function HealthCheck.checkRedis()
 end
 
 -- Check MinIO connectivity
+-- Verifies both internal (MINIO_ENDPOINT — used by the app for S3 operations)
+-- and external (MINIO_ENDPOINT_WEB_EXTERNAL — used by browsers/clients for public access).
+-- "healthy" = both pass, "degraded" = one passes, "unhealthy" = neither passes.
 function HealthCheck.checkMinio()
     local start_time = ngx.now()
     local status = {
@@ -140,43 +213,86 @@ function HealthCheck.checkMinio()
         details = {}
     }
 
-    local minio_endpoint = os.getenv("MINIO_ENDPOINT") or "http://localhost:9000"
-    status.details.endpoint = minio_endpoint
-
-    local success, result = pcall(function()
-        local httpc = http.new()
-        httpc:set_timeout(5000) -- 5 second timeout
-
-        local res, err = httpc:request_uri(minio_endpoint .. "/minio/health/live", {
-            method = "GET",
-        })
-
-        if not res then
-            error("Connection failed: " .. tostring(err))
+    -- Internal: the endpoint the app uses for S3 operations (container-to-container)
+    local minio_internal = os.getenv("MINIO_ENDPOINT")
+        or os.getenv("MINIO_INTERNAL_ENDPOINT")
+        or "http://minio:9000"
+    -- External: server-accessible public endpoint (set on deployed environments)
+    -- Falls back to MINIO_PUBLIC_URL but skips localhost URLs (browser-only, not reachable from container)
+    local minio_external = os.getenv("MINIO_ENDPOINT_WEB_EXTERNAL")
+    if not minio_external or minio_external == "" then
+        local public_url = os.getenv("MINIO_PUBLIC_URL")
+        if public_url and public_url ~= "" and not public_url:match("localhost") and not public_url:match("127%.0%.0%.1") then
+            minio_external = public_url
         end
+    end
 
-        return {
-            connected = true,
-            http_code = res.status,
-        }
-    end)
+    status.details.internal_endpoint = minio_internal
+    status.details.external_endpoint = minio_external or "(not configured)"
+
+    -- SSL verification: enabled via HEALTH_CHECK_SSL_VERIFY=true (default: false)
+    local ssl_env = os.getenv("HEALTH_CHECK_SSL_VERIFY")
+    local ssl_verify = ssl_env == "true" or ssl_env == "1"
+    status.details.ssl_verify = ssl_verify
+
+    -- Helper: try a single MinIO health request
+    local function check_endpoint(url)
+        if not url or url == "" then
+            return { connected = false, error = "Not configured" }
+        end
+        local ok, result = pcall(function()
+            local httpc = http.new()
+            httpc:set_timeout(5000)
+            -- Resolve K8s DNS hostnames (e.g. .svc.cluster.local) to IP
+            local resolved_url = resolve_for_health_check(url)
+            local res, err = httpc:request_uri(resolved_url .. "/minio/health/live", {
+                method = "GET",
+                ssl_verify = ssl_verify,
+            })
+            if not res then
+                error("Connection failed: " .. tostring(err))
+            end
+            return { connected = true, http_code = res.status }
+        end)
+        if ok then
+            return result
+        end
+        return { connected = false, error = tostring(result) }
+    end
+
+    -- Check both endpoints
+    local internal_result = check_endpoint(minio_internal)
+    status.details.internal = internal_result
+    local internal_healthy = internal_result.connected and internal_result.http_code == 200
+
+    local external_result = check_endpoint(minio_external)
+    status.details.external = external_result
+    local external_healthy = external_result.connected and external_result.http_code == 200
 
     status.response_time_ms = math.floor((ngx.now() - start_time) * 1000)
 
-    if not success then
+    local external_configured = minio_external and minio_external ~= ""
+
+    if internal_healthy and (external_healthy or not external_configured) then
+        -- Internal works, and external either works or wasn't configured — all good
+        status.details.connected = true
+    elseif internal_healthy and external_configured and not external_healthy then
+        -- App can talk to MinIO but public access is broken
         status.status = "degraded"
-        status.error = "MinIO not available: " .. tostring(result)
+        status.details.connected = true
+        status.error = "MinIO external endpoint not reachable (internal OK)"
+    elseif external_healthy and not internal_healthy then
+        -- External works but internal is broken — app S3 operations may fail
+        status.status = "degraded"
+        status.details.connected = true
+        status.error = "MinIO internal endpoint not reachable (external OK)"
+    else
+        -- Neither works
+        status.status = "unhealthy"
         status.details.connected = false
-        return status
+        status.error = "MinIO not reachable on any endpoint"
     end
 
-    if result.http_code ~= 200 then
-        status.status = "degraded"
-        status.error = "MinIO returned HTTP " .. tostring(result.http_code)
-    end
-
-    status.details.connected = result.connected
-    status.details.http_code = result.http_code
     return status
 end
 
@@ -345,10 +461,14 @@ function HealthCheck.getQuickStatus()
     local db_check = HealthCheck.checkDatabase()
     local minio_check = HealthCheck.checkMinio()
 
+    -- Database is critical (unhealthy = overall unhealthy)
+    -- MinIO is important but not critical (unhealthy = overall degraded)
     local overall = "healthy"
     if db_check.status == "unhealthy" then
         overall = "unhealthy"
-    elseif db_check.status == "degraded" or minio_check.status == "degraded" then
+    elseif db_check.status == "degraded"
+        or minio_check.status == "degraded"
+        or minio_check.status == "unhealthy" then
         overall = "degraded"
     end
 
@@ -369,7 +489,8 @@ function HealthCheck.getQuickStatus()
             minio = {
                 status = minio_check.status,
                 response_time_ms = minio_check.response_time_ms,
-                endpoint = minio_check.details and minio_check.details.endpoint or nil,
+                connected = minio_check.details and minio_check.details.connected or false,
+                error = minio_check.error,
             }
         }
     }

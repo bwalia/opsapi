@@ -292,7 +292,7 @@ const NotificationPanel = memo(function NotificationPanel({
       {/* Panel */}
       <div
         ref={panelRef}
-        className="absolute right-0 mt-2 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-xl border border-secondary-200 z-50 overflow-hidden"
+        className="absolute right-0 mt-2 w-96 max-w-[calc(100vw-2rem)] bg-surface rounded-xl shadow-xl border border-secondary-200 z-50 overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-secondary-200">

@@ -91,6 +91,16 @@ return function(app)
         local redirect_uri = Global.getEnvVar("HMRC_REDIRECT_URI")
         local environment  = Global.getEnvVar("HMRC_ENVIRONMENT") or "sandbox"
 
+        -- Validate environment value
+        if environment ~= "sandbox" and environment ~= "production" then
+            ngx.log(ngx.ERR, "[HMRC] Invalid HMRC_ENVIRONMENT: ", environment,
+                             " — must be 'sandbox' or 'production'")
+            return {
+                status = 503,
+                json   = { error = "HMRC_ENVIRONMENT must be 'sandbox' or 'production'" }
+            }
+        end
+
         if not client_id or not redirect_uri then
             return {
                 status = 503,
@@ -98,10 +108,27 @@ return function(app)
             }
         end
 
+        -- statement_id is optional — when connecting from settings/profile page
+        -- it won't be provided. The callback uses it to redirect back appropriately.
         local statement_id = self.params.statement_id
-        if not statement_id or statement_id == "" then
-            return { status = 400, json = { error = "statement_id is required" } }
+        local source = self.params.source or "file"  -- "file" or "settings"
+
+        -- redirect_url: the frontend origin to redirect back to after HMRC auth.
+        -- Required for multi-tenant/multi-environment support (SaaS).
+        -- Falls back to Referer header or http://localhost for local dev.
+        local redirect_url = self.params.redirect_url
+        if not redirect_url or redirect_url == "" then
+            local referer = ngx.req.get_headers()["referer"]
+            if referer then
+                -- Extract origin from referer (e.g. https://acc.diytaxreturn.co.uk/settings → https://acc.diytaxreturn.co.uk)
+                redirect_url = referer:match("^(https?://[^/]+)")
+            end
         end
+        if not redirect_url or redirect_url == "" then
+            redirect_url = "http://localhost"
+        end
+        -- Strip trailing slash
+        redirect_url = redirect_url:gsub("/$", "")
 
         -- current_user is set by the before_filter auth middleware
         local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.id)
@@ -109,10 +136,12 @@ return function(app)
             return { status = 401, json = { error = "Not authenticated" } }
         end
 
-        -- Build HMAC-signed state
+        -- Build HMAC-signed state (includes redirect_url so callback knows where to send user)
         local state, state_err = sign_state({
             uuid = user_uuid,
-            sid  = statement_id,
+            sid  = statement_id or "",
+            src  = source,
+            rurl = redirect_url,
             ts   = ngx.time(),
         })
         if not state then
@@ -151,14 +180,25 @@ return function(app)
     -- Called by HMRC after user authenticates.
     -- -----------------------------------------------------------------------
     app:get("/auth/hmrc/callback", RateLimit.wrap(HMRC_LIMIT, function(self)
-        local frontend_url = Global.getEnvVar("APP_BASE_URL") or "http://localhost"
+        local default_frontend = "http://localhost"
         local environment  = Global.getEnvVar("HMRC_ENVIRONMENT") or "sandbox"
 
-        -- ── OAuth error from HMRC ──
+        if environment ~= "sandbox" and environment ~= "production" then
+            ngx.log(ngx.ERR, "[HMRC] Invalid HMRC_ENVIRONMENT in callback: ", environment)
+            return { redirect_to = default_frontend .. "/settings?hmrc_error=server_misconfigured" }
+        end
+
+        -- ── OAuth error from HMRC (before state is available) ──
         local oauth_error = self.params.error
         if oauth_error then
             ngx.log(ngx.WARN, "[HMRC] OAuth error from HMRC: ", oauth_error)
-            return { redirect_to = frontend_url .. "/file?hmrc_error=" .. ngx.escape_uri(oauth_error) }
+            -- Try to extract frontend_url from state if present, else use default
+            local err_frontend = default_frontend
+            if self.params.state then
+                local sd = verify_state(self.params.state)
+                if sd and sd.rurl then err_frontend = sd.rurl end
+            end
+            return { redirect_to = err_frontend .. "/file?hmrc_error=" .. ngx.escape_uri(oauth_error) }
         end
 
         local code  = self.params.code
@@ -166,22 +206,41 @@ return function(app)
 
         if not code or not state then
             ngx.log(ngx.WARN, "[HMRC] Callback missing code or state")
-            return { redirect_to = frontend_url .. "/file?hmrc_error=missing_params" }
+            return { redirect_to = default_frontend .. "/file?hmrc_error=missing_params" }
         end
 
         -- ── Validate HMAC state ──
         local state_data = verify_state(state)
         if not state_data then
-            return { redirect_to = frontend_url .. "/file?hmrc_error=invalid_state" }
+            return { redirect_to = default_frontend .. "/file?hmrc_error=invalid_state" }
         end
 
         local user_uuid    = state_data.uuid
         local statement_id = state_data.sid
+        local source       = state_data.src or "file"
+        -- Frontend URL comes from the signed state (set during initiate)
+        local frontend_url = state_data.rurl or default_frontend
+
+        -- Build redirect base depending on where the user started
+        local function error_redirect(err_code)
+            if source == "settings" then
+                return { redirect_to = frontend_url .. "/settings?hmrc_error=" .. ngx.escape_uri(err_code) }
+            end
+            return {
+                redirect_to = frontend_url .. "/file?statement=" .. (statement_id or "") ..
+                              "&hmrc_error=" .. ngx.escape_uri(err_code)
+            }
+        end
 
         -- ── Exchange code for token ──
         local client_id     = Global.getEnvVar("HMRC_CLIENT_ID")
         local client_secret = Global.getEnvVar("HMRC_CLIENT_SECRET")
         local redirect_uri  = Global.getEnvVar("HMRC_REDIRECT_URI")
+
+        if not client_id or not client_secret or not redirect_uri then
+            ngx.log(ngx.ERR, "[HMRC] Missing OAuth config in callback")
+            return error_redirect("server_misconfigured")
+        end
 
         local token_url
         if environment == "production" then
@@ -203,32 +262,23 @@ return function(app)
                 redirect_uri  = redirect_uri,
             }),
             headers    = { ["Content-Type"] = "application/x-www-form-urlencoded" },
-            ssl_verify = false,  -- required for sandbox; production uses valid cert
+            ssl_verify = (environment == "production"),
         })
 
         if not token_res then
             ngx.log(ngx.ERR, "[HMRC] Token exchange HTTP error: ", tostring(token_err))
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_exchange_failed"
-            }
+            return error_redirect("token_exchange_failed")
         end
 
         if token_res.status ~= 200 then
             ngx.log(ngx.ERR, "[HMRC] Token exchange failed HTTP ", token_res.status, ": ", token_res.body)
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_exchange_failed"
-            }
+            return error_redirect("token_exchange_failed")
         end
 
         local ok, token_data = pcall(cjson.decode, token_res.body)
         if not ok or not token_data or not token_data.access_token then
             ngx.log(ngx.ERR, "[HMRC] Token response missing access_token")
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_exchange_failed"
-            }
+            return error_redirect("token_exchange_failed")
         end
 
         -- ── Store token in DB ──
@@ -244,19 +294,20 @@ return function(app)
 
         if not store_ok then
             ngx.log(ngx.ERR, "[HMRC] Failed to store token: ", tostring(store_err))
-            -- Non-fatal: redirect but show error
-            return {
-                redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
-                              "&hmrc_error=token_store_failed"
-            }
+            return error_redirect("token_store_failed")
         end
 
         ngx.log(ngx.NOTICE, "[HMRC] OAuth successful for user=", user_uuid,
-                             " statement=", statement_id, " expires_in=", expires_in)
+                             " statement=", statement_id, " source=", source, " expires_in=", expires_in)
 
         -- ── Redirect to frontend — no token in URL ──
+        if source == "settings" then
+            return {
+                redirect_to = frontend_url .. "/settings?hmrc_connected=true"
+            }
+        end
         return {
-            redirect_to = frontend_url .. "/file?statement=" .. statement_id ..
+            redirect_to = frontend_url .. "/file?statement=" .. (statement_id or "") ..
                           "&hmrc_connected=true"
         }
     end))
@@ -265,7 +316,7 @@ return function(app)
     -- DELETE /auth/hmrc/disconnect
     -- Requires: JWT auth. Removes stored HMRC token for the current user.
     -- -----------------------------------------------------------------------
-    app:delete("/auth/hmrc/disconnect", function(self)
+    app:delete("/auth/hmrc/disconnect", RateLimit.wrap(HMRC_LIMIT, function(self)
         local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.id)
         if not user_uuid then
             return { status = 401, json = { error = "Not authenticated" } }
@@ -279,6 +330,6 @@ return function(app)
 
         ngx.log(ngx.NOTICE, "[HMRC] Disconnected HMRC for user=", user_uuid)
         return { status = 200, json = { message = "HMRC disconnected successfully" } }
-    end)
+    end))
 
 end

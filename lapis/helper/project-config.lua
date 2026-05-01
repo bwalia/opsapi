@@ -35,6 +35,13 @@ ProjectConfig.FEATURES = {
 
     -- New project-specific features
     TAX_COPILOT = "tax_copilot",       -- UK Tax Return AI Agent
+    CRM = "crm",                       -- CRM: accounts, contacts, deals, pipelines
+    TIMESHEETS = "timesheets",         -- Timesheet tracking and approval
+    INVOICING = "invoicing",           -- Invoice generation and payments
+    ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
+
+    -- Platform-level features (always-on for every preset)
+    THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
 }
 
 -- Define what features each project code includes
@@ -54,6 +61,11 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.SERVICES,
         ProjectConfig.FEATURES.BANK_TRANSACTIONS,
         ProjectConfig.FEATURES.TAX_COPILOT,
+        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.TIMESHEETS,
+        ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.ACCOUNTING,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Tax Copilot - UK Tax Return AI Agent
@@ -63,6 +75,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TAX_COPILOT,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Ecommerce platform
@@ -73,6 +86,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Ecommerce with chat
@@ -84,6 +98,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Full collaboration platform
@@ -95,6 +110,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.VAULT,
         ProjectConfig.FEATURES.SERVICES,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Hospital CRM
@@ -103,12 +119,27 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.HOSPITAL,
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
+    -- Business/Professional Services
+    business = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.TIMESHEETS,
+        ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.ACCOUNTING,
+        ProjectConfig.FEATURES.KANBAN,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 
     -- Minimal core only (just auth system + menu for dashboard)
     core_only = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
     },
 }
 
@@ -235,6 +266,26 @@ function ProjectConfig.isTaxCopilotEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.TAX_COPILOT)
 end
 
+function ProjectConfig.isCrmEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.CRM)
+end
+
+function ProjectConfig.isTimesheetsEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.TIMESHEETS)
+end
+
+function ProjectConfig.isInvoicingEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.INVOICING)
+end
+
+function ProjectConfig.isAccountingEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.ACCOUNTING)
+end
+
+function ProjectConfig.isThemesEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.THEMES)
+end
+
 -- Get project info for debugging/logging
 function ProjectConfig.getProjectInfo()
     return {
@@ -320,7 +371,73 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "tax_statements", name = "Statements", description = "Bank statement uploads", category = "Tax" },
         { machine_name = "tax_file", name = "HMRC Filing", description = "Submit tax returns to HMRC", category = "Tax", allowed_actions = {"access"} },
     },
+
+    -- CRM modules
+    crm = {
+        { machine_name = "crm_accounts", name = "CRM Accounts", description = "Company/organization management", category = "CRM" },
+        { machine_name = "crm_contacts", name = "CRM Contacts", description = "Contact management", category = "CRM" },
+        { machine_name = "crm_deals", name = "CRM Deals", description = "Deal pipeline management", category = "CRM" },
+        { machine_name = "crm_pipelines", name = "CRM Pipelines", description = "Sales pipeline configuration", category = "CRM" },
+        { machine_name = "crm_activities", name = "CRM Activities", description = "Activity tracking", category = "CRM" },
+    },
+
+    -- Timesheet modules
+    timesheets = {
+        { machine_name = "timesheets", name = "Timesheets", description = "Time tracking and approval", category = "Business" },
+        { machine_name = "timesheet_approvals", name = "Timesheet Approvals", description = "Approve/reject timesheets", category = "Business", allowed_actions = {"approve", "reject", "read"} },
+    },
+
+    -- Invoicing modules
+    invoicing = {
+        { machine_name = "invoices", name = "Invoices", description = "Invoice creation and management", category = "Finance" },
+        { machine_name = "payments", name = "Payments", description = "Payment recording and tracking", category = "Finance" },
+        { machine_name = "tax_rates_config", name = "Tax Rates", description = "Tax rate configuration", category = "Finance" },
+    },
+
+    -- Accounting/Bookkeeping modules
+    accounting = {
+        { machine_name = "accounting", name = "Bookkeeping", description = "Chart of accounts, journal entries, and financial reports", category = "Accounting" },
+        { machine_name = "bank_reconciliation", name = "Bank Reconciliation", description = "Import and reconcile bank transactions", category = "Accounting" },
+        { machine_name = "expense_management", name = "Expenses", description = "Expense tracking and approval", category = "Accounting" },
+        { machine_name = "vat_returns", name = "VAT Returns", description = "UK VAT return calculation and submission", category = "Accounting" },
+        { machine_name = "financial_reports", name = "Financial Reports", description = "Trial balance, balance sheet, P&L", category = "Accounting", allowed_actions = {"read"} },
+    },
+
+    -- Theme system (platform-level; always on)
+    themes = {
+        { machine_name = "themes", name = "Themes", description = "Create, customize, activate, and publish themes for your workspace", category = "Appearance", is_system = true, allowed_actions = {"access", "read", "create", "update", "delete", "manage", "activate", "publish"} },
+    },
 }
+
+-- =============================================================================
+-- DYNAMIC FEATURE REGISTRATION (used by project-loader.lua)
+-- =============================================================================
+
+--- Register a new feature dynamically from a project manifest.
+-- Called by the project-loader when it discovers projects in /projects/.
+-- @param code string Project code (e.g. "hospital_patient_manager")
+-- @param feature_list table List of feature strings this project includes
+-- @param modules table|nil RBAC module definitions for this project
+function ProjectConfig.registerFeature(code, feature_list, modules)
+    -- Add to FEATURES enum if not already present
+    local upper = code:upper()
+    if not ProjectConfig.FEATURES[upper] then
+        ProjectConfig.FEATURES[upper] = code
+    end
+
+    -- Register the project's feature set
+    if not ProjectConfig.PROJECT_FEATURES[code] then
+        ProjectConfig.PROJECT_FEATURES[code] = feature_list
+    end
+
+    -- Register RBAC modules
+    if modules and #modules > 0 then
+        ProjectConfig.PROJECT_MODULES[code] = modules
+    end
+
+    -- Reset cached features so new registrations are picked up
+    _enabled_features = nil
+end
 
 --- Get RBAC modules for current PROJECT_CODE (core + project-specific features)
 -- @return table List of module definitions

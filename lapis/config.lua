@@ -29,3 +29,19 @@ config("development", {
     database = os.getenv("POSTGRES_DB") or "opsapi-diytaxreturn"
   }
 })
+
+config("production", {
+  port = 80,
+  server = "nginx",
+  code_cache = "on",
+  num_workers = "1",
+  session_name = "opsapi_session",
+  secret = os.getenv("JWT_SECRET_KEY") or "change-me-in-production",
+  postgres = {
+    host = os.getenv("POSTGRES_HOST") or "127.0.0.1",
+    user = os.getenv("POSTGRES_USER") or "pguser",
+    password = os.getenv("POSTGRES_PASSWORD") or "pgpassword",
+    database = os.getenv("POSTGRES_DB") or "opsapi",
+    port = tonumber(os.getenv("POSTGRES_PORT") or "5432")
+  }
+})

@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: {{ .Release.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "stat -c %a /tmp && ls -la /tmp && cp /tmp/configmap/bootstrap-nginx.sh /usr/local/bin/bootstrap-nginx.sh && chmod +x /usr/local/bin/bootstrap-nginx.sh && /bin/sh /usr/local/bin/bootstrap-nginx.sh"]
+          volumeMounts:
+            - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
+              mountPath: /tmp/configmap
+            - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
+              mountPath: /tmp/secrets
+          ports:
+            - containerPort: {{ .Values.containerPort | default 80 }}
+          startupProbe:
+            httpGet:
+              path: /live
+              port: {{ .Values.containerPort | default 80 }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: {{ .Values.containerPort | default 80 }}
+            timeoutSeconds: 3
+            failureThreshold: 3
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.containerPort | default 80 }}
+            timeoutSeconds: 10
+            periodSeconds: 15
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-secrets
+          env:
+            - name: LAPIS_ENVIRONMENT
+              value: "production"
+            - name: PROJECT_CODE
+              value: {{ .Values.projectCode | default "all" | quote }}
+            {{- if and .Values.setup .Values.setup.adminEmail }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.setup.adminEmail | quote }}
+            {{- end }}
+            {{- if and .Values.setup .Values.setup.adminPassword }}
+            - name: ADMIN_PASSWORD
+              value: {{ .Values.setup.adminPassword | quote }}
+            {{- end }}
+            {{- if and .Values.setup .Values.setup.namespaceSlug }}
+            - name: NAMESPACE_SLUG
+              value: {{ .Values.setup.namespaceSlug | quote }}
+            {{- end }}
+            # ── Password reset email links + allow-list bootstrap ──────────
+            # These two env vars feed migration 489's auto-bootstrap of
+            # ``namespaces.allowed_redirect_origins`` AND the legacy
+            # env-var fallback in /auth/forgot-password (defence in
+            # depth for any namespace whose column is empty at runtime).
+            #
+            # ``frontendUrl``  = canonical primary frontend for this tenant.
+            # ``passwordResetAllowedOrigins`` = optional comma-separated
+            # extras for multi-frontend tenants (staging + prod, or
+            # per-region domains).
+            #
+            # See README.md → Password Reset Flow for the full lookup
+            # priority chain.
+            {{- if .Values.frontendUrl }}
+            - name: FRONTEND_URL
+              value: {{ .Values.frontendUrl | quote }}
+            {{- end }}
+            {{- if .Values.passwordResetAllowedOrigins }}
+            - name: PASSWORD_RESET_ALLOWED_ORIGINS
+              value: {{ .Values.passwordResetAllowedOrigins | quote }}
+            {{- end }}
+      volumes:
+        - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
+          configMap:
+            name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
+        - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
+          secret:
+            secretName: "{{ .Release.Name }}-secrets"
+            items:
+            - key: LAPIS_CONFIG_LUA_FILE
+              path: config.lua

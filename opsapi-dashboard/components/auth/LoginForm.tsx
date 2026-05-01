@@ -35,7 +35,15 @@ const LoginForm: React.FC = () => {
       await login(formData);
       toast.success('Login successful');
       router.push('/dashboard');
-    } catch (err) {
+    } catch (err: unknown) {
+      const error = err as Error & { requires_2fa?: boolean; session_token?: string; email?: string };
+      // If 2FA is required, store session token and redirect to OTP page
+      if (error.requires_2fa && error.session_token) {
+        sessionStorage.setItem('2fa_session_token', error.session_token);
+        sessionStorage.setItem('2fa_email', error.email || '');
+        router.push('/verify-otp');
+        return;
+      }
       toast.error(err instanceof Error ? err.message : 'Login failed');
     }
   };

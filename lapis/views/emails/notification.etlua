@@ -1,0 +1,19 @@
+<h2><%= title or "Notification" %></h2>
+
+<% if message then %>
+  <p><%= message %></p>
+<% end %>
+
+<% if details then %>
+  <div class="info-box">
+    <%- details %>
+  </div>
+<% end %>
+
+<% if action_url then %>
+  <p style="text-align: center; margin: 28px 0;">
+    <a href="<%= action_url %>" class="btn"><%= action_label or "View Details" %></a>
+  </p>
+<% end %>
+
+<p>Regards,<br>The <%= app_name %> Team</p>

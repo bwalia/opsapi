@@ -19,7 +19,7 @@ const Badge: React.FC<BadgeProps> = ({
 }) => {
   const variants = {
     default: 'bg-secondary-100 text-secondary-700',
-    secondary: 'bg-secondary-100 text-secondary-600',
+    secondary: 'bg-secondary-100 text-secondary-700',
     success: 'bg-success-500/10 text-success-600',
     warning: 'bg-warning-500/10 text-warning-600',
     error: 'bg-error-500/10 text-error-600',
@@ -35,6 +35,7 @@ const Badge: React.FC<BadgeProps> = ({
   if (status) {
     return (
       <span
+        role="status"
         className={cn(
           'inline-flex items-center font-medium rounded-full',
           sizes[size],

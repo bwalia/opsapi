@@ -40,11 +40,11 @@ const ProgressBar = memo(function ProgressBar({
 
   return (
     <div className={cn('space-y-1', className)}>
-      <div className="flex items-center justify-between text-xs text-gray-500">
+      <div className="flex items-center justify-between text-xs text-secondary-500">
         <span>{completed} of {total} tasks</span>
         <span>{percentage}%</span>
       </div>
-      <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+      <div className="h-1.5 bg-secondary-200 rounded-full overflow-hidden">
         <div
           className={cn(
             'h-full rounded-full transition-all',
@@ -78,15 +78,15 @@ const BudgetProgress = memo(function BudgetProgress({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-gray-500 flex items-center gap-1">
+        <span className="text-secondary-500 flex items-center gap-1">
           <DollarSign size={12} />
           Budget
         </span>
-        <span className={cn(isOverBudget ? 'text-red-600' : 'text-gray-600')}>
+        <span className={cn(isOverBudget ? 'text-red-600' : 'text-secondary-600')}>
           {formatBudget(spent, currency)} / {formatBudget(total, currency)}
         </span>
       </div>
-      <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+      <div className="h-1.5 bg-secondary-200 rounded-full overflow-hidden">
         <div
           className={cn(
             'h-full rounded-full transition-all',
@@ -127,7 +127,7 @@ const ProjectMenu = memo(function ProjectMenu({
           e.stopPropagation();
           onToggle();
         }}
-        className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+        className="p-1 rounded hover:bg-secondary-100 text-secondary-400 hover:text-secondary-600 transition-colors"
       >
         <MoreHorizontal size={18} />
       </button>
@@ -135,13 +135,13 @@ const ProjectMenu = memo(function ProjectMenu({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); onToggle(); }} />
-          <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+          <div className="absolute right-0 mt-1 w-44 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit();
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary-700 hover:bg-secondary-50"
             >
               <Edit2 size={14} />
               Edit project
@@ -151,7 +151,7 @@ const ProjectMenu = memo(function ProjectMenu({
                 e.stopPropagation();
                 onSettings();
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary-700 hover:bg-secondary-50"
             >
               <Settings size={14} />
               Settings
@@ -161,7 +161,7 @@ const ProjectMenu = memo(function ProjectMenu({
                 e.stopPropagation();
                 onArchive();
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary-700 hover:bg-secondary-50"
             >
               <Archive size={14} />
               Archive
@@ -245,7 +245,7 @@ const ProjectCard = memo(function ProjectCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={cn(
-        'bg-white rounded-xl border shadow-sm p-5 cursor-pointer transition-all',
+        'bg-surface rounded-xl border shadow-sm p-5 cursor-pointer transition-all',
         'hover:shadow-md hover:border-primary-200',
         'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
         isOverdue && 'border-l-4 border-l-red-500',
@@ -264,7 +264,7 @@ const ProjectCard = memo(function ProjectCard({
           </div>
 
           <div>
-            <h3 className="font-semibold text-gray-900">{project.name}</h3>
+            <h3 className="font-semibold text-secondary-900">{project.name}</h3>
             <span
               className={cn(
                 'inline-block text-xs px-2 py-0.5 rounded-full border mt-1',
@@ -281,8 +281,8 @@ const ProjectCard = memo(function ProjectCard({
           <button
             onClick={handleStarClick}
             className={cn(
-              'p-1 rounded hover:bg-gray-100 transition-colors',
-              isStarred ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'
+              'p-1 rounded hover:bg-secondary-100 transition-colors',
+              isStarred ? 'text-yellow-500' : 'text-secondary-400 hover:text-yellow-500'
             )}
           >
             <Star size={18} fill={isStarred ? 'currentColor' : 'none'} />
@@ -314,7 +314,7 @@ const ProjectCard = memo(function ProjectCard({
 
       {/* Description */}
       {project.description && (
-        <p className="text-sm text-gray-500 line-clamp-2 mb-4">
+        <p className="text-sm text-secondary-500 line-clamp-2 mb-4">
           {project.description}
         </p>
       )}
@@ -336,9 +336,9 @@ const ProjectCard = memo(function ProjectCard({
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+      <div className="flex items-center justify-between mt-4 pt-4 border-t border-secondary-100">
         {/* Members */}
-        <div className="flex items-center gap-1 text-sm text-gray-500">
+        <div className="flex items-center gap-1 text-sm text-secondary-500">
           <Users size={14} />
           <span>{project.member_count} members</span>
         </div>
@@ -348,7 +348,7 @@ const ProjectCard = memo(function ProjectCard({
           <div
             className={cn(
               'flex items-center gap-1 text-sm',
-              isOverdue ? 'text-red-600' : 'text-gray-500'
+              isOverdue ? 'text-red-600' : 'text-secondary-500'
             )}
           >
             <Calendar size={14} />

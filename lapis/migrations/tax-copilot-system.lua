@@ -14,6 +14,9 @@
   - tax_audit_logs          : Audit trail for all changes
   - tax_support_conversations : User-accountant messaging
   - tax_support_messages    : Individual support messages
+  - tax_user_profiles       : User HMRC profile (hashed NINO, preferences)
+  - hmrc_businesses         : Cached HMRC business details
+  - hmrc_obligations        : Cached quarterly obligation periods
 ]]
 
 local schema = require("lapis.db.schema")
@@ -766,5 +769,1570 @@ return {
         print("  Custom actions (read/reply): tax_support")
         print("  Full CRUD: users, roles, settings, tax_transactions, tax_categories, tax_statements")
         print("  Removed: namespace, tax_extract, tax_classify, tax_reconcile, tax_calculate, tax_admin")
+    end,
+
+    -- 32. Create tax_rates table for configurable tax brackets (UUID primary key)
+    [32] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_rates (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                tax_year VARCHAR(10) NOT NULL UNIQUE,
+                personal_allowance NUMERIC NOT NULL DEFAULT 12570,
+                personal_allowance_taper_threshold NUMERIC NOT NULL DEFAULT 100000,
+                basic_rate NUMERIC NOT NULL DEFAULT 0.20,
+                basic_rate_upper NUMERIC NOT NULL DEFAULT 50270,
+                higher_rate NUMERIC NOT NULL DEFAULT 0.40,
+                higher_rate_upper NUMERIC NOT NULL DEFAULT 125140,
+                additional_rate NUMERIC NOT NULL DEFAULT 0.45,
+                nic_class4_main_rate NUMERIC NOT NULL DEFAULT 0.06,
+                nic_class4_lower_threshold NUMERIC NOT NULL DEFAULT 12570,
+                nic_class4_upper_threshold NUMERIC NOT NULL DEFAULT 50270,
+                nic_class4_additional_rate NUMERIC NOT NULL DEFAULT 0.02,
+                nic_class2_weekly NUMERIC NOT NULL DEFAULT 3.45,
+                nic_class2_annual NUMERIC NOT NULL DEFAULT 179.40,
+                nic_class2_threshold NUMERIC NOT NULL DEFAULT 12570,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid)
+            )
+        ]])
+        print("[Tax Copilot] Created tax_rates table with UUID primary key")
+    end,
+
+    -- 33. Seed 2025-26 tax rates (current HMRC rates)
+    [33] = function()
+        db.query([[
+            INSERT INTO tax_rates (
+                uuid, tax_year,
+                personal_allowance, personal_allowance_taper_threshold,
+                basic_rate, basic_rate_upper,
+                higher_rate, higher_rate_upper,
+                additional_rate,
+                nic_class4_main_rate, nic_class4_lower_threshold,
+                nic_class4_upper_threshold, nic_class4_additional_rate,
+                nic_class2_weekly, nic_class2_annual, nic_class2_threshold
+            ) VALUES
+            (gen_random_uuid()::text, '2025-26', 12570, 100000, 0.20, 50270, 0.40, 125140, 0.45,
+             0.06, 12570, 50270, 0.02, 3.45, 179.40, 12570),
+            (gen_random_uuid()::text, '2024-25', 12570, 100000, 0.20, 50270, 0.40, 125140, 0.45,
+             0.06, 12570, 50270, 0.02, 3.45, 179.40, 12570),
+            (gen_random_uuid()::text, '2023-24', 12570, 100000, 0.20, 50270, 0.40, 125140, 0.45,
+             0.09, 12570, 50270, 0.02, 3.45, 179.40, 12570)
+            ON CONFLICT (tax_year) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded tax_rates for 2023-24, 2024-25, 2025-26")
+    end,
+
+    -- 34. Create tax_user_profiles table
+    -- Stores user's HMRC-related profile data (hashed NINO, business info, etc.)
+    -- NINO is stored as a bcrypt hash — only last 4 chars are kept in plaintext for display.
+    [34] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_user_profiles (
+                id SERIAL NOT NULL,
+                uuid CHARACTER VARYING(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                user_id INTEGER NOT NULL UNIQUE,
+                user_uuid CHARACTER VARYING(255) NOT NULL UNIQUE,
+                nino_hash TEXT,
+                nino_last4 CHARACTER VARYING(255),
+                has_nino BOOLEAN NOT NULL DEFAULT FALSE,
+                hmrc_connected BOOLEAN NOT NULL DEFAULT FALSE,
+                default_business_id CHARACTER VARYING(255),
+                default_tax_year CHARACTER VARYING(255),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (id)
+            )
+        ]])
+        print("[Tax Copilot] Created tax_user_profiles table (NINO stored as bcrypt hash)")
+    end,
+
+    -- 35. Add indexes to tax_user_profiles
+    [35] = function()
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_user_id ON tax_user_profiles (user_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_user_uuid ON tax_user_profiles (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_uuid ON tax_user_profiles (uuid)")
+        print("[Tax Copilot] Added indexes to tax_user_profiles")
+    end,
+
+    -- 36. Create hmrc_businesses table
+    -- Caches the user's HMRC business details fetched via MTD API
+    [36] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_businesses (
+                id SERIAL NOT NULL,
+                uuid CHARACTER VARYING(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                user_uuid CHARACTER VARYING(255) NOT NULL,
+                business_id CHARACTER VARYING(255) NOT NULL,
+                type_of_business CHARACTER VARYING(255) NOT NULL DEFAULT 'self-employment',
+                trading_name CHARACTER VARYING(255),
+                accounting_type CHARACTER VARYING(255),
+                first_accounting_period_start CHARACTER VARYING(255),
+                first_accounting_period_end CHARACTER VARYING(255),
+                raw_response TEXT,
+                fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (id)
+            )
+        ]])
+        print("[Tax Copilot] Created hmrc_businesses table")
+    end,
+
+    -- 37. Add indexes to hmrc_businesses
+    [37] = function()
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_businesses_user_uuid ON hmrc_businesses (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_businesses_business_id ON hmrc_businesses (business_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_businesses_uuid ON hmrc_businesses (uuid)")
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_businesses_user_business
+            ON hmrc_businesses (user_uuid, business_id)
+        ]])
+        print("[Tax Copilot] Added indexes to hmrc_businesses")
+    end,
+
+    -- 38. Create hmrc_obligations table
+    -- Caches quarterly obligation periods fetched from HMRC
+    [38] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_obligations (
+                id SERIAL NOT NULL,
+                uuid CHARACTER VARYING(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                user_uuid CHARACTER VARYING(255) NOT NULL,
+                business_id CHARACTER VARYING(255) NOT NULL,
+                tax_year CHARACTER VARYING(255) NOT NULL,
+                period_start CHARACTER VARYING(255) NOT NULL,
+                period_end CHARACTER VARYING(255) NOT NULL,
+                due_date CHARACTER VARYING(255),
+                status CHARACTER VARYING(255) NOT NULL DEFAULT 'Open',
+                received_date CHARACTER VARYING(255),
+                period_key CHARACTER VARYING(255),
+                fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (id)
+            )
+        ]])
+        print("[Tax Copilot] Created hmrc_obligations table")
+    end,
+
+    -- 39. Add indexes to hmrc_obligations
+    [39] = function()
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_user_uuid ON hmrc_obligations (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_business_id ON hmrc_obligations (business_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_tax_year ON hmrc_obligations (tax_year)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_status ON hmrc_obligations (status)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_obligations_uuid ON hmrc_obligations (uuid)")
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_obligations_period
+            ON hmrc_obligations (user_uuid, business_id, period_start, period_end)
+        ]])
+        print("[Tax Copilot] Added indexes to hmrc_obligations")
+    end,
+
+    -- 40. Add encrypted NINO column to tax_user_profiles
+    -- Stores AES-encrypted NINO for server-side HMRC API calls
+    -- (bcrypt hash is kept for verification, encrypted copy for API usage)
+    [40] = function()
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS nino_encrypted TEXT")
+        print("[Tax Copilot] Added nino_encrypted column to tax_user_profiles")
+    end,
+
+    -- 41. Create hmrc_tokens table
+    -- Stores HMRC OAuth access/refresh tokens per user.
+    -- Previously created at runtime via ensureTable() — now a proper migration.
+    [41] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_tokens (
+                id           SERIAL PRIMARY KEY,
+                user_uuid    TEXT        NOT NULL UNIQUE,
+                access_token TEXT        NOT NULL,
+                refresh_token TEXT,
+                scope        TEXT,
+                expires_at   TIMESTAMP,
+                created_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+                updated_at   TIMESTAMP   NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_tokens_user_uuid ON hmrc_tokens (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_tokens_expires_at ON hmrc_tokens (expires_at)")
+        print("[Tax Copilot] Created hmrc_tokens table")
+    end,
+
+    -- 42. Add namespace_id to tables missing it + backfill with active namespace
+    -- Ensures all tax data is namespace-scoped for multi-tenant isolation.
+    -- Safe: adds column with DEFAULT 0, then backfills from the first active namespace.
+    [42] = function()
+        -- Tables that need namespace_id added
+        local tables_to_add = {
+            "tax_transactions",
+            "tax_user_profiles",
+            "hmrc_businesses",
+            "hmrc_obligations",
+            "hmrc_tokens",
+        }
+
+        for _, tbl in ipairs(tables_to_add) do
+            -- Check if column already exists (idempotent)
+            local col_check = db.query([[
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = ? AND column_name = 'namespace_id'
+            ]], tbl)
+            if not col_check or #col_check == 0 then
+                db.query("ALTER TABLE " .. db.escape_identifier(tbl) ..
+                    " ADD COLUMN namespace_id INTEGER NOT NULL DEFAULT 0")
+                db.query("CREATE INDEX IF NOT EXISTS idx_" .. tbl .. "_namespace_id ON " ..
+                    db.escape_identifier(tbl) .. " (namespace_id)")
+                print("[Tax Copilot] Added namespace_id to " .. tbl)
+            else
+                print("[Tax Copilot] namespace_id already exists on " .. tbl)
+            end
+        end
+
+        -- Backfill: set namespace_id to the tax_copilot namespace (not system)
+        -- Uses PROJECT_CODE env var to find the correct namespace.
+        -- Falls back to project_code = 'tax_copilot', then first non-system namespace.
+        local project_code = os.getenv("PROJECT_CODE") or "tax_copilot"
+        local ns = db.query([[
+            SELECT id FROM namespaces
+            WHERE status = 'active' AND project_code = ?
+            ORDER BY id ASC LIMIT 1
+        ]], project_code)
+        -- Fallback: first non-system active namespace
+        if not ns or #ns == 0 then
+            ns = db.query([[
+                SELECT id FROM namespaces
+                WHERE status = 'active' AND slug != 'system'
+                ORDER BY id ASC LIMIT 1
+            ]])
+        end
+        if ns and #ns > 0 then
+            local ns_id = ns[1].id
+            -- All tables with namespace_id (including ones that already had it)
+            local all_tables = {
+                "tax_bank_accounts",
+                "tax_statements",
+                "tax_transactions",
+                "tax_user_profiles",
+                "hmrc_businesses",
+                "hmrc_obligations",
+                "hmrc_tokens",
+            }
+            for _, tbl in ipairs(all_tables) do
+                local updated = db.query(
+                    "UPDATE " .. db.escape_identifier(tbl) ..
+                    " SET namespace_id = ? WHERE namespace_id = 0 OR namespace_id IS NULL",
+                    ns_id
+                )
+                local count = updated and updated.affected_rows or 0
+                print("[Tax Copilot] Backfilled " .. tbl .. " namespace_id=" .. ns_id .. " (" .. tostring(count) .. " rows)")
+            end
+        else
+            print("[Tax Copilot] WARNING: No active namespace found, skipping backfill")
+        end
+    end,
+
+    -- =========================================================================
+    -- 43. Classification training data table
+    --
+    -- Stores high-confidence AI classifications and accountant corrections
+    -- as training data for building a custom classification model.
+    -- Embeddings and MinIO paths are NULL when created by OpsAPI (accountant
+    -- corrections) and filled asynchronously by FastAPI background processor.
+    -- =========================================================================
+    [43] = function()
+        local exists = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'classification_training_data'
+        ]])
+        if #exists > 0 then
+            -- Table exists (possibly from Python auto-create with old schema).
+            -- Ensure all required columns exist for the current schema.
+            print("[Tax Copilot] classification_training_data exists — ensuring columns are up to date")
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS source varchar(50) DEFAULT 'ai_classification'") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS original_category varchar(100)") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS corrected_by integer") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS namespace_id integer DEFAULT 0") end)
+            pcall(function() db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS updated_at timestamp DEFAULT NOW()") end)
+            -- Ensure pgvector column (may be text from old auto-create)
+            pcall(function() db.query("CREATE EXTENSION IF NOT EXISTS vector") end)
+            pcall(function()
+                -- Ensure embedding column is vector(384) for all-MiniLM-L6-v2.
+                -- Handles: text (old Python auto-create), vector(1536) (old OpenAI), or missing.
+                local col_info = db.query([[
+                    SELECT data_type, udt_name FROM information_schema.columns
+                    WHERE table_name = 'classification_training_data' AND column_name = 'embedding'
+                ]])
+                if col_info and #col_info > 0 then
+                    local dt = col_info[1].data_type
+                    if dt == "text" then
+                        -- Drop existing data (incompatible format) and change type
+                        db.query("UPDATE classification_training_data SET embedding = NULL WHERE embedding IS NOT NULL")
+                        db.query("ALTER TABLE classification_training_data ALTER COLUMN embedding TYPE vector(384) USING NULL")
+                        print("[Tax Copilot] Converted embedding column from text to vector(384)")
+                    elseif dt == "USER-DEFINED" then
+                        -- Already vector type; check if it's the wrong dimension
+                        -- Drop and recreate if needed (NULL out old embeddings since dimensions changed)
+                        local check_dim = db.query("SELECT atttypmod FROM pg_attribute WHERE attrelid = 'classification_training_data'::regclass AND attname = 'embedding'")
+                        if check_dim and #check_dim > 0 and check_dim[1].atttypmod ~= 388 then
+                            -- atttypmod = dims + 4 for pgvector; 384 + 4 = 388
+                            db.query("UPDATE classification_training_data SET embedding = NULL")
+                            pcall(function() db.query("DROP INDEX IF EXISTS idx_ctd_embedding_hnsw") end)
+                            db.query("ALTER TABLE classification_training_data ALTER COLUMN embedding TYPE vector(384) USING NULL")
+                            print("[Tax Copilot] Changed embedding column from vector(1536) to vector(384)")
+                        end
+                    end
+                else
+                    -- Column missing entirely
+                    db.query("ALTER TABLE classification_training_data ADD COLUMN embedding vector(384)")
+                    print("[Tax Copilot] Added embedding column as vector(384)")
+                end
+            end)
+            -- Ensure indexes
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_source ON classification_training_data(source)") end)
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_namespace ON classification_training_data(namespace_id)") end)
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_embedding_hnsw ON classification_training_data USING hnsw (embedding vector_cosine_ops)") end)
+            pcall(function() db.query("CREATE INDEX IF NOT EXISTS idx_ctd_pending_embedding ON classification_training_data (id) WHERE embedding IS NULL") end)
+            print("[Tax Copilot] classification_training_data schema updated")
+            return
+        end
+
+        -- Ensure pgvector extension is available
+        pcall(function()
+            db.query("CREATE EXTENSION IF NOT EXISTS vector")
+        end)
+
+        schema.create_table("classification_training_data", {
+            { "id",                types.serial },
+            { "uuid",              types.varchar({ unique = true }) },
+            { "transaction_uuid",  types.text },
+            { "user_id",           types.integer },
+            { "source",            types.varchar },                        -- ai_classification | accountant_correction
+            { "original_category", types.varchar({ null = true }) },       -- AI's category before accountant changed it
+            { "corrected_by",      types.integer({ null = true }) },       -- accountant user_id
+            { "description",       types.text },
+            { "amount",            "numeric(18,2)" },
+            { "transaction_type",  types.varchar },
+            { "transaction_date",  types.varchar({ null = true }) },
+            { "category",          types.varchar },                        -- final category (after correction if any)
+            { "hmrc_category",     types.varchar },
+            { "confidence",        "numeric(5,4)" },
+            { "is_tax_deductible", types.boolean({ default = false }) },
+            { "reasoning",         types.text({ null = true }) },
+            { "classified_by",     types.varchar({ null = true }) },
+            { "minio_path",        types.text({ null = true }) },          -- filled by FastAPI
+            { "namespace_id",      types.integer({ default = 0 }) },
+            { "created_at",        types.time({ default = db.raw("NOW()") }) },
+            { "updated_at",        types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)",
+            "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+        })
+
+        -- Native pgvector column (384 dimensions for all-MiniLM-L6-v2 sentence-transformer)
+        -- Added via raw SQL because Lapis schema builder doesn't know the vector type.
+        -- NULL when created by OpsAPI; filled by FastAPI background processor.
+        db.query("ALTER TABLE classification_training_data ADD COLUMN embedding vector(384)")
+
+        -- Unique constraint on transaction_uuid (idempotency)
+        db.query("ALTER TABLE classification_training_data ADD CONSTRAINT uq_ctd_transaction_uuid UNIQUE (transaction_uuid)")
+
+        -- Standard indexes
+        schema.create_index("classification_training_data", "uuid")
+        schema.create_index("classification_training_data", "transaction_uuid")
+        schema.create_index("classification_training_data", "user_id")
+        schema.create_index("classification_training_data", "source")
+        schema.create_index("classification_training_data", "category")
+        schema.create_index("classification_training_data", "created_at")
+        schema.create_index("classification_training_data", "namespace_id")
+
+        -- HNSW index for fast approximate nearest-neighbor search on embeddings.
+        -- cosine distance (vector_cosine_ops) matches the similarity metric used
+        -- by the Python search_similar() query.
+        db.query([[
+            CREATE INDEX idx_ctd_embedding_hnsw
+            ON classification_training_data
+            USING hnsw (embedding vector_cosine_ops)
+        ]])
+
+        -- Partial index: records awaiting embedding generation
+        db.query("CREATE INDEX idx_ctd_pending_embedding ON classification_training_data (id) WHERE embedding IS NULL")
+
+        print("[Tax Copilot] Created classification_training_data table with pgvector embedding")
+    end,
+
+    -- 44. Seed 9 additional transaction categories from accountant analysis
+    -- Adds categories identified from real accountant-classified bank statements
+    -- that were missing from the original seed (migration [6]).
+    [44] = function()
+        local function get_hmrc_id(key)
+            local result = db.select("id FROM tax_hmrc_categories WHERE key = ?", key)
+            return result and result[1] and result[1].id or nil
+        end
+
+        local new_categories = {
+            -- Tax-deductible expense categories
+            { key = "cost_of_sales", label = "Cost of Sales", type = "EXPENSE", hmrc_key = "cost_of_goods", is_deductible = true, rate = 1.0, desc = "Direct costs of goods sold or services delivered", examples = "COGS, cost of production, direct labour costs, manufacturing costs" },
+            { key = "printing_and_reproduction", label = "Printing & Reproduction", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "Printing, photocopying, and reproduction costs", examples = "Business cards, brochures, document printing, photocopying, leaflets" },
+            { key = "motor_expenses", label = "Motor Expenses", type = "EXPENSE", hmrc_key = "car_van_travel", is_deductible = true, rate = 1.0, desc = "Vehicle running costs including fuel, repairs, insurance, road tax, MOT", examples = "Shell, BP, Esso, petrol, diesel, MOT, car insurance, road tax, breakdown cover" },
+            { key = "shipping_and_delivery", label = "Shipping & Delivery", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "Courier, freight, and delivery costs", examples = "DPD, DHL, FedEx, Hermes, Evri, courier delivery, freight charges, shipping" },
+            { key = "staff_welfare", label = "Staff Welfare", type = "EXPENSE", hmrc_key = "wages_staff", is_deductible = true, rate = 1.0, desc = "Staff welfare expenses (not entertainment)", examples = "Staff refreshments, first aid supplies, team building, staff gifts under HMRC limits" },
+            { key = "general_admin_expenses", label = "General Administrative Expenses", type = "EXPENSE", hmrc_key = "telephone_office", is_deductible = true, rate = 1.0, desc = "General office and administrative expenses not elsewhere classified", examples = "Office maintenance, waste disposal, shredding, fire extinguisher servicing" },
+            -- Non-deductible / balance sheet categories
+            { key = "directors_loan_account", label = "Directors Loan Account", type = "EXPENSE", hmrc_key = nil, is_deductible = false, rate = 0.0, desc = "Movements on directors loan account (balance sheet, not P&L)", examples = "DLA repayment, loan to director, director loan repayment" },
+            { key = "loan_repayments", label = "Loan Repayments", type = "EXPENSE", hmrc_key = nil, is_deductible = false, rate = 0.0, desc = "Capital repayments on loans (not deductible; interest portion is separate)", examples = "Bounce Back Loan repayment, bank loan repayment, commercial loan repayment" },
+            { key = "dividend_payments", label = "Dividend Payments", type = "EXPENSE", hmrc_key = nil, is_deductible = false, rate = 0.0, desc = "Dividend distributions to shareholders (not a business expense)", examples = "Interim dividend, final dividend, shareholder distribution" },
+        }
+
+        local count = 0
+        for _, cat in ipairs(new_categories) do
+            local exists = db.select("id FROM tax_categories WHERE key = ?", cat.key)
+            if not exists or #exists == 0 then
+                local hmrc_id = cat.hmrc_key and get_hmrc_id(cat.hmrc_key) or db.NULL
+                db.query([[
+                    INSERT INTO tax_categories (uuid, key, label, hmrc_category_id, is_tax_deductible, deduction_rate, type, description, examples, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ]], MigrationUtils.generateUUID(), cat.key, cat.label, hmrc_id, cat.is_deductible, cat.rate, cat.type, cat.desc, cat.examples, true)
+                count = count + 1
+            end
+        end
+
+        print("[Tax Copilot] Seeded " .. count .. " new transaction categories from accountant analysis")
+    end,
+
+    -- 45. Merge overlapping categories that map to the same HMRC box.
+    -- motor_expenses → travel_expense (both travelCosts)
+    -- computer_and_internet_expenses → software_subscriptions (both adminCosts)
+    -- post_and_stationery → shipping_and_delivery (both adminCosts)
+    [45] = function()
+        -- Remap transactions that used the old category keys to the merged keys
+        local merges = {
+            { old = "motor_expenses", new = "travel_expense" },
+            { old = "computer_and_internet_expenses", new = "software_subscriptions" },
+            { old = "post_and_stationery", new = "shipping_and_delivery" },
+        }
+
+        local total_remapped = 0
+        for _, merge in ipairs(merges) do
+            local result = db.query(
+                "UPDATE tax_transactions SET category = ? WHERE category = ?",
+                merge.new, merge.old
+            )
+            local count = result and result.affected_rows or 0
+            if count > 0 then
+                print("[Tax Copilot] Remapped " .. count .. " transactions: " .. merge.old .. " → " .. merge.new)
+            end
+            total_remapped = total_remapped + count
+        end
+
+        -- Deactivate the old categories (keep for audit trail, don't delete)
+        db.query([[
+            UPDATE tax_categories SET is_active = false, updated_at = NOW()
+            WHERE key IN ('motor_expenses', 'computer_and_internet_expenses', 'post_and_stationery')
+        ]])
+
+        -- Update shipping_and_delivery to include stationery in label/description
+        db.query([[
+            UPDATE tax_categories
+            SET label = 'Postage, Shipping & Delivery',
+                description = 'Postage, stationery, courier, freight, and delivery costs',
+                examples = 'Royal Mail, DPD, DHL, FedEx, Hermes, Evri, stamps, envelopes, Staples, courier delivery, freight charges, shipping',
+                updated_at = NOW()
+            WHERE key = 'shipping_and_delivery'
+        ]])
+
+        print("[Tax Copilot] Merged 3 overlapping categories, remapped " .. total_remapped .. " transactions")
+    end,
+
+    -- 46. Create classification_reference_data table
+    -- Stores accountant-classified transactions from external bank statements
+    -- as gold-standard reference data for AI similarity search.
+    -- Separate from classification_training_data (real user corrections).
+    [46] = function()
+        -- Requires pgvector extension (already created in migration [43])
+        schema.create_table("classification_reference_data", {
+            { "id", types.serial },
+            { "uuid", types.varchar({ unique = true }) },
+            { "description", types.text },
+            { "description_raw", types.text },
+            { "amount", "numeric(18,2) NOT NULL" },
+            { "transaction_type", types.varchar },
+            { "transaction_date", types.varchar({ null = true }) },
+            { "category", types.varchar },
+            { "hmrc_category", types.varchar({ null = true }) },
+            { "confidence", "numeric(5,4) NOT NULL DEFAULT 1.0" },
+            { "is_tax_deductible", types.boolean({ default = false }) },
+            { "reasoning", types.text({ null = true }) },
+            { "original_label", types.varchar({ null = true }) },
+            { "client_business_type", types.varchar },
+            { "user_profile_type", types.varchar({ null = true }) },
+            { "industry", types.varchar({ null = true }) },
+            { "source_file", types.varchar },
+            { "row_index", types.integer },
+            { "embedding", "vector(384)" },
+            { "namespace_id", types.integer({ default = 0 }) },
+            { "created_at", types.time({ default = db.raw("NOW()") }) },
+            { "updated_at", types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)"
+        })
+
+        -- Standard indexes
+        schema.create_index("classification_reference_data", "uuid")
+        schema.create_index("classification_reference_data", "category")
+        schema.create_index("classification_reference_data", "client_business_type")
+        schema.create_index("classification_reference_data", "industry")
+        schema.create_index("classification_reference_data", "source_file")
+        schema.create_index("classification_reference_data", "created_at")
+        schema.create_index("classification_reference_data", "namespace_id")
+
+        -- Composite unique for idempotent re-imports
+        db.query([[
+            CREATE UNIQUE INDEX idx_crd_source_row
+            ON classification_reference_data (source_file, row_index)
+        ]])
+
+        -- HNSW index for fast similarity search (same as classification_training_data)
+        db.query([[
+            CREATE INDEX idx_crd_embedding_hnsw
+            ON classification_reference_data
+            USING hnsw (embedding vector_cosine_ops)
+        ]])
+
+        -- Partial index for records awaiting embedding generation
+        db.query("CREATE INDEX idx_crd_pending_embedding ON classification_reference_data (id) WHERE embedding IS NULL")
+
+        print("[Tax Copilot] Created classification_reference_data table with pgvector embedding")
+    end,
+
+    -- 47. Seed classification_reference_data with accountant-classified transactions
+    -- Client C (Amazon seller, ecommerce) and Client D (Construction company).
+    -- Source: 600 raw transactions from Numbers files → 599 parsed (1 "multiple
+    -- transactions" aggregator row skipped) → 183 deduped rows using amount-banded
+    -- strategy: group by (description, category, hmrc_category, business_type,
+    -- profile_type, industry, transaction_type, amount_band) where bands are
+    -- small (<£50), medium (£50-200), large (£200+). Keeps first row per group.
+    -- Per profile: amazon_seller=35, construction_company=148.
+    -- See scripts/dedupe_reference_data.py for the regenerator.
+    [47] = function()
+        local count = 0
+
+        -- Load SQL from external file to avoid LuaJIT string-size segfaults
+        local sql_path = debug.getinfo(1, "S").source:match("@(.*/)")
+            .. "sql/047_seed_classification_reference_data.sql"
+        local f = assert(io.open(sql_path, "r"))
+        local sql = f:read("*a")
+        f:close()
+
+        db.query(sql)
+        local result = db.select("COUNT(*) as cnt FROM classification_reference_data")
+        count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded " .. count .. " deduped accountant reference transactions (Client C + D)")
+    end,
+
+    -- 48. Add profession/industry fields to tax_user_profiles
+    -- Needed so the AI classifier can factor in the user's business type
+    -- (e.g., "Shell £45" is deductible for a taxi driver but personal for a dev).
+    [48] = function()
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS profession VARCHAR(255)")
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS industry VARCHAR(255)")
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS business_description TEXT")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_profession ON tax_user_profiles (profession)")
+        print("[Tax Copilot] Added profession, industry, business_description to tax_user_profiles")
+    end,
+
+    -- 49. Add classification metadata fields to tax_transactions
+    -- Tracks how each transaction was classified (source), its cleaned merchant name
+    -- (for pattern matching / RAG lookup), and whether it's a business expense.
+    [49] = function()
+        db.query("ALTER TABLE tax_transactions ADD COLUMN IF NOT EXISTS classification_source VARCHAR(100)")
+        db.query("ALTER TABLE tax_transactions ADD COLUMN IF NOT EXISTS cleaned_merchant_name VARCHAR(500)")
+        db.query("ALTER TABLE tax_transactions ADD COLUMN IF NOT EXISTS is_business_expense BOOLEAN DEFAULT TRUE")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_txn_cleaned_merchant ON tax_transactions (cleaned_merchant_name)")
+        print("[Tax Copilot] Added classification_source, cleaned_merchant_name, is_business_expense to tax_transactions")
+    end,
+
+    -- ===========================================================================
+    -- 50. Error Catalog + i18n Notification System
+    -- ===========================================================================
+    -- Three tables powering a unified, multi-language error + notification system:
+    --
+    --   message_catalog       Canonical list of error / notification codes.
+    --   message_translations  Per-locale user-facing messages for each code.
+    --   error_occurrences     Audit trail linking every user-visible error back
+    --                         to the raw exception that caused it (admin only).
+    --
+    -- All primary keys are UUIDs. The `code` column on message_catalog is the
+    -- developer-facing identifier (e.g. AUTH_401, TAX_CALC_003) and is UNIQUE.
+    [50] = function()
+        -- message_catalog ------------------------------------------------------
+        db.query([[
+            CREATE TABLE IF NOT EXISTS message_catalog (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                code VARCHAR(64) NOT NULL UNIQUE,
+                category VARCHAR(16) NOT NULL DEFAULT 'error',
+                severity VARCHAR(16) NOT NULL DEFAULT 'error',
+                http_status INTEGER,
+                default_locale VARCHAR(8) NOT NULL DEFAULT 'en',
+                developer_note TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid),
+                CONSTRAINT message_catalog_category_ck
+                    CHECK (category IN ('error','warning','info','success')),
+                CONSTRAINT message_catalog_severity_ck
+                    CHECK (severity IN ('error','warn','info'))
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_catalog_code ON message_catalog (code)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_catalog_category ON message_catalog (category)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_catalog_active ON message_catalog (is_active)")
+
+        -- message_translations -------------------------------------------------
+        db.query([[
+            CREATE TABLE IF NOT EXISTS message_translations (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                catalog_uuid VARCHAR(255) NOT NULL
+                    REFERENCES message_catalog(uuid) ON DELETE CASCADE,
+                locale VARCHAR(8) NOT NULL,
+                user_message TEXT NOT NULL,
+                title VARCHAR(255),
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid),
+                CONSTRAINT message_translations_catalog_locale_uk
+                    UNIQUE (catalog_uuid, locale)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_translations_catalog ON message_translations (catalog_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_message_translations_locale ON message_translations (locale)")
+
+        -- error_occurrences ----------------------------------------------------
+        -- Every time middleware catches an error we write one row here. Admins
+        -- browse these in /admin/errors for triage. `raw_error` and `stack_trace`
+        -- are never exposed to end users.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS error_occurrences (
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text,
+                catalog_uuid VARCHAR(255)
+                    REFERENCES message_catalog(uuid) ON DELETE SET NULL,
+                code VARCHAR(64) NOT NULL,
+                correlation_id VARCHAR(64) NOT NULL,
+                raw_error TEXT,
+                stack_trace TEXT,
+                endpoint TEXT,
+                http_method VARCHAR(16),
+                http_status INTEGER,
+                user_uuid VARCHAR(255),
+                tenant_namespace VARCHAR(255),
+                request_context JSONB,
+                app_context JSONB,
+                user_agent TEXT,
+                ip_address INET,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (uuid)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_code_created ON error_occurrences (code, created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_correlation ON error_occurrences (correlation_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_user_created ON error_occurrences (user_uuid, created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_created ON error_occurrences (created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_error_occurrences_tenant ON error_occurrences (tenant_namespace)")
+
+        print("[Tax Copilot] Created message_catalog, message_translations, error_occurrences")
+    end,
+
+    -- 51. Seed English catalog + translations for the initial code set.
+    -- Safe to re-run: uses ON CONFLICT (code) DO NOTHING.
+    -- Adding a new code = append a row + translation. No code change needed.
+    [51] = function()
+        -- Helper: insert a catalog row + English translation atomically.
+        -- Using a DO block so the translation can reference the generated UUID.
+        db.query([[
+            DO $$
+            DECLARE
+                v_catalog_uuid VARCHAR(255);
+                seed_row RECORD;
+            BEGIN
+                FOR seed_row IN
+                    SELECT * FROM (VALUES
+                        -- code, category, severity, http_status, title, user_message, developer_note
+                        ('SYSTEM_500', 'error', 'error', 500,
+                         'Something went wrong',
+                         'Something went wrong on our side. Please try again in a moment. If it keeps happening, contact support and share this reference.',
+                         'Unclassified exception fallback. Always accompanied by a stack trace in error_occurrences.'),
+                        ('SYSTEM_503', 'error', 'error', 503,
+                         'Service unavailable',
+                         'The service is temporarily unavailable. Please try again shortly.',
+                         'Upstream health check failed or dependency unreachable.'),
+                        ('VALIDATION_400', 'error', 'warn', 400,
+                         'Check your details',
+                         'Some of the details you entered don''t look right. Please review and try again.',
+                         'Request body / query validation failed. Include field errors in app_context.'),
+                        ('RATE_LIMIT_429', 'error', 'warn', 429,
+                         'Too many attempts',
+                         'You''ve made too many attempts. Please wait a moment and try again.',
+                         'slowapi rate limit triggered.'),
+
+                        ('AUTH_401', 'error', 'warn', 401,
+                         'Sign in required',
+                         'Please sign in to continue.',
+                         'Missing or invalid JWT.'),
+                        ('AUTH_403', 'error', 'warn', 403,
+                         'Access denied',
+                         'You don''t have permission to do that.',
+                         'Role check failed (ROLE_ADMIN / ROLE_ACCOUNTANT etc.).'),
+                        ('AUTH_EXPIRED', 'error', 'warn', 401,
+                         'Session expired',
+                         'Your session has expired. Please sign in again.',
+                         'JWT exp claim in the past.'),
+                        ('AUTH_INVALID_CREDENTIALS', 'error', 'warn', 401,
+                         'Invalid credentials',
+                         'The email or password you entered is incorrect.',
+                         'Lapis /auth/login returned 401.'),
+                        ('AUTH_ACCOUNT_LOCKED', 'error', 'error', 423,
+                         'Account locked',
+                         'Your account is temporarily locked. Please contact support.',
+                         'Too many failed login attempts.'),
+
+                        ('UPLOAD_PDF_001', 'error', 'warn', 400,
+                         'Unable to read file',
+                         'We couldn''t read the file you uploaded. Please make sure it''s a valid PDF, image, CSV or Excel file.',
+                         'Raised by pdf_processor when the uploaded bytes match no known format.'),
+                        ('UPLOAD_PDF_002', 'error', 'warn', 413,
+                         'File too large',
+                         'The file you uploaded is too large. Please upload a file smaller than {max_mb} MB.',
+                         'Exceeds settings.max_upload_size_mb.'),
+                        ('UPLOAD_PDF_003', 'error', 'warn', 415,
+                         'Unsupported file type',
+                         'We can''t process files of this type. Please upload a PDF, image, CSV or Excel file.',
+                         'Extension not in supported list.'),
+
+                        ('EXTRACT_001', 'error', 'warn', 422,
+                         'No transactions found',
+                         'We couldn''t find any transactions in this statement. Please check it''s the right file and try again.',
+                         'Extractor returned 0 transactions.'),
+                        ('EXTRACT_002', 'error', 'error', 502,
+                         'Extraction service unavailable',
+                         'We''re having trouble reading statements right now. Please try again in a few minutes.',
+                         'All LLM providers failed (Claude + OpenAI).'),
+                        ('EXTRACT_003', 'warning', 'warn', 200,
+                         'Low-confidence extraction',
+                         'We extracted your transactions but some values may need review. Please double-check before continuing.',
+                         'Confidence below 0.7.'),
+
+                        ('CLASSIFY_001', 'error', 'error', 502,
+                         'Classification service unavailable',
+                         'We couldn''t classify your transactions right now. Please try again shortly.',
+                         'All LLM providers failed during classification.'),
+                        ('CLASSIFY_002', 'error', 'warn', 404,
+                         'Statement not found',
+                         'We couldn''t find that statement. It may have been removed.',
+                         'Statement UUID not in current user''s namespace.'),
+
+                        ('RECONCILE_001', 'error', 'warn', 422,
+                         'Reconciliation failed',
+                         'We couldn''t match all your transactions. Please review and try again.',
+                         'Reconciliation rules produced unresolvable conflicts.'),
+
+                        ('TAX_CALC_001', 'error', 'warn', 422,
+                         'Calculation input incomplete',
+                         'Some required information is missing from your return. Please fill in the highlighted sections.',
+                         'Tax calculator validator rejected input.'),
+                        ('TAX_CALC_002', 'error', 'error', 500,
+                         'Calculation failed',
+                         'We couldn''t complete your tax calculation. Please try again or contact support.',
+                         'Unhandled exception in tax_calculator.'),
+                        ('TAX_CALC_003', 'warning', 'warn', 200,
+                         'Figures differ from HMRC',
+                         'Our calculation differs from HMRC''s preview. Please review the breakdown.',
+                         'Local vs. HMRC preview diff exceeded tolerance.'),
+
+                        ('HMRC_AUTH_001', 'error', 'warn', 401,
+                         'HMRC not connected',
+                         'Please connect your HMRC account to continue.',
+                         'No HMRC OAuth token on file for this user.'),
+                        ('HMRC_AUTH_002', 'error', 'warn', 401,
+                         'HMRC session expired',
+                         'Your HMRC session has expired. Please reconnect HMRC.',
+                         'HMRC returned 401; refresh token flow not yet wired.'),
+                        ('HMRC_SUBMIT_001', 'error', 'warn', 400,
+                         'HMRC rejected submission',
+                         'HMRC rejected your submission. Please review the details and try again.',
+                         'HMRC 400 RULE_* error; specific rule in app_context.'),
+                        ('HMRC_SUBMIT_002', 'error', 'error', 502,
+                         'HMRC unavailable',
+                         'HMRC is temporarily unavailable. Please try again in a few minutes.',
+                         'HMRC 5xx or timeout.'),
+                        ('HMRC_NOT_FOUND_404', 'error', 'warn', 404,
+                         'HMRC record not found',
+                         'HMRC couldn''t find the record you''re looking for. Please check your HMRC registration and try again.',
+                         'HMRC 404 MATCHING_RESOURCE_NOT_FOUND.'),
+
+                        ('NOTIF_INFO_001', 'info', 'info', NULL,
+                         'Heads up',
+                         '{message}',
+                         'Generic in-app info toast; message passed via app_context.'),
+                        ('NOTIF_WARNING_001', 'warning', 'warn', NULL,
+                         'Please review',
+                         '{message}',
+                         'Generic in-app warning; message passed via app_context.'),
+                        ('NOTIF_SUCCESS_001', 'success', 'info', NULL,
+                         'All done',
+                         'Your changes have been saved.',
+                         'Generic success toast.'),
+                        ('NOTIF_SUCCESS_002', 'success', 'info', NULL,
+                         'Submission successful',
+                         'Your submission to HMRC was successful. Reference: {reference}.',
+                         'HMRC submission receipt confirmation.')
+                    ) AS t(code, category, severity, http_status, title, user_message, developer_note)
+                LOOP
+                    INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+                    VALUES (seed_row.code, seed_row.category, seed_row.severity, seed_row.http_status, seed_row.developer_note)
+                    ON CONFLICT (code) DO NOTHING
+                    RETURNING uuid INTO v_catalog_uuid;
+
+                    -- If ON CONFLICT skipped the insert, look up the existing uuid
+                    IF v_catalog_uuid IS NULL THEN
+                        SELECT uuid INTO v_catalog_uuid FROM message_catalog WHERE code = seed_row.code;
+                    END IF;
+
+                    INSERT INTO message_translations (catalog_uuid, locale, user_message, title)
+                    VALUES (v_catalog_uuid, 'en', seed_row.user_message, seed_row.title)
+                    ON CONFLICT (catalog_uuid, locale) DO NOTHING;
+                END LOOP;
+            END $$;
+        ]])
+
+        local result = db.select("COUNT(*) as cnt FROM message_catalog")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded message_catalog (" .. count .. " codes) + English translations")
+    end,
+
+    -- 52. Seed notification-specific catalog codes used by the Python
+    -- send_catalog_notification helper (Phase E). Translations themselves
+    -- live in backend/app/errors/translations/*.json and are loaded on
+    -- FastAPI startup, so we do NOT seed message_translations here —
+    -- that would duplicate the source of truth.
+    --
+    -- Idempotent: ON CONFLICT (code) DO NOTHING. Safe to re-run; safe to
+    -- add more codes in a future migration.
+    [52] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+                ('NOTIF_EXTRACT_COMPLETE', 'success', 'info', NULL,
+                 'Push/toast fired by /api/extract when extraction finishes. Placeholders: {count}.'),
+                ('NOTIF_CLASSIFY_COMPLETE', 'success', 'info', NULL,
+                 'Push/toast fired by /api/classify when classification finishes. Placeholders: {count}.'),
+                ('NOTIF_HMRC_OBLIGATIONS_UPDATED', 'info', 'info', NULL,
+                 'Push fired when fetch_obligations discovers new obligations. Placeholders: {body}.')
+            ON CONFLICT (code) DO NOTHING
+        ]])
+
+        local result = db.select("COUNT(*) as cnt FROM message_catalog WHERE code LIKE 'NOTIF_%'")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded notification codes (" .. count .. " NOTIF_* rows in catalog)")
+    end,
+
+    -- 53. Seed CLASSIFY_003 — the "partial success" notice code. Attached
+    -- as a notice on the classify 200 response when cloud AI providers
+    -- failed but Ollama filled in, so the user gets a toast rather than
+    -- finding out silently. Placeholder: {fallback_count}.
+    [53] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+                ('CLASSIFY_003', 'warning', 'warn', NULL,
+                 'Attached as a notice to classify 2xx when cloud AI providers failed and Ollama filled in. Placeholder: {fallback_count}.')
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded CLASSIFY_003 partial-success notice code")
+    end,
+
+    -- 54. Add profile_type to classification_training_data
+    -- Records which business profile was active during classification,
+    -- enabling per-profile accuracy analysis and RAG boosting.
+    [54] = function()
+        db.query("ALTER TABLE classification_training_data ADD COLUMN IF NOT EXISTS profile_type VARCHAR(100)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_ctd_profile_type ON classification_training_data (profile_type)")
+        print("[Tax Copilot] Added profile_type to classification_training_data")
+    end,
+
+    -- ===========================================================================
+    -- Merge note (hmrc-mtd-preview-calc branch):
+    -- Steps 55-60 below were originally numbered 50-55 on the feature branch,
+    -- and their corresponding lapis keys 464-469. Shifted by +5 / +9 respectively
+    -- during the merge with origin/main so they sit AFTER the error-catalog and
+    -- menu-items migrations added on main (steps 50-54, keys 464-472).
+    -- ===========================================================================
+
+    -- 55. Add mtd_field_name and mtd_section columns to tax_hmrc_categories
+    --
+    -- Bridges our internal SA103F-paper category keys (e.g. "cost_of_goods", "wages_staff")
+    -- to the actual HMRC Making Tax Digital (MTD) ITSA API JSON field names
+    -- (e.g. "costOfGoods", "wagesAndStaffCosts") used by:
+    --   PUT /individuals/business/self-employment/{nino}/{businessId}/cumulative/{taxYear}
+    --
+    -- Without this mapping, our category keys cannot be sent to HMRC's API directly.
+    --
+    -- mtd_field_name : the camelCase JSON key HMRC expects, or NULL when the category
+    --                  is not part of the MTD period submission body
+    --                  (e.g. use_of_home, capital_allowances are submitted separately
+    --                  via the annual submission endpoint, not the cumulative one).
+    -- mtd_section    : which JSON object on the request body the field belongs to —
+    --                  'periodIncome', 'periodExpenses', 'periodDisallowableExpenses',
+    --                  or NULL for fields that don't go in any period section.
+    --
+    -- Idempotent: ADD COLUMN IF NOT EXISTS is safe to re-run on existing customer DBs.
+    -- Backfill is performed in migration [56].
+    [55] = function()  -- lapis key: 473_tax_add_mtd_field_name_column
+        db.query("ALTER TABLE tax_hmrc_categories ADD COLUMN IF NOT EXISTS mtd_field_name VARCHAR(64)")
+        db.query("ALTER TABLE tax_hmrc_categories ADD COLUMN IF NOT EXISTS mtd_section VARCHAR(32)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tax_hmrc_categories_mtd_field_name ON tax_hmrc_categories (mtd_field_name)")
+        print("[Tax Copilot] Added mtd_field_name and mtd_section columns to tax_hmrc_categories")
+    end,
+
+    -- 56. Backfill mtd_field_name and mtd_section for the 14 existing rows seeded in [4].
+    --
+    -- Maps each internal SA103F category key to the camelCase JSON field name expected
+    -- by HMRC's MTD ITSA Self-Employment Business API v5.0 cumulative endpoint.
+    --
+    -- HMRC API reference:
+    --   PUT /individuals/business/self-employment/{nino}/{businessId}/cumulative/{taxYear}
+    --   Request body:
+    --     periodIncome   : { turnover, other }
+    --     periodExpenses : { costOfGoods, paymentsToSubcontractors, wagesAndStaffCosts,
+    --                        carVanTravelExpenses, premisesRunningCosts, maintenanceCosts,
+    --                        adminCosts, businessEntertainmentCosts, advertisingCosts,
+    --                        interestOnBankOtherLoans, financeCharges, irrecoverableDebts,
+    --                        professionalFees, depreciation, otherExpenses }
+    --
+    -- Notes on individual rows:
+    --   - 'interest_finance' is mapped to 'interestOnBankOtherLoans' as the primary target.
+    --     The FastAPI aggregator splits this row's amount between interestOnBankOtherLoans
+    --     and financeCharges at submission time when finer detail is available.
+    --   - 'use_of_home' and 'capital_allowances' remain NULL: they are submitted via the
+    --     annual submission endpoint (PUT .../annual/{taxYear}) under 'allowances', not
+    --     the cumulative period endpoint. They will be wired in a later migration when
+    --     annual submissions are implemented.
+    --
+    -- Idempotent: each UPDATE is guarded by `WHERE mtd_field_name IS NULL` so a manually
+    -- corrected value on a customer DB is never overwritten. Re-running this migration
+    -- after the columns are populated is a no-op.
+    [56] = function()
+        local mappings = {
+            { key = "turnover",            mtd_field = "turnover",                 section = "periodIncome"   },
+            { key = "other_income",        mtd_field = "other",                    section = "periodIncome"   },
+            { key = "cost_of_goods",       mtd_field = "costOfGoods",              section = "periodExpenses" },
+            { key = "car_van_travel",      mtd_field = "carVanTravelExpenses",     section = "periodExpenses" },
+            { key = "wages_staff",         mtd_field = "wagesAndStaffCosts",       section = "periodExpenses" },
+            { key = "rent_rates",          mtd_field = "premisesRunningCosts",     section = "periodExpenses" },
+            { key = "repairs_maintenance", mtd_field = "maintenanceCosts",         section = "periodExpenses" },
+            { key = "accountancy_legal",   mtd_field = "professionalFees",         section = "periodExpenses" },
+            { key = "interest_finance",    mtd_field = "interestOnBankOtherLoans", section = "periodExpenses" },
+            { key = "telephone_office",    mtd_field = "adminCosts",               section = "periodExpenses" },
+            { key = "other_expenses",      mtd_field = "otherExpenses",            section = "periodExpenses" },
+            { key = "depreciation",        mtd_field = "depreciation",             section = "periodExpenses" },
+            -- use_of_home and capital_allowances intentionally omitted — they are part of the
+            -- annual submission, not the period/cumulative submission. They remain NULL.
+        }
+
+        local updated = 0
+        for _, m in ipairs(mappings) do
+            db.query([[
+                UPDATE tax_hmrc_categories
+                   SET mtd_field_name = ?,
+                       mtd_section    = ?,
+                       updated_at     = NOW()
+                 WHERE key             = ?
+                   AND mtd_field_name IS NULL
+            ]], m.mtd_field, m.section, m.key)
+            updated = updated + 1
+        end
+
+        print(string.format(
+            "[Tax Copilot] Backfilled mtd_field_name / mtd_section for %d tax_hmrc_categories rows",
+            updated
+        ))
+    end,
+
+    -- 57. Insert 4 new HMRC categories that exist in the MTD ITSA cumulative endpoint
+    -- but were missing from the paper SA103F taxonomy we originally seeded in [4].
+    --
+    -- These rows cover HMRC MTD API fields that our original 14 categories did not
+    -- map to cleanly. Each row is inserted with mtd_field_name / mtd_section already
+    -- populated so the aggregator can immediately submit transactions classified
+    -- against them.
+    --
+    -- Box codes:
+    --   The `box` column is UNIQUE in tax_hmrc_categories (from migration [3]).
+    --   The original 14 rows use plain numeric box numbers (15, 17, 19, ...).
+    --   These 4 new rows use synthetic suffixed codes (20a, 25b, 27a, 29a) to stay
+    --   unique while visually grouping them near their nearest SA103F neighbour.
+    --   The `box` column is informational once mtd_field_name exists — the MTD field
+    --   name is the authoritative HMRC identifier going forward.
+    --
+    -- Safety:
+    --   Uses INSERT ... ON CONFLICT (key) DO NOTHING so re-running the migration
+    --   is a no-op. Does NOT touch any existing row. Does NOT alter any FK in
+    --   tax_categories — the aggregator applies the mapping override at code level
+    --   (per the agreed decision #2 on interest_finance, generalised).
+    [57] = function()
+        local new_categories = {
+            {
+                key            = "subcontractor_payments",
+                box            = "20a",
+                label          = "Payments to Subcontractors",
+                description    = "Payments to CIS and non-CIS subcontractors (construction, trades, agency staff)",
+                is_deductible  = true,
+                mtd_field_name = "paymentsToSubcontractors",
+                mtd_section    = "periodExpenses",
+            },
+            {
+                key            = "entertainment_costs",
+                box            = "25b",
+                label          = "Business Entertainment",
+                description    = "Client and business entertainment costs (not tax deductible — captured for completeness)",
+                is_deductible  = false,
+                mtd_field_name = "businessEntertainmentCosts",
+                mtd_section    = "periodExpenses",
+            },
+            {
+                key            = "advertising_marketing",
+                box            = "27a",
+                label          = "Advertising and Marketing",
+                description    = "Advertising, marketing, promotional and sponsorship costs",
+                is_deductible  = true,
+                mtd_field_name = "advertisingCosts",
+                mtd_section    = "periodExpenses",
+            },
+            {
+                key            = "bad_debts",
+                box            = "29a",
+                label          = "Irrecoverable Debts",
+                description    = "Bad debts and other irrecoverable amounts written off during the period",
+                is_deductible  = true,
+                mtd_field_name = "irrecoverableDebts",
+                mtd_section    = "periodExpenses",
+            },
+        }
+
+        local inserted = 0
+        for _, cat in ipairs(new_categories) do
+            db.query([[
+                INSERT INTO tax_hmrc_categories
+                    (uuid, key, box, label, description, is_tax_deductible, is_active,
+                     mtd_field_name, mtd_section, created_at, updated_at)
+                VALUES
+                    (gen_random_uuid()::text, ?, ?, ?, ?, ?, true, ?, ?, NOW(), NOW())
+                ON CONFLICT (key) DO NOTHING
+            ]], cat.key, cat.box, cat.label, cat.description,
+                cat.is_deductible, cat.mtd_field_name, cat.mtd_section)
+            inserted = inserted + 1
+        end
+
+        print(string.format(
+            "[Tax Copilot] Inserted up to %d new MTD HMRC categories (ON CONFLICT DO NOTHING)",
+            inserted
+        ))
+    end,
+
+    -- 58. Add CHECK constraint enforcing the mtd_field_name / mtd_section invariant:
+    --     either BOTH are NULL (category not part of MTD period submission)
+    --     or BOTH are populated (category maps to a specific MTD JSON field).
+    --
+    -- Why:
+    --   Protects against half-populated state where an admin saves only one of the
+    --   two columns through the UI. Having mtd_field_name without mtd_section (or
+    --   vice versa) would silently break the aggregator.
+    --
+    -- Safety:
+    --   All existing rows after migration [55] and [56] already satisfy this
+    --   invariant:
+    --     - 12 backfilled rows have BOTH populated
+    --     - use_of_home and capital_allowances have BOTH NULL (annual submission)
+    --     - 4 new rows from [57] have BOTH populated
+    --   So the constraint is safe to add without re-writing any data.
+    --
+    -- Idempotent:
+    --   Wrapped in pcall + "constraint already exists" detection. Postgres does not
+    --   support `ADD CONSTRAINT IF NOT EXISTS` on CHECK constraints directly, so we
+    --   catch the duplicate error.
+    [58] = function()
+        local ok, err = pcall(function()
+            db.query([[
+                ALTER TABLE tax_hmrc_categories
+                ADD CONSTRAINT chk_tax_hmrc_categories_mtd_fields_both_or_neither
+                CHECK (
+                    (mtd_field_name IS NULL     AND mtd_section IS NULL)
+                 OR (mtd_field_name IS NOT NULL AND mtd_section IS NOT NULL)
+                )
+            ]])
+        end)
+
+        if ok then
+            print("[Tax Copilot] Added CHECK constraint chk_tax_hmrc_categories_mtd_fields_both_or_neither")
+        elseif err and tostring(err):match("already exists") then
+            print("[Tax Copilot] CHECK constraint chk_tax_hmrc_categories_mtd_fields_both_or_neither already exists, skipping")
+        else
+            -- Unknown error — re-raise so the migration fails visibly.
+            error(err)
+        end
+    end,
+
+    -- 59. Normalise tax_categories.type casing to lowercase.
+    --
+    -- Historical seed data (migration [6]) inserted type as 'EXPENSE' / 'INCOME'
+    -- (uppercase), but every downstream consumer in FastAPI expects lowercase:
+    --   - backend/app/models/category.py CategoryType enum: "income" / "expense"
+    --   - backend/app/services/category_service.py compares `== "expense"`
+    --   - backend/app/core/categories.py compares `== "income"`
+    --   - backend/app/api/categories.py list filter does `type == type_filter.lower()`
+    --
+    -- The uppercase rows were never reachable by the lowercase filters, and
+    -- the admin "filter by type" dropdown has silently been returning near-zero
+    -- results. This migration aligns the stored values with what the code
+    -- already expects.
+    --
+    -- Idempotent: the WHERE clause only touches rows that aren't already
+    -- lowercase, so re-running updates zero rows.
+    [59] = function()
+        -- Count first so the log message is meaningful
+        local before = db.query([[
+            SELECT COUNT(*) AS n FROM tax_categories WHERE type <> LOWER(type)
+        ]])
+        local to_fix = (before and before[1] and tonumber(before[1].n)) or 0
+
+        db.query([[
+            UPDATE tax_categories
+               SET type       = LOWER(type),
+                   updated_at = NOW()
+             WHERE type <> LOWER(type)
+        ]])
+
+        print(string.format(
+            "[Tax Copilot] Normalised tax_categories.type casing to lowercase (%d rows updated)",
+            to_fix
+        ))
+    end,
+
+    -- 60. Create hmrc_calculations table — stores the result of every HMRC
+    --     MTD ITSA preview calculation triggered via
+    --     POST /api/hmrc/calculate-preview (FastAPI, Phase D).
+    --
+    -- One row per calculation run. The Phase D orchestration endpoint
+    -- inserts a row with status='triggered' as soon as HMRC accepts the
+    -- cumulative submission, then updates it to status='ready' once the
+    -- calculation result is retrieved. Failures mark status='error' with
+    -- the error_message column populated.
+    --
+    -- Columns split into three conceptual groups:
+    --
+    --   Request context
+    --     user_uuid, business_id, tax_year, period_start, period_end
+    --     calculation_type  — 'in-year' / 'intent-to-finalise' / 'intent-to-amend'
+    --
+    --   HMRC round-trip
+    --     calculation_id    — UUID returned by HMRC's trigger endpoint
+    --     status            — 'triggered' | 'ready' | 'error'
+    --     error_message     — human-readable error if status='error'
+    --     triggered_at      — when we called HMRC's POST /trigger
+    --     retrieved_at      — when HMRC's GET /{id} returned 200
+    --     poll_attempts     — how many retrieve calls it took (1-7 typical)
+    --     raw_response      — full JSON of HMRC's calculation tree for audit
+    --
+    --   Parsed figures (from calculation.taxCalculation)
+    --     total_income_tax_and_nics_due  — the headline figure users see
+    --     total_taxable_income
+    --     income_tax_charged
+    --     class2_nics
+    --     class4_nics
+    --     personal_allowance
+    --
+    --   Aggregation stats (from the Phase B aggregator)
+    --     tx_total, tx_applied, tx_unmapped, tx_excluded_no_mtd,
+    --     tx_override_applied
+    --     — Captured alongside the figures so a user seeing a
+    --       "surprising" HMRC number can drill into why it differs from
+    --       their local Python estimate (e.g. 250 transactions
+    --       unclassified → missing from the submission).
+    --
+    -- Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    -- Safe to re-run. Purely additive — touches no existing rows.
+    [60] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_calculations (
+                id                              BIGSERIAL PRIMARY KEY,
+                uuid                            VARCHAR(64) UNIQUE NOT NULL,
+
+                -- Request context
+                user_uuid                       VARCHAR(64) NOT NULL,
+                business_id                     VARCHAR(255) NOT NULL,
+                tax_year                        VARCHAR(16) NOT NULL,
+                period_start                    DATE NOT NULL,
+                period_end                      DATE NOT NULL,
+                calculation_type                VARCHAR(32) NOT NULL DEFAULT 'in-year',
+
+                -- HMRC round-trip
+                calculation_id                  VARCHAR(64),
+                status                          VARCHAR(16) NOT NULL DEFAULT 'triggered',
+                error_message                   TEXT,
+                triggered_at                    TIMESTAMP,
+                retrieved_at                    TIMESTAMP,
+                poll_attempts                   INTEGER DEFAULT 0,
+                raw_response                    TEXT,
+
+                -- Parsed figures (NULL until status='ready')
+                total_income_tax_and_nics_due   NUMERIC(15, 2),
+                total_taxable_income             NUMERIC(15, 2),
+                income_tax_charged               NUMERIC(15, 2),
+                class2_nics                      NUMERIC(15, 2),
+                class4_nics                      NUMERIC(15, 2),
+                personal_allowance               NUMERIC(15, 2),
+
+                -- Aggregation stats (from the Phase B aggregator)
+                tx_total                         INTEGER DEFAULT 0,
+                tx_applied                       INTEGER DEFAULT 0,
+                tx_unmapped                      INTEGER DEFAULT 0,
+                tx_excluded_no_mtd               INTEGER DEFAULT 0,
+                tx_override_applied              INTEGER DEFAULT 0,
+
+                -- Audit
+                created_at                       TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at                       TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_user_uuid ON hmrc_calculations (user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_business_year ON hmrc_calculations (business_id, tax_year)")
+        db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_hmrc_calculations_calc_id ON hmrc_calculations (calculation_id) WHERE calculation_id IS NOT NULL")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_status ON hmrc_calculations (status)")
+
+        print("[Tax Copilot] Created hmrc_calculations table for Phase D preview-calculation round-trip")
+    end,
+
+    -- ===========================================================================
+    -- Merge note (continued):
+    -- Steps 61-62 below were originally numbered 55-56 on origin/main, with
+    -- lapis keys 473-474. Renumbered during this merge to sit AFTER the
+    -- hmrc-mtd-preview-calc branch's steps 55-60 (lapis keys 473-478).
+    -- ===========================================================================
+
+    -- 61. Seed health_and_safety reference data (Client A + B)
+    -- 209 deduped accountant-classified transactions for the health & safety profile.
+    -- Uses ON CONFLICT so existing C+D data (migration 47) is untouched.
+    [61] = function()
+        local sql_path = debug.getinfo(1, "S").source:match("@(.*/)")
+            .. "sql/048_seed_health_safety_reference_data.sql"
+        local f = assert(io.open(sql_path, "r"))
+        local sql = f:read("*a")
+        f:close()
+
+        db.query(sql)
+        local result = db.select("COUNT(*) as cnt FROM classification_reference_data WHERE client_business_type = 'health_and_safety'")
+        local count = result and result[1] and result[1].cnt or 0
+        print("[Tax Copilot] Seeded " .. count .. " health_and_safety reference transactions (Client A + B)")
+    end,
+
+    -- 62. Create classification_profiles table
+    -- Stores business profile configurations created via the admin UI.
+    -- Filesystem profiles (amazon_seller, etc.) continue to work alongside DB profiles.
+    [62] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS classification_profiles (
+                id SERIAL PRIMARY KEY,
+                uuid VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()::text UNIQUE,
+                profile_key VARCHAR(100) NOT NULL UNIQUE,
+                display_name VARCHAR(255) NOT NULL,
+                industry VARCHAR(100),
+                user_profile_type VARCHAR(100) DEFAULT 'limited_company',
+                category_affinity JSONB DEFAULT '{}',
+                personal_indicators JSONB DEFAULT '[]',
+                excluded_categories JSONB DEFAULT '[]',
+                rules_markdown TEXT,
+                keyword_rules JSONB DEFAULT '[]',
+                category_mappings JSONB DEFAULT '{}',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                namespace_id INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_profile_key ON classification_profiles (profile_key)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_industry ON classification_profiles (industry)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_is_active ON classification_profiles (is_active)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_cp_namespace_id ON classification_profiles (namespace_id)")
+        print("[Tax Copilot] Created classification_profiles table")
+    end,
+
+    -- ===========================================================================
+    -- Issue #308 — User-created custom categories + audit trail (April 2026)
+    --
+    -- Adds the schema needed for two connected features:
+    --
+    --   1. Two global flags admin can toggle:
+    --        - allow_user_category_editing  (gate the classify-page picker for
+    --                                        non-admin users)
+    --        - allow_user_custom_categories (further gate "+ Add custom" entry)
+    --      Both default OFF — the system is admin-only until an admin flips
+    --      them on. Settings live in a key/value table so future toggles are
+    --      data, not migrations.
+    --
+    --   2. User-scoped custom categories ("Bee Supplies", "Restoration Parts"):
+    --      created by users on the classify page, moderated by admin via the
+    --      admin dashboard, optionally promoted to system-wide categories
+    --      when multiple users keep creating the same name.
+    --
+    --   3. Append-only audit log on every category change so admin can see
+    --      who changed what and when. Retention is enforced server-side
+    --      (tax_transaction_audit_retention_days config) so the table stays
+    --      bounded.
+    --
+    --   4. Denormalised "who last touched this" pointers on tax_transactions
+    --      for cheap classify-page badge rendering (no JOIN to the audit log
+    --      on every page render).
+    -- ===========================================================================
+
+    -- 63. Create tax_app_settings table (key/value store for global toggles)
+    [63] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_app_settings (
+                id              SERIAL PRIMARY KEY,
+                setting_key     VARCHAR(100) UNIQUE NOT NULL,
+                setting_value   JSONB NOT NULL,
+                setting_type    VARCHAR(20) NOT NULL
+                                CHECK (setting_type IN ('boolean','integer','string','object','array')),
+                description     TEXT NOT NULL,
+                category        VARCHAR(50) NOT NULL DEFAULT 'general',
+                is_admin_only   BOOLEAN NOT NULL DEFAULT TRUE,
+                updated_by_user_uuid VARCHAR(255),
+                updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_tas_category ON tax_app_settings(category)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tas_is_admin_only ON tax_app_settings(is_admin_only)")
+
+        -- Seed the two flags introduced by issue #308. ON CONFLICT DO NOTHING so
+        -- re-running the migration is idempotent; admin's value (if changed)
+        -- is never overwritten.
+        local seeds = {
+            {
+                key  = "allow_user_category_editing",
+                val  = "false",
+                type = "boolean",
+                cat  = "classification",
+                desc = "When true, non-admin users can change a transaction's category on the classify page. When false, only admins can edit categories.",
+                public = true,
+            },
+            {
+                key  = "allow_user_custom_categories",
+                val  = "false",
+                type = "boolean",
+                cat  = "classification",
+                desc = "When true, users can additionally create their own custom category names on the classify page. Requires allow_user_category_editing to also be true. Custom categories are user-scoped until an admin moderates them.",
+                public = true,
+            },
+        }
+        for _, s in ipairs(seeds) do
+            db.query([[
+                INSERT INTO tax_app_settings
+                    (setting_key, setting_value, setting_type, description, category, is_admin_only)
+                VALUES (?, ?::jsonb, ?, ?, ?, ?)
+                ON CONFLICT (setting_key) DO NOTHING
+            ]], s.key, s.val, s.type, s.desc, s.cat, not s.public)
+        end
+        print("[Tax Copilot] Created tax_app_settings table and seeded #308 flags")
+    end,
+
+    -- 64. Create tax_user_custom_categories table
+    [64] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_user_custom_categories (
+                id              SERIAL PRIMARY KEY,
+                uuid            VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+                user_uuid       VARCHAR(255) NOT NULL,
+                namespace_id    INTEGER NOT NULL DEFAULT 0,
+
+                name            VARCHAR(100) NOT NULL,
+                key_normalized  VARCHAR(120) NOT NULL,
+
+                status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                                CHECK (status IN ('pending','approved','rejected','promoted')),
+
+                mapped_to_category_id      INTEGER NULL,
+                mapped_to_hmrc_category_id INTEGER NULL,
+
+                admin_notes        TEXT NULL,
+                reviewed_by_user_uuid VARCHAR(255) NULL,
+                reviewed_at        TIMESTAMP NULL,
+
+                promoted_to_category_id INTEGER NULL,
+                promoted_at        TIMESTAMP NULL,
+                promoted_by_user_uuid VARCHAR(255) NULL,
+
+                usage_count        INTEGER NOT NULL DEFAULT 0,
+
+                is_active          BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+
+                UNIQUE (user_uuid, key_normalized),
+
+                CONSTRAINT fk_tucc_mapped_category
+                    FOREIGN KEY (mapped_to_category_id)
+                    REFERENCES tax_categories(id) ON DELETE SET NULL,
+                CONSTRAINT fk_tucc_mapped_hmrc
+                    FOREIGN KEY (mapped_to_hmrc_category_id)
+                    REFERENCES tax_hmrc_categories(id) ON DELETE SET NULL,
+                CONSTRAINT fk_tucc_promoted_category
+                    FOREIGN KEY (promoted_to_category_id)
+                    REFERENCES tax_categories(id) ON DELETE SET NULL
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_user_uuid ON tax_user_custom_categories(user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_namespace_id ON tax_user_custom_categories(namespace_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_status ON tax_user_custom_categories(status)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_mapped_to ON tax_user_custom_categories(mapped_to_category_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_key_normalized ON tax_user_custom_categories(key_normalized)")
+        -- Composite index supporting "find duplicate names across users" admin query
+        db.query("CREATE INDEX IF NOT EXISTS idx_tucc_key_status ON tax_user_custom_categories(key_normalized, status)")
+        print("[Tax Copilot] Created tax_user_custom_categories table")
+    end,
+
+    -- 65. Create tax_transaction_audit table (append-only history)
+    [65] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS tax_transaction_audit (
+                id              BIGSERIAL PRIMARY KEY,
+                transaction_uuid VARCHAR(255) NOT NULL,
+                user_uuid       VARCHAR(255) NOT NULL,
+                user_role       VARCHAR(20) NOT NULL
+                                CHECK (user_role IN ('user','admin','accountant','ai','system')),
+
+                action          VARCHAR(50) NOT NULL,
+
+                old_value       JSONB,
+                new_value       JSONB,
+
+                source          VARCHAR(20) NOT NULL DEFAULT 'web'
+                                CHECK (source IN ('web','ios','admin','api','classifier','reconciler')),
+                ip_address      VARCHAR(64) NULL,
+                user_agent      VARCHAR(500) NULL,
+                correlation_id  VARCHAR(255) NULL,
+
+                namespace_id    INTEGER NOT NULL DEFAULT 0,
+                created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_transaction_uuid ON tax_transaction_audit(transaction_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_user_uuid ON tax_transaction_audit(user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_created_at ON tax_transaction_audit(created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_action ON tax_transaction_audit(action)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tta_namespace_id ON tax_transaction_audit(namespace_id)")
+        print("[Tax Copilot] Created tax_transaction_audit table (append-only)")
+    end,
+
+    -- 66. Add denormalised pointers + custom category FK to tax_transactions
+    [66] = function()
+        db.query([[
+            ALTER TABLE tax_transactions
+                ADD COLUMN IF NOT EXISTS modified_by_user_uuid VARCHAR(255) NULL,
+                ADD COLUMN IF NOT EXISTS modified_by_role      VARCHAR(20) NULL,
+                ADD COLUMN IF NOT EXISTS modified_at           TIMESTAMP NULL,
+                ADD COLUMN IF NOT EXISTS custom_category_uuid  VARCHAR(255) NULL
+        ]])
+        -- Constraint added separately so the migration succeeds even when the
+        -- column already exists from a prior partial run (ALTER ... ADD CHECK
+        -- without a column name).
+        local check_exists = db.select([[
+            1 FROM information_schema.check_constraints
+            WHERE constraint_name = 'chk_tax_transactions_modified_by_role'
+        ]])
+        if not check_exists or #check_exists == 0 then
+            db.query([[
+                ALTER TABLE tax_transactions
+                ADD CONSTRAINT chk_tax_transactions_modified_by_role
+                CHECK (modified_by_role IS NULL
+                       OR modified_by_role IN ('user','admin','accountant','ai','system'))
+            ]])
+        end
+
+        local fk_exists = db.select([[
+            1 FROM information_schema.table_constraints
+            WHERE constraint_name = 'fk_tax_transactions_custom_category'
+        ]])
+        if not fk_exists or #fk_exists == 0 then
+            db.query([[
+                ALTER TABLE tax_transactions
+                ADD CONSTRAINT fk_tax_transactions_custom_category
+                FOREIGN KEY (custom_category_uuid)
+                REFERENCES tax_user_custom_categories(uuid) ON DELETE SET NULL
+            ]])
+        end
+
+        db.query("CREATE INDEX IF NOT EXISTS idx_tx_modified_by_user ON tax_transactions(modified_by_user_uuid)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_tx_custom_category ON tax_transactions(custom_category_uuid)")
+        print("[Tax Copilot] Added modified_by_* + custom_category_uuid columns to tax_transactions")
+    end,
+
+    -- 67. Seed max_custom_categories_per_user setting (issue #308 user side).
+    --
+    -- Per-user creation cap that admins can tune at runtime without a code
+    -- change. Default 20 matches the issue's suggested limit. Stored in
+    -- tax_app_settings as an admin-only integer so it doesn't leak through
+    -- /api/settings/public — the user-side POST endpoint reads it directly
+    -- from the cached settings_service to enforce the cap.
+    --
+    -- ON CONFLICT DO NOTHING so re-running the migration on a system that
+    -- already has the row (e.g. an admin tuned the value to 50) doesn't
+    -- silently reset their override.
+    [67] = function()
+        db.query([[
+            INSERT INTO tax_app_settings
+                (setting_key, setting_value, setting_type, description, category, is_admin_only)
+            VALUES (
+                'max_custom_categories_per_user',
+                '20'::jsonb,
+                'integer',
+                'Maximum number of custom categories a single user can have at once. The user-side POST endpoint rejects creation beyond this cap. Promoted/rejected customs do not count toward the limit.',
+                'classification',
+                TRUE
+            )
+            ON CONFLICT (setting_key) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded max_custom_categories_per_user = 20 (admin-tunable)")
+    end,
+
+    -- 68. Seed AUTH_EMAIL_TAKEN error code.
+    --
+    -- Used by /api/v2/register when the email is already registered
+    -- (UNIQUE(email) violation). Migrating the legacy
+    -- ``{error: "Email already registered"}`` 409 response to the
+    -- catalog envelope unlocks: translatable message, occurrence_uuid,
+    -- "send to support" deep-link, and ``context.action_url`` so the
+    -- frontend can render a "Sign in instead" button.
+    --
+    -- Seeded here (alongside other AUTH_* codes from phase 50) for
+    -- consistency. Once we extract the catalog into shared infra, this
+    -- and the other AUTH_* codes belong in a generic-auth migration
+    -- file rather than tax-copilot-specific.
+    --
+    -- The matching translation lives in
+    -- ``backend/app/errors/translations/en.json`` (Python loads it on
+    -- startup via translation_loader). Adding the catalog row here
+    -- gives Lapis what it needs to resolve the code; the translation
+    -- file gives Python what it needs to render the user-facing text.
+    [68] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES (
+                'AUTH_EMAIL_TAKEN', 'error', 'warn', 409,
+                'Register endpoint hit a UNIQUE(email) violation. Frontend should highlight the email field and offer a Sign In link.'
+            )
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded AUTH_EMAIL_TAKEN error code")
     end,
 }

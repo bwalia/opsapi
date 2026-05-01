@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title><%= subject or app_name or "Notification" %></title>
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<![endif]-->
+<style>
+  /* Reset */
+  body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+  table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+  img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+  body { margin: 0; padding: 0; width: 100% !important; height: 100% !important; background-color: #f4f4f7; }
+
+  /* Core */
+  .email-wrapper { width: 100%; background-color: #f4f4f7; padding: 40px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+  /* Header — uses brand_color from template data, defaults to #dc2626 (red) */
+  .email-header { background-color: <%= brand_color or "#dc2626" %>; padding: 28px 40px; text-align: center; }
+  .email-header h1 { color: #ffffff; margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  <% if brand_logo_url then %>
+  .email-header img { max-height: 40px; margin-bottom: 12px; }
+  <% end %>
+
+  /* Body */
+  .email-body { padding: 36px 40px; color: #374151; font-size: 15px; line-height: 1.7; }
+  .email-body h2 { color: #111827; font-size: 20px; margin: 0 0 16px 0; font-weight: 600; }
+  .email-body p { margin: 0 0 16px 0; }
+  .email-body a { color: <%= brand_color or "#dc2626" %>; text-decoration: none; }
+
+  /* Button */
+  .btn { display: inline-block; background-color: <%= brand_color or "#dc2626" %>; color: #ffffff !important; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; margin: 8px 0; }
+
+  /* Code Box */
+  .code-box { background-color: #f3f4f6; border: 2px solid #e5e7eb; border-radius: 8px; padding: 20px 24px; text-align: center; font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #111827; margin: 20px 0; font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace; }
+
+  /* Info Box */
+  .info-box { background-color: #fef2f2; border-left: 4px solid <%= brand_color or "#dc2626" %>; padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 16px 0; font-size: 14px; color: #991b1b; }
+
+  /* Divider */
+  .divider { border: none; border-top: 1px solid #e5e7eb; margin: 24px 0; }
+
+  /* Footer */
+  .email-footer { padding: 24px 40px; text-align: center; color: #9ca3af; font-size: 12px; line-height: 1.6; border-top: 1px solid #f3f4f6; }
+  .email-footer a { color: #6b7280; text-decoration: underline; }
+
+  /* Responsive */
+  @media only screen and (max-width: 620px) {
+    .email-body, .email-header, .email-footer { padding-left: 24px !important; padding-right: 24px !important; }
+    .code-box { font-size: 26px; letter-spacing: 6px; padding: 16px 18px; }
+  }
+</style>
+</head>
+<body>
+<div class="email-wrapper">
+  <div class="email-container">
+    <div class="email-header">
+      <% if brand_logo_url then %>
+        <img src="<%= brand_logo_url %>" alt="<%= app_name or 'Logo' %>" />
+      <% end %>
+      <h1><%= header_title or app_name or "OpsAPI" %></h1>
+    </div>
+    <div class="email-body">
+      <%- content %>
+    </div>
+    <div class="email-footer">
+      <p>&copy; <%= current_year %> <%= app_name or "OpsAPI" %>. All rights reserved.</p>
+      <% if support_email then %>
+        <p>Need help? <a href="mailto:<%= support_email %>"><%= support_email %></a></p>
+      <% end %>
+      <% if unsubscribe_url then %>
+        <p><a href="<%= unsubscribe_url %>">Unsubscribe</a></p>
+      <% end %>
+    </div>
+  </div>
+</div>
+</body>
+</html>

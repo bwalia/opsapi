@@ -37,14 +37,10 @@ on:
           - opsapi
           - opsapi-kisaan
       PROJECT_CODE:
-        type: choice
-        description: "Please select the project Code"
-        default: "opsapi"
+        type: string
+        description: "Project code(s) for migrations. Single (tax_copilot) or comma-separated (ecommerce,collaboration)"
+        default: "all"
         required: true
-        options:
-          - opsapi
-          - kisaan
-          - tax-copilot
 
 env:
   PROJECT_NAME: ${{ github.event.inputs.PROJECT_NAME || 'opsapi' }}
@@ -172,6 +168,16 @@ jobs:
             --set image.repository=bwalia/opsapi \
             --set image.tag=latest \
             --namespace ${{ env.TARGET_ENV }} --create-namespace
+        shell: bash
+
+      - name: Deploy Adminer with NodePort for quick DB access
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          echo "Deploying Adminer to ${{ env.TARGET_ENV }} namespace..."
+          helm upgrade --install adminer ./devops/helm-charts/adminer \
+            --namespace ${{ env.TARGET_ENV }} --create-namespace
+          echo "Adminer deployed. Access via NodePort 32200."
         shell: bash
 
       - name: Kubeseal encrypt the env secrets file for node Helper app [Deactivated for now]

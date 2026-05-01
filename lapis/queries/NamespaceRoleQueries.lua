@@ -15,7 +15,8 @@ local NamespaceRoleQueries = {}
 
 -- Valid permission actions — reject anything not in this set
 local VALID_ACTIONS = {
-    access = true, create = true, read = true, update = true, delete = true, manage = true, reply = true
+    access = true, create = true, read = true, update = true, delete = true, manage = true, reply = true,
+    deploy = true -- services module: deploy action (seeded by menu-system migration)
 }
 
 --- Validate permissions object: check actions are valid and modules exist in DB
@@ -338,7 +339,7 @@ function NamespaceRoleQueries.setModulePermissions(role_id, module, actions)
     -- Validate actions
     for _, action in ipairs(actions or {}) do
         if not VALID_ACTIONS[action] then
-            error("Invalid action '" .. tostring(action) .. "'. Valid: create, read, update, delete, manage")
+            error("Invalid action '" .. tostring(action) .. "'. Valid: create, read, update, delete, manage, access, reply, deploy")
         end
     end
 
@@ -358,7 +359,7 @@ end
 function NamespaceRoleQueries.addPermission(role_id, module, action)
     -- Validate action
     if not VALID_ACTIONS[action] then
-        error("Invalid action '" .. tostring(action) .. "'. Valid: create, read, update, delete, manage")
+        error("Invalid action '" .. tostring(action) .. "'. Valid: create, read, update, delete, manage, access, reply, deploy")
     end
 
     local role = NamespaceRoleQueries.show(role_id)

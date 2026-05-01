@@ -107,7 +107,7 @@ const UserRolesCard: React.FC<UserRolesCardProps> = memo(function UserRolesCard(
                 {roleInfo.permissions.map((permission, permIndex) => (
                   <span
                     key={permIndex}
-                    className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-white rounded-md border border-secondary-200 text-secondary-600"
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-surface rounded-md border border-secondary-200 text-secondary-600"
                   >
                     <Check className="w-3 h-3 text-success-500" />
                     {permission}

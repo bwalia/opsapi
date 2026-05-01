@@ -29,7 +29,7 @@ const StatsCard: React.FC<StatsCardProps> = memo(function StatsCard({
   return (
     <div
       className={cn(
-        'bg-white rounded-xl border border-secondary-200 p-4 sm:p-6 hover:shadow-lg transition-shadow duration-300',
+        'bg-surface rounded-xl border border-secondary-200 p-4 sm:p-6 hover:shadow-lg transition-shadow duration-300',
         className
       )}
     >

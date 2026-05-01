@@ -1,5 +1,5 @@
 import { apiClient, toFormData, AUTH_TOKEN_KEY, AUTH_USER_KEY, clearAllAuthStorage } from '@/lib/api-client';
-import type { LoginCredentials, LoginResponse, User, NamespacePermissions } from '@/types';
+import type { LoginCredentials, LoginResponse, User, NamespacePermissions, Verify2faParams, Resend2faParams } from '@/types';
 
 /**
  * Decode JWT payload (base64url)
@@ -42,6 +42,19 @@ export const authService = {
 
     const data = response.data;
 
+    // If backend requires 2FA, throw with session data so the UI can redirect
+    if (data.requires_2fa && data.session_token) {
+      const err = new Error('Two-factor authentication required') as Error & {
+        requires_2fa: true;
+        session_token: string;
+        email: string;
+      };
+      err.requires_2fa = true;
+      err.session_token = data.session_token;
+      err.email = data.email || '';
+      throw err;
+    }
+
     // Store token and user in localStorage
     if (data.token) {
       this.setToken(data.token);
@@ -72,6 +85,58 @@ export const authService = {
     }
 
     return data;
+  },
+
+  /**
+   * Verify 2FA OTP code and receive full JWT
+   */
+  async verify2fa(params: Verify2faParams): Promise<LoginResponse> {
+    const response = await apiClient.post<LoginResponse>(
+      '/auth/2fa/verify',
+      JSON.stringify(params),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+
+    const data = response.data;
+
+    if (data.token) {
+      this.setToken(data.token);
+
+      const jwtPayload = decodeJWTPayload(data.token);
+      if (jwtPayload?.userinfo) {
+        const userinfo = jwtPayload.userinfo as {
+          namespace?: {
+            id?: number;
+            uuid?: string;
+            name?: string;
+            slug?: string;
+            is_owner?: boolean;
+            role?: string;
+            permissions?: NamespacePermissions;
+          };
+        };
+        if (userinfo.namespace && data.user) {
+          (data.user as User & { namespace?: typeof userinfo.namespace }).namespace = userinfo.namespace;
+        }
+      }
+    }
+    if (data.user) {
+      this.setUser(data.user);
+    }
+
+    return data;
+  },
+
+  /**
+   * Resend 2FA OTP code
+   */
+  async resend2fa(params: Resend2faParams): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(
+      '/auth/2fa/resend',
+      JSON.stringify(params),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
   },
 
   /**

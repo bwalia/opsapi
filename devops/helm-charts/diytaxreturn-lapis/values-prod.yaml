@@ -1,0 +1,47 @@
+env: prod
+app: diytaxreturn-lapis
+projectCode: all
+
+# ─── Password reset email link target ─────────────────────────────────
+# Canonical frontend origin for production. Migration 489 uses this
+# to bootstrap ``namespaces.allowed_redirect_origins`` on first run;
+# runtime path also falls back to it if any namespace's column is
+# empty. See README.md → Password Reset Flow.
+#
+# TODO: confirm the production hostname before first deploy. Likely
+# values: https://app.diytaxreturn.co.uk, https://www.diytaxreturn.co.uk,
+# or https://diytaxreturn.co.uk. Update before going live.
+frontendUrl: "https://app.diytaxreturn.co.uk"
+# passwordResetAllowedOrigins: ""
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: wslproxy
+  annotations: {}
+  hosts: []
+  tls: []
+
+externalSecret:
+  enabled: true
+
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
