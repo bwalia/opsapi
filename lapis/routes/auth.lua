@@ -426,24 +426,6 @@ return function(app)
         end
         email = email:lower():match("^%s*(.-)%s*$")
 
-        -- Resolve the redirect target. Anything not in the allow-list
-        -- is silently replaced with the default — never echo an
-        -- attacker-supplied origin into the email body.
-        local allowed = get_allowed_reset_origins()
-        local origin = default_reset_origin()
-        if redirect_url and type(redirect_url) == "string" then
-            -- Strip any path/query the caller included; we only trust
-            -- the origin part.
-            local origin_only = redirect_url:match("^(https?://[^/]+)") or redirect_url
-            if allowed[origin_only] then
-                origin = origin_only
-            else
-                ngx.log(ngx.WARN,
-                    "[forgot-password] rejected unlisted redirect_url=",
-                    tostring(redirect_url))
-            end
-        end
-
         -- Generic success response — same shape whether the email
         -- exists or not. Prevents an attacker from enumerating
         -- registered emails by submitting a list and watching for
@@ -468,6 +450,91 @@ return function(app)
             -- Email not registered. Return the same 200-OK as the
             -- success path so the response is timing-stable.
             return generic_ok
+        end
+
+        -- ────────────────────────────────────────────────────────────
+        -- Resolve which frontend origin to use in the email link.
+        --
+        -- Priority (the SaaS-correct order):
+        --   1. The user's namespace allow-list (DB) — primary.
+        --      Multi-tenant: each tenant declares its own legitimate
+        --      frontend origins via ``namespaces.allowed_redirect_
+        --      origins``. New tenant onboarding adds a row, no env-
+        --      var update or opsapi restart needed.
+        --   2. The legacy global env-var allow-list. Bootstrap-only
+        --      fallback for existing deployments where the namespace
+        --      column hasn't been populated yet (migration 489 will
+        --      bootstrap it from these env vars on first run).
+        --
+        -- The user-supplied ``redirect_url`` is validated against the
+        -- effective allow-list — we never echo an attacker-supplied
+        -- origin into an email. If validation fails, we fall back to
+        -- the first allow-listed origin (canonical primary for that
+        -- namespace).
+        -- ────────────────────────────────────────────────────────────
+        local function canonicalise(url)
+            if type(url) ~= "string" or url == "" then return nil end
+            return url:match("^(https?://[^/]+)") or url
+        end
+
+        -- Build the effective allow-list: namespace first, env-var fallback.
+        local allowed_set = {}
+        local first_origin = nil
+        local function add_to_allowed(o)
+            local canon = canonicalise(o)
+            if not canon or allowed_set[canon] then return end
+            allowed_set[canon] = true
+            if not first_origin then first_origin = canon end
+        end
+
+        local user_ns = NamespaceQueries.getUserDefaultNamespace(user.id)
+        if user_ns and user_ns.id then
+            local ns_origins = NamespaceQueries.getAllowedRedirectOrigins(user_ns.id)
+            for _, o in ipairs(ns_origins or {}) do add_to_allowed(o) end
+        end
+
+        -- Env-var fallback. Lets pre-existing deployments with
+        -- FRONTEND_URL / PASSWORD_RESET_ALLOWED_ORIGINS continue
+        -- working until namespace columns are populated. Once
+        -- migration 489 runs on a fresh DB, these are auto-bootstrapped
+        -- and this fallback becomes inert.
+        if not first_origin then
+            for legacy_origin, _ in pairs(get_allowed_reset_origins()) do
+                add_to_allowed(legacy_origin)
+            end
+        end
+
+        -- Pick the origin to use in the email link.
+        --   - Caller's redirect_url if it's allow-listed (preserves
+        --     "land on the frontend that issued the request" UX when
+        --     a tenant has multiple allow-listed origins, e.g.
+        --     staging + prod).
+        --   - Otherwise the first allow-listed origin (canonical
+        --     primary for that namespace).
+        --   - Last resort: env-var default. Only reachable when
+        --     namespace allow-list is empty AND no env var set —
+        --     should not happen in any properly-configured env, but
+        --     we'd rather send a localhost-pointing email than crash.
+        local origin
+        local requested = canonicalise(redirect_url)
+        if requested and allowed_set[requested] then
+            origin = requested
+        elseif first_origin then
+            origin = first_origin
+            if requested then
+                ngx.log(ngx.WARN,
+                    "[forgot-password] redirect_url not in allow-list, using primary; ",
+                    "requested=", tostring(redirect_url),
+                    " primary=", origin,
+                    " user_id=", user.id)
+            end
+        else
+            origin = default_reset_origin()
+            ngx.log(ngx.WARN,
+                "[forgot-password] no allow-list configured for namespace; ",
+                "using env default. user_id=", user.id,
+                " namespace_id=", user_ns and user_ns.id or "nil",
+                " origin=", origin)
         end
 
         local ip = ngx.var.remote_addr

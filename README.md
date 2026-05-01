@@ -272,6 +272,11 @@ All environment variables are in `lapis/.env`. The `.sample.env` file has workin
 | `CORS_ALLOWED_ORIGINS` | Comma-separated explicit origin URLs |
 | `NODE_API_URL` | Node.js service URL |
 | `OPSAPI_SSL_VERIFY` | SSL verification for external calls (`true`/`false`) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP server for outbound email (password reset, invitations, OTP) |
+| `SMTP_FROM_EMAIL` / `SMTP_FROM_NAME` | Default sender for outbound email |
+| `APP_NAME` | Display name used in email subject lines (default `OpsAPI`) |
+| `FRONTEND_URL` | **Bootstrap-only**: seeds `namespaces.allowed_redirect_origins` on first run of migration 489. Auto-set by `start.sh`. After migration, the source of truth is the DB column — see [Password Reset Flow](#password-reset-flow). |
+| `PASSWORD_RESET_ALLOWED_ORIGINS` | **Bootstrap-only**: comma-separated extra origins for the same migration 489 bootstrap. Used when one tenant has multiple frontends (e.g. staging + prod). |
 
 **Note:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If changed after initial build, rebuild with:
 
@@ -366,6 +371,182 @@ docker exec -e "PROJECT_CODE=all" -it opsapi lapis migrate
 | `GET /metrics` | Prometheus metrics |
 | `POST /auth/login` | Login (returns JWT) |
 | `POST /api/v2/register` | User registration |
+| `POST /auth/forgot-password` | Request a password-reset email — see [Password Reset Flow](#password-reset-flow) |
+| `POST /auth/reset-password` | Consume a reset token and set a new password |
+
+---
+
+## Password Reset Flow
+
+OpsAPI ships a production-grade password reset flow that scales to
+multi-tenant SaaS without per-environment code or env-var changes
+once a tenant is configured.
+
+### Two-step flow
+
+```
+┌─────────┐     1. POST /auth/forgot-password         ┌─────────┐
+│ Browser │ ─────{email, redirect_url}──────────────► │ OpsAPI  │
+└─────────┘                                            └─────────┘
+                                                            │
+                                              2. Look up user → namespace
+                                                 → allow-list of origins
+                                                            │
+                                              3. Validate redirect_url
+                                                 against allow-list
+                                                            │
+                                              4. Generate 32-byte CSPRNG
+                                                 token, store SHA-256(token)
+                                                            │
+                                              5. Send email with link:
+                                                 ${origin}/reset-password
+                                                 ?token=${plaintext_token}
+                                                            │
+┌─────────┐    User clicks email link             ◄──────────┘
+│ Browser │ ─────────────► /reset-password?token=xxxxx
+│         │                                              │
+│         │     6. POST /auth/reset-password             │
+│         │ ─────{token, new_password}────────────────► OpsAPI
+└─────────┘                                              │
+                                              7. Atomic UPDATE..RETURNING
+                                                 (single-use, race-free)
+                                                            │
+                                              8. bcrypt-hash new password,
+                                                 store, revoke ALL refresh
+                                                 tokens for the user
+                                                            │
+                                              9. 200 OK
+```
+
+### Where the email link points: namespace allow-list
+
+The frontend sends `redirect_url` (its own origin) in the request body.
+OpsAPI validates it against the user's namespace allow-list before
+interpolating it into the email link. This stops an attacker submitting
+a forgot-password for someone else's email with `redirect_url:
+"https://evil.com"` — the link mailed to the real user would otherwise
+point at the attacker's site.
+
+**Allow-list lookup priority:**
+
+1. **`namespaces.allowed_redirect_origins`** (primary, multi-tenant SaaS source of truth)
+   — `TEXT[]` column populated per tenant. The first entry is the
+   canonical primary used as fallback when the request's `redirect_url`
+   isn't in the list.
+
+2. **`PASSWORD_RESET_ALLOWED_ORIGINS` + `FRONTEND_URL` env vars** (bootstrap fallback)
+   — used only when the user's namespace has an empty/NULL column.
+   Migration 489 uses these env vars to populate the column on first
+   run, so the env vars become inert once any namespace is bootstrapped.
+
+3. **`http://localhost`** — last-resort default, for dev only. A WARN
+   log fires if production hits this path.
+
+### Configure a new tenant
+
+For each new SaaS tenant / new environment / new frontend domain, set
+the namespace's allow-list. Three ways depending on your workflow:
+
+**A — `start.sh` auto-bootstrap (existing pattern):**
+Set `FRONTEND_URL` (and optionally `PASSWORD_RESET_ALLOWED_ORIGINS`) in
+the environment. On first migration run, all namespaces with empty
+allow-lists are populated from these env vars.
+
+```bash
+FRONTEND_URL=https://app.example.com \
+PASSWORD_RESET_ALLOWED_ORIGINS=https://staging.example.com,https://acc.example.com \
+  ./start.sh prod
+```
+
+**B — Direct SQL (any time after migration runs):**
+```sql
+UPDATE namespaces
+SET allowed_redirect_origins = ARRAY[
+  'https://app.example.com',         -- primary (first entry)
+  'https://staging.example.com',
+  'https://acc.example.com'
+]
+WHERE slug = 'tax-copilot';
+```
+
+**C — Admin UI (planned, not yet shipped):**
+A future PR adds an "Allowed redirect URLs" tab in `/admin/settings`
+so tenant owners can manage their own list without DB access. The DB
+column is the same; the UI is just CRUD.
+
+### Security properties
+
+| Property | Implementation |
+|---|---|
+| **Cryptographic randomness** | 32 bytes from `resty.random.bytes(N, true)` — `bytes_strict` so a low-entropy pool fails loud rather than issuing a weak token |
+| **Token storage** | SHA-256(token) hex; the plaintext token only ever lives in the email link, never persisted, never logged |
+| **Single-use** | Atomic `UPDATE ... RETURNING` with `used_at IS NULL AND expires_at > NOW()` — no race window between validate and consume |
+| **Token TTL** | 30 minutes (industry standard for reset links) |
+| **Enumeration safety** | `/forgot-password` always returns 200 with the same response body, regardless of whether the email exists |
+| **Rate limit** | `/forgot-password` 5/hour per IP, `/reset-password` 10/min per IP — token itself is the strong gate, rate limit is anti-abuse |
+| **Refresh-token revocation** | On successful reset, every `refresh_tokens` row for the user is revoked — kicks attackers out of any stolen sessions |
+| **Multi-pending-token cleanup** | Re-requesting forgot-password invalidates earlier unconsumed tokens; consuming a token invalidates siblings |
+| **Phishing-domain protection** | The user-supplied `redirect_url` is validated against the namespace allow-list before being interpolated into the email body |
+
+### Verifying it locally
+
+```bash
+# 1. Confirm the column exists and is populated
+docker exec opsapi-postgres-dev-db psql -U pguser -d opsapi-diytaxreturn \
+  -c "SELECT slug, allowed_redirect_origins FROM namespaces;"
+
+# 2. Trigger forgot-password with an allow-listed origin
+curl -X POST http://localhost/opsapi/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@taxreturn.uk","redirect_url":"http://localhost"}'
+
+# 3. Trigger with a NON-allow-listed origin (attacker simulation) —
+#    should return 200 (enumeration-safe) but log a WARN and use the
+#    namespace's primary origin in the email
+curl -X POST http://localhost/opsapi/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@taxreturn.uk","redirect_url":"https://attacker.com"}'
+
+# 4. Confirm the WARN was logged
+tail -50 lapis/logs/error.log | grep "forgot-password"
+# Expected: "[forgot-password] redirect_url not in allow-list, using primary;
+#            requested=https://attacker.com primary=http://localhost user_id=..."
+
+# 5. Synthesise a token for QA (skips the actual email send)
+docker exec opsapi-postgres-dev-db psql -U pguser -d opsapi-diytaxreturn -c "
+  DELETE FROM password_reset_tokens WHERE user_id = 4;
+  INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
+  VALUES (4, encode(digest('local_qa_token_42chars_for_testing_only', 'sha256'), 'hex'),
+          NOW() + INTERVAL '30 minutes', NOW());
+"
+
+# 6. Consume it
+curl -X POST http://localhost/opsapi/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token":"local_qa_token_42chars_for_testing_only","new_password":"NewPass123!"}'
+```
+
+### Rolling out to a new environment
+
+1. Deploy this branch — migration 489 runs automatically on container start.
+2. If `FRONTEND_URL` (and optionally `PASSWORD_RESET_ALLOWED_ORIGINS`)
+   is set, the migration auto-bootstraps every namespace's allow-list
+   from those env vars. **You're done.**
+3. Otherwise, populate manually via the SQL in option B above.
+4. Verify with the curl smoke-tests above.
+5. Subsequent additions (new staging URL, domain rename) use option B
+   — no opsapi restart, no env-var change required.
+
+### Files involved
+
+| File | Role |
+|---|---|
+| [`lapis/migrations/tax-copilot-system.lua`](lapis/migrations/tax-copilot-system.lua) | Phase 487 — `password_reset_tokens` table |
+| [`lapis/migrations.lua`](lapis/migrations.lua) | Phase 489 — `namespaces.allowed_redirect_origins` column + bootstrap |
+| [`lapis/helper/password-reset.lua`](lapis/helper/password-reset.lua) | Token lifecycle (create / validate-and-consume / revoke) |
+| [`lapis/queries/NamespaceQueries.lua`](lapis/queries/NamespaceQueries.lua) | `getAllowedRedirectOrigins()` helper |
+| [`lapis/routes/auth.lua`](lapis/routes/auth.lua) | `/auth/forgot-password` and `/auth/reset-password` route handlers |
+| [`lapis/views/emails/password_reset.etlua`](lapis/views/emails/password_reset.etlua) | Email template |
 
 ---
 
@@ -434,6 +615,31 @@ helm upgrade --install opsapi ./devops/helm-charts/opsapi \
   --set image.repository=bwalia/opsapi \
   --set image.tag=latest \
   --namespace <namespace> --create-namespace
+```
+
+##### Per-environment frontend URL (required for password reset emails)
+
+Each `values-<env>.yaml` MUST set `frontendUrl` to the canonical frontend
+origin for that environment. The deployment template injects it as
+`FRONTEND_URL`, which migration 489 uses to bootstrap
+`namespaces.allowed_redirect_origins` on first run AND the runtime
+fallback uses if any namespace's column is empty.
+
+```yaml
+# values-acc.yaml example
+frontendUrl: "https://acc.diytaxreturn.co.uk"
+# optional comma-separated extras for multi-frontend tenants:
+# passwordResetAllowedOrigins: "https://acc-alt.diytaxreturn.co.uk"
+```
+
+Without this, password reset emails will contain `http://localhost`
+links — a WARN log fires in production. See [Password Reset Flow](#password-reset-flow).
+After first deploy, verify the bootstrap landed:
+
+```bash
+kubectl -n <namespace> exec deploy/diytaxreturn-lapis -- \
+  psql $DATABASE_URL -c \
+  "SELECT slug, allowed_redirect_origins FROM namespaces;"
 ```
 
 #### OpsAPI Node

@@ -1316,6 +1316,100 @@ local _migrations = {
     end,
 
     -- =========================================================================
+    -- CORE AUTH: Per-namespace allow-list of frontend origins for password
+    -- reset emails (and any future "redirect to a frontend" flow).
+    -- =========================================================================
+    --
+    -- Why this column exists
+    --   opsapi is multi-tenant SaaS — different consumers (tax-copilot,
+    --   future products) run their own frontends at their own domains.
+    --   When a user clicks "forgot password", the email link must point
+    --   at THE FRONTEND THAT ISSUED THE REQUEST, not a hardcoded one.
+    --
+    --   The /auth/forgot-password endpoint receives ``redirect_url`` in
+    --   the body — but that's user-supplied, so we can't trust it
+    --   blindly (an attacker could phish via legitimate-looking emails
+    --   pointing at attacker.com). The defence is a per-namespace
+    --   allow-list: the user's namespace declares which origins are
+    --   legitimate, the request's origin is validated against it.
+    --
+    -- Why per-namespace, not per-app or env var
+    --   Per-namespace is the right granularity for SaaS:
+    --     - Tenant onboarding adds a row to namespaces — adds the
+    --       allowed origins in the same step. No env-var update, no
+    --       opsapi restart per new tenant.
+    --     - One tenant can have multiple frontends (staging/prod),
+    --       both legitimate, both in the list.
+    --     - One tenant compromised? Remove their origins from the
+    --       list and they can't be phished anymore.
+    --   The pattern matches Auth0 "Allowed Callback URLs" per app,
+    --   Okta "Trusted Origins", Supabase "Site URL + redirect URLs".
+    --
+    -- Bootstrap from env vars
+    --   To avoid breaking existing deployments (int, acc) that rely on
+    --   FRONTEND_URL / PASSWORD_RESET_ALLOWED_ORIGINS env vars set by
+    --   start.sh, this migration ALSO populates the allow-list for any
+    --   namespace whose column is currently NULL/empty. Idempotent —
+    --   re-running won't overwrite admin edits.
+    --
+    --   Once every namespace has its column populated, the env-var
+    --   fallback in routes/auth.lua becomes a defence-in-depth path,
+    --   not the primary lookup. Future PR can remove the fallback
+    --   when telemetry confirms zero hits on it.
+    -- =========================================================================
+    ['489_add_namespace_allowed_redirect_origins'] = function()
+        -- 1. Add the column. ``IF NOT EXISTS`` makes the migration
+        --    idempotent — safe to re-run, safe across rolling deploys.
+        db.query([[
+            ALTER TABLE namespaces
+            ADD COLUMN IF NOT EXISTS allowed_redirect_origins TEXT[]
+        ]])
+
+        -- 2. Bootstrap. For namespaces with NULL/empty column, fill
+        --    from env vars so deployments that already had FRONTEND_URL
+        --    + PASSWORD_RESET_ALLOWED_ORIGINS configured continue
+        --    working with no manual SQL after this migration runs.
+        local frontend_url = os.getenv("FRONTEND_URL")
+        local extra_csv = os.getenv("PASSWORD_RESET_ALLOWED_ORIGINS")
+
+        local origins = {}
+        local seen = {}
+        local function add_origin(o)
+            if not o or o == "" then return end
+            local trimmed = o:match("^%s*(.-)%s*$")
+            -- Canonicalise: strip path/query/fragment, keep scheme + host.
+            local canon = trimmed:match("^(https?://[^/]+)") or trimmed
+            if canon == "" or seen[canon] then return end
+            seen[canon] = true
+            table.insert(origins, canon)
+        end
+        add_origin(frontend_url)
+        if extra_csv and extra_csv ~= "" then
+            for o in extra_csv:gmatch("[^,]+") do add_origin(o) end
+        end
+
+        if #origins == 0 then
+            print("[Auth] Namespace allow-list column added; no env vars set, " ..
+                  "skipping bootstrap. Populate via SQL or admin UI.")
+            return
+        end
+
+        -- Update only NULL/empty rows. Already-populated namespaces
+        -- (e.g. someone hand-edited via SQL or a future admin UI)
+        -- aren't disturbed.
+        db.query([[
+            UPDATE namespaces
+            SET allowed_redirect_origins = ?,
+                updated_at = NOW()
+            WHERE allowed_redirect_origins IS NULL
+               OR cardinality(allowed_redirect_origins) = 0
+        ]], db.array(origins))
+
+        print(("[Auth] Namespace allow-list bootstrapped from env vars: %s"):format(
+            table.concat(origins, ", ")))
+    end,
+
+    -- =========================================================================
     -- CRM SYSTEM (500-509)
     -- =========================================================================
     ['500_crm_create_pipelines'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 1),

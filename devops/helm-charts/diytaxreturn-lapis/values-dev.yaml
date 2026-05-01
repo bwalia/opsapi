@@ -2,6 +2,15 @@ env: dev
 app: diytaxreturn-lapis
 projectCode: all
 
+# ─── Password reset email link target ─────────────────────────────────
+# Canonical frontend origin for the dev cluster. Migration 489 uses
+# this to bootstrap ``namespaces.allowed_redirect_origins``. Update
+# to your dev frontend URL if you have one; leaving empty is safe —
+# the auth.lua localhost dev fallback will fire and a WARN gets
+# logged. See README.md → Password Reset Flow.
+frontendUrl: "https://dev.diytaxreturn.co.uk"
+# passwordResetAllowedOrigins: ""
+
 image:
   repository: bwalia/opsapi
   tag: latest
