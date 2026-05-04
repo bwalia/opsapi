@@ -465,13 +465,15 @@ load_if("tax_copilot", "routes.tax-admin-categories")
 load_if("tax_copilot", "routes.tax-support")
 
 -- ============================================
--- CRM (Accounts, Contacts, Deals, Pipelines)
+-- CRM (Accounts, Contacts, Deals, Pipelines, Leads)
 -- ============================================
 load_if("crm", "routes.crm-pipelines")
 load_if("crm", "routes.crm-accounts")
 load_if("crm", "routes.crm-contacts")
 load_if("crm", "routes.crm-deals")
 load_if("crm", "routes.crm-activities")
+load_if("crm", "routes.crm-leads")
+load_if("crm", "routes.crm-leads-public")
 
 -- ============================================
 -- TIMESHEETS (Time tracking and approval)
