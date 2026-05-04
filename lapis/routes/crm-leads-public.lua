@@ -21,7 +21,7 @@ return function(app)
             -- Resolve namespace from slug
             local namespaces = db.query([[
                 SELECT id, slug FROM namespaces
-                WHERE slug = ? AND deleted_at IS NULL
+                WHERE slug = ?
                 LIMIT 1
             ]], self.params.namespace_slug)
 
