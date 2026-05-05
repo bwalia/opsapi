@@ -2335,4 +2335,239 @@ return {
         ]])
         print("[Tax Copilot] Seeded AUTH_EMAIL_TAKEN error code")
     end,
+
+    -- 69. Create hmrc_filings table — audit-grade record of every
+    --     interaction with HMRC's MTD ITSA filing endpoints
+    --     (final-declaration, confirm-amendment).
+    --
+    -- Why a separate table from ``tax_returns``:
+    --   - tax_returns is the user-facing tax-return domain object
+    --     (one per user/year, status DRAFT|READY|FILED).
+    --   - hmrc_filings is append-only, NRS-grade audit. A single
+    --     tax_returns row can have N hmrc_filings rows over its life
+    --     (one final-declaration + future confirm-amendment events).
+    --   - Keeping them separate stops the domain row growing
+    --     submission-tracking columns and lets the audit table be
+    --     partitioned by tax_year once volume justifies.
+    --
+    -- HMRC standards baked in:
+    --   - calculation_id is HMRC's natural idempotency key. The
+    --     partial unique index uq_hmrc_filings_calc_committed below
+    --     guarantees the same calc_id can't be filed twice — mirrors
+    --     HMRC returning RULE_FINAL_DECLARATION_RECEIVED on duplicate.
+    --   - correlation_id stores HMRC's X-Correlation-Id response
+    --     header. HMRC support tickets cite this; we MUST keep it.
+    --   - api_version pins the spec version used at filing time
+    --     (currently 8.0 for Calculations API). Future re-parses are
+    --     unambiguous when HMRC ships v9.
+    --   - request/response payload + headers captured for NRS
+    --     non-repudiation. Auth tokens are redacted before storage.
+    --
+    -- Multi-tenancy:
+    --   - namespace_id ties the row to the SaaS tenant for tenant-
+    --     scoped audit queries. Indexed for partition-friendly access.
+    --
+    -- Lifecycle of a row:
+    --     pending  → row written before HMRC POST (so a crash
+    --                between POST and persistence is recoverable)
+    --     submitted → POST returned 2xx, response captured
+    --     accepted  → confirmed by subsequent retrieve / settled
+    --     rejected  → HMRC returned 4xx with error envelope
+    --     superseded → a later amendment supplanted this row (kept
+    --                  for audit, not active)
+    --
+    -- Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT
+    -- EXISTS. Safe to re-run. Purely additive.
+    [69] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS hmrc_filings (
+                id                       BIGSERIAL PRIMARY KEY,
+                uuid                     VARCHAR(64) UNIQUE NOT NULL,
+                user_uuid                VARCHAR(64) NOT NULL,
+                user_id                  INTEGER,
+                namespace_id             INTEGER NOT NULL DEFAULT 0,
+                tax_return_id            INTEGER REFERENCES tax_returns(id) ON DELETE SET NULL,
+
+                -- HMRC identifiers
+                nino                     VARCHAR(16) NOT NULL,
+                tax_year                 VARCHAR(16) NOT NULL,
+                calculation_id           VARCHAR(64) NOT NULL,
+                hmrc_submission_id       VARCHAR(128),
+                correlation_id           VARCHAR(128),
+
+                -- Filing metadata
+                filing_type              VARCHAR(32) NOT NULL,
+                api_version              VARCHAR(16) NOT NULL DEFAULT '8.0',
+                status                   VARCHAR(16) NOT NULL DEFAULT 'pending',
+                environment              VARCHAR(16) NOT NULL DEFAULT 'sandbox',
+
+                -- Declaration / NRS audit
+                declaration_timestamp    TIMESTAMP NOT NULL,
+                submitter_ip             VARCHAR(64),
+                submitter_user_agent     TEXT,
+
+                -- Request / response capture (NRS non-repudiation)
+                request_payload          JSONB,
+                request_headers          JSONB,
+                response_status_code     INTEGER,
+                response_headers         JSONB,
+                response_body            JSONB,
+
+                -- Error capture
+                error_code               VARCHAR(64),
+                error_message            TEXT,
+
+                -- Timestamps
+                created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at               TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+
+        -- HMRC's idempotency contract: same (calculation_id,
+        -- filing_type) cannot reach 'submitted' or 'accepted' twice.
+        -- Pending rows aren't constrained — a retry that failed
+        -- pre-submit can be reused.
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_hmrc_filings_calc_committed
+            ON hmrc_filings (calculation_id, filing_type)
+            WHERE status IN ('submitted', 'accepted')
+        ]])
+
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_filings_user_year ON hmrc_filings (user_uuid, tax_year)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_filings_correlation ON hmrc_filings (correlation_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_filings_calc_id ON hmrc_filings (calculation_id)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_filings_namespace ON hmrc_filings (namespace_id, created_at)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_filings_status ON hmrc_filings (status)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_filings_tax_return ON hmrc_filings (tax_return_id) WHERE tax_return_id IS NOT NULL")
+
+        print("[Tax Copilot] Created hmrc_filings table for HMRC MTD ITSA filing audit trail")
+    end,
+
+    -- 70. Enforce one filed tax return per user per year.
+    --
+    -- A user can have many DRAFT / READY rows for the same year
+    -- (history of revisions before filing) but only one FILED row.
+    -- Mirrors HMRC's contract — they accept one final-declaration
+    -- per NINO per tax year. A second filing attempt at our API
+    -- layer hits this constraint and we return the prior row
+    -- instead of re-submitting.
+    --
+    -- Partial index — drafts are unconstrained.
+    [70] = function()
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_tax_returns_filed_per_year
+            ON tax_returns (user_id, tax_year)
+            WHERE status = 'FILED'
+        ]])
+        print("[Tax Copilot] Added partial unique index: one FILED tax_return per user/year")
+    end,
+
+    -- 71. Add correlation_id to hmrc_calculations.
+    --
+    -- HMRC's calculation endpoints already return X-Correlation-Id
+    -- in response headers; we just weren't capturing it. Adding it
+    -- here so every calculation row carries the support-ticket
+    -- handle for HMRC ops, matching what hmrc_filings.correlation_id
+    -- captures for the filing step.
+    --
+    -- Backfill: existing rows get NULL — we have no way to
+    -- reconstruct the value retrospectively. New rows populate from
+    -- the response header.
+    [71] = function()
+        db.query([[
+            ALTER TABLE hmrc_calculations
+            ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(128)
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_correlation ON hmrc_calculations (correlation_id) WHERE correlation_id IS NOT NULL")
+        print("[Tax Copilot] Added correlation_id column to hmrc_calculations")
+    end,
+
+    -- 72. Fix over-strict UNIQUE index on hmrc_calculations.calculation_id.
+    --
+    -- Migration #60 created this as ``UNIQUE INDEX … (calculation_id)
+    -- WHERE calculation_id IS NOT NULL``, which incorrectly assumed
+    -- HMRC returns globally unique calculation IDs. In production
+    -- that's true; in sandbox HMRC returns the SAME canned calc id
+    -- (e.g. ``c75dbb53-6237-49e2-b05a-60ef221f0260``) on every trigger
+    -- call. The unique index then blocks every subsequent row from
+    -- persisting the calc id, leaving the column NULL — which breaks
+    -- the file-prepare → file-submit handoff (the file/submit route
+    -- looks up the row by calculation_id).
+    --
+    -- Replace with a non-unique index scoped to (user_uuid,
+    -- calculation_id). Multiple users can legitimately share the same
+    -- canned calc id in sandbox, and a single user can re-trigger as
+    -- often as they want — neither is a bug. The lookup pattern
+    -- (`WHERE user_uuid = ? AND calculation_id = ?`) benefits from
+    -- the composite index without needing uniqueness.
+    [72] = function()
+        db.query("DROP INDEX IF EXISTS idx_hmrc_calculations_calc_id")
+        db.query("CREATE INDEX IF NOT EXISTS idx_hmrc_calculations_calc_id ON hmrc_calculations (user_uuid, calculation_id) WHERE calculation_id IS NOT NULL")
+        print("[Tax Copilot] Re-scoped hmrc_calculations.calculation_id index to (user_uuid, calculation_id)")
+    end,
+
+    -- 73. Add request_payload column to hmrc_calculations.
+    --
+    -- HMRC's existing ``raw_response`` column captures HMRC's response
+    -- to the retrieve calculation call. It does NOT capture the
+    -- cumulative-period submission BODY we sent in step 6 of the
+    -- pipeline (PUT .../cumulative/{taxYear}). Without it we have no
+    -- direct evidence of *what figures we filed against* — only
+    -- HMRC's interpretation of them.
+    --
+    -- For NRS-grade audit and debugging support, we now persist the
+    -- exact body sent to HMRC's cumulative endpoint alongside the
+    -- response. JSONB so we can query into specific fields (e.g.
+    -- "find every row where periodIncome.turnover > 50000").
+    --
+    -- The column is also copied into ``hmrc_filings.request_payload``
+    -- when /file/submit runs, so the audit trail for a final
+    -- declaration includes both the calculation it was based on and
+    -- the figures that produced that calculation — the complete
+    -- non-repudiation chain a customer could later contest.
+    --
+    -- Backfill: existing rows get NULL. Future rows are populated by
+    -- the FastAPI calculate-preview / file-prepare orchestration.
+    [73] = function()
+        db.query([[
+            ALTER TABLE hmrc_calculations
+            ADD COLUMN IF NOT EXISTS request_payload JSONB
+        ]])
+        print("[Tax Copilot] Added request_payload column to hmrc_calculations")
+    end,
+
+    -- 74. Re-scope the partial unique index on hmrc_filings.
+    --
+    -- Migration #69 created ``uq_hmrc_filings_calc_committed`` as
+    -- ``UNIQUE (calculation_id, filing_type) WHERE status IN
+    -- ('submitted','accepted')``. The intent was: HMRC's idempotency
+    -- contract — the same calculation_id can't be filed twice. That's
+    -- correct in production, where HMRC issues a globally unique
+    -- calculationId per trigger.
+    --
+    -- In sandbox, HMRC's calculation engine doesn't exist; every
+    -- ``trigger/intent-to-finalise`` call returns the SAME canned
+    -- ``c75dbb53-6237-49e2-b05a-60ef221f0260`` regardless of NINO,
+    -- year, or submitter. So when User A files for tax_year 2026-27
+    -- and then User B (different NINO, different account) files for
+    -- their own tax_year 2026-27, both end up with the same calc_id
+    -- and the unique index blocks the second one — even though
+    -- they're entirely separate filings. The IntegrityError handler
+    -- then incorrectly marks B's filing as ``superseded``, so the UI
+    -- shows "Filed successfully" but no submission reference.
+    --
+    -- Fix: scope to ``(user_uuid, calculation_id, filing_type)``.
+    -- In production this remains useful — a single user cannot file
+    -- the same calc_id twice (matches HMRC's contract). In sandbox
+    -- it lets multiple users share the canned calc_id, which is the
+    -- correct sandbox semantic.
+    [74] = function()
+        db.query("DROP INDEX IF EXISTS uq_hmrc_filings_calc_committed")
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_hmrc_filings_calc_committed
+            ON hmrc_filings (user_uuid, calculation_id, filing_type)
+            WHERE status IN ('submitted', 'accepted')
+        ]])
+        print("[Tax Copilot] Re-scoped uq_hmrc_filings_calc_committed to (user_uuid, calculation_id, filing_type)")
+    end,
 }
