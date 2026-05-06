@@ -134,6 +134,7 @@ local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
+local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
@@ -1433,6 +1434,10 @@ local _migrations = {
     ['502_crm_create_contacts'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 3),
     ['503_crm_create_deals'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 4),
     ['504_crm_create_activities'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 5),
+
+    -- CRM Leads (510-511)
+    ['510_crm_create_leads'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 1),
+    ['511_crm_leads_enquiry_link'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 2),
 
     -- =========================================================================
     -- TIMESHEET SYSTEM (520-529)

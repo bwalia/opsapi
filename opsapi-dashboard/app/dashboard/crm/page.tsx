@@ -18,6 +18,8 @@ import {
   ChevronDown,
   RefreshCw,
   X,
+  UserPlus,
+  ArrowRightCircle,
 } from 'lucide-react';
 import { Input, Table, Badge, Pagination, Card, Modal, Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -27,6 +29,8 @@ import {
   type CrmContact,
   type CrmDeal,
   type CrmActivity,
+  type CrmLead,
+  type CrmLeadStats,
   type CrmDashboardStats,
   type CrmListParams,
 } from '@/services/crm.service';
@@ -38,7 +42,7 @@ import toast from 'react-hot-toast';
 // Tab type
 // ============================================================
 
-type CrmTab = 'accounts' | 'contacts' | 'deals' | 'activities';
+type CrmTab = 'leads' | 'accounts' | 'contacts' | 'deals' | 'activities';
 
 // ============================================================
 // Stats Card
@@ -101,6 +105,32 @@ const ACTIVITY_TYPE_OPTIONS = [
   { value: 'meeting', label: 'Meeting' },
   { value: 'note', label: 'Note' },
   { value: 'task', label: 'Task' },
+];
+
+const LEAD_STATUS_OPTIONS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'new', label: 'New' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'qualified', label: 'Qualified' },
+  { value: 'converted', label: 'Converted' },
+  { value: 'lost', label: 'Lost' },
+];
+
+const LEAD_SOURCE_OPTIONS = [
+  { value: 'all', label: 'All Sources' },
+  { value: 'website_form', label: 'Website Form' },
+  { value: 'email', label: 'Email' },
+  { value: 'social_media', label: 'Social Media' },
+  { value: 'manual', label: 'Manual Entry' },
+  { value: 'api', label: 'API / Webhook' },
+  { value: 'referral', label: 'Referral' },
+];
+
+const LEAD_PRIORITY_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'urgent', label: 'Urgent' },
 ];
 
 // ============================================================
@@ -494,15 +524,243 @@ const CreateActivityModal: React.FC<CreateActivityModalProps> = ({ isOpen, onClo
 };
 
 // ============================================================
+// Create Lead Modal
+// ============================================================
+
+interface CreateLeadModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+const CreateLeadModal: React.FC<CreateLeadModalProps> = ({ isOpen, onClose, onSuccess }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    company_name: '',
+    job_title: '',
+    source: 'manual',
+    channel: '',
+    campaign: '',
+    priority: 'medium',
+    notes: '',
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.first_name.trim() && !formData.email.trim()) {
+      toast.error('First name or email is required');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await crmService.createLead(formData);
+      toast.success('Lead created successfully');
+      setFormData({ first_name: '', last_name: '', email: '', phone: '', company_name: '', job_title: '', source: 'manual', channel: '', campaign: '', priority: 'medium', notes: '' });
+      onSuccess();
+      onClose();
+    } catch (error) {
+      console.error('Failed to create lead:', error);
+      toast.error('Failed to create lead');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Create Lead">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">First Name *</label>
+            <input name="first_name" value={formData.first_name} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="First name" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Last Name</label>
+            <input name="last_name" value={formData.last_name} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Last name" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Email *</label>
+            <input name="email" type="email" value={formData.email} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="email@example.com" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Phone</label>
+            <input name="phone" value={formData.phone} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="+44 7700 000000" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Company</label>
+            <input name="company_name" value={formData.company_name} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Company name" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Job Title</label>
+            <input name="job_title" value={formData.job_title} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="e.g. Marketing Director" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Source</label>
+            <div className="relative">
+              <select name="source" value={formData.source} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
+                {LEAD_SOURCE_OPTIONS.filter((o) => o.value !== 'all').map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Priority</label>
+            <div className="relative">
+              <select name="priority" value={formData.priority} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
+                {LEAD_PRIORITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Channel</label>
+            <input name="channel" value={formData.channel} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="e.g. organic, paid, social" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Campaign</label>
+            <input name="campaign" value={formData.campaign} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Campaign name" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Notes</label>
+            <textarea name="notes" value={formData.notes} onChange={handleChange} rows={3} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" placeholder="Additional notes about this lead..." />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Creating...' : 'Create Lead'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
+// ============================================================
+// Convert Lead Modal
+// ============================================================
+
+interface ConvertLeadModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+  lead: CrmLead | null;
+}
+
+const ConvertLeadModal: React.FC<ConvertLeadModalProps> = ({ isOpen, onClose, onSuccess, lead }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createDeal, setCreateDeal] = useState(false);
+  const [dealData, setDealData] = useState({ name: '', value: '', currency: 'GBP', stage: 'new' });
+
+  const handleDealChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setDealData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lead) return;
+
+    setIsSubmitting(true);
+    try {
+      const deal = createDeal && dealData.name.trim() ? {
+        name: dealData.name,
+        value: dealData.value ? parseFloat(dealData.value) : 0,
+        currency: dealData.currency,
+        stage: dealData.stage,
+      } : undefined;
+
+      await crmService.convertLead(lead.uuid, deal);
+      toast.success('Lead converted to contact successfully');
+      setCreateDeal(false);
+      setDealData({ name: '', value: '', currency: 'GBP', stage: 'new' });
+      onSuccess();
+      onClose();
+    } catch (error) {
+      console.error('Failed to convert lead:', error);
+      toast.error('Failed to convert lead');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!lead) return null;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Convert Lead">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Lead summary */}
+        <div className="bg-secondary-50 rounded-lg p-4 space-y-1">
+          <p className="text-sm font-medium text-secondary-900">{lead.first_name} {lead.last_name}</p>
+          {lead.email && <p className="text-sm text-secondary-600">{lead.email}</p>}
+          {lead.company_name && <p className="text-sm text-secondary-600">{lead.company_name}</p>}
+          {lead.phone && <p className="text-sm text-secondary-600">{lead.phone}</p>}
+        </div>
+
+        <p className="text-sm text-secondary-600">
+          This will create a new <strong>CRM Contact</strong> from this lead&apos;s information.
+        </p>
+
+        {/* Optional deal creation */}
+        <div className="border border-secondary-200 rounded-lg p-4 space-y-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={createDeal}
+              onChange={(e) => setCreateDeal(e.target.checked)}
+              className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span className="text-sm font-medium text-secondary-700">Also create a deal</span>
+          </label>
+
+          {createDeal && (
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">Deal Name *</label>
+                <input name="name" value={dealData.name} onChange={handleDealChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Deal name" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-secondary-700 mb-1">Value</label>
+                <input name="value" type="number" step="0.01" value={dealData.value} onChange={handleDealChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-secondary-700 mb-1">Currency</label>
+                <input name="currency" value={dealData.currency} onChange={handleDealChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="GBP" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Converting...' : 'Convert Lead'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
+// ============================================================
 // Main CRM Page Content
 // ============================================================
 
 function CrmPageContent() {
   // Active tab
-  const [activeTab, setActiveTab] = useState<CrmTab>('accounts');
+  const [activeTab, setActiveTab] = useState<CrmTab>('leads');
 
   // Stats
   const [stats, setStats] = useState<CrmDashboardStats | null>(null);
+  const [leadStats, setLeadStats] = useState<CrmLeadStats | null>(null);
 
   // Common list state
   const [isLoading, setIsLoading] = useState(true);
@@ -510,6 +768,7 @@ function CrmPageContent() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -522,12 +781,16 @@ function CrmPageContent() {
   const [contacts, setContacts] = useState<CrmContact[]>([]);
   const [deals, setDeals] = useState<CrmDeal[]>([]);
   const [activities, setActivities] = useState<CrmActivity[]>([]);
+  const [leads, setLeads] = useState<CrmLead[]>([]);
 
   // Modals
   const [isCreateAccountOpen, setIsCreateAccountOpen] = useState(false);
   const [isCreateContactOpen, setIsCreateContactOpen] = useState(false);
   const [isCreateDealOpen, setIsCreateDealOpen] = useState(false);
   const [isCreateActivityOpen, setIsCreateActivityOpen] = useState(false);
+  const [isCreateLeadOpen, setIsCreateLeadOpen] = useState(false);
+  const [isConvertLeadOpen, setIsConvertLeadOpen] = useState(false);
+  const [convertTarget, setConvertTarget] = useState<CrmLead | null>(null);
 
   // Delete
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -542,8 +805,12 @@ function CrmPageContent() {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const data = await crmService.getDashboardStats();
-        setStats(data);
+        const [dashboardData, leadData] = await Promise.all([
+          crmService.getDashboardStats().catch(() => null),
+          crmService.getLeadStats().catch(() => null),
+        ]);
+        if (dashboardData) setStats(dashboardData);
+        if (leadData) setLeadStats(leadData);
       } catch (error) {
         console.error('Failed to load CRM stats:', error);
       }
@@ -558,6 +825,7 @@ function CrmPageContent() {
     setStatusFilter('all');
     setStageFilter('all');
     setTypeFilter('all');
+    setSourceFilter('all');
     setSortColumn('created_at');
     setSortDirection('desc');
   }, [activeTab]);
@@ -574,8 +842,9 @@ function CrmPageContent() {
     if (statusFilter !== 'all') params.status = statusFilter;
     if (stageFilter !== 'all') params.stage = stageFilter;
     if (typeFilter !== 'all') params.type = typeFilter;
+    if (sourceFilter !== 'all') params.source = sourceFilter;
     return params;
-  }, [currentPage, sortColumn, sortDirection, searchQuery, statusFilter, stageFilter, typeFilter]);
+  }, [currentPage, sortColumn, sortDirection, searchQuery, statusFilter, stageFilter, typeFilter, sourceFilter]);
 
   // Fetch data for active tab
   const fetchData = useCallback(async () => {
@@ -585,7 +854,14 @@ function CrmPageContent() {
     try {
       const params = buildParams();
 
-      if (activeTab === 'accounts') {
+      if (activeTab === 'leads') {
+        const response = await crmService.getLeads(params);
+        if (fetchId === fetchIdRef.current) {
+          setLeads(response.data);
+          setTotalPages(response.total_pages);
+          setTotalItems(response.total);
+        }
+      } else if (activeTab === 'accounts') {
         const response = await crmService.getAccounts(params);
         if (fetchId === fetchIdRef.current) {
           setAccounts(response.data);
@@ -664,7 +940,8 @@ function CrmPageContent() {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      if (deleteTarget.type === 'accounts') await crmService.deleteAccount(deleteTarget.uuid);
+      if (deleteTarget.type === 'leads') await crmService.deleteLead(deleteTarget.uuid);
+      else if (deleteTarget.type === 'accounts') await crmService.deleteAccount(deleteTarget.uuid);
       else if (deleteTarget.type === 'contacts') await crmService.deleteContact(deleteTarget.uuid);
       else if (deleteTarget.type === 'deals') await crmService.deleteDeal(deleteTarget.uuid);
       else if (deleteTarget.type === 'activities') await crmService.deleteActivity(deleteTarget.uuid);
@@ -679,6 +956,12 @@ function CrmPageContent() {
     }
   };
 
+  // Convert lead handler
+  const handleConvertLead = useCallback((lead: CrmLead) => {
+    setConvertTarget(lead);
+    setIsConvertLeadOpen(true);
+  }, []);
+
   // Complete activity
   const handleCompleteActivity = useCallback(async (uuid: string) => {
     try {
@@ -691,6 +974,127 @@ function CrmPageContent() {
   }, [fetchData]);
 
   // ---- Table columns ----
+
+  const leadStatusColors: Record<string, string> = {
+    new: 'bg-blue-100 text-blue-800',
+    contacted: 'bg-amber-100 text-amber-800',
+    qualified: 'bg-green-100 text-green-800',
+    converted: 'bg-purple-100 text-purple-800',
+    lost: 'bg-red-100 text-red-800',
+  };
+
+  const leadSourceLabels: Record<string, string> = {
+    website_form: 'Website',
+    email: 'Email',
+    social_media: 'Social',
+    manual: 'Manual',
+    api: 'API',
+    referral: 'Referral',
+  };
+
+  const leadPriorityColors: Record<string, string> = {
+    low: 'bg-secondary-100 text-secondary-700',
+    medium: 'bg-blue-100 text-blue-700',
+    high: 'bg-amber-100 text-amber-700',
+    urgent: 'bg-red-100 text-red-700',
+  };
+
+  const leadColumns: TableColumn<CrmLead>[] = useMemo(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      render: (lead) => (
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
+            <UserPlus className="w-5 h-5 text-violet-600" />
+          </div>
+          <div>
+            <p className="font-medium text-secondary-900">{lead.first_name} {lead.last_name || ''}</p>
+            {lead.company_name && <p className="text-xs text-secondary-500">{lead.company_name}</p>}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      render: (lead) => lead.email ? (
+        <div className="flex items-center gap-2 text-sm text-secondary-600">
+          <Mail className="w-3.5 h-3.5 text-secondary-400" />
+          <span>{lead.email}</span>
+        </div>
+      ) : <span className="text-sm text-secondary-400">--</span>,
+    },
+    {
+      key: 'source',
+      header: 'Source',
+      render: (lead) => (
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary-100 text-secondary-700">
+          {leadSourceLabels[lead.source] || lead.source}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (lead) => (
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${leadStatusColors[lead.status] || 'bg-secondary-100 text-secondary-600'}`}>
+          {lead.status}
+        </span>
+      ),
+    },
+    {
+      key: 'priority',
+      header: 'Priority',
+      render: (lead) => (
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${leadPriorityColors[lead.priority] || 'bg-secondary-100 text-secondary-600'}`}>
+          {lead.priority}
+        </span>
+      ),
+    },
+    {
+      key: 'score',
+      header: 'Score',
+      sortable: true,
+      render: (lead) => (
+        <span className="text-sm font-medium text-secondary-700">{lead.score}</span>
+      ),
+    },
+    {
+      key: 'created_at',
+      header: 'Created',
+      sortable: true,
+      render: (lead) => (
+        <span className="text-sm text-secondary-600">{formatDate(lead.created_at)}</span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 'w-28',
+      render: (lead) => (
+        <div className="flex items-center gap-1">
+          {lead.status !== 'converted' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleConvertLead(lead); }}
+              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+              title="Convert to Contact"
+            >
+              <ArrowRightCircle className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDeleteClick(lead.uuid, `${lead.first_name} ${lead.last_name || ''}`, 'leads'); }}
+            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
+            title="Delete Lead"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      ),
+    },
+  ], [handleDeleteClick, handleConvertLead]);
 
   const accountColumns: TableColumn<CrmAccount>[] = useMemo(() => [
     {
@@ -1001,6 +1405,7 @@ function CrmPageContent() {
 
   // Tab config
   const tabs: { key: CrmTab; label: string; icon: React.ReactNode }[] = [
+    { key: 'leads', label: 'Leads', icon: <UserPlus className="w-4 h-4" /> },
     { key: 'accounts', label: 'Accounts', icon: <Building2 className="w-4 h-4" /> },
     { key: 'contacts', label: 'Contacts', icon: <Users className="w-4 h-4" /> },
     { key: 'deals', label: 'Deals', icon: <DollarSign className="w-4 h-4" /> },
@@ -1009,7 +1414,8 @@ function CrmPageContent() {
 
   // Create button handler
   const handleCreate = () => {
-    if (activeTab === 'accounts') setIsCreateAccountOpen(true);
+    if (activeTab === 'leads') setIsCreateLeadOpen(true);
+    else if (activeTab === 'accounts') setIsCreateAccountOpen(true);
     else if (activeTab === 'contacts') setIsCreateContactOpen(true);
     else if (activeTab === 'deals') setIsCreateDealOpen(true);
     else if (activeTab === 'activities') setIsCreateActivityOpen(true);
@@ -1017,6 +1423,7 @@ function CrmPageContent() {
 
   const createLabel = useMemo(() => {
     const labels: Record<CrmTab, string> = {
+      leads: 'Add Lead',
       accounts: 'Add Account',
       contacts: 'Add Contact',
       deals: 'Add Deal',
@@ -1031,7 +1438,7 @@ function CrmPageContent() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-secondary-900">CRM</h1>
-          <p className="text-secondary-500 mt-1">Manage accounts, contacts, deals, and activities</p>
+          <p className="text-secondary-500 mt-1">Manage leads, accounts, contacts, deals, and activities</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -1048,30 +1455,36 @@ function CrmPageContent() {
       </div>
 
       {/* Stats Cards */}
-      {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {(stats || leadStats) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <StatCard
+            title="New Leads"
+            value={leadStats?.new_leads ?? 0}
+            icon={<UserPlus className="w-6 h-6" />}
+            color="info"
+          />
           <StatCard
             title="Total Accounts"
-            value={stats.total_accounts}
+            value={stats?.total_accounts ?? 0}
             icon={<Building2 className="w-6 h-6" />}
             color="primary"
           />
           <StatCard
             title="Active Deals"
-            value={stats.active_deals}
+            value={stats?.active_deals ?? 0}
             icon={<Briefcase className="w-6 h-6" />}
             color="info"
           />
           <StatCard
             title="Deal Value"
-            value={formatCurrency(stats.total_deal_value)}
+            value={formatCurrency(stats?.total_deal_value ?? 0)}
             icon={<DollarSign className="w-6 h-6" />}
             color="success"
           />
           <StatCard
-            title="Activities Today"
-            value={stats.activities_today}
-            icon={<CalendarCheck className="w-6 h-6" />}
+            title="Conversion Rate"
+            value={leadStats ? `${leadStats.conversion_rate}%` : '0%'}
+            icon={<ArrowRightCircle className="w-6 h-6" />}
             color="warning"
           />
         </div>
@@ -1108,6 +1521,36 @@ function CrmPageContent() {
               leftIcon={<Search className="w-4 h-4" />}
             />
           </div>
+
+          {/* Filters for leads */}
+          {activeTab === 'leads' && (
+            <>
+              <div className="relative">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
+                >
+                  {LEAD_STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
+              </div>
+              <div className="relative">
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => { setSourceFilter(e.target.value); setCurrentPage(1); }}
+                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
+                >
+                  {LEAD_SOURCE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
+              </div>
+            </>
+          )}
 
           {/* Status filter for accounts and contacts */}
           {(activeTab === 'accounts' || activeTab === 'contacts') && (
@@ -1161,6 +1604,19 @@ function CrmPageContent() {
 
       {/* Table */}
       <div>
+        {activeTab === 'leads' && (
+          <Table
+            columns={leadColumns}
+            data={leads}
+            keyExtractor={(l) => l.uuid}
+            sortColumn={sortColumn}
+            sortDirection={sortDirection}
+            onSort={handleSort}
+            isLoading={isLoading}
+            emptyMessage="No leads found"
+          />
+        )}
+
         {activeTab === 'accounts' && (
           <Table
             columns={accountColumns}
@@ -1224,10 +1680,12 @@ function CrmPageContent() {
       </div>
 
       {/* Create Modals */}
+      <CreateLeadModal isOpen={isCreateLeadOpen} onClose={() => setIsCreateLeadOpen(false)} onSuccess={fetchData} />
       <CreateAccountModal isOpen={isCreateAccountOpen} onClose={() => setIsCreateAccountOpen(false)} onSuccess={fetchData} />
       <CreateContactModal isOpen={isCreateContactOpen} onClose={() => setIsCreateContactOpen(false)} onSuccess={fetchData} />
       <CreateDealModal isOpen={isCreateDealOpen} onClose={() => setIsCreateDealOpen(false)} onSuccess={fetchData} />
       <CreateActivityModal isOpen={isCreateActivityOpen} onClose={() => setIsCreateActivityOpen(false)} onSuccess={fetchData} />
+      <ConvertLeadModal isOpen={isConvertLeadOpen} onClose={() => { setIsConvertLeadOpen(false); setConvertTarget(null); }} onSuccess={fetchData} lead={convertTarget} />
 
       {/* Delete Confirmation */}
       <ConfirmDialog
