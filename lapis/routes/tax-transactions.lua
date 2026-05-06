@@ -129,6 +129,35 @@ local function build_user_filters(params, user_id)
 end
 
 -- Parse request body (supports both JSON and form-urlencoded)
+-- Read the raw request body, transparently handling the case where
+-- nginx has buffered it to a temp file because it exceeded
+-- ``client_body_buffer_size``. Without the file fallback,
+-- ``ngx.req.get_body_data()`` returns nil for any large body and the
+-- caller sees an empty params table — which is exactly how
+-- bulk-confirm requests with 1000+ transaction UUIDs (~40KB JSON)
+-- silently lost their payload and 400'd. This helper centralises
+-- that recovery so all body-parsing paths benefit.
+local function read_request_body()
+    local body = ngx.req.get_body_data()
+    if body and body ~= "" then
+        return body
+    end
+    -- Body too large for the in-memory buffer — nginx wrote it to
+    -- /tmp/client_body_temp. Read it back; this is the only way to
+    -- recover the bytes once they've spilled to disk.
+    local body_file = ngx.req.get_body_file()
+    if body_file then
+        local f, err = io.open(body_file, "rb")
+        if f then
+            local data = f:read("*all")
+            f:close()
+            return data
+        end
+        ngx.log(ngx.ERR, "Failed to open buffered body file ", body_file, ": ", err)
+    end
+    return nil
+end
+
 local function parse_request_body()
     ngx.req.read_body()
 
@@ -137,14 +166,11 @@ local function parse_request_body()
 
     -- If JSON content type, parse as JSON
     if content_type:find("application/json", 1, true) then
-        local ok, result = pcall(function()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then
-                return {}
-            end
-            return cjson.decode(body)
-        end)
-
+        local body = read_request_body()
+        if not body or body == "" then
+            return {}
+        end
+        local ok, result = pcall(cjson.decode, body)
         if ok and type(result) == "table" then
             return result
         end
@@ -473,16 +499,19 @@ return function(app)
         }
     end))
 
-    -- Bulk confirm transactions
+    -- Bulk confirm transactions.
+    --
+    -- Two body shapes:
+    --   { "scope": "ALL_PENDING", ... }            — confirm every
+    --       unconfirmed transaction in this statement. Body stays
+    --       small regardless of transaction count.
+    --   { "transaction_ids": ["uuid", ...], ... }  — confirm exactly
+    --       these UUIDs (still scoped to the statement server-side).
+    --
+    -- The route accepts either; the query layer enforces that at
+    -- least one is provided.
     app:post("/api/v2/tax/statements/:statement_id/transactions/bulk-confirm", AuthMiddleware.requireAuth(function(self)
         merge_params(self)
-
-        if not self.params.transaction_ids then
-            return {
-                json = { error = "transaction_ids array is required" },
-                status = 400
-            }
-        end
 
         local transaction_ids = self.params.transaction_ids
         if type(transaction_ids) == "string" then
@@ -490,6 +519,13 @@ return function(app)
             if ok then
                 transaction_ids = parsed
             end
+        end
+
+        if self.params.scope ~= "ALL_PENDING" and not transaction_ids then
+            return {
+                json = { error = "Provide either transaction_ids or scope: \"ALL_PENDING\"" },
+                status = 400
+            }
         end
 
         local result, err = TaxTransactionQueries.bulkConfirm(
@@ -538,16 +574,11 @@ return function(app)
         return { json = result, status = 200 }
     end))
 
-    -- Bulk confirm classifications
+    -- Bulk confirm classifications. Same dual-mode shape as
+    -- bulk-confirm above (scope or transaction_ids); see comment
+    -- there for the rationale.
     app:post("/api/v2/tax/statements/:statement_id/transactions/bulk-confirm-classification", AuthMiddleware.requireAuth(function(self)
         merge_params(self)
-
-        if not self.params.transaction_ids then
-            return {
-                json = { error = "transaction_ids array is required" },
-                status = 400
-            }
-        end
 
         local transaction_ids = self.params.transaction_ids
         if type(transaction_ids) == "string" then
@@ -555,6 +586,13 @@ return function(app)
             if ok then
                 transaction_ids = parsed
             end
+        end
+
+        if self.params.scope ~= "ALL_PENDING" and not transaction_ids then
+            return {
+                json = { error = "Provide either transaction_ids or scope: \"ALL_PENDING\"" },
+                status = 400
+            }
         end
 
         local result, err = TaxTransactionQueries.bulkConfirmClassification(
