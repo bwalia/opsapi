@@ -11,6 +11,7 @@ local RateLimit = require("middleware.rate-limit")
 local Errors = require("lib.errors")
 local OTP = require("helper.otp")
 local RefreshToken = require("helper.refresh-token")
+local AuthCookies = require("helper.auth-cookies")
 local PasswordReset = require("helper.password-reset")
 local Mail = require("helper.mail")
 
@@ -86,11 +87,14 @@ end
 
 --- Build the full login response (user + token + namespaces + refresh_token).
 -- Shared by both login and 2FA verify to avoid duplication.
+-- @param self table Lapis request context (used by AuthCookies to
+--             resolve the cookie's Domain attribute from the
+--             calling tenant's Origin — see helper/auth-cookies.lua)
 -- @param userWithRoles table User record from UserQueries.show()
 -- @param user_id number Internal user ID
 -- @param device_info string|nil Optional device description for refresh token
 -- @return table JSON-ready response body
-local function build_login_response(userWithRoles, user_id, device_info)
+local function build_login_response(self, userWithRoles, user_id, device_info)
     local rolesArray = {}
     if userWithRoles.roles then
         for _, role in ipairs(userWithRoles.roles) do
@@ -171,11 +175,23 @@ local function build_login_response(userWithRoles, user_id, device_info)
     -- Issue an opaque refresh token (stored hashed in DB, revocable).
     -- Wrapped in pcall: if the refresh_tokens table doesn't exist yet (migration
     -- pending), login must still succeed — just without a refresh token.
+    --
+    -- The token is delivered to the client through TWO transports:
+    --   1. JSON body (``refresh_token`` field below) — for mobile/CLI
+    --      clients that don't speak cookies.
+    --   2. HttpOnly Secure cookie via AuthCookies.set — the canonical
+    --      web transport. JS-invisible so XSS can't read it; auto-sent
+    --      by the browser on every refresh request, no localStorage
+    --      handoff required. See helper/auth-cookies.lua for the full
+    --      security rationale.
+    -- Web clients should prefer the cookie and may treat the JSON
+    -- ``refresh_token`` as optional.
     local refresh_token_raw
     if user_id then
         local ok, rt_or_err, rt_err = pcall(RefreshToken.create, user_id, device_info)
         if ok and rt_or_err then
             refresh_token_raw = rt_or_err
+            pcall(AuthCookies.set, self, rt_or_err)
         else
             ngx.log(ngx.WARN, "[AUTH] Refresh token creation skipped: ",
                 tostring(ok and rt_err or rt_or_err))
@@ -331,7 +347,7 @@ return function(app)
 
         return {
             status = 200,
-            json = build_login_response(userWithRoles, user_id, device_info)
+            json = build_login_response(self, userWithRoles, user_id, device_info)
         }
     end))
 
@@ -863,6 +879,35 @@ return function(app)
             })
         end
 
+        -- Issue an opaque refresh token alongside the JWT, mirroring
+        -- /auth/login. Delivered ONLY via HttpOnly Secure cookie — never
+        -- in the redirect URL, because URL params leak through server
+        -- access logs, browser history, Referer headers, and browser
+        -- extensions. See helper/auth-cookies.lua for the full
+        -- rationale.
+        --
+        -- Without this, OAuth-signed-up users had no refresh_token at
+        -- all and the frontend fell through to the legacy JWT-only
+        -- refresh path, which 401s under certain proxy/JWT
+        -- configurations and forced an unnecessary re-login.
+        --
+        -- pcall mirrors /auth/login: if the refresh_tokens migration
+        -- hasn't run yet, OAuth login still succeeds — the user just
+        -- won't get refresh-on-401 until the migration lands.
+        local device_info = ngx.req.get_headers()["user-agent"]
+        if device_info and #device_info > 255 then
+            device_info = device_info:sub(1, 255)
+        end
+        if user.id then
+            local ok_rt, rt_or_err, rt_err = pcall(RefreshToken.create, user.id, device_info)
+            if ok_rt and rt_or_err then
+                pcall(AuthCookies.set, self, rt_or_err)
+            else
+                ngx.log(ngx.WARN, "[AUTH] OAuth refresh token creation skipped: ",
+                    tostring(ok_rt and rt_err or rt_or_err))
+            end
+        end
+
         -- Determine redirect URL based on client type
         -- If redirect_from contains 'desktop' or 'electron', use custom protocol
         -- Otherwise, use web frontend URL
@@ -871,7 +916,10 @@ return function(app)
         local final_url
 
         if is_desktop then
-            -- Desktop app: use custom protocol
+            -- Desktop app: use custom protocol. Desktop doesn't share
+            -- the browser's cookie jar so this leaves desktop OAuth
+            -- without a refresh token — the desktop client will need
+            -- a separate exchange step (out of scope for this fix).
             final_url = string.format("wsl-chat://auth/callback?token=%s", ngx.escape_uri(token))
         else
             -- Web app: use frontend_url from state (passed by frontend), fall back to env var
@@ -893,6 +941,13 @@ return function(app)
                 self.session[k] = nil
             end
         end
+
+        -- Clear the refresh-token cookie. Browser keeps the cookie
+        -- around indefinitely otherwise — even after the user logs
+        -- out — and would auto-include it on subsequent /auth/refresh
+        -- attempts, which would then succeed if the underlying DB
+        -- token wasn't also revoked. Belt-and-braces: zero out both.
+        pcall(AuthCookies.clear, self)
 
         -- Clear user's cart and deactivate device tokens
         local user_uuid = ngx.var.http_x_user_id
@@ -1148,14 +1203,32 @@ return function(app)
 
     -- Token refresh endpoint with opaque refresh token + backward compat
     --
-    -- New flow:  POST /auth/refresh  { "refresh_token": "<opaque>" }
-    --            → validates opaque token, rotates it, issues new JWT + new refresh token
+    -- Token sources, in priority order:
+    --   1. JSON body / form ``refresh_token`` field (mobile, CLI, and
+    --      existing localStorage-based web sessions)
+    --   2. ``refresh_token`` HttpOnly cookie (modern web — set by
+    --      /auth/login + /auth/google/callback via AuthCookies)
+    --   3. ``Authorization: Bearer <jwt>`` legacy fallback
     --
-    -- Legacy:    POST /auth/refresh  (Authorization: Bearer <jwt>)
-    --            → re-signs the JWT (old behavior, for clients that haven't upgraded)
+    -- The cookie path is the canonical web transport because it's
+    -- XSS-safe (HttpOnly), CSRF-safe (SameSite=Strict), and never
+    -- traverses URL/log/history/Referer channels. See
+    -- helper/auth-cookies.lua for the full rationale.
     app:post("/auth/refresh", RateLimit.wrap(REFRESH_LIMIT, function(self)
         local params = parse_json_body()
         local refresh_token_raw = params.refresh_token or self.params.refresh_token
+
+        -- Cookie fallback when the body / form didn't carry one. We
+        -- check this BEFORE the legacy Authorization-header path so
+        -- modern web sessions (no localStorage refresh_token) hit the
+        -- well-tested opaque-rotation path instead of the brittle
+        -- JWT-resign fallback.
+        if (not refresh_token_raw or refresh_token_raw == "") then
+            local cookie_token = AuthCookies.read(self)
+            if cookie_token and cookie_token ~= "" then
+                refresh_token_raw = cookie_token
+            end
+        end
 
         -- ── New flow: opaque refresh token ──
         if refresh_token_raw and refresh_token_raw ~= "" then
@@ -1238,6 +1311,15 @@ return function(app)
                 local ok_rotate, new_refresh = pcall(RefreshToken.rotate,
                     rt_data.id, rt_data.user_id, rt_data.family_id, device_info)
 
+                -- Persist the rotated token on the same two transports
+                -- as login: HttpOnly cookie for web, JSON body for
+                -- mobile/CLI. Browser auto-replaces the old cookie
+                -- (same name/path/domain) so the next refresh round
+                -- carries the new value with no client work required.
+                if ok_rotate and new_refresh then
+                    pcall(AuthCookies.set, self, new_refresh)
+                end
+
                 return {
                     status = 200,
                     json = {
@@ -1290,9 +1372,20 @@ return function(app)
         local params = parse_json_body()
         local refresh_token_raw = params.refresh_token or self.params.refresh_token
 
+        -- Cookie-based clients send the refresh token via HttpOnly
+        -- cookie, not body. Read both so revocation works for every
+        -- transport. Always clear the cookie regardless — browsers
+        -- otherwise hold on to it forever and would silently
+        -- "re-login" the user on the next refresh.
+        if (not refresh_token_raw or refresh_token_raw == "") then
+            refresh_token_raw = AuthCookies.read(self)
+        end
+
         if refresh_token_raw and refresh_token_raw ~= "" then
             pcall(RefreshToken.revoke, refresh_token_raw)
         end
+
+        pcall(AuthCookies.clear, self)
 
         return {
             status = 200,
