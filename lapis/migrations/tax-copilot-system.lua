@@ -2570,4 +2570,51 @@ return {
         ]])
         print("[Tax Copilot] Re-scoped uq_hmrc_filings_calc_committed to (user_uuid, calculation_id, filing_type)")
     end,
+
+    -- 75. Add default_profile_key to tax_user_profiles.
+    --
+    -- This is the user's chosen "what kind of business am I" answer
+    -- captured at registration (and editable via Settings). It's a
+    -- strict reference to ``classification_profiles.profile_key`` —
+    -- distinct from the freeform ``profession`` / ``industry`` /
+    -- ``business_description`` columns on the same table, which
+    -- carry user-typed context for the AI classifier prompt.
+    --
+    --   profession           = "I sell vintage car parts on eBay" (freeform)
+    --   default_profile_key  = "ecommerce_seller"                 (catalog enum)
+    --
+    -- Capturing it once at registration removes the per-classify
+    -- dropdown friction (currently the user picks the same value
+    -- on every statement they classify) and lets the classify API
+    -- resolve a sensible default when the request omits profile_type.
+    --
+    -- We intentionally do NOT add a foreign-key constraint to
+    -- classification_profiles.profile_key. Reasons:
+    --   * The catalog table is namespace-scoped (multi-tenant) — a
+    --     hard FK would make catalog GC awkward.
+    --   * Existing tests/dev fixtures sometimes wipe the catalog
+    --     and reseed; a hard FK turns that into a cascade.
+    --   * We validate at write time in app code (register.lua and
+    --     the FastAPI tax-profile PUT handler), which is the
+    --     appropriate layer for "is this enum value still active".
+    --
+    -- Nullable: existing users have no default until they pick one,
+    -- and the classify endpoint falls back to its existing per-call
+    -- ``profile_type`` field — full backward compatibility.
+    [75] = function()
+        db.query([[
+            ALTER TABLE tax_user_profiles
+            ADD COLUMN IF NOT EXISTS default_profile_key VARCHAR(100)
+        ]])
+        -- Partial index: only the rows that actually carry a value
+        -- need to be looked up by it (e.g. analytics: "how many
+        -- users picked amazon_seller?"). Keeps index size bounded
+        -- as the table grows.
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_tax_user_profiles_default_profile_key
+            ON tax_user_profiles (default_profile_key)
+            WHERE default_profile_key IS NOT NULL
+        ]])
+        print("[Tax Copilot] Added default_profile_key column to tax_user_profiles")
+    end,
 }
