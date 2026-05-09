@@ -391,4 +391,167 @@ return function(app)
         }
     end)
 
+    -- =========================================================================
+    -- GET /api/v2/tax/dashboard/statements-by-period
+    --
+    -- Server-side filter for the dashboard's "Statements by period" widget.
+    -- Returns BOTH the available periods (so the client can populate the
+    -- dropdown) AND the statement rows for the selected period — one round
+    -- trip serves the whole UI.
+    --
+    -- Periods follow HMRC's MTD ITSA quarterly boundaries (Q1: 6 Apr – 5 Jul,
+    -- Q2: 6 Jul – 5 Oct, Q3: 6 Oct – 5 Jan, Q4: 6 Jan – 5 Apr) so a "Q1" on
+    -- this widget matches the same "Q1" the user sees in HMRC obligations.
+    -- A statement is bucketed by its ``period_end`` date because that's what
+    -- HMRC uses to assign a submission to a quarter; statements that span
+    -- two quarters fall under the later one (matches HMRC).
+    --
+    -- Query params:
+    --   tax_year — e.g. "2025-26". Defaults to current UK tax year.
+    --   period   — "Q1" / "Q2" / "Q3" / "Q4". Defaults to the first quarter
+    --              that has any statements; otherwise "Q1".
+    --
+    -- Response shape (all date filtering is done in-DB; no client filtering):
+    --   {
+    --     tax_year: "2025-26",
+    --     selected_period_key: "Q1",
+    --     available_periods: [
+    --       { period_key, period_start, period_end, statement_count }, …
+    --     ],
+    --     statements: [
+    --       { uuid, file_name, workflow_step, processing_status,
+    --         period_start, period_end, total_income, total_expenses,
+    --         uploaded_at, updated_at }, …
+    --     ]
+    --   }
+    -- =========================================================================
+    app:get("/api/v2/tax/dashboard/statements-by-period", function(self)
+        local user = self.current_user
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        local user_id = getUserId(user)
+        if not user_id then
+            return { status = 404, json = { error = "User not found" } }
+        end
+
+        local tax_year = self.params.tax_year or getCurrentTaxYear()
+        local ty_start, ty_end = getTaxYearDates(tax_year)
+        if not ty_start then
+            return {
+                status = 400,
+                json = { error = "Invalid tax_year format. Use YYYY-YY (e.g. 2025-26)" }
+            }
+        end
+
+        -- HMRC quarterly boundaries derived from the tax-year start year.
+        -- Built once here so the dropdown labels and the row filter use
+        -- exactly the same dates (no risk of off-by-one between the two).
+        local start_year = tonumber(tax_year:sub(1, 4))
+        local end_year = start_year + 1
+        local quarters = {
+            { key = "Q1", start_d = string.format("%d-04-06", start_year), end_d = string.format("%d-07-05", start_year) },
+            { key = "Q2", start_d = string.format("%d-07-06", start_year), end_d = string.format("%d-10-05", start_year) },
+            { key = "Q3", start_d = string.format("%d-10-06", start_year), end_d = string.format("%d-01-05", end_year) },
+            { key = "Q4", start_d = string.format("%d-01-06", end_year),   end_d = string.format("%d-04-05", end_year) },
+        }
+
+        -- Per-quarter statement counts. One DB query: bucket every statement
+        -- whose period_end (or upload date if period_end is null) falls in
+        -- the year, then group by the quarter range it lives in. CASE
+        -- expression mirrors the quarter table above.
+        local counts_rows = db.query([[
+            SELECT
+                CASE
+                    WHEN COALESCE(period_end, statement_date, uploaded_at::date) <= ?::date THEN 'Q1'
+                    WHEN COALESCE(period_end, statement_date, uploaded_at::date) <= ?::date THEN 'Q2'
+                    WHEN COALESCE(period_end, statement_date, uploaded_at::date) <= ?::date THEN 'Q3'
+                    ELSE 'Q4'
+                END AS period_key,
+                COUNT(*) AS statement_count
+            FROM tax_statements
+            WHERE user_id = ?
+              AND COALESCE(period_end, statement_date, uploaded_at::date) >= ?::date
+              AND COALESCE(period_end, statement_date, uploaded_at::date) <= ?::date
+            GROUP BY 1
+        ]],
+            quarters[1].end_d,
+            quarters[2].end_d,
+            quarters[3].end_d,
+            user_id,
+            ty_start,
+            ty_end
+        )
+
+        -- Index counts by period_key for the response builder.
+        local count_by_key = {}
+        for _, r in ipairs(counts_rows or {}) do
+            count_by_key[r.period_key] = tonumber(r.statement_count) or 0
+        end
+
+        -- Build the available_periods list in fixed Q1 → Q4 order.
+        local available = {}
+        for _, q in ipairs(quarters) do
+            table.insert(available, {
+                period_key = q.key,
+                period_start = q.start_d,
+                period_end = q.end_d,
+                statement_count = count_by_key[q.key] or 0,
+            })
+        end
+
+        -- Resolve the selected period. Explicit ``?period=Qx`` takes
+        -- precedence; otherwise pick the first quarter that has any
+        -- statements; otherwise fall back to Q1 so the widget still
+        -- renders a meaningful empty state.
+        local selected_key = self.params.period
+        local selected_quarter = nil
+        if selected_key then
+            for _, q in ipairs(quarters) do
+                if q.key == selected_key then selected_quarter = q break end
+            end
+        end
+        if not selected_quarter then
+            for _, q in ipairs(quarters) do
+                if (count_by_key[q.key] or 0) > 0 then
+                    selected_quarter = q
+                    selected_key = q.key
+                    break
+                end
+            end
+        end
+        if not selected_quarter then
+            selected_quarter = quarters[1]
+            selected_key = "Q1"
+        end
+
+        -- Fetch the statement rows for the selected period — same column
+        -- set the dashboard-summary endpoint returns under recent_activity
+        -- so the frontend can render rows with the existing UI primitives.
+        local rows = db.query([[
+            SELECT uuid, file_name, workflow_step, processing_status,
+                   period_start, period_end, statement_date,
+                   total_income, total_expenses, uploaded_at, updated_at
+            FROM tax_statements
+            WHERE user_id = ?
+              AND COALESCE(period_end, statement_date, uploaded_at::date) >= ?::date
+              AND COALESCE(period_end, statement_date, uploaded_at::date) <= ?::date
+            ORDER BY COALESCE(period_end, statement_date, uploaded_at::date) DESC, updated_at DESC
+            LIMIT 50
+        ]], user_id, selected_quarter.start_d, selected_quarter.end_d)
+
+        return {
+            status = 200,
+            json = {
+                tax_year = tax_year,
+                selected_period_key = selected_key,
+                selected_period_start = selected_quarter.start_d,
+                selected_period_end = selected_quarter.end_d,
+                available_periods = available,
+                statements = rows or {},
+            }
+        }
+    end)
+
 end
