@@ -1283,6 +1283,7 @@ local _migrations = {
     ['494_tax_hmrc_calculations_request_payload']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 73),
     ['495_tax_rescope_hmrc_filings_unique']          = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 74),
     ['496_tax_user_profile_default_profile_key']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 75),
+    ['497_tax_widen_error_occurrence_tenant_ns']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 76),
 
     -- =========================================================================
     -- CORE AUTH: Password reset tokens
