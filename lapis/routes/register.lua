@@ -6,6 +6,82 @@ local Global = require("helper.global")
 local db = require("lapis.db")
 local Errors = require("lib.errors")
 
+--- Validate that a business profile key is acceptable.
+-- @param profile_key string|nil The candidate key (e.g. "amazon_seller")
+-- @return boolean ok      — true if valid OR if the value is empty/nil
+--                           (caller decides whether the field is required)
+-- @return string|nil error_reason — set when ok=false, one of:
+--                           "inactive_profile_key" / "invalid_profile_key_format"
+--
+-- The canonical catalog is the union of two sources:
+--   * classification_profiles table (admin-managed, namespace-scoped)
+--   * filesystem profile rules under backend/app/profiles/ (FastAPI side)
+-- Lapis can only read the DB half. So we use a tiered policy:
+--   1. If the key matches a row in classification_profiles → trust it,
+--      reject only when the row is explicitly inactive.
+--   2. If the key isn't in the table → accept on a format check
+--      (lower_snake_case ASCII). The frontend sources its dropdown
+--      from /api/tax-profile/types which returns the FULL union, so
+--      a key arriving here unrecognised in the DB came from the
+--      filesystem half — also valid. The format check guards against
+--      arbitrary user-supplied strings (SQL-safe via parameterised
+--      queries elsewhere; this is just to keep the column tidy).
+--
+-- We deliberately don't enforce a DB-level FK to classification_profiles
+-- (see migration #75 rationale). Validation lives here so the same
+-- rule applies to every caller that accepts a profile key
+-- (registration today; settings update + OAuth onboarding next).
+local function validate_profile_key(profile_key)
+    if not profile_key or profile_key == "" then
+        return true  -- caller decides whether to treat empty as a hard error
+    end
+
+    -- Format check: lower_snake_case ASCII, 1-100 chars. Matches the
+    -- shape every existing key in the codebase uses.
+    if not profile_key:match("^[a-z][a-z0-9_]*$") or #profile_key > 100 then
+        return false, "invalid_profile_key_format"
+    end
+
+    -- Soft DB check: only reject when we're certain (row exists AND
+    -- is_active = false). Missing row falls through to "accept" so
+    -- filesystem-only profiles work without a duplicate registry.
+    local rows = db.query(
+        "SELECT is_active FROM classification_profiles WHERE profile_key = ? LIMIT 1",
+        profile_key
+    )
+    if rows and #rows > 0 then
+        local is_active = rows[1].is_active
+        -- Lapis pgmoon returns booleans as Lua booleans; older drivers
+        -- as 't'/'f' strings. Accept both shapes.
+        if is_active == false or is_active == 'f' or is_active == 0 then
+            return false, "inactive_profile_key"
+        end
+    end
+    return true
+end
+
+--- Persist the user's chosen default_profile_key into tax_user_profiles.
+-- Called after the user row + namespace assignment exist so the
+-- profile row exists too (assignUserToNamespace is responsible for
+-- creating the row downstream of the namespace dispatch).
+-- Idempotent via ON CONFLICT — safe even if the row was created
+-- earlier in the request.
+local function save_default_profile_key(user_id, user_uuid, profile_key)
+    if not profile_key or profile_key == "" then return end
+    local ok, err = pcall(function()
+        db.query([[
+            INSERT INTO tax_user_profiles (user_id, user_uuid, default_profile_key, created_at, updated_at)
+            VALUES (?, ?, ?, NOW(), NOW())
+            ON CONFLICT (user_uuid) DO UPDATE
+            SET default_profile_key = EXCLUDED.default_profile_key,
+                updated_at = NOW()
+        ]], user_id, user_uuid, profile_key)
+    end)
+    if not ok then
+        ngx.log(ngx.ERR, "[Register] Failed to save default_profile_key: ", tostring(err))
+    end
+end
+
 -- Auto-assign new user to the active project namespace
 local function assignUserToNamespace(user_id, user_uuid)
     local ok, err = pcall(function()
@@ -128,11 +204,51 @@ return function(app)
                 })
             end
 
-            local user = UserQueries.create(params)
+            -- Capture the optional business profile key BEFORE creating
+            -- the user — if the value is malformed we fail fast without
+            -- leaving an orphan user record. Empty / nil is allowed
+            -- (legacy clients that don't send the field continue to
+            -- work; the user picks one later in /onboarding or Settings).
+            local default_profile_key = params.default_profile_key
+            if default_profile_key and default_profile_key ~= "" then
+                local ok, reason = validate_profile_key(default_profile_key)
+                if not ok then
+                    return Errors.response(self, "VALIDATION_400", {
+                        context = {
+                            field = "default_profile_key",
+                            reason = reason,
+                            provided = default_profile_key,
+                            user_message = (reason == "inactive_profile_key")
+                                and "That business profile is no longer offered. Please pick another."
+                                or  "Unknown business profile. Please pick from the list.",
+                        },
+                    })
+                end
+            end
+
+            -- Build the users-table payload as a fresh shallow copy
+            -- minus our new field. This avoids depending on caller
+            -- mutations to ``self.params`` (which Lapis may wrap with
+            -- a metatable that treats ``= nil`` as a no-op) and keeps
+            -- the contract with UserQueries.create explicit: it
+            -- receives only fields valid for the users table.
+            local user_create_params = {}
+            for k, v in pairs(params) do
+                if k ~= "default_profile_key" then
+                    user_create_params[k] = v
+                end
+            end
+            local user = UserQueries.create(user_create_params)
             user.password = nil
 
             -- Auto-assign to project namespace (member role + default namespace)
             assignUserToNamespace(user.id, user.uuid)
+
+            -- Persist the validated profile key onto tax_user_profiles.
+            -- Runs after assignUserToNamespace so the profile row's
+            -- creation race is owned by the namespace setup; this
+            -- call is an idempotent UPSERT either way.
+            save_default_profile_key(user.id, user.uuid, default_profile_key)
 
             -- Generate JWT token for immediate authentication
             local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
@@ -149,7 +265,14 @@ return function(app)
                     id = user.id,
                     email = user.email,
                     username = user.username,
-                    role = user.role
+                    role = user.role,
+                    -- Surface the freshly-saved business profile key
+                    -- so the frontend can render the right onboarding
+                    -- state and pre-fill classify without a second
+                    -- /api/tax-profile fetch on the very next page.
+                    -- Always set explicitly to a string-or-nil for
+                    -- consumer parsers; cjson omits nils on encode.
+                    default_profile_key = default_profile_key,
                 },
                 exp = ngx.time() + (60 * 60) -- 1 hour expiry (matches DEFAULT_EXPIRATION)
             }

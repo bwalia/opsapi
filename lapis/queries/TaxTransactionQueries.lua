@@ -606,6 +606,26 @@ function TaxTransactionQueries.confirmClassification(uuid, params, user)
 end
 
 -- Bulk confirm transactions
+--- Bulk-confirm transactions belonging to a statement.
+--
+-- Two modes, picked by the caller:
+--
+--   * **Scope mode** — ``params.scope == "ALL_PENDING"``: confirm every
+--     transaction in the statement that isn't already confirmed.
+--     ``transaction_ids`` is ignored. Body size is O(1) regardless of
+--     transaction count, so this is the right mode for the "Confirm
+--     All" button — it scales to 10,000+ transactions.
+--
+--   * **List mode** — caller provides ``transaction_ids``: confirm
+--     exactly those UUIDs (still scoped to the statement so users
+--     can't confirm someone else's transactions by smuggling UUIDs).
+--     Use this for "confirm selected subset" UIs.
+--
+-- Both modes hit the database with **one** ``UPDATE`` statement and
+-- ``RETURNING uuid`` to get the count without a second round-trip.
+-- The previous implementation looped ``find`` + ``update`` per UUID,
+-- which meant 1000 transactions = 2000 SQL round-trips and a
+-- multi-second HTTP request that could time out.
 function TaxTransactionQueries.bulkConfirm(statement_uuid, transaction_ids, params, user)
     local user_id = getUserId(user)
     if not user_id then
@@ -623,25 +643,62 @@ function TaxTransactionQueries.bulkConfirm(statement_uuid, transaction_ids, para
         return nil, "Statement not found"
     end
 
-    local confirmed_count = 0
-    for _, txn_uuid in ipairs(transaction_ids) do
-        local transaction = TaxTransactions:find({
-            uuid = txn_uuid,
-            statement_id = statement.id,
-        })
+    local target_status = params.confirmation_status or "CONFIRMED"
+    local scope = params.scope
 
-        if transaction then
-            transaction:update({
-                confirmation_status = params.confirmation_status or "CONFIRMED",
-                confirmed_at = db.raw("NOW()"),
-                confirmed_by = user_id,
-                updated_at = db.raw("NOW()")
-            })
-            confirmed_count = confirmed_count + 1
+    local result
+    if scope == "ALL_PENDING" then
+        -- Filter-based confirm: no UUID list needed. Skip rows that
+        -- are already in the target status so we don't bump
+        -- updated_at / confirmed_at on already-confirmed rows.
+        result = db.query([[
+            UPDATE tax_transactions
+            SET confirmation_status = ?,
+                confirmed_at = NOW(),
+                confirmed_by = ?,
+                updated_at = NOW()
+            WHERE statement_id = ?
+              AND confirmation_status IS DISTINCT FROM ?
+            RETURNING uuid
+        ]], target_status, user_id, statement.id, target_status)
+    else
+        if type(transaction_ids) ~= "table" or #transaction_ids == 0 then
+            return nil, "transaction_ids array is required (or set scope to ALL_PENDING)"
         end
+
+        -- Build (?, ?, ...) placeholder list for the IN clause —
+        -- matches the convention in DeviceTokenQueries / ChatUserPresenceQueries.
+        local placeholders = {}
+        for i = 1, #transaction_ids do
+            placeholders[i] = "?"
+        end
+
+        -- Args: [target_status, user_id, statement.id, ...transaction_ids]
+        local args = { target_status, user_id, statement.id }
+        for i = 1, #transaction_ids do
+            args[#args + 1] = transaction_ids[i]
+        end
+
+        local sql = [[
+            UPDATE tax_transactions
+            SET confirmation_status = ?,
+                confirmed_at = NOW(),
+                confirmed_by = ?,
+                updated_at = NOW()
+            WHERE statement_id = ?
+              AND uuid IN (]] .. table.concat(placeholders, ", ") .. [[)
+            RETURNING uuid
+        ]]
+
+        result = db.query(sql, table.unpack(args))
     end
 
-    -- Audit log
+    local confirmed_count = (type(result) == "table") and #result or 0
+
+    -- Single audit-log entry per bulk operation — matches prior
+    -- behaviour. Records the count, target status, and which mode
+    -- was used so downstream observability can distinguish a 1-row
+    -- list-mode call from a 10,000-row scope-mode call.
     TaxAuditLogQueries.log({
         user_id = user_id,
         user_email = user.email,
@@ -652,7 +709,8 @@ function TaxTransactionQueries.bulkConfirm(statement_uuid, transaction_ids, para
         action = "BULK_CONFIRM",
         new_values = cjson.encode({
             count = confirmed_count,
-            confirmation_status = params.confirmation_status or "CONFIRMED"
+            confirmation_status = target_status,
+            mode = (scope == "ALL_PENDING") and "scope_all_pending" or "id_list",
         }),
         change_reason = params.change_reason
     })
@@ -660,7 +718,17 @@ function TaxTransactionQueries.bulkConfirm(statement_uuid, transaction_ids, para
     return { confirmed_count = confirmed_count }
 end
 
--- Bulk confirm classification
+--- Bulk-confirm classifications for transactions in a statement.
+--
+-- Same dual-mode shape as ``bulkConfirm`` (scope vs. id list) and
+-- the same single-UPDATE win, plus one extra step: when a
+-- classification is confirmed, the row is captured into
+-- ``classification_training_data`` so the AI classifier can learn
+-- from expert-validated decisions. The capture is done with a
+-- single ``INSERT ... SELECT FROM tax_transactions`` so the work
+-- happens server-side in Postgres rather than per-row from Lua.
+-- The ``NOT EXISTS`` guard on the SELECT keeps the operation
+-- idempotent — re-confirming a row never duplicates training data.
 function TaxTransactionQueries.bulkConfirmClassification(statement_uuid, transaction_ids, params, user)
     local user_id = getUserId(user)
     if not user_id then
@@ -679,61 +747,111 @@ function TaxTransactionQueries.bulkConfirmClassification(statement_uuid, transac
         return nil, "Statement not found"
     end
 
-    local confirmed_count = 0
-    for _, txn_uuid in ipairs(transaction_ids) do
-        local transaction = TaxTransactions:find({
-            uuid = txn_uuid,
-            statement_id = statement.id,
-        })
+    local target_status = params.classification_status or "CONFIRMED"
+    local scope = params.scope
 
-        if transaction then
-            transaction:update({
-                classification_status = params.classification_status or "CONFIRMED",
-                classification_confirmed_at = db.raw("NOW()"),
-                classification_confirmed_by = user_id,
-                updated_at = db.raw("NOW()")
-            })
-            confirmed_count = confirmed_count + 1
+    -- Build the WHERE clause tail and its args once; both the
+    -- UPDATE and the training-data INSERT need the same set of
+    -- target rows.
+    local where_tail
+    local where_args
 
-            -- Capture as expert-validated training data
-            if transaction.category and transaction.category ~= "" then
-                pcall(function()
-                    local existing = db.query(
-                        "SELECT id FROM classification_training_data WHERE transaction_uuid = ? LIMIT 1",
-                        txn_uuid
-                    )
-                    if not existing or #existing == 0 then
-                        db.query([[
-                            INSERT INTO classification_training_data
-                                (uuid, transaction_uuid, user_id, source, original_category, corrected_by,
-                                 description, amount, transaction_type, transaction_date,
-                                 category, hmrc_category, confidence, is_tax_deductible,
-                                 reasoning, classified_by, namespace_id, created_at, updated_at)
-                            VALUES (?, ?, ?, 'ai_classification', ?, ?,
-                                    ?, ?, ?, ?,
-                                    ?, ?, ?, ?,
-                                    ?, ?, 0, NOW(), NOW())
-                        ]],
-                            Global.generateUUID(),
-                            txn_uuid,
-                            transaction.user_id,
-                            transaction.category,
-                            user_id,
-                            transaction.description,
-                            transaction.amount,
-                            transaction.transaction_type or "DEBIT",
-                            transaction.transaction_date or db.NULL,
-                            transaction.category,
-                            transaction.hmrc_category or "",
-                            transaction.confidence_score or 0.85,
-                            transaction.is_tax_deductible or false,
-                            params.change_reason or db.NULL,
-                            transaction.classified_by or db.NULL
-                        )
-                    end
-                end)
-            end
+    if scope == "ALL_PENDING" then
+        where_tail = "AND classification_status IS DISTINCT FROM ?"
+        where_args = { target_status }
+    else
+        if type(transaction_ids) ~= "table" or #transaction_ids == 0 then
+            return nil, "transaction_ids array is required (or set scope to ALL_PENDING)"
         end
+        local placeholders = {}
+        for i = 1, #transaction_ids do
+            placeholders[i] = "?"
+        end
+        where_tail = "AND uuid IN (" .. table.concat(placeholders, ", ") .. ")"
+        where_args = {}
+        for i = 1, #transaction_ids do
+            where_args[i] = transaction_ids[i]
+        end
+    end
+
+    -- Step 1: bulk UPDATE. Returning the affected uuids gives us
+    -- both the count and a precise list of rows for the training-
+    -- data step, so we don't need a separate SELECT.
+    local update_args = { target_status, user_id, statement.id }
+    for _, a in ipairs(where_args) do
+        update_args[#update_args + 1] = a
+    end
+    local updated = db.query([[
+        UPDATE tax_transactions
+        SET classification_status = ?,
+            classification_confirmed_at = NOW(),
+            classification_confirmed_by = ?,
+            updated_at = NOW()
+        WHERE statement_id = ? ]] .. where_tail .. [[
+        RETURNING uuid
+    ]], table.unpack(update_args))
+
+    local confirmed_count = (type(updated) == "table") and #updated or 0
+
+    -- Step 2: bulk training-data capture. Single INSERT ... SELECT,
+    -- guarded by NOT EXISTS for idempotency. Wrapped in pcall
+    -- because training-data capture is best-effort — we don't want
+    -- to fail the whole confirm operation if (e.g.) the namespace
+    -- column or pgcrypto extension isn't available in some
+    -- environment.
+    if confirmed_count > 0 then
+        local affected_uuids = {}
+        for _, row in ipairs(updated) do
+            affected_uuids[#affected_uuids + 1] = row.uuid
+        end
+        local in_placeholders = {}
+        for i = 1, #affected_uuids do
+            in_placeholders[i] = "?"
+        end
+
+        -- Args: [corrected_by_user_id, change_reason, ...affected_uuids]
+        local training_args = { user_id, params.change_reason or db.NULL }
+        for _, u in ipairs(affected_uuids) do
+            training_args[#training_args + 1] = u
+        end
+
+        pcall(function()
+            db.query([[
+                INSERT INTO classification_training_data
+                    (uuid, transaction_uuid, user_id, source, original_category, corrected_by,
+                     description, amount, transaction_type, transaction_date,
+                     category, hmrc_category, confidence, is_tax_deductible,
+                     reasoning, classified_by, namespace_id, created_at, updated_at)
+                SELECT
+                    gen_random_uuid()::varchar,
+                    t.uuid,
+                    t.user_id,
+                    'ai_classification',
+                    t.category,
+                    ?,
+                    t.description,
+                    t.amount,
+                    COALESCE(t.transaction_type, 'DEBIT'),
+                    t.transaction_date,
+                    t.category,
+                    COALESCE(t.hmrc_category, ''),
+                    COALESCE(t.confidence_score, 0.85),
+                    COALESCE(t.is_tax_deductible, false),
+                    ?,
+                    COALESCE(t.classified_by, ''),
+                    0,
+                    NOW(),
+                    NOW()
+                FROM tax_transactions t
+                WHERE t.uuid IN (]] .. table.concat(in_placeholders, ", ") .. [[)
+                  AND t.category IS NOT NULL
+                  AND t.category != ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM classification_training_data ctd
+                      WHERE ctd.transaction_uuid = t.uuid
+                  )
+            ]], table.unpack(training_args))
+        end)
     end
 
     -- Audit log
@@ -747,7 +865,8 @@ function TaxTransactionQueries.bulkConfirmClassification(statement_uuid, transac
         action = "BULK_CONFIRM_CLASSIFICATION",
         new_values = cjson.encode({
             count = confirmed_count,
-            classification_status = params.classification_status or "CONFIRMED"
+            classification_status = target_status,
+            mode = (scope == "ALL_PENDING") and "scope_all_pending" or "id_list",
         }),
         change_reason = params.change_reason
     })

@@ -134,6 +134,7 @@ local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
+local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
@@ -1266,6 +1267,25 @@ local _migrations = {
     ['486_tax_seed_max_custom_categories_setting']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 67),
     ['488_tax_seed_auth_email_taken_code']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 68),
 
+    -- 490: hmrc_filings — audit-grade record of every HMRC MTD ITSA
+    --      filing event (final-declaration, confirm-amendment).
+    --      Separate from tax_returns so the domain row stays clean
+    --      and the audit table can be partitioned later.
+    -- 491: tax_returns partial unique index — one FILED row per user/year.
+    --      Mirrors HMRC's "one final-declaration per NINO/year" rule
+    --      and stops accidental re-filing at the DB layer.
+    -- 492: hmrc_calculations.correlation_id — capture HMRC's
+    --      X-Correlation-Id response header for support tickets.
+    ['490_tax_create_hmrc_filings']                  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 69),
+    ['491_tax_unique_filed_tax_return_per_year']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 70),
+    ['492_tax_hmrc_calculations_correlation_id']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 71),
+    ['493_tax_rescope_hmrc_calc_id_index']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 72),
+    ['494_tax_hmrc_calculations_request_payload']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 73),
+    ['495_tax_rescope_hmrc_filings_unique']          = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 74),
+    ['496_tax_user_profile_default_profile_key']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 75),
+    ['497_tax_widen_error_occurrence_tenant_ns']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 76),
+    ['498_tax_backfill_orphan_category_hmrc_links']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 77),
+
     -- =========================================================================
     -- CORE AUTH: Password reset tokens
     -- =========================================================================
@@ -1417,6 +1437,10 @@ local _migrations = {
     ['502_crm_create_contacts'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 3),
     ['503_crm_create_deals'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 4),
     ['504_crm_create_activities'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 5),
+
+    -- CRM Leads (510-511)
+    ['510_crm_create_leads'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 1),
+    ['511_crm_leads_enquiry_link'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 2),
 
     -- =========================================================================
     -- TIMESHEET SYSTEM (520-529)

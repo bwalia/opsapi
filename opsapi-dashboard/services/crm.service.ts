@@ -89,6 +89,56 @@ export interface CrmActivity {
   updated_at: string;
 }
 
+export type CrmLeadSource = 'website_form' | 'email' | 'social_media' | 'manual' | 'api' | 'referral';
+export type CrmLeadStatus = 'new' | 'contacted' | 'qualified' | 'converted' | 'lost';
+export type CrmLeadPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface CrmLead {
+  uuid: string;
+  first_name: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  company_name?: string;
+  job_title?: string;
+  source: CrmLeadSource;
+  channel?: string;
+  campaign?: string;
+  referrer_url?: string;
+  landing_page_url?: string;
+  status: CrmLeadStatus;
+  lost_reason?: string;
+  owner_user_uuid?: string;
+  score: number;
+  priority: CrmLeadPriority;
+  notes?: string;
+  converted_at?: string;
+  converted_contact_uuid?: string;
+  converted_contact_first_name?: string;
+  converted_contact_last_name?: string;
+  converted_deal_uuid?: string;
+  converted_deal_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrmLeadStats {
+  total_leads: number;
+  new_leads: number;
+  contacted_leads: number;
+  qualified_leads: number;
+  converted_leads: number;
+  lost_leads: number;
+  conversion_rate: number;
+  leads_by_source: { source: string; count: number }[];
+}
+
+export interface CrmLeadConvertResult {
+  lead: CrmLead;
+  contact: CrmContact;
+  deal?: CrmDeal;
+}
+
 export interface CrmDashboardStats {
   total_accounts: number;
   active_deals: number;
@@ -103,6 +153,8 @@ export interface CrmListParams {
   status?: string;
   stage?: string;
   type?: string;
+  source?: string;
+  priority?: string;
   orderBy?: string;
   orderDir?: 'asc' | 'desc';
 }
@@ -129,6 +181,8 @@ function buildCrmParams(params: CrmListParams): Record<string, unknown> {
   if (params.status && params.status !== 'all') q.status = params.status;
   if (params.stage && params.stage !== 'all') q.stage = params.stage;
   if (params.type && params.type !== 'all') q.type = params.type;
+  if (params.source && params.source !== 'all') q.source = params.source;
+  if (params.priority && params.priority !== 'all') q.priority = params.priority;
   if (params.orderBy) q.order_by = params.orderBy;
   if (params.orderDir) q.order_dir = params.orderDir;
   return q;
@@ -304,6 +358,48 @@ export const crmService = {
   async completeActivity(uuid: string): Promise<CrmActivity> {
     const response = await apiClient.put(`/api/v2/crm/activities/${uuid}/complete`, toFormData({}));
     return response.data;
+  },
+
+  // ----------------------------------------------------------
+  // Leads
+  // ----------------------------------------------------------
+
+  async getLeads(params: CrmListParams = {}): Promise<CrmPaginatedResponse<CrmLead>> {
+    const qs = buildQueryString(buildCrmParams(params));
+    const response = await apiClient.get(`/api/v2/crm/leads${qs}`);
+    return parsePaginated<CrmLead>(response);
+  },
+
+  async getLead(uuid: string): Promise<CrmLead> {
+    const response = await apiClient.get(`/api/v2/crm/leads/${uuid}`);
+    return response.data;
+  },
+
+  async createLead(data: Record<string, unknown>): Promise<CrmLead> {
+    const response = await apiClient.post('/api/v2/crm/leads', toFormData(data));
+    return response.data;
+  },
+
+  async updateLead(uuid: string, data: Record<string, unknown>): Promise<CrmLead> {
+    const response = await apiClient.put(`/api/v2/crm/leads/${uuid}`, toFormData(data));
+    return response.data;
+  },
+
+  async deleteLead(uuid: string): Promise<void> {
+    await apiClient.delete(`/api/v2/crm/leads/${uuid}`);
+  },
+
+  async convertLead(uuid: string, dealData?: Record<string, unknown>): Promise<CrmLeadConvertResult> {
+    const payload: Record<string, unknown> = {};
+    if (dealData) payload.deal = dealData;
+    const response = await apiClient.post(`/api/v2/crm/leads/${uuid}/convert`, toFormData(payload));
+    return response.data;
+  },
+
+  async getLeadStats(): Promise<CrmLeadStats> {
+    const response = await apiClient.get('/api/v2/crm/leads/stats');
+    const d = response.data as Record<string, unknown>;
+    return (d?.data || d) as CrmLeadStats;
   },
 };
 
