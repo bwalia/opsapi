@@ -2617,4 +2617,29 @@ return {
         ]])
         print("[Tax Copilot] Added default_profile_key column to tax_user_profiles")
     end,
+
+    -- 76. Widen error_occurrences.tenant_namespace from VARCHAR(255) to TEXT.
+    --
+    -- Why: the JWT issued by Lapis carries ``userinfo.namespace`` as a
+    -- multi-field dict (slug, id, uuid, role, permissions, name, …). The
+    -- Python middleware used to ``str(dict)`` it, which produced a Python
+    -- dict repr that easily exceeded 255 chars on tenants with many
+    -- permissions. Every such error then triggered StringDataRightTruncation
+    -- on INSERT and was silently dropped from the audit trail — visible to
+    -- the end user as ``VALIDATION_400 · <ref>``, invisible to admins
+    -- because /admin/errors/occurrences/<uuid> would 404.
+    --
+    -- The middleware fix (PR companion) extracts a short slug for the
+    -- column, but we widen the schema anyway so even a future regression
+    -- can never lose an audit row again. TEXT carries no overhead in
+    -- Postgres vs varchar(N), and the existing btree index works fine on
+    -- text — the actual values we store are still short slugs (~16 chars
+    -- on average).
+    [76] = function()
+        db.query([[
+            ALTER TABLE error_occurrences
+            ALTER COLUMN tenant_namespace TYPE TEXT
+        ]])
+        print("[Tax Copilot] Widened error_occurrences.tenant_namespace VARCHAR(255) -> TEXT")
+    end,
 }
