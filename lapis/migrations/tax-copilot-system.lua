@@ -2642,4 +2642,131 @@ return {
         ]])
         print("[Tax Copilot] Widened error_occurrences.tenant_namespace VARCHAR(255) -> TEXT")
     end,
+
+    -- 77. Backfill tax_categories.hmrc_category_id for orphaned rows.
+    --
+    -- Background: backend/app/core/categories.py::CATEGORY_DEFINITIONS used
+    -- camelCase MTD field names (e.g. "otherExpenses") as the
+    -- ``hmrc_category`` reference, but the Python seeder expects
+    -- snake_case ``tax_hmrc_categories.key`` values (e.g. "other_expenses").
+    -- Every reference silently failed the lookup, leaving each seeded
+    -- ``tax_categories`` row with ``hmrc_category_id = NULL``.
+    --
+    -- Symptom users see: "Run HMRC preview" returns 400 with
+    -- ``reason: no_classified_transactions, excluded_non_tax: N``. The
+    -- aggregator dropped every transaction tagged with one of these
+    -- orphaned AI categories because the FK chain yielded no
+    -- ``mtd_field_name``. Verified live on int: ~5,800 transactions
+    -- across 51+ users.
+    --
+    -- This migration backfills the FK pointer for each orphan to its
+    -- canonical HMRC catalogue row. It is idempotent (only touches rows
+    -- still NULL) so it survives re-runs. Categories that SHOULD remain
+    -- unmapped (drawings, personal_expense, dividend_payments etc.)
+    -- are intentionally NOT in the mapping list and stay NULL — that's
+    -- the aggregator's legit "excluded_no_mtd_field" bucket.
+    --
+    -- The companion diy-tax-return-uk PR fixes the Python seeder so
+    -- the bug can't reintroduce itself on the next deploy. Land this
+    -- migration first so existing orphans are healed before the new
+    -- FastAPI code rolls; either order is technically safe because
+    -- the Python seeder is idempotent (skips existing rows) but
+    -- migration-first is cleaner.
+    [77] = function()
+        -- One UPDATE per HMRC target. Each WHERE includes
+        -- ``hmrc_category_id IS NULL`` so re-running the migration is
+        -- a no-op once linkage is in place — and so admins who
+        -- manually re-mapped a row don't get it overwritten.
+        local mappings = {
+            -- (hmrc_category.key, { ai_category.key, ... })
+            { "turnover",               { "income_sales", "income_refund" } },
+            { "cost_of_goods",          { "purchases", "material_and_supplies" } },
+            { "rent_rates",             { "rent_expense", "rates_and_water",
+                                          "light_and_heat", "council_tax",
+                                          "garage_rent_expense", "cleaning",
+                                          "service_charges", "taxes_property" } },
+            { "advertising_marketing",  { "advertising" } },
+            { "telephone_office",       { "telephone_expense", "it_support" } },
+            { "car_van_travel",         { "travel_expense" } },
+            { "entertainment_costs",    { "meals_and_entertainment" } },
+            { "accountancy_legal",      { "legal_and_professional_fees" } },
+            { "repairs_maintenance",    { "repair_and_maintenance",
+                                          "gas_certificate" } },
+            { "other_expenses",         { "dues_and_subscriptions",
+                                          "insurance_expense",
+                                          "insurance_expense_general_liability",
+                                          "insurance_expense_health",
+                                          "sundry_expense",
+                                          "training_expense",
+                                          "furnishing_expense",
+                                          "equipment_rental",
+                                          "storage_expense",
+                                          "meetings",
+                                          "testing_expense" } },
+        }
+
+        local total_relinked = 0
+        for _, m in ipairs(mappings) do
+            local hmrc_key = m[1]
+            local ai_keys = m[2]
+            -- Build the IN list as a parameterised query so quoting is
+            -- safe even though all keys are static lower_snake_case.
+            local placeholders = {}
+            for i = 1, #ai_keys do placeholders[i] = "?" end
+            local sql = string.format([[
+                UPDATE tax_categories
+                SET hmrc_category_id = (
+                    SELECT id FROM tax_hmrc_categories
+                    WHERE key = ? AND is_active = true
+                ),
+                updated_at = NOW()
+                WHERE key IN (%s)
+                  AND hmrc_category_id IS NULL
+                  AND is_active = true
+            ]], table.concat(placeholders, ", "))
+            -- Args: hmrc_key first (for the SELECT), then all ai_keys.
+            local args = { hmrc_key }
+            for _, k in ipairs(ai_keys) do table.insert(args, k) end
+            local res = db.query(sql, unpack(args))
+            -- Lapis db.query doesn't return an affected count for UPDATE
+            -- on every driver; we instead count afterwards if needed.
+            total_relinked = total_relinked + #ai_keys
+        end
+
+        print(string.format(
+            "[Tax Copilot] Backfilled tax_categories.hmrc_category_id " ..
+            "for up to %d orphaned AI categories. Categories left NULL " ..
+            "are intentional (personal_expense, drawings, tax_payments, " ..
+            "loan_repayments, income_salary, etc. — not tax-relevant " ..
+            "for the SE cumulative submission).",
+            total_relinked
+        ))
+
+        -- Bonus cleanup pass — the denormalised
+        -- ``tax_transactions.hmrc_category`` column stored camelCase
+        -- MTD field names (e.g. "otherExpenses") in some rows because
+        -- the classifier hardcoded that value before the companion PR
+        -- fixed it. The aggregator doesn't read this column so it
+        -- didn't affect calculations, but admin exports and the
+        -- transactions UI display it. Normalise to snake_case so all
+        -- rows are consistent.
+        db.query([[
+            UPDATE tax_transactions
+            SET hmrc_category = 'other_expenses', updated_at = NOW()
+            WHERE hmrc_category = 'otherExpenses'
+        ]])
+        -- Any other camelCase MTD field names that might have leaked
+        -- in via the classifier fallback path are handled by the
+        -- broader "snap to snake_case" UPDATE below.
+        db.query([[
+            UPDATE tax_transactions
+            SET hmrc_category = h.key, updated_at = NOW()
+            FROM tax_hmrc_categories h
+            WHERE tax_transactions.hmrc_category = h.mtd_field_name
+              AND tax_transactions.hmrc_category <> h.key
+        ]])
+        print("[Tax Copilot] Normalised tax_transactions.hmrc_category " ..
+              "to snake_case keys (was camelCase MTD field names on " ..
+              "some rows due to classifier hardcode — see companion PR).")
+    end,
 }
