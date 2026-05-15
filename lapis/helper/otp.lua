@@ -267,6 +267,27 @@ function OTP.sendToEmail(user, brand)
         return false, err
     end
 
+    -- E2E test traffic suppression. CI runs the Playwright suite many times
+    -- a day and each register/login dumps a real OTP into the shared test
+    -- mailbox (diytaxreturnmail@gmail.com via Gmail plus-addressing). We
+    -- still CREATE the OTP row above so OTP.verify works normally — only
+    -- the SMTP send is skipped. Double-gated:
+    --   1) LAPIS_ENVIRONMENT must not be "production"  (acc + prod = always send)
+    --   2) Recipient must match OTP_SUPPRESS_FOR_EMAIL_REGEX
+    -- If the env var is unset, behaviour is identical to before this change.
+    local suppress_regex = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
+    if env ~= "production" and suppress_regex and suppress_regex ~= "" then
+        local matched, regex_err = ngx.re.match(user.email, suppress_regex, "jo")
+        if regex_err then
+            ngx.log(ngx.WARN, "[OTP] Bad OTP_SUPPRESS_FOR_EMAIL_REGEX (", suppress_regex,
+                "): ", regex_err, " — falling back to sending the email")
+        elseif matched then
+            ngx.log(ngx.NOTICE, "[OTP] Suppressed email for E2E test recipient ", user.email,
+                " (env=", env, ", code still in DB for OTP.verify)")
+            return true
+        end
+    end
+
     brand = brand or {}
     local app_name = type(brand.app_name) == "string" and brand.app_name ~= "" and brand.app_name or "DIY Tax Return"
     local safe_color = sanitize_hex_color(brand.brand_color)
