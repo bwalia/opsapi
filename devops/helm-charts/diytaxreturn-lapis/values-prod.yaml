@@ -1,6 +1,12 @@
 env: prod
 app: diytaxreturn-lapis
-projectCode: all
+# Scope migrations + namespace setup to the tax app only. With "all",
+# this deployment would run (and own) migrations for every platform
+# project — ecommerce, hospital, crm, kanban, … — none of which the
+# DIY Tax Return app uses. A CRM migration drift took acc opsapi down
+# for 22h on 2026-05-14; "tax_copilot" makes that class of failure
+# impossible since non-tax migration modules are never loaded.
+projectCode: tax_copilot
 
 # ─── Password reset email link target ─────────────────────────────────
 # Canonical frontend origin for production. Migration 489 uses this
