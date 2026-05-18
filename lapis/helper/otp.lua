@@ -267,6 +267,20 @@ function OTP.sendToEmail(user, brand)
         return false, err
     end
 
+    -- E2E sink: skip the SMTP send for addresses matching
+    -- OTP_SUPPRESS_FOR_EMAIL_REGEX (Lua pattern). The DB code is still
+    -- created above so TEST_OTP_CODE-bypass flows continue to work. Without
+    -- this guard, e2e addresses like `e2e-<ts><rand>@e2e.invalid` cause SMTP
+    -- delay/bounce floods back to SMTP_FROM_EMAIL.
+    local suppress_pattern = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
+    if suppress_pattern and suppress_pattern ~= "" then
+        local ok_match, matched = pcall(string.find, user.email, suppress_pattern)
+        if ok_match and matched then
+            ngx.log(ngx.NOTICE, "[OTP] SMTP send suppressed (matched OTP_SUPPRESS_FOR_EMAIL_REGEX) for ", user.email)
+            return true
+        end
+    end
+
     brand = brand or {}
     local app_name = type(brand.app_name) == "string" and brand.app_name ~= "" and brand.app_name or "DIY Tax Return"
     local safe_color = sanitize_hex_color(brand.brand_color)
