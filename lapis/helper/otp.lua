@@ -307,6 +307,13 @@ function OTP.sendToEmail(user, brand)
             brand_logo_url = safe_logo,
             support_email = brand.support_email,
         },
+        -- Non-prod debug context. Stripped by Mail.send before the
+        -- SMTP payload is built; only used to populate the banner.
+        triggered_by = {
+            user_uuid = user.uuid,
+            user_email = user.email,
+            source = "otp.sendToEmail",
+        },
     })
 
     if not ok then
