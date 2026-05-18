@@ -35,7 +35,7 @@ return {
         if table_exists("crm_leads") then return end
 
         db.query([[
-            CREATE TABLE crm_leads (
+            CREATE TABLE IF NOT EXISTS crm_leads (
                 id BIGSERIAL PRIMARY KEY,
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,

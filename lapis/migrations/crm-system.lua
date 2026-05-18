@@ -28,7 +28,7 @@ return {
         if table_exists("crm_pipelines") then return end
 
         db.query([[
-            CREATE TABLE crm_pipelines (
+            CREATE TABLE IF NOT EXISTS crm_pipelines (
                 id BIGSERIAL PRIMARY KEY,
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
@@ -57,7 +57,7 @@ return {
         if table_exists("crm_accounts") then return end
 
         db.query([[
-            CREATE TABLE crm_accounts (
+            CREATE TABLE IF NOT EXISTS crm_accounts (
                 id BIGSERIAL PRIMARY KEY,
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
@@ -104,7 +104,7 @@ return {
         if table_exists("crm_contacts") then return end
 
         db.query([[
-            CREATE TABLE crm_contacts (
+            CREATE TABLE IF NOT EXISTS crm_contacts (
                 id BIGSERIAL PRIMARY KEY,
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
@@ -149,7 +149,7 @@ return {
         if table_exists("crm_deals") then return end
 
         db.query([[
-            CREATE TABLE crm_deals (
+            CREATE TABLE IF NOT EXISTS crm_deals (
                 id BIGSERIAL PRIMARY KEY,
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
@@ -205,7 +205,7 @@ return {
         if table_exists("crm_activities") then return end
 
         db.query([[
-            CREATE TABLE crm_activities (
+            CREATE TABLE IF NOT EXISTS crm_activities (
                 id BIGSERIAL PRIMARY KEY,
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,

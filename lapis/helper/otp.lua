@@ -267,16 +267,23 @@ function OTP.sendToEmail(user, brand)
         return false, err
     end
 
-    -- E2E sink: skip the SMTP send for addresses matching
-    -- OTP_SUPPRESS_FOR_EMAIL_REGEX (Lua pattern). The DB code is still
-    -- created above so TEST_OTP_CODE-bypass flows continue to work. Without
-    -- this guard, e2e addresses like `e2e-<ts><rand>@e2e.invalid` cause SMTP
-    -- delay/bounce floods back to SMTP_FROM_EMAIL.
-    local suppress_pattern = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
-    if suppress_pattern and suppress_pattern ~= "" then
-        local ok_match, matched = pcall(string.find, user.email, suppress_pattern)
-        if ok_match and matched then
-            ngx.log(ngx.NOTICE, "[OTP] SMTP send suppressed (matched OTP_SUPPRESS_FOR_EMAIL_REGEX) for ", user.email)
+    -- E2E test traffic suppression. CI runs the Playwright suite many times
+    -- a day and each register/login dumps a real OTP into the shared test
+    -- mailbox (diytaxreturnmail@gmail.com via Gmail plus-addressing). We
+    -- still CREATE the OTP row above so OTP.verify works normally — only
+    -- the SMTP send is skipped. Double-gated:
+    --   1) LAPIS_ENVIRONMENT must not be "production"  (acc + prod = always send)
+    --   2) Recipient must match OTP_SUPPRESS_FOR_EMAIL_REGEX
+    -- If the env var is unset, behaviour is identical to before this change.
+    local suppress_regex = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
+    if env ~= "production" and suppress_regex and suppress_regex ~= "" then
+        local matched, regex_err = ngx.re.match(user.email, suppress_regex, "jo")
+        if regex_err then
+            ngx.log(ngx.WARN, "[OTP] Bad OTP_SUPPRESS_FOR_EMAIL_REGEX (", suppress_regex,
+                "): ", regex_err, " — falling back to sending the email")
+        elseif matched then
+            ngx.log(ngx.NOTICE, "[OTP] Suppressed email for E2E test recipient ", user.email,
+                " (env=", env, ", code still in DB for OTP.verify)")
             return true
         end
     end
@@ -299,6 +306,13 @@ function OTP.sendToEmail(user, brand)
             header_title = type(brand.header_title) == "string" and brand.header_title ~= "" and brand.header_title or app_name,
             brand_logo_url = safe_logo,
             support_email = brand.support_email,
+        },
+        -- Non-prod debug context. Stripped by Mail.send before the
+        -- SMTP payload is built; only used to populate the banner.
+        triggered_by = {
+            user_uuid = user.uuid,
+            user_email = user.email,
+            source = "otp.sendToEmail",
         },
     })
 

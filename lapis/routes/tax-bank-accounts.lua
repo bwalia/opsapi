@@ -51,13 +51,21 @@ local function validate_bank_account_params(params, is_create)
         params.account_number = trimmed
     end
 
-    -- sort_code: optional, must be XX-XX-XX format
+    -- sort_code: optional. UK sort codes are exactly 6 digits, commonly
+    -- written XX-XX-XX on statements. Accept what users naturally paste —
+    -- "123456", "12-34-56", "12 34 56" — and canonicalise to XX-XX-XX.
+    -- Mirrors `normalize_sort_code` in backend/app/models/bank_account.py
+    -- so the Python and Lua write paths can't drift.
     if params.sort_code and params.sort_code ~= "" then
         local trimmed = params.sort_code:match("^%s*(.-)%s*$")
-        if not trimmed:match("^%d%d%-%d%d%-%d%d$") then
-            return false, "sort_code must be in XX-XX-XX format (e.g. 20-00-00)"
+        if trimmed:match("[^%d%s%-]") then
+            return false, "sort_code can only contain digits, spaces or hyphens"
         end
-        params.sort_code = trimmed
+        local digits = (trimmed:gsub("[%s%-]", ""))
+        if #digits ~= 6 then
+            return false, "sort_code must be 6 digits (e.g. 20-00-00 or 200000)"
+        end
+        params.sort_code = digits:sub(1, 2) .. "-" .. digits:sub(3, 4) .. "-" .. digits:sub(5, 6)
     end
 
     -- account_type: must be a valid type

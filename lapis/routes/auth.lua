@@ -552,6 +552,12 @@ return function(app)
                 reset_url = reset_url,
                 expires_in = "30 minutes",
             },
+            -- Non-prod debug context (stripped on prod by Mail.send).
+            triggered_by = {
+                user_uuid = user.uuid,
+                user_email = user.email,
+                source = "auth.forgot-password",
+            },
         })
         if not send_ok then
             ngx.log(ngx.ERR, "[forgot-password] Mail.send failed for user=",
