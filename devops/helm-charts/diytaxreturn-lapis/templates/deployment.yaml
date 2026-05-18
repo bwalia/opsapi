@@ -56,6 +56,20 @@ spec:
           env:
             - name: LAPIS_ENVIRONMENT
               value: "production"
+            # Deployment-environment label used by helper/mail.lua to
+            # decide whether to inject the non-prod debug banner +
+            # [ENV] subject prefix. We can't reuse LAPIS_ENVIRONMENT
+            # here because it's hardcoded "production" above so the
+            # secret-templated config.lua's single `config("production")`
+            # block is selected — without this split, the banner would
+            # never fire on dev/test/int/acc.
+            #
+            # Values: dev / test / int / acc / prod — matches the suffix
+            # of values-*.yaml. helper/mail.lua treats both "prod" and
+            # "production" as prod (is_production_env), so prod
+            # deployments get no banner.
+            - name: OPSAPI_DEPLOY_ENV
+              value: {{ .Values.env | quote }}
             - name: PROJECT_CODE
               value: {{ .Values.projectCode | default "all" | quote }}
             {{- if and .Values.setup .Values.setup.adminEmail }}
