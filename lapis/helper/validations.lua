@@ -1,10 +1,17 @@
 local Validation = {}
 local validate = require("lapis.validate")
 
+-- Minimum length lifted from 8 → 12 to match NIST 800-63B's
+-- "memorised secret" guidance and to clear zxcvbn score ≥ 3 on
+-- typical strings (the frontend gates submit on the same score, so a
+-- shorter password rarely reaches us, but we enforce it server-side
+-- as the authoritative gate).
+local MIN_PASSWORD_LENGTH = 12
+
 -- Password strength validation
 function Validation.validatePasswordStrength(password)
-    if not password or #password < 8 then
-        error("Password must be at least 8 characters long")
+    if not password or #password < MIN_PASSWORD_LENGTH then
+        error("Password must be at least " .. MIN_PASSWORD_LENGTH .. " characters long")
     end
 
     if not string.match(password, "%u") then
@@ -17,6 +24,40 @@ function Validation.validatePasswordStrength(password)
 
     if not string.match(password, "%d") then
         error("Password must contain at least one number")
+    end
+
+    -- Have I Been Pwned check — k-anonymity, plaintext never leaves
+    -- this process. Wrapped in pcall so a HIBP outage doesn't lock
+    -- users out of signup; the helper logs internally on failure.
+    local ok_req, HIBP = pcall(require, "helper.hibp")
+    if not ok_req then
+        ngx.log(ngx.WARN, "[validations] HIBP module load failed: ", tostring(HIBP))
+    elseif not HIBP or not HIBP.check_password then
+        ngx.log(ngx.WARN, "[validations] HIBP module shape unexpected")
+    else
+        -- pcall returns (true, ret1, ret2, ...) on success. Capture both
+        -- return values so a soft-fail (nil, "reason") doesn't lose the
+        -- diagnostic. Don't call HIBP.check_password twice — the cosocket
+        -- has timing-sensitive state and a second call inside a log line
+        -- has segfaulted before on this image.
+        local ok_call, count, fetch_err = pcall(HIBP.check_password, password)
+        if not ok_call then
+            ngx.log(ngx.WARN, "[validations] HIBP raised: ", tostring(count))
+        elseif type(count) == "number" then
+            ngx.log(ngx.NOTICE, "[validations] HIBP hit count=", count)
+            if count > 0 then
+                error(
+                    "This password has appeared in known data breaches and is unsafe. "
+                    .. "Please choose a different one."
+                )
+            end
+        else
+            ngx.log(
+                ngx.NOTICE,
+                "[validations] HIBP unreachable; allowing. err=",
+                tostring(fetch_err)
+            )
+        end
     end
 
     return true
@@ -33,7 +74,7 @@ function Validation.createUser(params)
         {
             "password",
             exists = true,
-            min_length = 8,
+            min_length = MIN_PASSWORD_LENGTH,
             max_length = 128,
         },
         { "email", exists = true, min_length = 3, matches_pattern = "^[%w._%%+-]+@[%w.-]+%.%a%a+$" },
