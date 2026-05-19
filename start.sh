@@ -703,6 +703,20 @@ check_and_update_env() {
         echo -e "${GREEN}[+] All environment URLs are correctly configured!${NC}"
     fi
 
+    # ── Ensure OTP_SUPPRESS_FOR_EMAIL_REGEX is set for non-prod ───────
+    # Without this, Lapis attempts real SMTP delivery to E2E sink
+    # recipients like `*@e2e.invalid` — the MX bounces back to
+    # SMTP_FROM_EMAIL and floods that mailbox. helper/mail.lua gates
+    # the suppression on is_production_env, so injecting a non-empty
+    # default in prod would be a no-op; we still skip it on prod to
+    # avoid surprising SREs who may want suppression off entirely.
+    if [[ "$target_env" != "prod" ]]; then
+        if ! grep -q "^OTP_SUPPRESS_FOR_EMAIL_REGEX=" "$ENV_FILE"; then
+            echo -e "${YELLOW}[!] OTP_SUPPRESS_FOR_EMAIL_REGEX missing — appending default sink regex${NC}"
+            echo 'OTP_SUPPRESS_FOR_EMAIL_REGEX=^diytaxreturnmail\+e2e-.*@gmail\.com$|@e2e\.invalid$' >> "$ENV_FILE"
+        fi
+    fi
+
     return 0
 }
 
