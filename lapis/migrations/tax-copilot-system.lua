@@ -2769,4 +2769,41 @@ return {
               "to snake_case keys (was camelCase MTD field names on " ..
               "some rows due to classifier hardcode — see companion PR).")
     end,
+
+    -- 78. Rename legacy test-admin email `administrative@admin.com` to
+    -- `administrative@e2e.invalid`. The original placeholder address
+    -- resolves to a non-routable MX (admin.com → localhost.admin.com.
+    -- 127.0.0.1, times out) — every E2E login as the test admin
+    -- triggers an OTP send that bounces back to SMTP_FROM_EMAIL,
+    -- flooding `tenthmatrix.mailer@gmail.com` with Mail Delivery
+    -- Subsystem warnings.
+    --
+    -- The RFC 6761 `.invalid` TLD is guaranteed undeliverable, and the
+    -- OTP_SUPPRESS_FOR_EMAIL_REGEX baked into the chart by #401/#403
+    -- matches `@e2e\.invalid$` — so Lapis short-circuits the SMTP send
+    -- entirely instead of handing a doomed message to Gmail. Companion
+    -- workflow change in `deploy-docker-self-hosted.yml` rewrites the
+    -- `login-creds.json` file on each runner so E2E flows log in with
+    -- the new email.
+    --
+    -- Idempotent: only renames when the legacy email exists (so safe
+    -- to re-run on every deploy).
+    [78] = function()
+        db.query([[
+            UPDATE users
+            SET email = 'administrative@e2e.invalid',
+                username = 'administrative@e2e.invalid',
+                updated_at = NOW()
+            WHERE email = 'administrative@admin.com'
+        ]])
+        local res = db.select(
+            "COUNT(*) as cnt FROM users WHERE email = 'administrative@e2e.invalid'"
+        )
+        local count = (res and res[1] and res[1].cnt) or 0
+        print(string.format(
+            "[Tax Copilot] Renamed legacy test-admin to administrative@e2e.invalid " ..
+            "(rows currently bearing the new email: %d).",
+            count
+        ))
+    end,
 }

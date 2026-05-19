@@ -171,6 +171,23 @@ jobs:
           fi
         shell: bash
 
+      - name: Migrate legacy admin email in login-creds.json (INT)
+        run: |
+          # Companion to Lapis migration 78. The historical placeholder
+          # `administrative@admin.com` is non-deliverable (its MX times out)
+          # and floods SMTP_FROM_EMAIL with Mail Delivery Subsystem bounces
+          # on every E2E login. Rewriting to `@e2e.invalid` lets the chart-
+          # default OTP_SUPPRESS_FOR_EMAIL_REGEX short-circuit the SMTP send.
+          # Idempotent: only acts when the legacy literal is present.
+          CREDS="/home/bwalia/.secrets/opsapi/diytaxreturnuk/int/login-creds.json"
+          if [ -f "$CREDS" ] && grep -q '"administrative@admin\.com"' "$CREDS"; then
+            echo "[migrate] rewriting $CREDS → administrative@e2e.invalid"
+            sed -i 's/administrative@admin\.com/administrative@e2e.invalid/g' "$CREDS"
+          else
+            echo "[migrate] $CREDS already migrated or absent — no action"
+          fi
+        shell: bash
+
       - name: Make start.sh executable
         run: chmod +x ./start.sh
         shell: bash
@@ -356,6 +373,23 @@ jobs:
           else
             echo "Error: .env file not found at $SERVER_ENV"
             exit 1
+          fi
+        shell: bash
+
+      - name: Migrate legacy admin email in login-creds.json (Test)
+        run: |
+          # Companion to Lapis migration 78. The historical placeholder
+          # `administrative@admin.com` is non-deliverable (its MX times out)
+          # and floods SMTP_FROM_EMAIL with Mail Delivery Subsystem bounces
+          # on every E2E login. Rewriting to `@e2e.invalid` lets the chart-
+          # default OTP_SUPPRESS_FOR_EMAIL_REGEX short-circuit the SMTP send.
+          # Idempotent: only acts when the legacy literal is present.
+          CREDS="/home/bwalia/.secrets/opsapi/diytaxreturnuk/test/login-creds.json"
+          if [ -f "$CREDS" ] && grep -q '"administrative@admin\.com"' "$CREDS"; then
+            echo "[migrate] rewriting $CREDS → administrative@e2e.invalid"
+            sed -i 's/administrative@admin\.com/administrative@e2e.invalid/g' "$CREDS"
+          else
+            echo "[migrate] $CREDS already migrated or absent — no action"
           fi
         shell: bash
 
