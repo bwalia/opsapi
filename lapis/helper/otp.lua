@@ -25,6 +25,34 @@ local EXPIRY_SECONDS = 300  -- 5 minutes
 local MAX_ATTEMPTS = 5
 local SESSION_TOKEN_EXPIRY = 300  -- 5 minutes (matches OTP expiry)
 
+-- Environment detection — mirrors helper/mail.lua's current_env() so the OTP
+-- send path and the generic mail path agree on what counts as production.
+--
+-- CRITICAL: do NOT read LAPIS_ENVIRONMENT directly for the suppression gate.
+-- The helm chart (devops/helm-charts/diytaxreturn-lapis/templates/deployment.yaml)
+-- hardcodes LAPIS_ENVIRONMENT="production" on EVERY cluster env (dev/test/int/
+-- acc/prod) so the secret-templated config.lua selects its single
+-- config("production") block. The real deployment label is carried by
+-- OPSAPI_DEPLOY_ENV (= .Values.env). Reading LAPIS_ENVIRONMENT alone made acc
+-- look like prod here, so OTP suppression was skipped and every E2E admin login
+-- emailed administrative@admin.com — which Gmail bounces (MX -> 127.0.0.1
+-- timeout) back to SMTP_FROM_EMAIL. Read OPSAPI_DEPLOY_ENV first to match
+-- mail.lua's should_suppress_recipient. Falls back to "development" (not
+-- "production") so docker-compose int/test, where neither var is set, still
+-- suppress; suppression is additionally gated on the recipient regex, so real
+-- users are never affected even if the env is misdetected.
+local function current_env()
+    return os.getenv("OPSAPI_DEPLOY_ENV")
+        or os.getenv("LAPIS_ENVIRONMENT")
+        or "development"
+end
+
+-- True for both helm's `env: prod` value AND Lapis's "production" config-block
+-- name, so callers don't need to know which one's in play.
+local function is_production_env(env)
+    return env == "production" or env == "prod"
+end
+
 --- Validate a hex color string (e.g. "#dc2626"). Returns sanitized value or default.
 local function sanitize_hex_color(color, default)
     default = default or "#dc2626"
@@ -256,9 +284,9 @@ function OTP.sendToEmail(user, brand)
     -- When TEST_OTP_CODE is set, the bypass code is accepted by OTP.verify()
     -- but we still create a real OTP and send the email so users receive the code.
     -- This allows developers to bypass with the test code while real users get emails.
-    local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
+    local env = current_env()
     local test_code = os.getenv("TEST_OTP_CODE")
-    if env ~= "production" and test_code and #test_code >= 6 then
+    if not is_production_env(env) and test_code and #test_code >= 6 then
         ngx.log(ngx.NOTICE, "[OTP] Test bypass enabled — real OTP will also be created and emailed for ", user.email)
     end
 
@@ -272,11 +300,13 @@ function OTP.sendToEmail(user, brand)
     -- mailbox (diytaxreturnmail@gmail.com via Gmail plus-addressing). We
     -- still CREATE the OTP row above so OTP.verify works normally — only
     -- the SMTP send is skipped. Double-gated:
-    --   1) LAPIS_ENVIRONMENT must not be "production"  (acc + prod = always send)
+    --   1) Deployment env must not be production/prod (resolved via
+    --      current_env(), which reads OPSAPI_DEPLOY_ENV first — so acc/int/test
+    --      now suppress, instead of acc looking like prod and always sending)
     --   2) Recipient must match OTP_SUPPRESS_FOR_EMAIL_REGEX
     -- If the env var is unset, behaviour is identical to before this change.
     local suppress_regex = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
-    if env ~= "production" and suppress_regex and suppress_regex ~= "" then
+    if not is_production_env(env) and suppress_regex and suppress_regex ~= "" then
         local matched, regex_err = ngx.re.match(user.email, suppress_regex, "jo")
         if regex_err then
             ngx.log(ngx.WARN, "[OTP] Bad OTP_SUPPRESS_FOR_EMAIL_REGEX (", suppress_regex,
