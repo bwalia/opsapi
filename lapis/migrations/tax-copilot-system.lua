@@ -2769,4 +2769,119 @@ return {
               "to snake_case keys (was camelCase MTD field names on " ..
               "some rows due to classifier hardcode — see companion PR).")
     end,
+
+    -- 78. tax_subscription_plans — product catalogue for the iOS in-app
+    --     subscription (Apple StoreKit). google_product_id and
+    --     stripe_price_id are reserved for future Android/web payment
+    --     surfaces; v1 only populates apple_product_id.
+    [78] = function()
+        schema.create_table("tax_subscription_plans", {
+            { "id",                types.serial },
+            { "uuid",              types.varchar({ unique = true }) },
+            { "apple_product_id",  types.varchar({ unique = true }) },
+            { "google_product_id", types.varchar({ null = true }) },
+            { "stripe_price_id",   types.varchar({ null = true }) },
+            { "display_name",      types.varchar },
+            { "description",       types.text({ null = true }) },
+            { "price_cents",       types.integer },
+            { "currency",          types.varchar({ default = "'GBP'" }) },
+            { "period",            types.varchar },
+            { "is_active",         types.boolean({ default = true }) },
+            { "created_at",        types.time({ default = db.raw("NOW()") }) },
+            { "updated_at",        types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)"
+        })
+        schema.create_index("tax_subscription_plans", "apple_product_id")
+    end,
+
+    -- 79. Seed the single launch plan: DIYTaxReturnStandard, £5.99/month.
+    --     Idempotent — re-running the migration must not duplicate the
+    --     row (see SELECT-then-INSERT pattern used in migration [4]).
+    [79] = function()
+        local existing = db.select(
+            "uuid FROM tax_subscription_plans WHERE apple_product_id = ?",
+            "DIYTaxReturnStandard"
+        )
+        if not existing or #existing == 0 then
+            db.query([[
+                INSERT INTO tax_subscription_plans
+                    (uuid, apple_product_id, display_name, description,
+                     price_cents, currency, period, is_active,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            ]],
+                MigrationUtils.generateUUID(),
+                "DIYTaxReturnStandard",
+                "Standard",
+                "Full access to DIY Tax Return UK.",
+                599,
+                "GBP",
+                "month",
+                true
+            )
+        end
+    end,
+
+    -- 80. tax_user_subscriptions — per-user entitlement row, written by
+    --     FastAPI from /api/iap/validate (auth'd) and from the Apple
+    --     ASSN V2 webhook. original_transaction_id is globally unique
+    --     so a second user submitting the same receipt is rejected at
+    --     the DB layer (Apple's model: one entitlement per Apple ID).
+    --     `environment` is analytics-only, never used for gating.
+    --     `app_account_token` is reserved for the future StoreKit 2
+    --     migration; the in_app_purchase 3.x plugin uses StoreKit 1
+    --     which doesn't populate it, so v1 leaves this column NULL.
+    [80] = function()
+        schema.create_table("tax_user_subscriptions", {
+            { "id",                       types.serial },
+            { "uuid",                     types.varchar({ unique = true }) },
+            { "user_uuid",                types.varchar },
+            { "plan_uuid",                types.varchar({ null = true }) },
+            { "apple_product_id",         types.varchar },
+            { "original_transaction_id",  types.varchar({ unique = true }) },
+            { "latest_transaction_id",    types.varchar({ null = true }) },
+            { "status",                   types.varchar },
+            { "environment",              types.varchar },
+            { "purchased_at",             types.time({ null = true }) },
+            { "expires_at",               types.time({ null = true }) },
+            { "auto_renew",               types.boolean({ default = true }) },
+            { "cancel_reason",            types.varchar({ null = true }) },
+            { "latest_receipt",           types.text({ null = true }) },
+            { "app_account_token",        types.varchar({ null = true }) },
+            { "created_at",               types.time({ default = db.raw("NOW()") }) },
+            { "updated_at",               types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)"
+        })
+    end,
+
+    -- 81. Lookup indexes for tax_user_subscriptions. expires_at is
+    --     scanned by the reconciler sweep; app_account_token is
+    --     pre-indexed for the future StoreKit 2 cutover.
+    [81] = function()
+        schema.create_index("tax_user_subscriptions", "user_uuid")
+        schema.create_index("tax_user_subscriptions", "expires_at")
+        schema.create_index("tax_user_subscriptions", "app_account_token")
+    end,
+
+    -- 82. tax_processed_apple_notifications — dedup store for Apple
+    --     ASSN V2 webhooks. Phase 1 of the FastAPI webhook handler
+    --     verifies + INSERTs here + ACKs Apple within the 30s window;
+    --     Phase 2 (BackgroundTask / reconciler) re-decodes signed_payload
+    --     and applies state. Rows with processed_at IS NULL are either
+    --     orphans (webhook arrived before /validate) or transient
+    --     failures awaiting the 5-min reconciler sweep.
+    [82] = function()
+        schema.create_table("tax_processed_apple_notifications", {
+            { "id",                       types.serial },
+            { "notification_uuid",        types.varchar({ unique = true }) },
+            { "notification_type",        types.varchar },
+            { "original_transaction_id",  types.varchar({ null = true }) },
+            { "signed_payload",           types.text },
+            { "received_at",              types.time({ default = db.raw("NOW()") }) },
+            { "processed_at",             types.time({ null = true }) },
+            "PRIMARY KEY (id)"
+        })
+        schema.create_index("tax_processed_apple_notifications", "processed_at")
+        schema.create_index("tax_processed_apple_notifications", "original_transaction_id")
+    end,
 }
