@@ -1,0 +1,46 @@
+# Dev-frontend overlay for the Next.js dashboard.
+#
+# Activated by `start.sh -D` (or `--dev-frontend`). Layered on top of the
+# main docker-compose.yml via `-f docker-compose.yml -f
+# docker-compose.dev-frontend.yml`. Effects:
+#
+#   - Runs `npm run dev` (next dev) instead of the production standalone
+#     server, enabling hot module reload.
+#   - Bind-mounts the host's opsapi-dashboard source into the container, so
+#     edits are picked up instantly — no image rebuild on every change.
+#   - Anonymous volumes for node_modules and .next so the container's
+#     installed deps and build cache aren't shadowed by the host mount.
+#   - Builds only the Dockerfile "builder" stage (has node + the full
+#     toolchain) instead of the lean production runner.
+#   - Loosens the healthcheck start_period because `next dev` cold compile
+#     is slower than starting a pre-built server.
+#
+# Only the dashboard service is affected — every other service inherits
+# its definition from docker-compose.yml unchanged.
+
+services:
+  dashboard:
+    build:
+      context: ../opsapi-dashboard
+      dockerfile: Dockerfile
+      target: builder
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://127.0.0.1:4010}
+    environment:
+      - NODE_ENV=development
+      - PORT=8039
+      - NEXT_TELEMETRY_DISABLED=1
+    volumes:
+      # Live-mount the dashboard source — host edits propagate instantly.
+      - ../opsapi-dashboard:/app
+      # Anonymous volumes shield container-local artefacts from the bind
+      # mount above (host has no node_modules/.next, or a platform-wrong one).
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8039"]
+      interval: 30s
+      timeout: 20s
+      retries: 6
+      start_period: 90s

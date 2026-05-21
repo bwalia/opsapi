@@ -20,7 +20,8 @@ function UserQueries.create(params)
     userData.role = nil
     userData.namespace_id = nil
     userData.namespace_role = nil
-    userData.created_by = nil  -- Not a column in users table
+    -- created_by IS a column (added in migration 08_add_users_audit_columns).
+    -- It's passed straight through to record who created this user.
     if userData.uuid == nil then
         userData.uuid = Global.generateUUID()
     end
@@ -232,7 +233,17 @@ function UserQueries.update(id, params)
     local user = Users:find({
         uuid = id
     })
+    -- Return nil for a missing user so the caller can surface a 404 instead
+    -- of throwing on user:update(nil).
+    if not user then
+        return nil
+    end
     params.id = nil
+    -- created_by must never change after creation — strip it so an update
+    -- payload can't overwrite the original creator. updated_by IS persisted
+    -- (column added in migration 08_add_users_audit_columns) to record who
+    -- last modified the user.
+    params.created_by = nil
     return user:update(params, {
         returning = "*"
     })

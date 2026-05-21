@@ -40,6 +40,8 @@ show_help() {
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
+    echo "  -D, --dev-frontend    Run the Next.js dashboard via 'next dev' with hot reload"
+    echo "                        (source-mounted from ../opsapi-dashboard, no rebuild on edits)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Preset Environments:${NC}"
@@ -83,6 +85,7 @@ show_help() {
     echo "  ./start.sh -c -e dev                     # Just check/update .env for dev"
     echo "  ./start.sh -r                            # Reset database (fresh start)"
     echo "  ./start.sh -e remote -n -C               # CI/CD deployment (no dev mounts)"
+    echo "  ./start.sh -e local -D                    # Local + Next.js dashboard in dev mode (hot reload)"
     echo "  ./start.sh -j tax_copilot                # Only create tax-related tables"
     echo "  ./start.sh -j ecommerce,collaboration    # Multi-project: combined features"
     echo "  ./start.sh -j business                   # Business/Professional Services"
@@ -102,6 +105,7 @@ TARGET_ENV=""
 CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
+DEV_FRONTEND=false
 PROJECT_CODE=""
 APEX_DOMAIN=""
 ADMIN_EMAIL=""
@@ -155,6 +159,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -C|--ci)
             CI_MODE=true
+            shift
+            ;;
+        -D|--dev-frontend)
+            DEV_FRONTEND=true
             shift
             ;;
         -d|--domain)
@@ -1036,11 +1044,22 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
-# Build docker compose command based on CI mode
-# CI mode uses a separate compose file without dev volume mounts
+# Build docker compose command based on CI mode + dev-frontend flag.
+#
+# CI mode and dev-frontend are mutually exclusive in intent — CI runs the
+# production build with no mounts; dev-frontend mounts the dashboard source
+# for hot reload. If both are passed, CI wins (with a warning) since it's
+# the safer/production path.
 if $CI_MODE; then
+    if $DEV_FRONTEND; then
+        echo -e "${YELLOW}[!] -D ignored: --ci takes precedence (CI builds run the production image).${NC}"
+    fi
     echo -e "${BLUE}[i] CI/CD mode enabled - using docker-compose.ci.yml (no dev volume mounts)${NC}"
     COMPOSE_CMD="docker compose -f docker-compose.ci.yml"
+elif $DEV_FRONTEND; then
+    echo -e "${BLUE}[i] Dev frontend mode enabled - running Next.js dashboard via 'next dev' with hot reload${NC}"
+    echo -e "${BLUE}    Source mounted from ../opsapi-dashboard — edits propagate without rebuilding.${NC}"
+    COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.dev-frontend.yml"
 else
     COMPOSE_CMD="docker compose"
 fi
