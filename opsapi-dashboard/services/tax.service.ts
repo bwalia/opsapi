@@ -30,7 +30,12 @@ export interface TaxStatement {
   statement_date?: string;
   start_date?: string;
   end_date?: string;
-  status: 'uploaded' | 'processing' | 'extracted' | 'classified' | 'error';
+  /** Legacy/optional — backend does not emit this; use processing_status/workflow_step. */
+  status?: 'uploaded' | 'processing' | 'extracted' | 'classified' | 'error';
+  /** Backend pipeline stage (UPPERCASE): UPLOADED → EXTRACTED → CLASSIFIED. */
+  workflow_step?: string;
+  /** Backend processing state (UPPERCASE): UPLOADED | CLASSIFYING | COMPLETED | ERROR. */
+  processing_status?: string;
   transaction_count?: number;
   error_message?: string;
   created_at: string;
@@ -50,11 +55,16 @@ export interface TaxTransaction {
   amount: number;
   balance?: number;
   transaction_type: 'credit' | 'debit';
+  /** Category key/slug (the backend stores & returns `category`, e.g. "office_supplies"). */
+  category?: string;
   category_id?: number;
   category_name?: string;
   hmrc_category?: string;
   confidence?: number;
+  confidence_score?: number;
+  classification_status?: string;
   classification_source?: string;
+  is_tax_deductible?: boolean;
   is_business: boolean;
   is_verified: boolean;
   notes?: string;
@@ -65,11 +75,30 @@ export interface TaxTransaction {
 export interface TaxCategory {
   id: number;
   uuid: string;
+  /** Snake_case identifier, e.g. "office_supplies". */
+  key?: string;
+  /** Display name. The API also returns this as `name` for compatibility. */
+  label?: string;
   name: string;
+  /** 'income' | 'expense'. Also returned as `category_type`. */
+  type?: 'income' | 'expense';
+  category_type?: 'income' | 'expense';
+  is_tax_deductible?: boolean;
+  is_deductible?: boolean;
+  deduction_rate?: number;
+  hmrc_category_id?: number;
   hmrc_box?: string;
-  category_type: 'income' | 'expense';
-  is_deductible: boolean;
   description?: string;
+  examples?: string;
+  is_active?: boolean;
+}
+
+export interface TaxCategoryInput {
+  label: string;
+  type: 'income' | 'expense';
+  description?: string;
+  is_tax_deductible?: boolean;
+  key?: string;
 }
 
 export interface TaxReportCategoryBreakdown {
@@ -243,7 +272,9 @@ export const taxService = {
     return response.data?.data || response.data;
   },
 
-  async uploadStatement(file: File, bankAccountId: number, statementDate?: string): Promise<TaxStatement> {
+  // bankAccountId is the bank account's UUID (the list API returns `uuid as id`).
+  // The upload route accepts it as bank_account_id and resolves it as the UUID.
+  async uploadStatement(file: File, bankAccountId: string | number, statementDate?: string): Promise<TaxStatement> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('bank_account_id', String(bankAccountId));
@@ -280,11 +311,15 @@ export const taxService = {
   async getTransactions(filters: TaxTransactionFilters = {}): Promise<PaginatedResponse<TaxTransaction>> {
     const response = await apiClient.get(`${TAX_BASE}/transactions`, { params: buildParams(filters as unknown as Record<string, unknown>) });
     const d = response.data;
+    // The transactions list route returns the array under `items` (and `limit`),
+    // unlike most list endpoints which use `data`/`per_page`. Accept both so the
+    // dashboard works regardless of which shape the API emits.
+    const list = Array.isArray(d?.items) ? d.items : (Array.isArray(d?.data) ? d.data : []);
     return {
-      data: Array.isArray(d?.data) ? d.data : [],
+      data: list,
       total: d?.total || 0,
       page: d?.page || 1,
-      per_page: d?.per_page || 20,
+      per_page: d?.limit || d?.per_page || 20,
       total_pages: d?.total_pages || 0,
     };
   },
@@ -312,12 +347,35 @@ export const taxService = {
   },
 
   // ── Categories ──────────────────────────────────────────────────────────────
-  async getCategories(): Promise<TaxCategory[]> {
-    const response = await apiClient.get(`${TAX_BASE}/categories`);
+  async getCategories(opts: { includeInactive?: boolean } = {}): Promise<TaxCategory[]> {
+    const params = opts.includeInactive ? { include_inactive: 'true' } : undefined;
+    const response = await apiClient.get(`${TAX_BASE}/categories`, { params });
     const d = response.data;
     if (Array.isArray(d?.data)) return d.data;
     if (Array.isArray(d)) return d;
     return [];
+  },
+
+  async createCategory(data: TaxCategoryInput): Promise<TaxCategory> {
+    const params = new URLSearchParams();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+    const response = await apiClient.post(`${TAX_BASE}/categories`, params.toString());
+    return response.data?.data || response.data;
+  },
+
+  async updateCategory(uuid: string, data: Partial<TaxCategoryInput> & { is_active?: boolean }): Promise<TaxCategory> {
+    const params = new URLSearchParams();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+    const response = await apiClient.put(`${TAX_BASE}/categories/${uuid}`, params.toString());
+    return response.data?.data || response.data;
+  },
+
+  async deleteCategory(uuid: string): Promise<void> {
+    await apiClient.delete(`${TAX_BASE}/categories/${uuid}`);
   },
 
   // ── Reports ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Search,
   Upload,
@@ -13,6 +14,7 @@ import {
   AlertCircle,
   Loader2,
   FileUp,
+  Tags,
 } from 'lucide-react';
 import { Input, Table, Card, Modal, Pagination } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -26,7 +28,9 @@ import { formatDate, formatCurrency } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
-const STATUS_CONFIG: Record<string, { label: string; classes: string; icon: React.ReactNode }> = {
+type StatusKey = 'uploaded' | 'processing' | 'extracted' | 'classified' | 'error';
+
+const STATUS_CONFIG: Record<StatusKey, { label: string; classes: string; icon: React.ReactNode }> = {
   uploaded: { label: 'Uploaded', classes: 'bg-blue-100 text-blue-700', icon: <FileUp className="w-3 h-3" /> },
   processing: { label: 'Processing', classes: 'bg-amber-100 text-amber-700', icon: <Loader2 className="w-3 h-3 animate-spin" /> },
   extracted: { label: 'Extracted', classes: 'bg-purple-100 text-purple-700', icon: <CheckCircle className="w-3 h-3" /> },
@@ -34,7 +38,32 @@ const STATUS_CONFIG: Record<string, { label: string; classes: string; icon: Reac
   error: { label: 'Error', classes: 'bg-red-100 text-red-700', icon: <AlertCircle className="w-3 h-3" /> },
 };
 
+/**
+ * Map the backend statement state to a UI status key.
+ *
+ * The backend tracks two UPPERCASE fields (no lowercase `status` field exists):
+ *   - workflow_step:      UPLOADED → EXTRACTED → (classify) …
+ *   - processing_status:  UPLOADED | CLASSIFYING | COMPLETED | ERROR
+ *
+ * We key the pipeline UI primarily off workflow_step (which stage the
+ * statement is at), falling back to processing_status. This drives both the
+ * status badge and which action button (Extract vs Classify) is shown.
+ */
+function getStatusKey(s: TaxStatement): StatusKey {
+  const step = (s.workflow_step || '').toUpperCase();
+  const proc = (s.processing_status || '').toUpperCase();
+
+  if (proc === 'ERROR') return 'error';
+  if (proc === 'CLASSIFYING') return 'processing';
+  // Extracted but not yet classified.
+  if (step === 'EXTRACTED' || (proc === 'COMPLETED' && step !== 'CLASSIFIED')) return 'extracted';
+  if (step === 'CLASSIFIED') return 'classified';
+  if (proc === 'PROCESSING' || proc === 'EXTRACTING') return 'processing';
+  return 'uploaded';
+}
+
 function StatementsContent() {
+  const router = useRouter();
   const [statements, setStatements] = useState<TaxStatement[]>([]);
   const [bankAccounts, setBankAccounts] = useState<TaxBankAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,7 +73,10 @@ function StatementsContent() {
 
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedBankAccountId, setSelectedBankAccountId] = useState<number | ''>('');
+  // The bank-accounts API returns `id` aliased from the UUID (uuid as id),
+  // so this holds a UUID string, not a numeric id. The upload endpoint
+  // accepts it as bank_account_id (which it treats as the UUID).
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('');
   const [statementDate, setStatementDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
@@ -113,7 +145,7 @@ function StatementsContent() {
 
     setIsUploading(true);
     try {
-      await taxService.uploadStatement(selectedFile, Number(selectedBankAccountId), statementDate || undefined);
+      await taxService.uploadStatement(selectedFile, selectedBankAccountId, statementDate || undefined);
       toast.success('Statement uploaded successfully');
       setShowUploadModal(false);
       setSelectedFile(null);
@@ -142,17 +174,10 @@ function StatementsContent() {
     }
   };
 
-  const handleClassify = async (statement: TaxStatement) => {
-    setProcessingId(statement.id);
-    try {
-      const result = await taxService.classifyTransactions(statement.id);
-      toast.success(result.message || 'Classification started');
-      fetchStatements();
-    } catch {
-      toast.error('Failed to classify transactions');
-    } finally {
-      setProcessingId(null);
-    }
+  // Classification is manual (no AI): send the user to the Transactions page to
+  // review the extracted rows and assign categories themselves.
+  const handleReview = () => {
+    router.push('/dashboard/tax/transactions');
   };
 
   const handleDelete = async (statement: TaxStatement) => {
@@ -198,7 +223,7 @@ function StatementsContent() {
       key: 'status',
       header: 'Status',
       render: (item) => {
-        const config = STATUS_CONFIG[item.status] || STATUS_CONFIG.uploaded;
+        const config = STATUS_CONFIG[getStatusKey(item)];
         return (
           <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${config.classes}`}>
             {config.icon}
@@ -221,36 +246,41 @@ function StatementsContent() {
       key: 'actions',
       header: '',
       width: 'w-36',
-      render: (item) => (
+      render: (item) => {
+        const statusKey = getStatusKey(item);
+        return (
         <div className="flex items-center gap-1">
-          {item.status === 'uploaded' && (
+          {statusKey === 'uploaded' && (
             <button
               onClick={(e) => { e.stopPropagation(); handleExtract(item); }}
               disabled={processingId === item.id}
-              className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-600 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
               title="Extract transactions"
             >
-              {processingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {processingId === item.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+              Extract
             </button>
           )}
-          {item.status === 'extracted' && (
+          {statusKey === 'extracted' && (
             <button
-              onClick={(e) => { e.stopPropagation(); handleClassify(item); }}
-              disabled={processingId === item.id}
-              className="px-2 py-1 text-xs rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-50"
-              title="Classify transactions"
+              onClick={(e) => { e.stopPropagation(); handleReview(); }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100"
+              title="Review & categorise transactions"
             >
-              {processingId === item.id ? 'Processing...' : 'Classify'}
+              <Tags className="w-3.5 h-3.5" />
+              Categorise
             </button>
           )}
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
             className="p-1.5 rounded-lg hover:bg-red-50 text-secondary-500 hover:text-red-600"
+            title="Delete statement"
           >
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
-      ),
+        );
+      },
     },
   ];
 
@@ -328,7 +358,7 @@ function StatementsContent() {
               <label className="block text-sm font-medium text-secondary-700 mb-1">Bank Account *</label>
               <select
                 value={selectedBankAccountId}
-                onChange={(e) => setSelectedBankAccountId(e.target.value ? Number(e.target.value) : '')}
+                onChange={(e) => setSelectedBankAccountId(e.target.value)}
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
                 <option value="">Select a bank account...</option>

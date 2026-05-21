@@ -273,6 +273,19 @@ local _migrations = {
         end
     end,
 
+    -- Audit columns for the users table: who created / last updated each user.
+    -- Stores the actor's UUID (nullable — system-created or pre-existing rows
+    -- have none). CORE migration: the users table is shared by every project
+    -- (tax_copilot, diy-tax-return, etc.), so this always runs. Idempotent via
+    -- ADD COLUMN IF NOT EXISTS, so it's safe on databases that already have
+    -- the columns or are brand new.
+    ['08_add_users_audit_columns'] = function()
+        db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)")
+        db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_by VARCHAR(255)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_users_created_by ON users (created_by)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_users_updated_by ON users (updated_by)")
+    end,
+
     ['02_create_roles'] = function()
         schema.create_table("roles", { { "id", types.serial }, { "uuid", types.varchar({
             unique = true
@@ -1264,6 +1277,7 @@ local _migrations = {
     ['483_tax_create_transaction_audit']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 65),
     ['484_tax_add_transaction_audit_columns']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 66),
     ['485_tax_grant_custom_categories_permissions']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 5),
+    ['628_tax_seed_categories_menu']                 = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 6),
     ['486_tax_seed_max_custom_categories_setting']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 67),
     ['488_tax_seed_auth_email_taken_code']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 68),
 

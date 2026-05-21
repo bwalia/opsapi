@@ -25,6 +25,12 @@ import { formatDate, formatCurrency } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
+// Backend stores transaction_type as UPPERCASE ('CREDIT' / 'DEBIT'); compare
+// case-insensitively so income is not mis-rendered as an expense.
+function isCreditType(type?: string): boolean {
+  return String(type || '').toLowerCase() === 'credit';
+}
+
 function TransactionsContent() {
   const [transactions, setTransactions] = useState<TaxTransaction[]>([]);
   const [categories, setCategories] = useState<TaxCategory[]>([]);
@@ -90,10 +96,18 @@ function TransactionsContent() {
     }
   };
 
-  const handleCategoryChange = async (txn: TaxTransaction, categoryId: string) => {
+  // Manual classification: the backend stores `category` as the category KEY
+  // (slug). We also carry the category's tax-deductible flag and mark the txn
+  // CONFIRMED so it counts as classified. No AI involved.
+  const handleCategoryChange = async (txn: TaxTransaction, categoryKey: string) => {
     try {
-      await taxService.updateTransaction(txn.uuid, { category_id: Number(categoryId) } as Partial<TaxTransaction>);
-      toast.success('Category updated');
+      const cat = categories.find((c) => c.key === categoryKey);
+      await taxService.updateTransaction(txn.uuid, {
+        category: categoryKey,
+        is_tax_deductible: cat?.is_tax_deductible ?? cat?.is_deductible,
+        classification_status: categoryKey ? 'CONFIRMED' : 'PENDING',
+      } as Partial<TaxTransaction>);
+      toast.success(categoryKey ? 'Category assigned' : 'Category cleared');
       setEditingTxn(null);
       fetchTransactions();
     } catch {
@@ -102,11 +116,18 @@ function TransactionsContent() {
   };
 
   const stats = useMemo(() => {
-    const income = transactions.filter((t) => t.transaction_type === 'credit').reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0);
-    const expenses = transactions.filter((t) => t.transaction_type === 'debit').reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0);
+    const income = transactions.filter((t) => isCreditType(t.transaction_type)).reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0);
+    const expenses = transactions.filter((t) => !isCreditType(t.transaction_type)).reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0);
     const verified = transactions.filter((t) => t.is_verified).length;
     return { income, expenses, verified, total: transactions.length };
   }, [transactions]);
+
+  // Map a stored category key (e.g. "office_supplies") to its display label.
+  const labelForCategory = useCallback((key?: string): string | null => {
+    if (!key) return null;
+    const cat = categories.find((c) => c.key === key);
+    return cat?.label || cat?.name || key;
+  }, [categories]);
 
   const columns: TableColumn<TaxTransaction>[] = [
     {
@@ -133,7 +154,7 @@ function TransactionsContent() {
       header: 'Amount',
       sortable: true,
       render: (item) => {
-        const isCredit = item.transaction_type === 'credit';
+        const isCredit = isCreditType(item.transaction_type);
         return (
           <div className="flex items-center gap-1">
             {isCredit ? (
@@ -149,7 +170,7 @@ function TransactionsContent() {
       },
     },
     {
-      key: 'category_name',
+      key: 'category',
       header: 'Category',
       render: (item) => {
         if (editingTxn === item.uuid) {
@@ -162,30 +183,27 @@ function TransactionsContent() {
               }}
               onBlur={() => setEditingTxn(null)}
               autoFocus
-              className="text-xs px-2 py-1 border rounded focus:ring-1 focus:ring-primary-500 max-w-[150px]"
+              className="text-xs px-2 py-1 border rounded focus:ring-1 focus:ring-primary-500 max-w-[180px]"
             >
-              <option value="">Select...</option>
+              <option value="">Unclassified</option>
               {categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
+                <option key={cat.uuid || cat.key} value={cat.key}>{cat.label || cat.name}</option>
               ))}
             </select>
           );
         }
 
+        const label = labelForCategory(item.category);
         return (
           <button
-            onClick={() => { setEditingTxn(item.uuid); setEditCategory(String(item.category_id || '')); }}
-            className="text-xs px-2 py-1 rounded hover:bg-secondary-100 text-left max-w-[150px] truncate"
+            onClick={() => { setEditingTxn(item.uuid); setEditCategory(item.category || ''); }}
+            className="text-xs px-2 py-1 rounded hover:bg-secondary-100 text-left max-w-[180px] truncate"
+            title="Click to assign a category"
           >
-            {item.category_name || (
+            {label ? (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-600">{label}</span>
+            ) : (
               <span className="text-secondary-400 italic">Unclassified</span>
-            )}
-            {item.confidence != null && (
-              <span className={`ml-1 text-[10px] ${
-                item.confidence > 0.8 ? 'text-green-500' : item.confidence > 0.5 ? 'text-amber-500' : 'text-red-500'
-              }`}>
-                ({(item.confidence * 100).toFixed(0)}%)
-              </span>
             )}
           </button>
         );

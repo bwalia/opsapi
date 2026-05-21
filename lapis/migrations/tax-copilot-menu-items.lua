@@ -327,4 +327,66 @@ return {
 
         print("[Tax Copilot] Granted permissions for tax_app_settings + tax_custom_categories")
     end,
+
+    -- =========================================================================
+    -- [6] Add the "Categories" sidebar menu item under Tax and enable it for
+    -- every namespace. The `tax_categories` *module* was already registered in
+    -- step [2]; this only adds the navigable menu entry + per-namespace config.
+    -- Idempotent: skips rows that already exist.
+    -- =========================================================================
+    [6] = function()
+        local MigrationUtils = require("helper.migration-utils")
+        local timestamp = MigrationUtils.getCurrentTimestamp()
+
+        -- Resolve the parent "tax" menu item created in step [1].
+        local parent = db.select("* FROM menu_items WHERE key = ?", "tax")
+        local parent_id = (#parent > 0) and parent[1].id or nil
+
+        local menu_key = "tax_categories"
+        local existing = db.select("* FROM menu_items WHERE key = ?", menu_key)
+        if #existing == 0 then
+            db.insert("menu_items", {
+                uuid = MigrationUtils.generateUUID(),
+                key = menu_key,
+                name = "Categories",
+                icon = "Tags",
+                path = "/dashboard/tax/categories",
+                module = "tax_categories",
+                required_action = "read",
+                priority = 35,
+                parent_id = parent_id,
+                is_active = true,
+                is_admin_only = false,
+                always_show = false,
+                settings = "{}",
+                created_at = timestamp,
+                updated_at = timestamp,
+            })
+        end
+
+        -- Enable the new menu item for every existing namespace.
+        local menu_rows = db.select("* FROM menu_items WHERE key = ?", menu_key)
+        if #menu_rows > 0 then
+            local menu_item = menu_rows[1]
+            local namespaces = db.select("* FROM namespaces")
+            for _, ns in ipairs(namespaces) do
+                local exists = db.select([[
+                    * FROM namespace_menu_config
+                    WHERE namespace_id = ? AND menu_item_id = ?
+                ]], ns.id, menu_item.id)
+                if #exists == 0 then
+                    db.insert("namespace_menu_config", {
+                        uuid = MigrationUtils.generateUUID(),
+                        namespace_id = ns.id,
+                        menu_item_id = menu_item.id,
+                        is_enabled = true,
+                        created_at = timestamp,
+                        updated_at = timestamp,
+                    })
+                end
+            end
+        end
+
+        print("[Tax Copilot] Seeded Categories menu item")
+    end,
 }

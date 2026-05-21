@@ -22,7 +22,8 @@ function TaxCategoryQueries.getAll(params)
     end
     if params.search and #params.search > 0 then
         local search = db.escape_literal("%" .. params.search .. "%")
-        table.insert(where_clauses, "(name ILIKE " .. search .. " OR description ILIKE " .. search .. ")")
+        -- The display column is `label` (there is no `name` column on this table).
+        table.insert(where_clauses, "(label ILIKE " .. search .. " OR key ILIKE " .. search .. " OR description ILIKE " .. search .. ")")
     end
 
     local where = table.concat(where_clauses, " AND ")
@@ -30,7 +31,7 @@ function TaxCategoryQueries.getAll(params)
     local per_page = tonumber(params.per_page) or 100
     local offset = (page - 1) * per_page
 
-    local rows = db.select("* FROM tax_categories WHERE " .. where .. " ORDER BY type, name LIMIT ? OFFSET ?",
+    local rows = db.select("* FROM tax_categories WHERE " .. where .. " ORDER BY type, label LIMIT ? OFFSET ?",
         per_page, offset)
     local count = db.select("COUNT(*) as total FROM tax_categories WHERE " .. where)
     return rows, count and count[1] and count[1].total or 0
