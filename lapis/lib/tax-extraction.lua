@@ -62,6 +62,47 @@ local function clean_amount(str)
     return tonumber(val)
 end
 
+-- Strip control characters and any bytes that are not valid UTF-8, returning a
+-- string that is always safe to store in a UTF-8 Postgres column. This matters
+-- because a multi-byte currency symbol (£ = 0xC2 0xA3) can leave an orphaned
+-- lead byte behind once amounts are stripped from a line — and Postgres rejects
+-- the whole INSERT with "invalid byte sequence for encoding UTF8". Valid
+-- multi-byte sequences (e.g. accented merchant names) are preserved.
+local function sanitize_text(s)
+    if not s then return "" end
+    local out = {}
+    local i, n = 1, #s
+    while i <= n do
+        local c = s:byte(i)
+        if c < 32 or c == 127 then
+            out[#out + 1] = " "      -- control char -> separator
+            i = i + 1
+        elseif c < 0x80 then
+            out[#out + 1] = string.char(c)
+            i = i + 1
+        elseif c >= 0xC2 and c <= 0xDF then
+            local c2 = s:byte(i + 1)
+            if c2 and c2 >= 0x80 and c2 <= 0xBF then
+                out[#out + 1] = s:sub(i, i + 1); i = i + 2
+            else i = i + 1 end       -- drop invalid lead byte
+        elseif c >= 0xE0 and c <= 0xEF then
+            local c2, c3 = s:byte(i + 1), s:byte(i + 2)
+            if c2 and c3 and c2 >= 0x80 and c2 <= 0xBF and c3 >= 0x80 and c3 <= 0xBF then
+                out[#out + 1] = s:sub(i, i + 2); i = i + 3
+            else i = i + 1 end
+        elseif c >= 0xF0 and c <= 0xF4 then
+            local c2, c3, c4 = s:byte(i + 1), s:byte(i + 2), s:byte(i + 3)
+            if c2 and c3 and c4 and c2 >= 0x80 and c2 <= 0xBF
+               and c3 >= 0x80 and c3 <= 0xBF and c4 >= 0x80 and c4 <= 0xBF then
+                out[#out + 1] = s:sub(i, i + 3); i = i + 4
+            else i = i + 1 end
+        else
+            i = i + 1                -- stray continuation / illegal byte -> drop
+        end
+    end
+    return (table.concat(out):gsub("%s+", " "):match("^%s*(.-)%s*$")) or ""
+end
+
 -- ---------------------------------------------------------------------------
 -- CSV Extraction
 -- ---------------------------------------------------------------------------
@@ -273,62 +314,92 @@ function Extraction.extract_from_text(text)
     elseif text_lower:match("monzo") then bank = "monzo"
     end
 
-    -- Parse line by line, looking for date-prefixed transaction rows
-    for line in text:gmatch("[^\r\n]+") do
-        local trimmed = line:match("^%s*(.-)%s*$")
-        if trimmed and #trimmed > 0 then
-            -- Pattern: DD/MM/YYYY or DD Mon YYYY followed by description and amounts
-            local date_str, rest
+    -- pdftotext -layout keeps columns aligned, but £ is 2 bytes (0xC2 0xA3) in
+    -- UTF-8 while header text is ASCII. Normalising £ to a single byte keeps
+    -- byte offsets equal to visual columns, so we can classify each amount by
+    -- the column it sits under (Debit / Credit / Balance).
+    local function normalise(line) return (line:gsub("£", "#")) end
 
-            -- DD/MM/YYYY format
-            date_str, rest = trimmed:match("^(%d%d[/%-]%d%d[/%-]%d%d%d?%d?)%s+(.+)")
-            if not date_str then
-                -- DD Mon YYYY format
-                date_str, rest = trimmed:match("^(%d%d?%s+%a+%s+%d%d%d%d)%s+(.+)")
+    -- First pass: locate a Debit/Credit/Balance column header, if present.
+    local col_debit, col_credit, col_balance
+    for line in text:gmatch("[^\r\n]+") do
+        local low = normalise(line):lower()
+        if low:find("balance") and (low:find("debit") or low:find("credit"))
+           and (low:find("date") or low:find("description") or low:find("details")) then
+            col_debit = low:find("debit")
+            col_credit = low:find("credit")
+            col_balance = low:find("balance")
+            break
+        end
+    end
+    local has_columns = col_balance ~= nil and (col_debit ~= nil or col_credit ~= nil)
+
+    -- Second pass: parse date-prefixed transaction rows.
+    local prev_balance = nil
+    for line in text:gmatch("[^\r\n]+") do
+        local norm = normalise(line)
+
+        -- Match a leading date (DD/MM/YYYY or DD Mon YYYY) and capture where it
+        -- ends so amount positions can be measured against the header columns.
+        local date_end, date_str = select(2, norm:find("^%s*(%d%d?[/%-]%d%d?[/%-]%d%d%d?%d?)%s")),
+                                    norm:match("^%s*(%d%d?[/%-]%d%d?[/%-]%d%d%d?%d?)%s")
+        if not date_str then
+            date_end, date_str = select(2, norm:find("^%s*(%d%d?%s+%a+%s+%d%d%d%d)%s")),
+                                 norm:match("^%s*(%d%d?%s+%a+%s+%d%d%d%d)%s")
+        end
+
+        local parsed_date = date_str and parse_date_uk(date_str)
+        if parsed_date and date_end then
+            -- Collect amounts with their start column (relative to the normalised
+            -- line, which is column-aligned with the header).
+            local amts, idx = {}, date_end + 1
+            while true do
+                local s, e = norm:find("#?[%d,]+%.%d%d", idx)
+                if not s then break end
+                -- Drop the synthetic '#' (normalised £) before parsing the number.
+                amts[#amts + 1] = { pos = s, val = clean_amount((norm:sub(s, e):gsub("#", ""))) }
+                idx = e + 1
             end
 
-            if date_str and rest then
-                local parsed_date = parse_date_uk(date_str)
-                if parsed_date then
-                    -- Extract amounts from the end of the line
-                    -- Look for patterns like: description    1,234.56    5,678.90
-                    local amounts = {}
-                    for amt in rest:gmatch("[£]?[%d,]+%.%d%d") do
-                        table.insert(amounts, clean_amount(amt))
+            if #amts > 0 then
+                -- Description is the text between the date and the first amount.
+                local description = sanitize_text(norm:sub(date_end + 1, amts[1].pos - 1))
+
+                -- The rightmost amount is the running balance; the first amount
+                -- (when there are 2+) is the transaction value.
+                local txn = amts[1]
+                local balance = (#amts > 1) and amts[#amts].val or nil
+
+                -- Classify type. Prefer column position; otherwise fall back to
+                -- description keywords, then to balance direction.
+                local txn_type
+                if has_columns and col_debit and col_credit then
+                    txn_type = (math.abs(txn.pos - col_debit) <= math.abs(txn.pos - col_credit))
+                        and "DEBIT" or "CREDIT"
+                else
+                    txn_type = "DEBIT"
+                    local dl = description:lower()
+                    if dl:match("credit") or dl:match("received") or dl:match("salary")
+                       or dl:match("transfer in") or dl:match("paid in")
+                       or dl:match("bacs credit") or dl:match("faster payment received")
+                       or dl:match("deposit") or dl:match("refund") then
+                        txn_type = "CREDIT"
                     end
-
-                    -- Remove amounts from description
-                    local description = rest:gsub("[£]?[%d,]+%.%d%d", ""):match("^%s*(.-)%s*$") or ""
-                    -- Clean up extra spaces
-                    description = description:gsub("%s+", " ")
-
-                    if #amounts > 0 then
-                        local amount = amounts[1]
-                        local balance = amounts[#amounts]
-                        if #amounts > 1 then
-                            amount = amounts[1]
-                            balance = amounts[#amounts]
-                        end
-
-                        -- Determine type from keywords or amount sign
-                        local txn_type = "DEBIT"
-                        local desc_lower = description:lower()
-                        if desc_lower:match("credit") or desc_lower:match("received") or
-                           desc_lower:match("transfer in") or desc_lower:match("paid in") or
-                           desc_lower:match("bacs credit") or desc_lower:match("faster payment received") then
-                            txn_type = "CREDIT"
-                        end
-
-                        table.insert(transactions, {
-                            date = parsed_date,
-                            description = description,
-                            amount = math.abs(amount or 0),
-                            transaction_type = txn_type,
-                            balance = (#amounts > 1) and balance or nil,
-                            source_bank = bank,
-                        })
+                    if balance and prev_balance then
+                        if balance > prev_balance then txn_type = "CREDIT"
+                        elseif balance < prev_balance then txn_type = "DEBIT" end
                     end
                 end
+                if balance then prev_balance = balance end
+
+                table.insert(transactions, {
+                    date = parsed_date,
+                    description = description,
+                    amount = math.abs(txn.val or 0),
+                    transaction_type = txn_type,
+                    balance = balance,
+                    source_bank = bank,
+                })
             end
         end
     end

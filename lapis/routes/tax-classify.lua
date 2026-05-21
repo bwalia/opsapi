@@ -50,16 +50,19 @@ return function(app)
                     return { status = 401, json = { error = "User not found" } }
                 end
 
-                -- Verify statement ownership and workflow state
+                -- Verify statement ownership and workflow state. Frontend sends
+                -- the UUID (list API aliases uuid as id); resolve the integer PK
+                -- for the tax_transactions.statement_id (integer FK) queries.
                 local statements = db.select(
-                    "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                    statement_id, user_id
+                    "* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1",
+                    tostring(statement_id), user_id
                 )
                 if #statements == 0 then
                     return { status = 404, json = { error = "Statement not found" } }
                 end
 
                 local stmt = statements[1]
+                local stmt_pk = stmt.id  -- integer primary key for DB writes
                 if stmt.workflow_step == "FILED" then
                     return { status = 409, json = { error = "Cannot reclassify a filed statement" } }
                 end
@@ -67,7 +70,7 @@ return function(app)
                 -- Get unclassified transactions
                 local transactions = db.select(
                     "* FROM tax_transactions WHERE statement_id = ? AND (classification_status = 'PENDING' OR classification_status IS NULL) ORDER BY id",
-                    statement_id
+                    stmt_pk
                 )
 
                 if #transactions == 0 then
@@ -81,7 +84,7 @@ return function(app)
                 db.update("tax_statements", {
                     processing_status = "CLASSIFYING",
                     updated_at = db.raw("NOW()"),
-                }, { id = statement_id })
+                }, { id = stmt_pk })
 
                 -- Start Langfuse trace
                 local langfuse = pcall(require, "lib.langfuse") and require("lib.langfuse") or nil
@@ -95,7 +98,7 @@ return function(app)
                 -- Run classification pipeline
                 local ok_cls, Classifier = pcall(require, "lib.tax-classifier")
                 if not ok_cls then
-                    db.update("tax_statements", { processing_status = "ERROR", updated_at = db.raw("NOW()") }, { id = statement_id })
+                    db.update("tax_statements", { processing_status = "ERROR", updated_at = db.raw("NOW()") }, { id = stmt_pk })
                     return { status = 500, json = { error = "Classifier not available" } }
                 end
 
@@ -138,7 +141,7 @@ return function(app)
                     workflow_step = "CLASSIFIED",
                     processing_status = "COMPLETED",
                     updated_at = db.raw("NOW()"),
-                }, { id = statement_id })
+                }, { id = stmt_pk })
 
                 -- Audit log
                 pcall(function()

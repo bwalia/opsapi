@@ -39,17 +39,24 @@ return function(app)
                 end
 
                 -- Fetch statement
+                -- The frontend works with the statement UUID (the list API
+                -- aliases `uuid as id`), so look up by uuid. stmt.id below is
+                -- the real integer PK used for all subsequent writes.
                 local statements = db.select(
-                    "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                    statement_id, user_id
+                    "* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1",
+                    tostring(statement_id), user_id
                 )
                 if #statements == 0 then
                     return { status = 404, json = { error = "Statement not found" } }
                 end
                 local stmt = statements[1]
+                local stmt_pk = stmt.id  -- integer primary key for DB writes
 
                 -- Download file from MinIO to temp path
-                local file_key = stmt.minio_key or stmt.file_path
+                -- File location lives in minio_object_key / minio_bucket (the
+                -- columns the upload writes). Keep legacy fallbacks just in case.
+                local file_key = stmt.minio_object_key or stmt.minio_key or stmt.file_path
+                local file_bucket = stmt.minio_bucket
                 if not file_key then
                     return { status = 400, json = { error = "Statement has no file attached" } }
                 end
@@ -65,7 +72,7 @@ return function(app)
                     return { status = 500, json = { error = "MinIO not configured" } }
                 end
 
-                local presigned_url = minio:getPresignedUrl(file_key, 300)
+                local presigned_url = minio:getPresignedUrl(file_key, 300, file_bucket)
                 if not presigned_url then
                     return { status = 500, json = { error = "Could not get file from storage" } }
                 end
@@ -120,7 +127,7 @@ return function(app)
                     if details.period_end then updates.period_end = details.period_end end
                     if next(updates) then
                         updates.updated_at = db.raw("NOW()")
-                        db.update("tax_statements", updates, { id = statement_id })
+                        db.update("tax_statements", updates, { id = stmt_pk })
                     end
                 end
 
@@ -143,21 +150,28 @@ return function(app)
                     return { status = 401, json = { error = "User not found" } }
                 end
 
+                -- The frontend works with the statement UUID (the list API
+                -- aliases `uuid as id`), so look up by uuid. stmt.id below is
+                -- the real integer PK used for all subsequent writes.
                 local statements = db.select(
-                    "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                    statement_id, user_id
+                    "* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1",
+                    tostring(statement_id), user_id
                 )
                 if #statements == 0 then
                     return { status = 404, json = { error = "Statement not found" } }
                 end
                 local stmt = statements[1]
+                local stmt_pk = stmt.id  -- integer primary key for DB writes
 
                 -- Check workflow step
                 if stmt.workflow_step and stmt.workflow_step ~= "UPLOADED" and stmt.workflow_step ~= "EXTRACTED" then
                     return { status = 409, json = { error = "Statement is past extraction stage" } }
                 end
 
-                local file_key = stmt.minio_key or stmt.file_path
+                -- File location lives in minio_object_key / minio_bucket (the
+                -- columns the upload writes). Keep legacy fallbacks just in case.
+                local file_key = stmt.minio_object_key or stmt.minio_key or stmt.file_path
+                local file_bucket = stmt.minio_bucket
                 if not file_key then
                     return { status = 400, json = { error = "Statement has no file attached" } }
                 end
@@ -171,7 +185,7 @@ return function(app)
                     return { status = 500, json = { error = "MinIO not configured" } }
                 end
 
-                local presigned_url = minio:getPresignedUrl(file_key, 300)
+                local presigned_url = minio:getPresignedUrl(file_key, 300, file_bucket)
                 if not presigned_url then
                     return { status = 500, json = { error = "Could not get file from storage" } }
                 end
@@ -202,13 +216,13 @@ return function(app)
                 db.update("tax_statements", {
                     processing_status = "PROCESSING",
                     updated_at = db.raw("NOW()"),
-                }, { id = statement_id })
+                }, { id = stmt_pk })
 
                 -- Run extraction
                 local ok_ext, Extraction = pcall(require, "lib.tax-extraction")
                 if not ok_ext then
                     os.remove(tmp_path)
-                    db.update("tax_statements", { processing_status = "ERROR", updated_at = db.raw("NOW()") }, { id = statement_id })
+                    db.update("tax_statements", { processing_status = "ERROR", updated_at = db.raw("NOW()") }, { id = stmt_pk })
                     return { status = 500, json = { error = "Extraction module not available" } }
                 end
 
@@ -227,17 +241,17 @@ return function(app)
                     db.update("tax_statements", {
                         processing_status = "ERROR",
                         updated_at = db.raw("NOW()"),
-                    }, { id = statement_id })
+                    }, { id = stmt_pk })
                     return { status = 422, json = { error = "Extraction failed: " .. tostring(err) } }
                 end
 
                 -- Insert extracted transactions
                 local inserted = 0
                 for _, txn in ipairs(result.transactions or {}) do
-                    local ok_insert = pcall(function()
+                    local ok_insert, insert_err = pcall(function()
                         db.insert("tax_transactions", {
                             uuid = Global.generateStaticUUID(),
-                            statement_id = tonumber(statement_id),
+                            statement_id = stmt_pk,
                             bank_account_id = stmt.bank_account_id,
                             user_id = user_id,
                             transaction_date = txn.date,
@@ -253,14 +267,21 @@ return function(app)
                     end)
                     if ok_insert then
                         inserted = inserted + 1
+                    else
+                        -- Don't fail the whole batch on one bad row, but make the
+                        -- failure visible — a silent pcall here once hid an
+                        -- invalid-UTF8 description that dropped every row.
+                        ngx.log(ngx.ERR, "tax-extract: transaction insert failed for statement ",
+                            stmt_pk, ": ", tostring(insert_err))
                     end
                 end
 
-                -- Update statement
+                -- Update statement. NOTE: transaction_count is NOT a stored
+                -- column — the list query derives it via a COUNT subquery on
+                -- tax_transactions — so we must not write it here.
                 local stmt_updates = {
                     processing_status = "COMPLETED",
                     workflow_step = "EXTRACTED",
-                    transaction_count = inserted,
                     updated_at = db.raw("NOW()"),
                 }
                 if result.bank then stmt_updates.bank_name = result.bank end
@@ -272,7 +293,7 @@ return function(app)
                         stmt_updates.closing_balance = result.bank_details.closing_balance
                     end
                 end
-                db.update("tax_statements", stmt_updates, { id = statement_id })
+                db.update("tax_statements", stmt_updates, { id = stmt_pk })
 
                 -- Audit log
                 pcall(function()
@@ -313,14 +334,17 @@ return function(app)
                 return { status = 401, json = { error = "User not found" } }
             end
 
-            -- Verify statement belongs to user
+            -- Verify statement belongs to user. Frontend passes the UUID
+            -- (list API aliases uuid as id); resolve the integer PK for the
+            -- tax_transactions.statement_id (integer FK) queries below.
             local statements = db.select(
-                "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                self.params.statement_id, user_id
+                "* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1",
+                tostring(self.params.statement_id), user_id
             )
             if #statements == 0 then
                 return { status = 404, json = { error = "Statement not found" } }
             end
+            local stmt_pk = statements[1].id
 
             local page = tonumber(self.params.page) or 1
             local per_page = tonumber(self.params.per_page) or 100
@@ -328,12 +352,12 @@ return function(app)
 
             local transactions = db.select(
                 "* FROM tax_transactions WHERE statement_id = ? ORDER BY transaction_date ASC, id ASC LIMIT ? OFFSET ?",
-                self.params.statement_id, per_page, offset
+                stmt_pk, per_page, offset
             )
 
             local count_result = db.select(
                 "COUNT(*) as total FROM tax_transactions WHERE statement_id = ?",
-                self.params.statement_id
+                stmt_pk
             )
             local total = count_result[1] and count_result[1].total or 0
 
