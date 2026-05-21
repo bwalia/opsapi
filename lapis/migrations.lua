@@ -1286,6 +1286,22 @@ local _migrations = {
     ['497_tax_widen_error_occurrence_tenant_ns']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 76),
     ['498_tax_backfill_orphan_category_hmrc_links']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 77),
 
+    -- 499–503: Apple in-app subscription tables (iOS StoreKit, ASSN V2).
+    --   499  → tax_subscription_plans (product catalogue, multi-platform-ready)
+    --   500  → seed the single launch plan: DIYTaxReturnStandard £5.99/mo
+    --   501  → tax_user_subscriptions (per-user entitlement, FastAPI writes)
+    --   502  → indexes for user_uuid / expires_at / app_account_token
+    --   503  → tax_processed_apple_notifications (webhook dedup + orphan store)
+    -- Numeric prefixes 500–503 coexist with the CRM block's 500_/501_ keys
+    -- below — Lapis tracks applied migrations by the full string key, not
+    -- the numeric portion, and dup numerics already appear across feature
+    -- blocks elsewhere in this table.
+    ['499_tax_create_subscription_plans']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 78),
+    ['500_tax_seed_subscription_plan_standard']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 79),
+    ['501_tax_create_user_subscriptions']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 80),
+    ['502_tax_add_user_subscriptions_indexes']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 81),
+    ['503_tax_create_processed_apple_notifications'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 82),
+
     -- =========================================================================
     -- CORE AUTH: Password reset tokens
     -- =========================================================================
