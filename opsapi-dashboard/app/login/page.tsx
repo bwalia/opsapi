@@ -31,24 +31,28 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, token, _hasHydrated, router, setToken]);
 
-  // Show loading while hydrating
+  // Show loading while hydrating — same neutral background as the app shell.
   if (!_hasHydrated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-secondary-900 via-secondary-800 to-primary-900">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-10 h-10 text-primary-500 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-secondary-900 via-secondary-800 to-primary-900 p-4">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-1/2 -right-1/2 w-full h-full bg-primary-500/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-1/2 -left-1/2 w-full h-full bg-primary-500/5 rounded-full blur-3xl" />
+    // Uses the same `bg-background` token as the dashboard so the login screen
+    // stays visually consistent across light/dark themes (no inverting
+    // gradient). A pair of soft, theme-aware accent glows add depth without
+    // fighting the surface palette.
+    <div className="relative min-h-screen flex items-center justify-center bg-background p-4 overflow-hidden">
+      {/* Subtle accent glows — tinted by the active accent, faint in both themes */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute -top-40 -right-40 w-[32rem] h-[32rem] bg-primary-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-[32rem] h-[32rem] bg-primary-500/5 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative z-10">
+      <div className="relative z-10 w-full max-w-md">
         <LoginForm />
       </div>
     </div>

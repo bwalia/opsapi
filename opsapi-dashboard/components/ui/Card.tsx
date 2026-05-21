@@ -11,16 +11,19 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, variant = 'default', padding = 'md', children, ...props }, ref) => {
     const variants = {
+      // Flat card with a hairline border — the refined-SaaS default.
       default: 'bg-surface border border-secondary-200',
-      elevated: 'bg-surface-elevated shadow-lg border border-secondary-100',
-      outlined: 'bg-transparent border-2 border-secondary-200',
+      // Elevated: soft low-spread shadow + hairline border (no heavy drop).
+      elevated: 'bg-surface border border-secondary-200 shadow-md',
+      // Outlined: 1px (not 2px) for a lighter feel.
+      outlined: 'bg-transparent border border-secondary-200',
     };
 
     const paddings = {
       none: '',
       sm: 'p-4',
-      md: 'p-6',
-      lg: 'p-8',
+      md: 'p-5',
+      lg: 'p-7',
     };
 
     return (

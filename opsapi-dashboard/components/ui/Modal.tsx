@@ -26,23 +26,38 @@ const Modal: React.FC<ModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = title ? `modal-title-${title.replace(/\s+/g, '-').toLowerCase()}` : undefined;
 
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+  // Keep a stable ref to the latest onClose so the Escape listener never needs
+  // onClose in its dependency array. Callers commonly pass an inline arrow
+  // (new identity each render); without this, the effect below would re-run on
+  // every parent render and the focus() call would steal focus out of inputs
+  // mid-typing.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
+  // Focus the modal ONLY when it transitions open — depends on isOpen alone,
+  // so re-renders while open (e.g. typing in a field) don't re-trigger focus.
+  useEffect(() => {
     if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'hidden';
-      // Focus the modal when it opens
       modalRef.current?.focus();
     }
+  }, [isOpen]);
+
+  // Escape-to-close + body scroll lock. Keyed on isOpen only; uses onCloseRef
+  // so a changing onClose identity doesn't re-subscribe the listener.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
+    document.addEventListener('keydown', handleEscape);
+    document.body.style.overflow = 'hidden';
 
     return () => {
       document.removeEventListener('keydown', handleEscape);
       document.body.style.overflow = '';
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

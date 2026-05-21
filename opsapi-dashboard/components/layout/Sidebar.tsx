@@ -59,16 +59,23 @@ const NavItemLink = memo(function NavItemLink({
       onClick={onClick}
       prefetch={false}
       className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+        "group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-colors duration-150",
         isCollapsed && "justify-center px-2",
         isActive
-          ? "bg-primary-500/10 text-primary-500 border-l-4 border-primary-500 ml-0 pl-2"
-          : "text-secondary-600 hover:bg-secondary-100 hover:text-secondary-900",
+          ? "bg-primary-500/10 text-primary-600"
+          : "text-secondary-800 hover:bg-secondary-100 hover:text-secondary-900",
       )}
       title={isCollapsed ? item.name : undefined}
     >
+      {/* Active indicator: subtle inset bar, not a heavy left border */}
+      {isActive && !isCollapsed && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r-full bg-primary-500" />
+      )}
       <Icon
-        className={cn("w-5 h-5 shrink-0", isActive && "text-primary-500")}
+        className={cn(
+          "w-5 h-5 shrink-0 transition-colors",
+          isActive ? "text-primary-600" : "text-secondary-600 group-hover:text-secondary-900",
+        )}
       />
       {!isCollapsed && (
         <>
@@ -300,7 +307,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
         <nav className="flex flex-col flex-1 p-4 overflow-hidden" aria-label="Main navigation">
           <div className="flex-1 space-y-1 overflow-y-auto scrollbar-thin">
             {!isCollapsed && (
-              <p className="px-3 mb-2 text-xs font-semibold text-secondary-400 uppercase tracking-wider">
+              <p className="px-3 mb-2 text-[11px] font-semibold text-secondary-500 uppercase tracking-[0.08em]">
                 Main Menu
               </p>
             )}
@@ -347,7 +354,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
           {/* Secondary Navigation */}
           <div className="pt-4 mt-4 border-t border-secondary-200 space-y-1 shrink-0">
             {!isCollapsed && secondaryMenu.length > 0 && (
-              <p className="px-3 mb-2 text-xs font-semibold text-secondary-400 uppercase tracking-wider">
+              <p className="px-3 mb-2 text-[11px] font-semibold text-secondary-500 uppercase tracking-[0.08em]">
                 Settings
               </p>
             )}

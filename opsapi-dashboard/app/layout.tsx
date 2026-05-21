@@ -1,12 +1,17 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Geist } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
+import { ThemeProvider, ThemeScript } from '@/contexts/ThemeContext';
 import './globals.css';
 
-const inter = Inter({
+// Geist — Vercel's geometric sans. Clean, modern, excellent at small sizes
+// and in dark mode. Exposed as --font-inter to avoid touching every
+// downstream reference to that CSS variable name.
+const geist = Geist({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-inter',
+  weight: ['400', '500', '600', '700'],
 });
 
 export const metadata: Metadata = {
@@ -23,7 +28,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={geist.variable} suppressHydrationWarning>
+      <head>
+        {/* Applies saved theme + accent before first paint (no flash). */}
+        <ThemeScript />
+      </head>
       <body className="antialiased">
         {/* Skip to main content link for keyboard/screen reader users */}
         <a
@@ -32,7 +41,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
         <Toaster
           position="top-right"
           toastOptions={{

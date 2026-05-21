@@ -103,8 +103,8 @@ export default function DashboardPage() {
 
       {/* Page Header */}
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-secondary-900">Dashboard</h1>
-        <p className="text-sm sm:text-base text-secondary-500 mt-1">
+        <h1 className="text-2xl font-semibold text-secondary-900 tracking-tight">Dashboard</h1>
+        <p className="text-sm text-secondary-500 mt-1">
           Welcome back! Here&apos;s what&apos;s happening with your business.
         </p>
       </div>
@@ -124,22 +124,20 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Charts and Health Status - Responsive layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
-        {/* Revenue Chart - Full width on mobile/tablet, 2/3 on desktop */}
-        <div className="xl:col-span-2 order-2 xl:order-1">
+      {/* Charts + Health Status. Left column (2/3) stacks the revenue chart
+          and recent orders so it grows to match the height of the Health
+          Status card on the right — no large empty void beside a short card. */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 items-start">
+        {/* Left column: revenue chart + recent orders */}
+        <div className="xl:col-span-2 order-2 xl:order-1 space-y-4 sm:space-y-6">
           <OrdersChart data={chartData} isLoading={isLoading} />
+          <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />
         </div>
 
-        {/* Health Status - Full width on mobile/tablet, 1/3 on desktop */}
+        {/* Right column: health status */}
         <div className="order-1 xl:order-2">
           <HealthStatus health={health} isLoading={isLoading} onRefresh={handleRefresh} />
         </div>
-      </div>
-
-      {/* Recent Orders */}
-      <div>
-        <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />
       </div>
     </div>
   );
