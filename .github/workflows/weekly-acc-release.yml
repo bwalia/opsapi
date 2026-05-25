@@ -49,9 +49,9 @@ on:
         type: boolean
         default: true
       project_code:
-        description: "Project code(s) for DB migrations (single or comma-separated, or 'all')"
+        description: "Override project code(s) for DB migrations (single or comma-separated). Leave BLANK to use values-acc.yaml (tax_copilot)."
         type: string
-        default: "all"
+        default: ""
 
 # Only one acceptance release at a time. An in-flight deploy is allowed to
 # finish so we never leave a half-applied Helm release behind.
@@ -250,13 +250,21 @@ jobs:
       # `--wait` blocks until resources are Ready.
       - name: Helm deploy — OpsAPI
         run: |
+          # Only override projectCode when one is explicitly provided. On the
+          # scheduled run (no inputs) this is blank, so values-acc.yaml decides
+          # (tax_copilot). Previously the `|| 'all'` fallback forced every
+          # feature's migrations on each weekly release.
+          PROJECT_CODE_ARG=""
+          if [ -n "${{ inputs.project_code }}" ]; then
+            PROJECT_CODE_ARG="--set projectCode=${{ inputs.project_code }}"
+          fi
           helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
             -f ${{ env.HELM_CHART_PATH }}/values-acc.yaml \
             --namespace ${{ env.NAMESPACE }} --create-namespace \
             --set image.repository=${{ env.IMAGE }} \
             --set image.tag=latest \
             --set env=${{ env.TARGET_ENV }} \
-            --set projectCode=${{ inputs.project_code || 'all' }} \
+            $PROJECT_CODE_ARG \
             --atomic --wait --timeout 5m
 
       # ----- Health gate — the E2E pre-condition ----------------------------
