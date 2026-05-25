@@ -213,6 +213,24 @@ function ProjectConfig.isFeatureEnabled(feature)
     return false
 end
 
+-- Check if ANY of the given features is enabled.
+-- Accepts a single feature string OR a list of feature strings.
+-- Lets a single migration be gated on multiple project codes — e.g.
+-- conditional({FEATURES.ECOMMERCE, FEATURES.TAX_COPILOT}, fn) creates the
+-- table when the active PROJECT_CODE is *either* ecommerce or tax_copilot,
+-- so a shared table lands in both projects without enabling a whole suite.
+function ProjectConfig.isAnyFeatureEnabled(features)
+    if type(features) ~= "table" then
+        return ProjectConfig.isFeatureEnabled(features)
+    end
+    for _, f in ipairs(features) do
+        if ProjectConfig.isFeatureEnabled(f) then
+            return true
+        end
+    end
+    return false
+end
+
 -- Shorthand checks for common features
 function ProjectConfig.isCoreEnabled()
     return true -- Core is always enabled
