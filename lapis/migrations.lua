@@ -132,6 +132,11 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
+-- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
+-- once multiple project codes need it. See migrations/billing-system.lua.
+local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.billing-system") or {}
+
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
 local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
@@ -1667,6 +1672,22 @@ local _migrations = {
     end,
 
     -- =========================================================================
+    -- =========================================================================
+    -- BILLING SYSTEM (single-merchant Stripe: subscriptions + one-time) — gated
+    -- on tax_copilot. Tables: plans, subscriptions, payments, refunds, webhook
+    -- events, usage meters. Key 700 is a retired no-op (the old per-tenant
+    -- Connect payment-accounts table, removed when billing went single-merchant).
+    -- Keys are numeric so they run before the zz* finalizers. See
+    -- migrations/billing-system.lua.
+    -- =========================================================================
+    ['700_billing_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 1),
+    ['701_billing_plans'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 2),
+    ['702_billing_subscriptions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 3),
+    ['703_billing_payments'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 4),
+    ['704_billing_refunds'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 5),
+    ['705_billing_webhook_events'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 6),
+    ['706_billing_usage_meters'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 7),
+
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
     -- =========================================================================
