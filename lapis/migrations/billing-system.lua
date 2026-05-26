@@ -294,4 +294,34 @@ return {
         ]])
         db.query([[ CREATE INDEX idx_usage_meters_lookup ON usage_meters (namespace_id, user_uuid, meter_key) ]])
     end,
+
+    -- ========================================================================
+    -- [8] Audit / tracking columns (additive, idempotent). Added after the
+    -- initial tables shipped, so ADD COLUMN IF NOT EXISTS keeps it safe to
+    -- re-run on databases that already have the base schema.
+    -- ========================================================================
+    [8] = function()
+        -- Subscriptions: which webhook last touched the row, trial start, and
+        -- when access actually ended (vs canceled_at = when cancellation was set).
+        db.query("ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS last_event_id TEXT")
+        db.query("ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMP")
+        db.query("ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS trial_start TIMESTAMP")
+        db.query("ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP")
+
+        -- Payments: when the charge actually settled (for revenue reporting).
+        db.query("ALTER TABLE billing_payments ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP")
+
+        -- Webhook events: test vs live, so test traffic is never mistaken for real.
+        db.query("ALTER TABLE stripe_webhook_events ADD COLUMN IF NOT EXISTS livemode BOOLEAN")
+    end,
+
+    -- ========================================================================
+    -- [9] Drop the dead Stripe Connect table. Billing is single-merchant now;
+    -- step [1] no longer creates namespace_payment_accounts, but databases
+    -- migrated before that pivot still have it (unused, no FKs into it).
+    -- Idempotent — a no-op where it was never created.
+    -- ========================================================================
+    [9] = function()
+        db.query("DROP TABLE IF EXISTS namespace_payment_accounts CASCADE")
+    end,
 }

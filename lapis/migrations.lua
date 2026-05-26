@@ -1719,6 +1719,8 @@ local _migrations = {
     ['704_billing_refunds'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 5),
     ['705_billing_webhook_events'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 6),
     ['706_billing_usage_meters'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 7),
+    ['707_billing_audit_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 8),
+    ['708_billing_drop_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 9),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

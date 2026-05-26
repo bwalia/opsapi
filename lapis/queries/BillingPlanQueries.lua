@@ -87,6 +87,21 @@ function BillingPlanQueries.getByUuid(uuid)
     return rows and rows[1] or nil
 end
 
+-- Fetch a plan by primary key id.
+function BillingPlanQueries.getById(id)
+    if not id then return nil end
+    local rows = db.query("SELECT * FROM billing_plans WHERE id = ? LIMIT 1", id)
+    return rows and rows[1] or nil
+end
+
+-- Resolve a plan from its Stripe price id (used by subscription webhooks).
+function BillingPlanQueries.getByStripePriceId(price_id)
+    if not price_id or price_id == "" then return nil end
+    local rows = db.query(
+        "SELECT * FROM billing_plans WHERE stripe_price_id = ? AND deleted_at IS NULL LIMIT 1", price_id)
+    return rows and rows[1] or nil
+end
+
 -- List a namespace's plans. opts.include_inactive, opts.plan_type filter.
 function BillingPlanQueries.listByNamespace(namespace_id, opts)
     opts = opts or {}

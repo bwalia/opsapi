@@ -258,6 +258,20 @@ function Stripe:retrieve_checkout_session(session_id)
     return self:_request("GET", url, nil)
 end
 
+-- Retrieve a Subscription.
+function Stripe:retrieve_subscription(subscription_id)
+    return self:_request("GET", "/subscriptions/" .. subscription_id, nil)
+end
+
+-- Cancel a Subscription. Default is graceful (at period end — the user keeps
+-- access until the paid period runs out); pass at_period_end=false to end now.
+function Stripe:cancel_subscription(subscription_id, at_period_end)
+    if at_period_end == false then
+        return self:_request("DELETE", "/subscriptions/" .. subscription_id, nil)
+    end
+    return self:_request("POST", "/subscriptions/" .. subscription_id, { cancel_at_period_end = true })
+end
+
 -- Create a Customer
 function Stripe:create_customer(email, name, options)
     options = options or {}

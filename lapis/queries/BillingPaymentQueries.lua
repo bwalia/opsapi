@@ -33,6 +33,8 @@ function BillingPaymentQueries.createPending(params)
     params.amount = math.floor(tonumber(params.amount) or 0)
     params.application_fee_amount = math.floor(tonumber(params.application_fee_amount) or 0)
     params.metadata = as_json(params.metadata)
+    -- Stamp when the money actually settled.
+    if params.status == "succeeded" and params.paid_at == nil then params.paid_at = db.raw("NOW()") end
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
     return BillingPaymentModel:create(params, { returning = "*" })
@@ -57,12 +59,20 @@ function BillingPaymentQueries.getByPaymentIntentId(pi_id)
     return rows and rows[1] or nil
 end
 
+function BillingPaymentQueries.getByInvoiceId(invoice_id)
+    if not invoice_id or invoice_id == "" then return nil end
+    local rows = db.query(
+        "SELECT * FROM billing_payments WHERE stripe_invoice_id = ? ORDER BY created_at DESC LIMIT 1", invoice_id)
+    return rows and rows[1] or nil
+end
+
 -- Update a payment by uuid.
 function BillingPaymentQueries.update(uuid, fields)
     local row = BillingPaymentModel:find({ uuid = uuid })
     if not row then return nil end
     fields.updated_at = db.raw("NOW()")
     if fields.metadata ~= nil then fields.metadata = as_json(fields.metadata) end
+    if fields.status == "succeeded" and fields.paid_at == nil then fields.paid_at = db.raw("NOW()") end
     row:update(fields)
     return row
 end

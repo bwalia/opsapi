@@ -1177,9 +1177,23 @@ else
     })"
 fi
 
-if ! run_lapis_exec "$SETUP_LUA_CMD"; then
+# The setup script is idempotent. `lapis exec` occasionally hits an
+# intermittent OpenResty worker crash (SIGSEGV) on a cold/just-reloaded worker;
+# nginx respawns the worker, so a retry reliably succeeds. Retry a few times
+# before giving up rather than failing the whole start on a transient blip.
+SETUP_OK=false
+for attempt in 1 2 3; do
+    if run_lapis_exec "$SETUP_LUA_CMD"; then
+        SETUP_OK=true
+        break
+    fi
+    echo -e "${YELLOW}[!] Namespace setup attempt ${attempt}/3 failed (transient worker crash); retrying...${NC}"
+    sleep 2
+done
+
+if ! $SETUP_OK; then
     echo ""
-    echo -e "${RED}[!] Namespace setup failed. Inspect container logs:${NC}"
+    echo -e "${RED}[!] Namespace setup failed after 3 attempts. Inspect container logs:${NC}"
     echo -e "${YELLOW}    docker logs ${CONTAINER_NAME}${NC}"
     exit 1
 fi

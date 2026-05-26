@@ -470,6 +470,8 @@ load_if("tax_copilot", "routes.tax-support")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
 load_if("tax_copilot", "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")
+load_if("tax_copilot", "routes.billing-webhook")
+load_if("tax_copilot", "routes.billing-account")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines, Leads)
