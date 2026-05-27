@@ -316,6 +316,14 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- CORE ROUTES (always loaded — core tables exist for all projects)
 -- ============================================
 safe_load_routes("routes.auth")
+-- TEST-ONLY: E2E OTP peek endpoint (POST /auth/e2e/peek-otp). Registered ONLY
+-- when E2E_OTP_PEEK_ENABLED=true (acc), so the route is physically absent in
+-- real production. The handler additionally enforces a shared secret, a valid
+-- 2FA session, a test-email allow-list, and a hard prod refuse. See
+-- routes/e2e-otp.lua. NEVER set E2E_OTP_PEEK_ENABLED on prod.
+if os.getenv("E2E_OTP_PEEK_ENABLED") == "true" then
+    safe_load_routes("routes.e2e-otp")
+end
 safe_load_routes("routes.pin")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
