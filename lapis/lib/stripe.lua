@@ -272,6 +272,13 @@ function Stripe:cancel_subscription(subscription_id, at_period_end)
     return self:_request("POST", "/subscriptions/" .. subscription_id, { cancel_at_period_end = true })
 end
 
+-- Update a Subscription (e.g. swap the plan/price for an upgrade/downgrade).
+-- `data` is passed through, so callers can set items = {{ id = <item_id>,
+-- price = <new_price_id> }} and proration_behavior = 'create_prorations'.
+function Stripe:update_subscription(subscription_id, data)
+    return self:_request("POST", "/subscriptions/" .. subscription_id, data or {})
+end
+
 -- Create a Customer
 function Stripe:create_customer(email, name, options)
     options = options or {}

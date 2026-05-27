@@ -60,6 +60,25 @@ local function context_from_metadata(meta)
     }
 end
 
+-- An invoice's subscription link and tenant metadata moved under
+-- invoice.parent.subscription_details in 2025+ Stripe API versions — the
+-- top-level invoice.subscription / invoice.payment_intent fields are now null.
+-- Resolve from every known location so renewals and proration (upgrade)
+-- invoices are recorded, not just first-checkout ones.
+local function invoice_subscription_id(invoice)
+    local sd = invoice.parent and invoice.parent.subscription_details
+    local ln = invoice.lines and invoice.lines.data and invoice.lines.data[1]
+    local lp = ln and ln.parent and ln.parent.subscription_item_details
+    return id_of(invoice.subscription)
+        or (sd and id_of(sd.subscription))
+        or (lp and id_of(lp.subscription))
+end
+
+local function invoice_metadata(invoice)
+    local sd = invoice.parent and invoice.parent.subscription_details
+    return (sd and sd.metadata) or invoice.metadata or {}
+end
+
 -- ── Event handlers ──────────────────────────────────────────────────────────
 -- Each receives the event's data.object and may raise on a hard failure
 -- (caller pcall's them and returns 5xx so Stripe retries).
@@ -125,12 +144,16 @@ local function upsert_subscription_from_object(sub, deleted, event)
     -- period boundaries that used to live on the subscription object itself.
     local item = sub.items and sub.items.data and sub.items.data[1]
 
-    -- Resolve the plan from metadata, else from the item's price.
-    local plan_id = ctx.plan_id
-    if not plan_id and item and item.price then
+    -- Resolve the plan from the CURRENT PRICE first — it is authoritative and
+    -- changes on upgrade/downgrade. metadata.plan_uuid only reflects the plan
+    -- the subscription was CREATED with (it goes stale after a plan switch),
+    -- so it's a fallback for the rare case the price isn't in our catalogue.
+    local plan_id
+    if item and item.price then
         local plan = BillingPlanQueries.getByStripePriceId(id_of(item.price))
         if plan then plan_id = plan.id end
     end
+    if not plan_id then plan_id = ctx.plan_id end
 
     -- Period dates: top-level (older API) OR on the item (newer API).
     local period_start = nz(sub.current_period_start) or (item and nz(item.current_period_start))
@@ -161,7 +184,7 @@ function handlers.customer_subscription_updated(sub, event) upsert_subscription_
 function handlers.customer_subscription_deleted(sub, event) upsert_subscription_from_object(sub, true, event) end
 
 function handlers.invoice_paid(invoice)
-    local sub_id = id_of(invoice.subscription)
+    local sub_id = invoice_subscription_id(invoice)
     local pi_id = id_of(invoice.payment_intent)
     local invoice_id = id_of(invoice.id)
     local sub = sub_id and BillingSubscriptionQueries.getByStripeId(sub_id) or nil
@@ -184,13 +207,19 @@ function handlers.invoice_paid(invoice)
         return
     end
 
-    -- No existing row (e.g. a renewal) — record it. Needs tenant context.
-    if sub then
+    -- No existing row — record it. This is the path for renewals AND for
+    -- upgrade prorations (always_invoice), neither of which has a checkout row.
+    -- Tenant context comes from our subscription row when we have it, else from
+    -- the invoice's own metadata (set on the subscription at checkout/change).
+    local ctx = context_from_metadata(invoice_metadata(invoice))
+    local namespace_id = sub and sub.namespace_id or ctx.namespace_id
+    local user_uuid = sub and sub.user_uuid or ctx.user_uuid
+    if namespace_id and user_uuid then
         BillingPaymentQueries.createPending({
-            namespace_id = sub.namespace_id,
-            user_uuid = sub.user_uuid,
-            plan_id = sub.plan_id,
-            subscription_id = sub.id,
+            namespace_id = namespace_id,
+            user_uuid = user_uuid,
+            plan_id = (sub and sub.plan_id) or ctx.plan_id,
+            subscription_id = sub and sub.id or nil,
             payment_type = "subscription",
             stripe_payment_intent_id = pi_id,
             stripe_invoice_id = invoice_id,
@@ -200,11 +229,13 @@ function handlers.invoice_paid(invoice)
             receipt_url = nz(invoice.hosted_invoice_url),
             status = "succeeded",
         })
+    else
+        ngx.log(ngx.WARN, "invoice.paid: no tenant context for invoice " .. tostring(invoice_id))
     end
 end
 
 function handlers.invoice_payment_failed(invoice)
-    local sub_id = id_of(invoice.subscription)
+    local sub_id = invoice_subscription_id(invoice)
     if sub_id then
         local sub = BillingSubscriptionQueries.getByStripeId(sub_id)
         if sub and sub.status ~= "canceled" then
