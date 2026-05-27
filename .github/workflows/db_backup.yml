@@ -1,123 +1,171 @@
 name: Daily PostgreSQL Backup
 
+# Backs up the opsapi Postgres database to MinIO.
+#
+# The database is managed by the Zalando postgres-operator (cluster `diy-tax-db`)
+# and lives INSIDE the k3s cluster on ClusterIP-only services — unreachable from
+# GitHub-hosted runners. So this runs on the in-cluster self-hosted `acc` runner
+# and reads credentials from the operator's own secret
+# (`postgres.diy-tax-db.credentials.postgresql.acid.zalan.do`, keys
+# username/password) — which is named consistently in every namespace that has
+# the DB. The DB host is resolved from the `diy-tax-db` Service ClusterIP, so no
+# cluster-DNS dependency.
+#
+# Scheduled runs back up `acc`. `prod` has no `diy-tax-db` cluster deployed yet,
+# so it is gated behind the INCLUDE_PROD flag below — flip it to "true" once a
+# prod database exists and prod joins the daily schedule automatically (no other
+# changes needed). prod can still be run manually anytime via "Run workflow".
+
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 * * *" # daily, 00:00 UTC
   workflow_dispatch:
     inputs:
       TARGET_ENV:
         type: choice
-        description: 'Please choose the Target environment'
-        default: 'test'
+        description: "Environment to back up"
+        default: "acc"
         required: true
         options:
-            - int
-            - test
-            - acc
-            - prod
+          - acc
+          - prod
+      PGDATABASE:
+        type: string
+        description: "Database name to dump"
+        default: "opsapi"
+        required: false
 
 env:
-  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'test' }}
+  # Flip to "true" once a Postgres DB exists in the `prod` namespace; prod then
+  # joins the daily backup automatically. Left "false" for now (no prod DB yet).
+  INCLUDE_PROD: "false"
+  ZALANDO_SECRET: "postgres.diy-tax-db.credentials.postgresql.acid.zalan.do"
+  PG_SERVICE: "diy-tax-db"
 
 jobs:
-  backup:
+  # Build the matrix: the chosen env on manual runs, acc+prod on the schedule.
+  set-matrix:
     runs-on: ubuntu-latest
-
+    outputs:
+      envs: ${{ steps.m.outputs.envs }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check and Install kubectl
+      - id: m
         run: |
-          if ! command -v kubectl &> /dev/null; then
-            echo "kubectl not found. Installing kubectl..."
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl
-            sudo mv kubectl /usr/local/bin/
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual run: back up exactly the chosen environment.
+            echo "envs=[\"${{ github.event.inputs.TARGET_ENV }}\"]" >> "$GITHUB_OUTPUT"
+          elif [ "$INCLUDE_PROD" = "true" ]; then
+            echo 'envs=["acc","prod"]' >> "$GITHUB_OUTPUT"
           else
-            echo "kubectl is already installed."
+            echo 'envs=["acc"]' >> "$GITHUB_OUTPUT"
           fi
-        shell: bash
+
+  backup:
+    needs: set-matrix
+    # In-cluster runner: reaches the ClusterIP-only Postgres services.
+    runs-on: [self-hosted, acc]
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.set-matrix.outputs.envs) }}
+    env:
+      TARGET_ENV: ${{ matrix.env }}
+      PGDATABASE: ${{ github.event.inputs.PGDATABASE || 'opsapi' }}
+    steps:
+      - name: Install kubectl (if missing)
+        run: |
+          if ! command -v kubectl >/dev/null 2>&1; then
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          fi
+          kubectl version --client=true 2>/dev/null | head -1 || true
 
       - name: Configure kubectl
         env:
           KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
         run: |
           if [ -z "$KUBECONFIG_BASE64" ]; then
-            echo "::error::KUBE_CONFIG_DATA_K3S secret is not set. Please configure the Kubernetes config secret."
+            echo "::error::KUBE_CONFIG_DATA_K3S secret is not set."
             exit 1
           fi
-          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
-          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
-          echo "Kubeconfig decoded and exported successfully."
+          echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
 
-      - name: Retrieve PostgreSQL Credentials from Kubernetes
+      - name: Resolve DB host + credentials (Zalando operator secret)
         run: |
-          # Verify kubectl can reach the cluster
-          if ! kubectl cluster-info --request-timeout=10s > /dev/null 2>&1; then
-            echo "::error::Cannot connect to Kubernetes cluster. Check KUBE_CONFIG_DATA_K3S secret."
+          set -euo pipefail
+          NS="$TARGET_ENV"
+
+          if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+            echo "::error::Cannot connect to the Kubernetes cluster (check KUBE_CONFIG_DATA_K3S)."
             exit 1
           fi
 
-          # Verify the secret exists
-          if ! kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} > /dev/null 2>&1; then
-            echo "::error::Secret 'opsapi-secrets' not found in namespace '${{ env.TARGET_ENV }}'"
-            echo "::error::Available secrets in namespace:"
-            kubectl get secrets -n ${{ env.TARGET_ENV }} --no-headers 2>/dev/null | awk '{print "  - "$1}' || true
-            exit 1
-          fi
-
-          # Debug: list available keys in the secret
-          echo "Available secret keys:"
-          kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data}" | python3 -c "import sys,json; print('\n'.join(json.loads(sys.stdin.read()).keys()))" 2>/dev/null || echo "(could not parse keys)"
-
-          PGHOST=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_HOST}" | base64 --decode)
-          PGPORT=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_PORT}" | base64 --decode)
-          PGUSER=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_USER}" | base64 --decode)
-          PGPASSWORD=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_PASSWORD}" | base64 --decode)
-          PGDATABASE=$(kubectl get secrets opsapi-secrets -n ${{ env.TARGET_ENV }} -o jsonpath="{.data.POSTGRES_DB}" | base64 --decode)
-
-          # Validate required credentials
+          # DB host = ClusterIP of the operator's Service (no DNS dependency).
+          PGHOST="$(kubectl -n "$NS" get svc "$PG_SERVICE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
           if [ -z "$PGHOST" ]; then
-            echo "::error::PGHOST is empty - POSTGRES_HOST key not found in opsapi-secrets"
-            exit 1
-          fi
-          if [ -z "$PGDATABASE" ]; then
-            echo "::error::PGDATABASE is empty - POSTGRES_DB key not found in opsapi-secrets"
+            echo "::error::Service '$PG_SERVICE' not found in namespace '$NS' — no Postgres deployed there?"
             exit 1
           fi
 
-          echo "PGHOST=$PGHOST" >> $GITHUB_ENV
-          echo "PGPORT=${PGPORT:-5432}" >> $GITHUB_ENV
-          echo "PGUSER=$PGUSER" >> $GITHUB_ENV
-          echo "PGPASSWORD=$PGPASSWORD" >> $GITHUB_ENV
-          echo "PGDATABASE=$PGDATABASE" >> $GITHUB_ENV
+          if ! kubectl -n "$NS" get secret "$ZALANDO_SECRET" >/dev/null 2>&1; then
+            echo "::error::Credentials secret '$ZALANDO_SECRET' not found in namespace '$NS'."
+            exit 1
+          fi
+          PGUSER="$(kubectl -n "$NS" get secret "$ZALANDO_SECRET" -o jsonpath='{.data.username}' | base64 -d)"
+          PGPASSWORD="$(kubectl -n "$NS" get secret "$ZALANDO_SECRET" -o jsonpath='{.data.password}' | base64 -d)"
 
-          echo "Successfully retrieved credentials (host: $PGHOST, port: ${PGPORT:-5432}, db: $PGDATABASE)"
+          # Mask the password in logs, then export for later steps.
+          echo "::add-mask::$PGPASSWORD"
+          {
+            echo "PGHOST=$PGHOST"
+            echo "PGPORT=5432"
+            echo "PGUSER=$PGUSER"
+            echo "PGPASSWORD=$PGPASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "Resolved $NS Postgres at $PGHOST:5432 (db: $PGDATABASE, user: $PGUSER)"
 
-      - name: Install PostgreSQL Client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-
-      - name: Dump PostgreSQL Database
+      - name: Install PostgreSQL client (>= server version 15)
         run: |
-          TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-          BACKUP_FILE="backup_$TIMESTAMP.sql"
-          pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -F c -f "$BACKUP_FILE"
-          echo "BACKUP_FILE=$BACKUP_FILE" >> $GITHUB_ENV
+          set -euo pipefail
+          if command -v pg_dump >/dev/null 2>&1 && pg_dump --version | grep -qE ' 1[5-9]| [2-9][0-9]'; then
+            echo "pg_dump $(pg_dump --version) already available."
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates lsb-release gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
 
-      - name: Install MinIO Client (mc)
+      - name: Dump database
         run: |
-          curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x mc
-          sudo mv mc /usr/local/bin/
+          set -euo pipefail
+          TS="$(date -u +'%Y-%m-%d_%H-%M-%S')"
+          BACKUP_FILE="opsapi_${TARGET_ENV}_${TS}.dump"
+          # -Fc = custom format (compressed, restorable with pg_restore).
+          pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -Fc -f "$BACKUP_FILE"
+          ls -lh "$BACKUP_FILE"
+          echo "BACKUP_FILE=$BACKUP_FILE" >> "$GITHUB_ENV"
 
-      - name: Configure MinIO Client
+      - name: Install MinIO client (if missing)
         run: |
-          mc alias set myminio ${{ secrets.MINIO_ENDPOINT }} ${{ secrets.MINIO_ACCESS_KEY }} ${{ secrets.MINIO_SECRET_KEY }}
+          if ! command -v mc >/dev/null 2>&1; then
+            curl -fsSL -O https://dl.min.io/client/mc/release/linux-amd64/mc
+            chmod +x mc && sudo mv mc /usr/local/bin/
+          fi
 
-      - name: Upload Backup to MinIO
+      - name: Upload backup to MinIO
         run: |
-          mc cp "$BACKUP_FILE" myminio/${{ secrets.MINIO_BUCKET }}/"$BACKUP_FILE"
+          set -euo pipefail
+          mc alias set myminio "${{ secrets.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY }}"
+          mc cp "$BACKUP_FILE" "myminio/${{ secrets.MINIO_BUCKET }}/postgres/${TARGET_ENV}/$BACKUP_FILE"
+          echo "Uploaded to ${{ secrets.MINIO_BUCKET }}/postgres/${TARGET_ENV}/$BACKUP_FILE"
 
-      - name: Cleanup Backup File
-        run: rm -f "$BACKUP_FILE"
+      - name: Cleanup
+        if: always()
+        run: rm -f "$BACKUP_FILE" || true
