@@ -235,6 +235,7 @@ app:before_filter(function(self)
         ["/auth/refresh"] = true,         -- Handles its own token validation
         ["/auth/2fa/verify"] = true,      -- 2FA OTP verification (pre-auth)
         ["/auth/2fa/resend"] = true,      -- 2FA resend OTP (pre-auth)
+        ["/auth/e2e/peek-otp"] = true,    -- TEST-ONLY: secret-gated in routes/e2e-otp.lua (no JWT; route only registered when E2E_OTP_PEEK_ENABLED=true)
         ["/auth/google"] = true,          -- Google OAuth initiation
         ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
