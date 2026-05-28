@@ -210,6 +210,18 @@ return function(app)
                 send_opts.from_name = params.from_name
             end
 
+            -- Non-prod debug context. Mail.send strips this before
+            -- the SMTP payload is built; only used to populate the
+            -- yellow banner injected on dev/test/int/acc.
+            if self.current_user then
+                send_opts.triggered_by = {
+                    user_uuid = self.current_user.uuid,
+                    user_email = self.current_user.email,
+                    role = self.current_user.role,
+                    source = "email.send",
+                }
+            end
+
             -- Send (async)
             local success, err = Mail.send(send_opts)
             if not success then

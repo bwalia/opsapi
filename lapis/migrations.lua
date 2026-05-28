@@ -42,8 +42,10 @@ local function skip_migration(name, feature)
 end
 
 -- Helper function to conditionally load migration modules
+-- `feature` may be a single feature string or a list of feature strings;
+-- the module loads if the active PROJECT_CODE enables ANY of them.
 local function load_if_enabled(feature, module_name)
-    if ProjectConfig.isFeatureEnabled(feature) then
+    if ProjectConfig.isAnyFeatureEnabled(feature) then
         local ok, module = pcall(require, module_name)
         if ok then
             return module
@@ -64,8 +66,13 @@ local ecommerce_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "
 local production_schema_upgrade = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "production-schema-upgrade") or {}
 local order_management_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE,
     "migrations.order-management-enhancement") or {}
-local payment_tracking_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.payment-tracking") or
-    {}
+-- payment-tracking holds the standalone `payments` table (steps 1-2) AND
+-- order-coupled steps (3-10 alter the ecommerce `orders` table). Load the
+-- module under ecommerce OR tax_copilot so tax_copilot can get the shared
+-- `payments` table; the order-coupled keys below stay gated on ECOMMERCE only.
+local payment_tracking_migrations = load_if_enabled(
+    { ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT },
+    "migrations.payment-tracking") or {}
 local stripe_integration_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.stripe-integration") or
     {}
 local multi_currency_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.multi-currency-support") or
@@ -132,6 +139,11 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
+-- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
+-- once multiple project codes need it. See migrations/billing-system.lua.
+local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.billing-system") or {}
+
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
 local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
@@ -159,27 +171,43 @@ local kafka_audit_migrations = require("migrations.kafka-audit-system")
 -- HELPER FUNCTIONS FOR CONDITIONAL MIGRATIONS
 -- =============================================================================
 
--- Returns the migration function or a skip function (with tracking)
+-- Human-readable label for a feature spec (string or list of strings),
+-- used for migration tracking / skip logs. {"ecommerce","tax_copilot"} → "ecommerce+tax_copilot"
+local function feature_label(feature)
+    if type(feature) == "table" then
+        return table.concat(feature, "+")
+    end
+    return feature
+end
+
+-- Returns the migration function or a skip function (with tracking).
+-- `feature` is a single feature string OR a list of feature strings; the
+-- migration runs if the active PROJECT_CODE enables ANY of them. This lets a
+-- single table be shared across project codes, e.g.
+--   conditional({ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT}, fn)
 local function conditional(feature, migration_func)
-    if ProjectConfig.isFeatureEnabled(feature) and migration_func then
+    local label = feature_label(feature)
+    if ProjectConfig.isAnyFeatureEnabled(feature) and migration_func then
         return function(...)
-            MigrationTracker.recordRan(feature, feature)
+            MigrationTracker.recordRan(label, label)
             return migration_func(...)
         end
     end
-    return skip_migration(feature, feature)
+    return skip_migration(label, label)
 end
 
--- Returns the migration from an array or a skip function (with tracking)
+-- Returns the migration from an array or a skip function (with tracking).
+-- `feature` may be a single feature string or a list (OR semantics) — see conditional().
 local function conditional_array(feature, migrations_array, index)
-    local name = feature .. "[" .. tostring(index) .. "]"
-    if ProjectConfig.isFeatureEnabled(feature) and migrations_array and migrations_array[index] then
+    local label = feature_label(feature)
+    local name = label .. "[" .. tostring(index) .. "]"
+    if ProjectConfig.isAnyFeatureEnabled(feature) and migrations_array and migrations_array[index] then
         return function(...)
-            MigrationTracker.recordRan(name, feature)
+            MigrationTracker.recordRan(name, label)
             return migrations_array[index](...)
         end
     end
-    return skip_migration(name, feature)
+    return skip_migration(name, label)
 end
 
 -- Dry-run: preview what would run/skip without touching the DB.
@@ -643,9 +671,18 @@ local _migrations = {
         6),
     ['53_create_patient_documents_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_crm_migrations, 7),
 
-    -- Payment Tracking (conditional on ecommerce)
-    ['54_create_payments_table'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 1),
-    ['55_add_payment_indexes'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 2),
+    -- Payment Tracking.
+    -- The `payments` table + its indexes are SHARED across ecommerce and
+    -- tax_copilot: the table is standalone (order_id/user_id are plain nullable
+    -- integers with no FK constraint), so it creates cleanly under tax_copilot
+    -- where the ecommerce `orders` table does not exist. A tax-service payment
+    -- is simply a row with user_id set and order_id NULL.
+    ['54_create_payments_table'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT }, payment_tracking_migrations, 1),
+    ['55_add_payment_indexes'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT }, payment_tracking_migrations, 2),
+    -- Steps 56-63 stay ECOMMERCE-only: they alter/extend the `orders` table
+    -- (add payment_id, status constraints, tracking) and create order-centric
+    -- tables (order_status_history, refunds). Under pure tax_copilot `orders`
+    -- doesn't exist, so widening these would fail at key 56.
     ['56_add_payment_id_to_orders'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 3),
     ['57_update_order_status_enum'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 4),
     ['58_create_order_status_history'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations,
@@ -1286,6 +1323,22 @@ local _migrations = {
     ['497_tax_widen_error_occurrence_tenant_ns']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 76),
     ['498_tax_backfill_orphan_category_hmrc_links']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 77),
 
+    -- 499–503: Apple in-app subscription tables (iOS StoreKit, ASSN V2).
+    --   499  → tax_subscription_plans (product catalogue, multi-platform-ready)
+    --   500  → seed the single launch plan: DIYTaxReturnStandard £5.99/mo
+    --   501  → tax_user_subscriptions (per-user entitlement, FastAPI writes)
+    --   502  → indexes for user_uuid / expires_at / app_account_token
+    --   503  → tax_processed_apple_notifications (webhook dedup + orphan store)
+    -- Numeric prefixes 500–503 coexist with the CRM block's 500_/501_ keys
+    -- below — Lapis tracks applied migrations by the full string key, not
+    -- the numeric portion, and dup numerics already appear across feature
+    -- blocks elsewhere in this table.
+    ['499_tax_create_subscription_plans']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 78),
+    ['500_tax_seed_subscription_plan_standard']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 79),
+    ['501_tax_create_user_subscriptions']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 80),
+    ['502_tax_add_user_subscriptions_indexes']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 81),
+    ['503_tax_create_processed_apple_notifications'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 82),
+
     -- =========================================================================
     -- CORE AUTH: Password reset tokens
     -- =========================================================================
@@ -1651,6 +1704,24 @@ local _migrations = {
     end,
 
     -- =========================================================================
+    -- =========================================================================
+    -- BILLING SYSTEM (single-merchant Stripe: subscriptions + one-time) — gated
+    -- on tax_copilot. Tables: plans, subscriptions, payments, refunds, webhook
+    -- events, usage meters. Key 700 is a retired no-op (the old per-tenant
+    -- Connect payment-accounts table, removed when billing went single-merchant).
+    -- Keys are numeric so they run before the zz* finalizers. See
+    -- migrations/billing-system.lua.
+    -- =========================================================================
+    ['700_billing_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 1),
+    ['701_billing_plans'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 2),
+    ['702_billing_subscriptions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 3),
+    ['703_billing_payments'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 4),
+    ['704_billing_refunds'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 5),
+    ['705_billing_webhook_events'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 6),
+    ['706_billing_usage_meters'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 7),
+    ['707_billing_audit_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 8),
+    ['708_billing_drop_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 9),
+
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
     -- =========================================================================

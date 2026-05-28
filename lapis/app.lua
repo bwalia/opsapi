@@ -235,6 +235,7 @@ app:before_filter(function(self)
         ["/auth/refresh"] = true,         -- Handles its own token validation
         ["/auth/2fa/verify"] = true,      -- 2FA OTP verification (pre-auth)
         ["/auth/2fa/resend"] = true,      -- 2FA resend OTP (pre-auth)
+        ["/auth/e2e/peek-otp"] = true,    -- TEST-ONLY: secret-gated in routes/e2e-otp.lua (no JWT; route only registered when E2E_OTP_PEEK_ENABLED=true)
         ["/auth/google"] = true,          -- Google OAuth initiation
         ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
@@ -316,6 +317,14 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- CORE ROUTES (always loaded — core tables exist for all projects)
 -- ============================================
 safe_load_routes("routes.auth")
+-- TEST-ONLY: E2E OTP peek endpoint (POST /auth/e2e/peek-otp). Registered ONLY
+-- when E2E_OTP_PEEK_ENABLED=true (acc), so the route is physically absent in
+-- real production. The handler additionally enforces a shared secret, a valid
+-- 2FA session, a test-email allow-list, and a hard prod refuse. See
+-- routes/e2e-otp.lua. NEVER set E2E_OTP_PEEK_ENABLED on prod.
+if os.getenv("E2E_OTP_PEEK_ENABLED") == "true" then
+    safe_load_routes("routes.e2e-otp")
+end
 safe_load_routes("routes.pin")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
@@ -467,6 +476,11 @@ load_if("tax_copilot", "routes.tax-app-settings")
 load_if("tax_copilot", "routes.tax-admin-custom-categories")
 load_if("tax_copilot", "routes.tax-custom-categories")
 load_if("tax_copilot", "routes.tax-support")
+-- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
+load_if("tax_copilot", "routes.billing-plans")
+load_if("tax_copilot", "routes.billing-checkout")
+load_if("tax_copilot", "routes.billing-webhook")
+load_if("tax_copilot", "routes.billing-account")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines, Leads)

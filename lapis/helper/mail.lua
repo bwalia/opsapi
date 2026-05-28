@@ -263,6 +263,207 @@ function Mail.getTemplates()
 end
 
 -- ============================================================================
+-- Non-prod enrichment + recipient suppression
+-- ============================================================================
+--
+-- Goal: on dev/test/int/acc deployments the shared inbox gets emails
+-- from every environment, and the user can't tell which env or which
+-- user triggered which message. We:
+--   1. Prefix the subject with [ENV] so inbox filtering works.
+--   2. Inject a "DEBUG CONTEXT" banner into the body listing env,
+--      hostname, recipient, triggered_by user, source IP, endpoint,
+--      request_id and timestamp.
+--   3. Suppress sending to recipients matching OTP_SUPPRESS_FOR_EMAIL_REGEX
+--      (e.g. the e2e mailbox `+e2e-...@`) so CI doesn't flood real
+--      mailboxes.
+-- LAPIS_ENVIRONMENT="production" disables all three — prod email path
+-- is byte-identical to before this change.
+
+-- The deployment-environment label ("dev" / "test" / "int" / "acc" /
+-- "prod"). We read OPSAPI_DEPLOY_ENV first because the helm chart
+-- sets it from `.Values.env`; LAPIS_ENVIRONMENT is hard-coded to
+-- "production" by the same chart so the secret-templated config.lua
+-- selects its only `config("production", ...)` block. Reading
+-- LAPIS_ENVIRONMENT alone would therefore always say "production" on
+-- the cluster and the banner would never fire on dev/int/acc.
+-- Local dev keeps working: docker-compose still only sets
+-- LAPIS_ENVIRONMENT, and the fallback chain picks it up.
+--
+-- Final fallback is "production" — fail closed. If neither var is set
+-- (e.g. a misconfigured deploy, or a CLI script run from outside the
+-- normal entrypoints) the system behaves like prod: no banner, no
+-- suppression. You opt INTO the debug banner by explicitly setting
+-- one of the env vars, never out of it by forgetting one.
+local function current_env()
+    return os.getenv("OPSAPI_DEPLOY_ENV")
+        or os.getenv("LAPIS_ENVIRONMENT")
+        or "production"
+end
+
+-- True for both helm's `env: prod` value AND Lapis's "production"
+-- config-block name, so callers don't need to know which one's in
+-- play. Add new aliases here if a new deployment naming convention
+-- appears.
+local function is_production_env(env)
+    return env == "production" or env == "prod"
+end
+
+local function current_hostname()
+    -- HOSTNAME is set by Docker / Kubernetes; falls back to a
+    -- placeholder so the banner always has something to show.
+    return os.getenv("HOSTNAME") or "unknown-host"
+end
+
+--- Should this recipient be silently skipped? Same env var as the
+--- OTP-specific check so SREs configure it once in the .env. Skipping
+--- is double-gated: env != production AND recipient matches regex.
+local function should_suppress_recipient(to)
+    if is_production_env(current_env()) then return false end
+    local pattern = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
+    if not pattern or pattern == "" then return false end
+    if type(to) ~= "string" then return false end
+    local matched, _ = ngx.re.match(to, pattern, "jo")
+    return matched ~= nil
+end
+
+--- Capture per-request context from ngx (request handler scope only —
+--- safe to call from a handler, returns empty when called from a
+--- background timer where ngx.var isn't usable). Pure read; never
+--- raises. Caller pairs this with an optional opts.triggered_by table
+--- for the user identity (which lives on `self.current_user`, not ngx).
+local function capture_request_context()
+    local ctx = {}
+    local ok = pcall(function()
+        ctx.source_ip = ngx.var.remote_addr
+        ctx.forwarded_for = ngx.var.http_x_forwarded_for
+        ctx.endpoint = ngx.var.request_method .. " " .. (ngx.var.request_uri or "")
+        ctx.request_id = ngx.var.http_x_request_id
+            or ngx.var.http_x_correlation_id
+        ctx.origin = ngx.var.http_origin or ngx.var.http_referer
+        ctx.user_agent = ngx.var.http_user_agent
+    end)
+    if not ok then return {} end
+    return ctx
+end
+
+--- Minimal HTML escape for values we paste into the debug banner. The
+--- banner is the only place we render free-form ngx vars into HTML.
+local function html_escape(s)
+    if s == nil then return "" end
+    return (tostring(s)
+        :gsub("&", "&amp;")
+        :gsub("<", "&lt;")
+        :gsub(">", "&gt;")
+        :gsub('"', "&quot;")
+        :gsub("'", "&#39;"))
+end
+
+--- Build the debug banner shown to the user inside non-prod emails.
+local function build_debug_banner_html(env, recipient, triggered_by, context)
+    local rows = {}
+    local function row(label, value)
+        if value == nil or value == "" then return end
+        rows[#rows + 1] = string.format(
+            '<tr><td style="padding:2px 12px 2px 0;color:#92400e;font-weight:600;white-space:nowrap;">%s</td><td style="padding:2px 0;color:#451a03;word-break:break-all;">%s</td></tr>',
+            html_escape(label), html_escape(value))
+    end
+
+    row("Environment", env)
+    row("Host",        current_hostname())
+    row("Recipient",   type(recipient) == "table" and table.concat(recipient, ", ") or recipient)
+    if triggered_by then
+        local who = triggered_by.user_email
+            or triggered_by.user_uuid
+            or triggered_by.username
+        if who then
+            local detail = {}
+            if triggered_by.user_email then detail[#detail + 1] = triggered_by.user_email end
+            if triggered_by.user_uuid  then detail[#detail + 1] = "uuid=" .. triggered_by.user_uuid end
+            if triggered_by.role       then detail[#detail + 1] = "role=" .. triggered_by.role end
+            row("Triggered by", table.concat(detail, " · "))
+        end
+        if triggered_by.source then row("Source", triggered_by.source) end
+    end
+    if context.source_ip      then row("Source IP",    context.source_ip) end
+    if context.forwarded_for  then row("Forwarded-For", context.forwarded_for) end
+    if context.endpoint       then row("Endpoint",     context.endpoint) end
+    if context.origin         then row("Origin",       context.origin) end
+    if context.request_id     then row("Request ID",   context.request_id) end
+    if context.user_agent     then row("User-Agent",   context.user_agent) end
+    row("Timestamp", os.date("!%Y-%m-%dT%H:%M:%SZ"))
+
+    return table.concat({
+        '<div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:6px;padding:14px;margin:0 0 18px;font:13px/1.5 \'SFMono-Regular\',Menlo,Consolas,monospace;color:#451a03;">',
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:#b45309;margin-bottom:8px;">NON-PROD EMAIL · ',
+        html_escape(string.upper(env)),
+        '</div>',
+        '<div style="font-size:11px;color:#92400e;margin-bottom:10px;">This banner is added on non-production environments to help you trace what triggered this message. It is not present on prod.</div>',
+        '<table style="border-collapse:collapse;font-size:12px;">',
+        table.concat(rows),
+        '</table>',
+        '</div>',
+    })
+end
+
+--- Build the plain-text equivalent of the banner for text-only emails.
+local function build_debug_banner_text(env, recipient, triggered_by, context)
+    local lines = {
+        "============================================================",
+        "NON-PROD DEBUG (env=" .. env .. ")",
+        "------------------------------------------------------------",
+        "Host:         " .. current_hostname(),
+        "Recipient:    " .. (type(recipient) == "table" and table.concat(recipient, ", ") or tostring(recipient)),
+    }
+    if triggered_by then
+        if triggered_by.user_email then lines[#lines + 1] = "Triggered by: " .. triggered_by.user_email end
+        if triggered_by.user_uuid  then lines[#lines + 1] = "User UUID:    " .. triggered_by.user_uuid end
+        if triggered_by.role       then lines[#lines + 1] = "Role:         " .. triggered_by.role end
+        if triggered_by.source     then lines[#lines + 1] = "Source:       " .. triggered_by.source end
+    end
+    if context.source_ip     then lines[#lines + 1] = "Source IP:    " .. context.source_ip end
+    if context.forwarded_for then lines[#lines + 1] = "Forwarded:    " .. context.forwarded_for end
+    if context.endpoint      then lines[#lines + 1] = "Endpoint:     " .. context.endpoint end
+    if context.origin        then lines[#lines + 1] = "Origin:       " .. context.origin end
+    if context.request_id    then lines[#lines + 1] = "Request ID:   " .. context.request_id end
+    lines[#lines + 1] = "Timestamp:    " .. os.date("!%Y-%m-%dT%H:%M:%SZ")
+    lines[#lines + 1] = "============================================================"
+    lines[#lines + 1] = ""
+    return table.concat(lines, "\n")
+end
+
+--- Mutates opts to add env prefix + debug banner. No-op when env is
+--- production. Always safe to call.
+local function enrich_for_non_prod(opts)
+    local env = current_env()
+    if is_production_env(env) then return end
+
+    local context = capture_request_context()
+    local triggered_by = opts.triggered_by
+    opts.triggered_by = nil  -- don't ship it into the JSON payload
+
+    local tag = "[" .. string.upper(env) .. "] "
+    if not opts.subject:find(tag, 1, true) then
+        opts.subject = tag .. opts.subject
+    end
+
+    if opts.html then
+        local banner = build_debug_banner_html(env, opts.to, triggered_by, context)
+        -- Inject right after <body> if present; else prepend.
+        local lower = opts.html:lower()
+        local _, body_open_e = lower:find("<body[^>]*>", 1)
+        if body_open_e then
+            opts.html = opts.html:sub(1, body_open_e) .. banner .. opts.html:sub(body_open_e + 1)
+        else
+            opts.html = banner .. opts.html
+        end
+    end
+
+    if opts.text then
+        opts.text = build_debug_banner_text(env, opts.to, triggered_by, context) .. opts.text
+    end
+end
+
+-- ============================================================================
 -- SMTP Sending (non-blocking via lua-resty-mail)
 -- ============================================================================
 
@@ -394,6 +595,21 @@ function Mail.send(opts)
         ngx.log(ngx.WARN, "[Mail] SMTP not configured — email to ", tostring(opts.to), " not sent")
         return false, "SMTP not configured. Set SMTP_USER and SMTP_PASSWORD environment variables."
     end
+
+    -- Suppress traffic to known E2E recipients on non-prod (stops the
+    -- shared CI mailbox getting flooded). Logged so SREs can audit
+    -- what got skipped. Production is unaffected (the check returns
+    -- false early when LAPIS_ENVIRONMENT=production).
+    if should_suppress_recipient(opts.to) then
+        ngx.log(ngx.NOTICE, "[Mail] SUPPRESSED non-prod email to ", tostring(opts.to),
+            " (matches OTP_SUPPRESS_FOR_EMAIL_REGEX)")
+        return true
+    end
+
+    -- Tag subject + inject debug banner on non-prod envs. Captures
+    -- ngx request context synchronously (still in handler scope)
+    -- before any timer.at hop loses it.
+    enrich_for_non_prod(opts)
 
     -- Synchronous mode (for use in ngx.timer callbacks or lapis exec scripts)
     if opts.sync then

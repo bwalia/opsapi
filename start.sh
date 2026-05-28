@@ -703,6 +703,46 @@ check_and_update_env() {
         echo -e "${GREEN}[+] All environment URLs are correctly configured!${NC}"
     fi
 
+    # ── Ensure OTP_SUPPRESS_FOR_EMAIL_REGEX covers required sinks ─────
+    # Lapis attempts real SMTP delivery for any recipient that doesn't
+    # match this regex. Three known non-deliverable destinations on
+    # non-prod envs generate Mail Delivery Subsystem bounces back to
+    # SMTP_FROM_EMAIL and flood that inbox:
+    #   - legacy `diytaxreturnmail+e2e-…@gmail.com` E2E pattern
+    #   - `*@e2e.invalid` E2E sink (RFC 6761 reserved TLD)
+    #   - `*@admin.com` test-admin user (MX times out to 127.0.0.1)
+    # helper/mail.lua gates the suppression on is_production_env, so
+    # injecting a default in prod would be a no-op; we still skip it
+    # on prod to avoid surprising SREs who may want suppression off.
+    #
+    # If the line exists but is missing one of the required patterns
+    # (e.g. an older deploy left `@e2e\.invalid$`-only), extend it
+    # in place rather than overwrite — preserves any custom additions.
+    if [[ "$target_env" != "prod" ]]; then
+        local default_regex='^diytaxreturnmail\+e2e-.*@gmail\.com$|@e2e\.invalid$|@admin\.com$'
+        local required_patterns=('@e2e\.invalid$' '@admin\.com$')
+        local current_line current_value new_value pat
+        current_line=$(grep "^OTP_SUPPRESS_FOR_EMAIL_REGEX=" "$ENV_FILE" | head -1)
+        if [[ -z "$current_line" ]]; then
+            echo -e "${YELLOW}[!] OTP_SUPPRESS_FOR_EMAIL_REGEX missing — appending default sink regex${NC}"
+            echo "OTP_SUPPRESS_FOR_EMAIL_REGEX=$default_regex" >> "$ENV_FILE"
+        else
+            current_value="${current_line#OTP_SUPPRESS_FOR_EMAIL_REGEX=}"
+            new_value="$current_value"
+            for pat in "${required_patterns[@]}"; do
+                if [[ "$new_value" != *"$pat"* ]]; then
+                    new_value="$new_value|$pat"
+                fi
+            done
+            if [[ "$new_value" != "$current_value" ]]; then
+                echo -e "${YELLOW}[!] OTP_SUPPRESS_FOR_EMAIL_REGEX missing required patterns — extending${NC}"
+                grep -v "^OTP_SUPPRESS_FOR_EMAIL_REGEX=" "$ENV_FILE" > "${ENV_FILE}.tmp"
+                mv "${ENV_FILE}.tmp" "$ENV_FILE"
+                echo "OTP_SUPPRESS_FOR_EMAIL_REGEX=$new_value" >> "$ENV_FILE"
+            fi
+        fi
+    fi
+
     return 0
 }
 
@@ -1137,9 +1177,23 @@ else
     })"
 fi
 
-if ! run_lapis_exec "$SETUP_LUA_CMD"; then
+# The setup script is idempotent. `lapis exec` occasionally hits an
+# intermittent OpenResty worker crash (SIGSEGV) on a cold/just-reloaded worker;
+# nginx respawns the worker, so a retry reliably succeeds. Retry a few times
+# before giving up rather than failing the whole start on a transient blip.
+SETUP_OK=false
+for attempt in 1 2 3; do
+    if run_lapis_exec "$SETUP_LUA_CMD"; then
+        SETUP_OK=true
+        break
+    fi
+    echo -e "${YELLOW}[!] Namespace setup attempt ${attempt}/3 failed (transient worker crash); retrying...${NC}"
+    sleep 2
+done
+
+if ! $SETUP_OK; then
     echo ""
-    echo -e "${RED}[!] Namespace setup failed. Inspect container logs:${NC}"
+    echo -e "${RED}[!] Namespace setup failed after 3 attempts. Inspect container logs:${NC}"
     echo -e "${YELLOW}    docker logs ${CONTAINER_NAME}${NC}"
     exit 1
 fi
