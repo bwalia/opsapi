@@ -119,7 +119,14 @@ function handlers.checkout_session_completed(session)
         BillingPaymentQueries.update(existing.uuid, fields)
     elseif ctx.namespace_id then
         -- No pending row (e.g. created out-of-band) — record it now.
-        BillingPaymentQueries.createPending({
+        -- Wrap to survive the same race documented in invoice_paid: if
+        -- invoice.paid already inserted a row with this stripe_invoice_id,
+        -- our INSERT trips the unique partial index on stripe_invoice_id
+        -- (migration 709). Catch the violation, look up the winner by
+        -- invoice id, and apply the fields we would have set instead —
+        -- specifically the session id, which the invoice handler can't
+        -- know on its own.
+        local ok, err = pcall(BillingPaymentQueries.createPending, {
             namespace_id = ctx.namespace_id,
             user_uuid = ctx.user_uuid,
             plan_id = ctx.plan_id,
@@ -133,6 +140,31 @@ function handlers.checkout_session_completed(session)
             currency = nz(session.currency) or "gbp",
             status = fields.status,
         })
+        if not ok then
+            local winner = fields.stripe_invoice_id
+                and BillingPaymentQueries.getByInvoiceId(fields.stripe_invoice_id)
+            if winner then
+                -- Layer the session-side fields onto the invoice-side row
+                -- so the merged row carries both the session id and the
+                -- invoice id. The other fields are already set or null-safe.
+                local merge = {
+                    stripe_checkout_session_id = session.id,
+                    subscription_id = subscription_row_id,
+                    stripe_payment_intent_id = fields.stripe_payment_intent_id,
+                    stripe_customer_id = fields.stripe_customer_id,
+                }
+                BillingPaymentQueries.update(winner.uuid, merge)
+                ngx.log(ngx.INFO,
+                    "checkout.session.completed: lost race with invoice.paid for invoice ",
+                    tostring(fields.stripe_invoice_id),
+                    " — merged session id onto winner's row")
+            else
+                ngx.log(ngx.ERR,
+                    "checkout.session.completed: createPending failed and no row found by invoice_id ",
+                    tostring(fields.stripe_invoice_id), ": ", tostring(err))
+                error(err)
+            end
+        end
     end
 end
 
@@ -215,7 +247,15 @@ function handlers.invoice_paid(invoice)
     local namespace_id = sub and sub.namespace_id or ctx.namespace_id
     local user_uuid = sub and sub.user_uuid or ctx.user_uuid
     if namespace_id and user_uuid then
-        BillingPaymentQueries.createPending({
+        -- Wrap the insert: checkout.session.completed and invoice.paid
+        -- frequently race for the same invoice (same Stripe event burst,
+        -- same second). The unique partial index on stripe_invoice_id
+        -- (migration 709) makes the second insert fail with a uniqueness
+        -- violation; we catch it, look up the row the other handler
+        -- already inserted, and apply our enrichment to it instead.
+        -- That way the visible state on /settings/billing is one row, not
+        -- two duplicate "succeeded" entries (acc 2026-05-29).
+        local ok, err = pcall(BillingPaymentQueries.createPending, {
             namespace_id = namespace_id,
             user_uuid = user_uuid,
             plan_id = (sub and sub.plan_id) or ctx.plan_id,
@@ -229,6 +269,20 @@ function handlers.invoice_paid(invoice)
             receipt_url = nz(invoice.hosted_invoice_url),
             status = "succeeded",
         })
+        if not ok then
+            local winner = invoice_id and BillingPaymentQueries.getByInvoiceId(invoice_id)
+            if winner then
+                BillingPaymentQueries.update(winner.uuid, enrich)
+                ngx.log(ngx.INFO,
+                    "invoice.paid: lost race with another handler for invoice ",
+                    tostring(invoice_id), " — enriched the winner's row instead")
+            else
+                ngx.log(ngx.ERR,
+                    "invoice.paid: createPending failed and no row found by invoice_id ",
+                    tostring(invoice_id), ": ", tostring(err))
+                error(err)  -- bubble up so the webhook returns 5xx and Stripe retries
+            end
+        end
     else
         ngx.log(ngx.WARN, "invoice.paid: no tenant context for invoice " .. tostring(invoice_id))
     end

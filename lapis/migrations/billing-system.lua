@@ -324,4 +324,72 @@ return {
     [9] = function()
         db.query("DROP TABLE IF EXISTS namespace_payment_accounts CASCADE")
     end,
+
+    -- ========================================================================
+    -- [10] Dedupe + unique index on stripe_invoice_id.
+    --
+    -- Webhooks `checkout.session.completed` and `invoice.paid` arrive
+    -- together (same second) for a successful subscription checkout and
+    -- both can attempt to insert a billing_payments row carrying the same
+    -- stripe_invoice_id. The checkout handler creates a row tied to the
+    -- session; the invoice handler races to look it up by invoice_id, finds
+    -- nothing (the other handler hasn't committed yet), and inserts a
+    -- second row. Result: two "succeeded" rows visible on the user's billing
+    -- page, even though Stripe only saw one transaction (acc 2026-05-29).
+    --
+    -- Fix: a unique partial index makes the race impossible at the DB level —
+    -- the losing handler's INSERT fails with a unique violation, and the
+    -- code path in routes/billing-webhook.lua catches that, looks up the
+    -- winner by invoice_id, and applies its enrichment fields to it instead.
+    --
+    -- Dedupe first so the index can be created on environments that already
+    -- accumulated duplicates. Strategy: keep the oldest row per invoice_id
+    -- (it carries the checkout session id), merge non-null fields from the
+    -- duplicate, delete the duplicate. No data is lost — just consolidated.
+    -- Idempotent: a re-run on a clean table is a no-op.
+    -- ========================================================================
+    [10] = function()
+        -- Defensive pre-dedup: any duplicate invoice rows get merged into
+        -- the oldest, then the duplicates are removed.
+        db.query([[
+            WITH dupes AS (
+              SELECT stripe_invoice_id,
+                     MIN(id) AS keep_id,
+                     MAX(id) AS drop_id
+              FROM billing_payments
+              WHERE stripe_invoice_id IS NOT NULL
+              GROUP BY stripe_invoice_id
+              HAVING COUNT(*) > 1
+            )
+            UPDATE billing_payments p
+            SET receipt_url              = COALESCE(p.receipt_url,              d_row.receipt_url),
+                stripe_customer_id       = COALESCE(p.stripe_customer_id,       d_row.stripe_customer_id),
+                stripe_payment_intent_id = COALESCE(p.stripe_payment_intent_id, d_row.stripe_payment_intent_id),
+                subscription_id          = COALESCE(p.subscription_id,          d_row.subscription_id),
+                updated_at = NOW()
+            FROM dupes d
+            JOIN billing_payments d_row ON d_row.id = d.drop_id
+            WHERE p.id = d.keep_id
+        ]])
+
+        db.query([[
+            DELETE FROM billing_payments p
+            USING (
+              SELECT stripe_invoice_id, MAX(id) AS drop_id
+              FROM billing_payments
+              WHERE stripe_invoice_id IS NOT NULL
+              GROUP BY stripe_invoice_id
+              HAVING COUNT(*) > 1
+            ) d
+            WHERE p.id = d.drop_id
+        ]])
+
+        -- Unique partial index. Permits unlimited NULL values (rows in the
+        -- pending pre-invoice state) but only one row per real invoice id.
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_payments_invoice
+            ON billing_payments (stripe_invoice_id)
+            WHERE stripe_invoice_id IS NOT NULL
+        ]])
+    end,
 }
