@@ -6,6 +6,7 @@ local Global = require "helper.global"
 local JWTHelper = require "helper.jwt-helper"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
+local NamespaceAssignment = require "helper.namespace_assignment"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 local RateLimit = require("middleware.rate-limit")
 local Errors = require("lib.errors")
@@ -824,6 +825,15 @@ return function(app)
                 oauth_id = google_user.id,
                 active = true
             })
+
+            -- Mirror the email/password sign-up flow: a brand-new user must
+            -- be added to the project namespace and given a default, or the
+            -- frontend's billing / settings pages 4xx with "Namespace not
+            -- found". Only runs on first-time sign-up — returning Google
+            -- users hit the early `if not user` branch and skip this.
+            if user then
+                NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
+            end
         end
 
         -- Get user with roles
@@ -1100,6 +1110,12 @@ return function(app)
                         json = { error = "Failed to create user" }
                     }
                 end
+
+                -- Mirror the email/password sign-up flow: a brand-new user
+                -- must be added to the project namespace and given a default,
+                -- or the frontend's billing / settings pages 4xx with
+                -- "Namespace not found". Only on first-time sign-up.
+                NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
             end
 
             -- Get user with roles
