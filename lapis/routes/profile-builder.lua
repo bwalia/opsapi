@@ -310,6 +310,102 @@ local function getUserTags(user_id)
     return {}
 end
 
+-- ─── Business-profile linkage helpers ──────────────────────────────────────
+-- A question can be tagged with one or more business profile keys
+-- (amazon_seller, landlord, sole_trader, …) — see migration step 36
+-- (table profile_question_business_profiles, PK on (question_id, profile_key)).
+--
+-- Semantics: empty link set => question applies to ALL profiles. Non-empty =>
+-- gates user-facing visibility to users whose tax_user_profiles.default_profile_key
+-- is in the set.
+
+-- Load the keys for ONE question. Returns an empty array on failure or no
+-- linkage so callers can always treat the result as "applies to all".
+local function loadQuestionBusinessProfiles(question_id)
+    if not question_id then return {} end
+    local ok, rows = pcall(db.query, [[
+        SELECT profile_key FROM profile_question_business_profiles
+        WHERE question_id = ? ORDER BY profile_key ASC
+    ]], question_id)
+    if not ok or not rows then return {} end
+    local out = {}
+    for i = 1, #rows do out[i] = rows[i].profile_key end
+    return out
+end
+
+-- Bulk-load for the list endpoint — avoids the N+1 query pattern when
+-- attaching business_profiles to dozens of questions in one response.
+-- Returns a table indexed by question_id where each value is the array of
+-- profile_keys for that question (always an array, never nil).
+local function bulkLoadQuestionBusinessProfiles(question_ids)
+    local out = {}
+    if not question_ids or #question_ids == 0 then return out end
+    -- Build the ANY($1::int[]) placeholder once, regardless of count.
+    local placeholders = {}
+    for i = 1, #question_ids do placeholders[i] = "?" end
+    local sql = [[
+        SELECT question_id, profile_key
+        FROM profile_question_business_profiles
+        WHERE question_id IN (]] .. table.concat(placeholders, ",") .. [[)
+        ORDER BY question_id, profile_key
+    ]]
+    local ok, rows = pcall(db.query, sql, unpack(question_ids))
+    if not ok or not rows then return out end
+    for _, row in ipairs(rows) do
+        local qid = row.question_id
+        if not out[qid] then out[qid] = {} end
+        out[qid][#out[qid] + 1] = row.profile_key
+    end
+    return out
+end
+
+-- Atomic write: replace the entire link set for one question. Caller passes
+-- an array of profile_keys (or nil/empty to clear all links). De-duplicates,
+-- trims, and shape-validates keys so the table never accumulates garbage.
+--
+-- Validation:
+--   - Must be a string.
+--   - After trimming, must match lower_snake_case (^[a-z][a-z0-9_]*$),
+--     mirroring the convention used by register.lua's default_profile_key
+--     and by FastAPI's profile_loader. Anything else is silently dropped
+--     and logged at WARN — the admin UI's multi-select is catalogue-driven
+--     so this only fires for direct API abuse.
+--   - Length bounded to 100 chars (matches the schema VARCHAR limit).
+--
+-- Existence in the catalogue (DB classification_profiles + filesystem
+-- profiles) is NOT validated here — Lua has no access to the FastAPI
+-- registry. The admin UI enforces that contract.
+local function replaceQuestionBusinessProfiles(question_id, keys)
+    if not question_id then return end
+    -- Always remove first so an empty input correctly clears the link set.
+    db.query("DELETE FROM profile_question_business_profiles WHERE question_id = ?", question_id)
+    if not keys or type(keys) ~= "table" or #keys == 0 then return end
+
+    local seen = {}
+    for _, raw in ipairs(keys) do
+        if type(raw) == "string" then
+            local key = raw:match("^%s*(.-)%s*$") -- trim
+            if not key or key == "" or #key > 100 then
+                if key and key ~= "" then
+                    ngx.log(ngx.WARN, "[ProfileBuilder] dropping over-long business_profile key (len=", #key, ")")
+                end
+            elseif not key:match("^[a-z][a-z0-9_]*$") then
+                ngx.log(ngx.WARN, "[ProfileBuilder] dropping malformed business_profile key: ", key)
+            elseif not seen[key] then
+                seen[key] = true
+                local ok_ins = pcall(db.query, [[
+                    INSERT INTO profile_question_business_profiles (question_id, profile_key, created_at)
+                    VALUES (?, ?, NOW())
+                    ON CONFLICT (question_id, profile_key) DO NOTHING
+                ]], question_id, key)
+                if not ok_ins then
+                    ngx.log(ngx.WARN, "[ProfileBuilder] failed to insert business_profile link q=", question_id, " key=", key)
+                end
+            end
+        end
+    end
+end
+
 -- Evaluate visibility rules for a question against current answers
 local function evaluateVisibility(question_id, answer_map)
     local ok, rules = pcall(db.query, [[
@@ -476,13 +572,69 @@ return function(app)
             end
         end
 
+        -- Resolve the user's business profile (e.g. amazon_seller, landlord).
+        -- Used below to gate which questions appear in the schema: a question
+        -- whose business_profiles link set is non-empty only shows up if the
+        -- user's default_profile_key is in that set. Questions with NO links
+        -- apply to everyone. Falls through gracefully when the user has no
+        -- tax_user_profiles row yet (treated as "no profile chosen" → only
+        -- universal questions visible).
+        local user_profile_key = nil
+        if user_id then
+            local ok_up, up_rows = pcall(db.query, [[
+                SELECT default_profile_key FROM tax_user_profiles
+                WHERE user_id = ? LIMIT 1
+            ]], user_id)
+            if ok_up and up_rows and #up_rows > 0 then
+                local k = up_rows[1].default_profile_key
+                if k and k ~= "" and k ~= cjson.null then
+                    user_profile_key = k
+                end
+            end
+        end
+
         local result = {}
         for _, cat in ipairs(categories or {}) do
-            local ok_q, questions = pcall(db.query, [[
-                SELECT * FROM profile_questions
-                WHERE category_id = ? AND is_active = true AND is_archived = false
-                ORDER BY display_order ASC, label ASC
-            ]], cat.id)
+            -- Filter clause shape changes depending on whether the user has
+            -- a profile_key. The link table is small (n_questions × few keys)
+            -- and indexed on profile_key, so the NOT EXISTS / EXISTS combo
+            -- is fast enough to inline per-category.
+            local ok_q, questions
+            if user_profile_key then
+                ok_q, questions = pcall(db.query, [[
+                    SELECT * FROM profile_questions pq
+                    WHERE pq.category_id = ?
+                      AND pq.is_active = true
+                      AND pq.is_archived = false
+                      AND (
+                        NOT EXISTS (
+                          SELECT 1 FROM profile_question_business_profiles
+                          WHERE question_id = pq.id
+                        )
+                        OR EXISTS (
+                          SELECT 1 FROM profile_question_business_profiles
+                          WHERE question_id = pq.id AND profile_key = ?
+                        )
+                      )
+                    ORDER BY pq.display_order ASC, pq.label ASC
+                ]], cat.id, user_profile_key)
+            else
+                -- No profile chosen yet: only show questions that apply to
+                -- everyone. Once the user picks a profile in /profile or
+                -- /settings, profile-specific questions reveal themselves
+                -- on the next schema fetch.
+                ok_q, questions = pcall(db.query, [[
+                    SELECT * FROM profile_questions pq
+                    WHERE pq.category_id = ?
+                      AND pq.is_active = true
+                      AND pq.is_archived = false
+                      AND NOT EXISTS (
+                        SELECT 1 FROM profile_question_business_profiles
+                        WHERE question_id = pq.id
+                      )
+                    ORDER BY pq.display_order ASC, pq.label ASC
+                ]], cat.id)
+            end
             if not ok_q then
                 ngx.log(ngx.ERR, "[ProfileBuilder] schema questions query failed: ", tostring(questions))
                 questions = {}
@@ -799,12 +951,32 @@ return function(app)
             end
         end
 
+        -- Server-side typeahead. Mirrors the questions endpoint so the
+        -- SearchableSelect on the questions modal Category picker can scale
+        -- past a small table.
+        local search = self.params.search
+        if search and search ~= "" then
+            local like = "%" .. search .. "%"
+            table.insert(where_parts, "(name ILIKE ? OR slug ILIKE ?)")
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+        end
+
         local where_clause = ""
         if #where_parts > 0 then
             where_clause = " WHERE " .. table.concat(where_parts, " AND ")
         end
 
-        local sql = "SELECT * FROM profile_categories" .. where_clause .. " ORDER BY display_order ASC, name ASC"
+        -- Paging — same shape and defaults as /questions.
+        local limit = tonumber(self.params.limit) or 100
+        if limit < 1 then limit = 1 end
+        if limit > 500 then limit = 500 end
+        local offset = tonumber(self.params.offset) or 0
+        if offset < 0 then offset = 0 end
+
+        local sql = "SELECT * FROM profile_categories"
+            .. where_clause
+            .. " ORDER BY display_order ASC, name ASC LIMIT " .. limit .. " OFFSET " .. offset
         local ok, rows = pcall(db.query, sql, unpack(where_vals))
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] categories list failed: ", tostring(rows))
@@ -1096,7 +1268,57 @@ return function(app)
             table.insert(where_vals, self.params.touchpoint)
         end
 
-        local sql = "SELECT pq.*, pc.uuid as category_uuid, pc.name as category_name FROM profile_questions pq LEFT JOIN profile_categories pc ON pc.id = pq.category_id WHERE " .. table.concat(where_parts, " AND ") .. " ORDER BY pq.display_order ASC, pq.label ASC"
+        -- Business-profile filter. Semantics:
+        --   "applies to this profile" === question has no link rows at all
+        --   (= applies to all), OR has a link row whose profile_key matches.
+        -- That keeps the default-all behaviour intact while letting an admin
+        -- ask "show me the questions that target landlord".
+        if self.params.business_profile and self.params.business_profile ~= "" then
+            table.insert(where_parts, [[
+                (NOT EXISTS (
+                    SELECT 1 FROM profile_question_business_profiles
+                    WHERE question_id = pq.id
+                ) OR EXISTS (
+                    SELECT 1 FROM profile_question_business_profiles
+                    WHERE question_id = pq.id AND profile_key = ?
+                ))
+            ]])
+            table.insert(where_vals, self.params.business_profile)
+        end
+
+        -- Server-side typeahead. `search` matches case-insensitive substring
+        -- against question label, key, description, AND the joined category
+        -- name — so the admin can type either the question wording or the
+        -- group it lives in to narrow it down. Used by the SearchableSelect
+        -- on /admin/profile-builder/rules so we don't ship the whole table
+        -- to the browser on every page open.
+        local search = self.params.search
+        if search and search ~= "" then
+            local like = "%" .. search .. "%"
+            table.insert(where_parts, [[
+                (pq.label ILIKE ?
+                 OR pq.question_key ILIKE ?
+                 OR pq.description ILIKE ?
+                 OR pc.name ILIKE ?)
+            ]])
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+        end
+
+        -- Paging. Default to a reasonable upper bound so a caller that
+        -- forgets to set limit can't accidentally pull the whole table; the
+        -- typeahead UI never needs more than a few dozen rows per request.
+        local limit = tonumber(self.params.limit) or 100
+        if limit < 1 then limit = 1 end
+        if limit > 500 then limit = 500 end
+        local offset = tonumber(self.params.offset) or 0
+        if offset < 0 then offset = 0 end
+
+        local sql = "SELECT pq.*, pc.uuid as category_uuid, pc.name as category_name FROM profile_questions pq LEFT JOIN profile_categories pc ON pc.id = pq.category_id WHERE "
+            .. table.concat(where_parts, " AND ")
+            .. " ORDER BY pq.display_order ASC, pq.label ASC LIMIT " .. limit .. " OFFSET " .. offset
         local ok, rows = pcall(db.query, sql, unpack(where_vals))
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] questions list failed: ", tostring(rows))
@@ -1118,6 +1340,15 @@ return function(app)
                     q.rules = (ok_rules and rules) or {}
                 end
             end
+        end
+
+        -- Attach business_profiles (string[]) to each row. Bulk-loaded so
+        -- the list endpoint never goes N+1, regardless of page size.
+        local q_ids = {}
+        for _, q in ipairs(rows or {}) do q_ids[#q_ids + 1] = q.id end
+        local bp_by_q = bulkLoadQuestionBusinessProfiles(q_ids)
+        for _, q in ipairs(rows or {}) do
+            q.business_profiles = bp_by_q[q.id] or {}
         end
 
         return { status = 200, json = { questions = rows or {}, total = #(rows or {}) } }
@@ -1147,6 +1378,8 @@ return function(app)
             SELECT * FROM profile_question_rules WHERE question_id = ? AND is_active = true ORDER BY priority ASC
         ]], question.id)
         question.rules = (ok_rules and rules) or {}
+
+        question.business_profiles = loadQuestionBusinessProfiles(question.id)
 
         return { status = 200, json = { question = question } }
     end)
@@ -1226,6 +1459,12 @@ return function(app)
 
         local question = ins_result and ins_result[1] or nil
         if question then
+            -- Persist business-profile links from the request body. Empty /
+            -- missing array clears any existing links (which would only
+            -- happen on a re-POST to an existing uuid — defensive).
+            replaceQuestionBusinessProfiles(question.id, params.business_profiles)
+            question.business_profiles = loadQuestionBusinessProfiles(question.id)
+
             auditLog({
                 namespace_id = namespace_id,
                 user_id = admin_uuid,
@@ -1259,6 +1498,10 @@ return function(app)
             return { status = 404, json = { error = "Question not found" } }
         end
         local old_q = find_rows[1]
+        -- Snapshot the OLD business-profile link set BEFORE any mutation so
+        -- the audit log's old_data_json gives a real diff (the LHS would
+        -- otherwise lose that field after the replace).
+        old_q.business_profiles = loadQuestionBusinessProfiles(old_q.id)
 
         local set_parts = {}
         local set_vals = {}
@@ -1290,26 +1533,46 @@ return function(app)
             end
         end
 
-        if #set_parts == 0 then
+        -- A `business_profiles` array in the body counts as an update too —
+        -- the admin may want to re-tag a question without changing any other
+        -- field. We treat `nil` as "leave existing links alone" and an array
+        -- (even an empty one) as "replace the link set with this".
+        local bp_provided = params.business_profiles ~= nil
+            and type(params.business_profiles) == "table"
+
+        if #set_parts == 0 and not bp_provided then
             return { status = 400, json = { error = "No fields to update" } }
         end
 
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
-        table.insert(set_parts, "updated_by = ?")
-        table.insert(set_vals, admin_int_id)
-        table.insert(set_parts, "updated_at = NOW()")
-        table.insert(set_vals, q_uuid)
 
-        local sql = "UPDATE profile_questions SET " .. table.concat(set_parts, ", ") .. " WHERE uuid = ? RETURNING *"
-        local ok_upd, upd_result = pcall(db.query, sql, unpack(set_vals))
-        if not ok_upd then
-            ngx.log(ngx.ERR, "[ProfileBuilder] update question failed: ", tostring(upd_result))
-            return { status = 500, json = { error = "Failed to update question" } }
+        local updated = old_q
+        if #set_parts > 0 then
+            table.insert(set_parts, "updated_by = ?")
+            table.insert(set_vals, admin_int_id)
+            table.insert(set_parts, "updated_at = NOW()")
+            table.insert(set_vals, q_uuid)
+
+            local sql = "UPDATE profile_questions SET " .. table.concat(set_parts, ", ") .. " WHERE uuid = ? RETURNING *"
+            local ok_upd, upd_result = pcall(db.query, sql, unpack(set_vals))
+            if not ok_upd then
+                ngx.log(ngx.ERR, "[ProfileBuilder] update question failed: ", tostring(upd_result))
+                return { status = 500, json = { error = "Failed to update question" } }
+            end
+            updated = upd_result and upd_result[1] or old_q
         end
 
-        local updated = upd_result and upd_result[1] or nil
-        if updated then
+        if bp_provided then
+            replaceQuestionBusinessProfiles(updated.id, params.business_profiles)
+        end
+        updated.business_profiles = loadQuestionBusinessProfiles(updated.id)
+
+        -- Audit fires for ANY successful change — column updates OR
+        -- business-profile re-tagging. Skipping the latter would hide
+        -- ops-relevant scope changes from the trail. old_q + updated both
+        -- carry business_profiles so the diff is meaningful either way.
+        if updated and (#set_parts > 0 or bp_provided) then
             auditLog({
                 namespace_id = old_q.namespace_id,
                 user_id = admin_uuid,
