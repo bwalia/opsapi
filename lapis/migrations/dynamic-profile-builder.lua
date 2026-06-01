@@ -1806,4 +1806,67 @@ return {
 
         print("[Profile] Client questions migration complete: 7 categories, 20 questions, 6 visibility rules, 4 tag rules")
     end,
+
+    -- =========================================================================
+    -- [36] profile_question_business_profiles — many-to-many link from a
+    --     profile question to the business profiles it applies to.
+    --
+    --     Why a join table (not an array column)?
+    --       - A question naturally applies to MULTIPLE business profiles
+    --         (e.g. "VAT registration" applies to sole_trader, limited_company,
+    --         amazon_seller, …).
+    --       - Future per-pair metadata becomes additive (e.g. "is_required for
+    --         landlord but optional for amazon_seller") without a schema rewrite.
+    --       - Easy reverse lookup via the secondary index on profile_key:
+    --         "give me every question for `amazon_seller`".
+    --
+    --     Why STRING profile_key instead of FK to classification_profiles.id?
+    --       - Business profiles come from TWO sources: the DB
+    --         (classification_profiles, admin-managed) AND the filesystem
+    --         (backend/app/profiles/*.md — amazon_seller, landlord, etc.).
+    --         An FK would silently lock out filesystem profiles. The FastAPI
+    --         already treats profile_key as the stable cross-source identifier.
+    --       - Validation lives in the admin UI (the multi-select shows only
+    --         keys returned by /fastapi/api/tax-profile/types — i.e. the
+    --         unioned catalogue), so orphan keys can only arrive via direct
+    --         DB writes, not via the app.
+    --
+    --     Semantics:
+    --       - Empty link set => question applies to ALL profiles (default).
+    --       - Non-empty => question applies only when the user's
+    --         tax_user_profiles.default_profile_key is in the set.
+    --
+    --     Composite PK on (question_id, profile_key) makes inserts naturally
+    --     idempotent — re-saving the same pairing is a no-op rather than a
+    --     duplicate row.
+    -- =========================================================================
+    [36] = function()
+        local exists = db.query([[
+            SELECT to_regclass('public.profile_question_business_profiles') AS reg
+        ]])
+        if exists and exists[1] and exists[1].reg then
+            return
+        end
+
+        db.query([[
+            CREATE TABLE profile_question_business_profiles (
+                question_id  INTEGER     NOT NULL,
+                profile_key  VARCHAR(100) NOT NULL,
+                created_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (question_id, profile_key),
+                CONSTRAINT fk_pqbp_question
+                    FOREIGN KEY (question_id)
+                    REFERENCES profile_questions(id)
+                    ON DELETE CASCADE
+            )
+        ]])
+
+        -- Reverse lookup: "all questions tagged for amazon_seller".
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_pqbp_profile_key
+            ON profile_question_business_profiles (profile_key)
+        ]])
+
+        print("[Profile] Created profile_question_business_profiles join table")
+    end,
 }

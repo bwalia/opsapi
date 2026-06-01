@@ -1245,6 +1245,7 @@ local _migrations = {
     ['437_profile_seed_new_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 34),
     ['438_tax_namespace_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 42),
     ['439_profile_client_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 35),
+    ['440_profile_question_business_profiles'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 36),
     ['441_create_classification_training_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 43),
     ['458_tax_seed_accountant_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 44),
     ['459_tax_merge_overlapping_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 45),
