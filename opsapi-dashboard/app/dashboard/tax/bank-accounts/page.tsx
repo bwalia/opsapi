@@ -84,7 +84,7 @@ function BankAccountsContent() {
     if (!editingAccount) return;
     setIsSaving(true);
     try {
-      await taxService.updateBankAccount(editingAccount.uuid, formData);
+      await taxService.updateBankAccount(editingAccount.uuid ?? editingAccount.id, formData);
       toast.success('Bank account updated');
       setEditingAccount(null);
       resetForm();
@@ -99,7 +99,7 @@ function BankAccountsContent() {
   const handleDelete = async (account: TaxBankAccount) => {
     if (!confirm(`Delete bank account "${account.bank_name}"? This cannot be undone.`)) return;
     try {
-      await taxService.deleteBankAccount(account.uuid);
+      await taxService.deleteBankAccount(account.uuid ?? account.id);
       toast.success('Bank account deleted');
       fetchAccounts();
     } catch {

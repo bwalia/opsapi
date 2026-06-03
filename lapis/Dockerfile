@@ -30,6 +30,10 @@ RUN luarocks install lua-resty-mail
 RUN apk add mysql-client
 RUN apk add postgresql-client
 RUN apk add curl
+# poppler-utils provides pdftotext + pdftoppm, used by lib/tax-extraction.lua to
+# pull transactions out of uploaded PDF bank statements (and rasterise scanned
+# PDFs for the Vision fallback). Without it, the "Extract" action fails on PDFs.
+RUN apk add --no-cache poppler-utils
 RUN wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc \
     --tries=3 --timeout=30 && \
     chmod +x /usr/local/bin/mc

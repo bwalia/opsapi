@@ -22,6 +22,16 @@ local function getUserId(user)
     return rows and rows[1] and rows[1].id
 end
 
+-- Resolve a statement by the identifier the client sends. The statements list
+-- exposes `uuid as id`, so the frontend sends the UUID — but older callers may
+-- pass the numeric PK. Accept both: numeric -> id, otherwise -> uuid.
+local function findStatement(statement_id, user_id)
+    if tostring(statement_id):match("^%d+$") then
+        return db.select("* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1", statement_id, user_id)
+    end
+    return db.select("* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1", statement_id, user_id)
+end
+
 return function(app)
 
     -- POST /api/v2/tax/extract/bank-details — detect bank details from file
@@ -39,14 +49,14 @@ return function(app)
                 end
 
                 -- Fetch statement
-                local statements = db.select(
-                    "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                    statement_id, user_id
-                )
+                local statements = findStatement(statement_id, user_id)
                 if #statements == 0 then
                     return { status = 404, json = { error = "Statement not found" } }
                 end
                 local stmt = statements[1]
+                -- Normalize to the numeric PK so all subsequent DB reads/writes
+                -- (inserts, updates) use the real id even when the client sent a uuid.
+                statement_id = stmt.id
 
                 -- Download file from MinIO to temp path
                 local file_key = stmt.minio_key or stmt.file_path
@@ -143,14 +153,14 @@ return function(app)
                     return { status = 401, json = { error = "User not found" } }
                 end
 
-                local statements = db.select(
-                    "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                    statement_id, user_id
-                )
+                local statements = findStatement(statement_id, user_id)
                 if #statements == 0 then
                     return { status = 404, json = { error = "Statement not found" } }
                 end
                 local stmt = statements[1]
+                -- Normalize to the numeric PK so all subsequent DB reads/writes
+                -- (inserts, updates) use the real id even when the client sent a uuid.
+                statement_id = stmt.id
 
                 -- Check workflow step
                 if stmt.workflow_step and stmt.workflow_step ~= "UPLOADED" and stmt.workflow_step ~= "EXTRACTED" then
@@ -313,14 +323,12 @@ return function(app)
                 return { status = 401, json = { error = "User not found" } }
             end
 
-            -- Verify statement belongs to user
-            local statements = db.select(
-                "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                self.params.statement_id, user_id
-            )
+            -- Verify statement belongs to user (accepts uuid or numeric id)
+            local statements = findStatement(self.params.statement_id, user_id)
             if #statements == 0 then
                 return { status = 404, json = { error = "Statement not found" } }
             end
+            local statement_pk = statements[1].id
 
             local page = tonumber(self.params.page) or 1
             local per_page = tonumber(self.params.per_page) or 100
@@ -328,12 +336,12 @@ return function(app)
 
             local transactions = db.select(
                 "* FROM tax_transactions WHERE statement_id = ? ORDER BY transaction_date ASC, id ASC LIMIT ? OFFSET ?",
-                self.params.statement_id, per_page, offset
+                statement_pk, per_page, offset
             )
 
             local count_result = db.select(
                 "COUNT(*) as total FROM tax_transactions WHERE statement_id = ?",
-                self.params.statement_id
+                statement_pk
             )
             local total = count_result[1] and count_result[1].total or 0
 

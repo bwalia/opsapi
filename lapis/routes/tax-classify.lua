@@ -20,6 +20,15 @@ local function getUserId(user)
     return rows and rows[1] and rows[1].id
 end
 
+-- Resolve a statement by uuid (what the frontend sends, via `uuid as id`) or by
+-- numeric PK. Returns the db.select result list.
+local function findStatement(statement_id, user_id)
+    if tostring(statement_id):match("^%d+$") then
+        return db.select("* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1", statement_id, user_id)
+    end
+    return db.select("* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1", statement_id, user_id)
+end
+
 return function(app)
 
     -- GET /api/v2/tax/classify/providers — list available LLM providers
@@ -50,16 +59,15 @@ return function(app)
                     return { status = 401, json = { error = "User not found" } }
                 end
 
-                -- Verify statement ownership and workflow state
-                local statements = db.select(
-                    "* FROM tax_statements WHERE id = ? AND user_id = ? LIMIT 1",
-                    statement_id, user_id
-                )
+                -- Verify statement ownership and workflow state (accepts uuid or id)
+                local statements = findStatement(statement_id, user_id)
                 if #statements == 0 then
                     return { status = 404, json = { error = "Statement not found" } }
                 end
 
                 local stmt = statements[1]
+                -- Normalize to the numeric PK for all downstream reads/writes.
+                statement_id = stmt.id
                 if stmt.workflow_step == "FILED" then
                     return { status = 409, json = { error = "Cannot reclassify a filed statement" } }
                 end

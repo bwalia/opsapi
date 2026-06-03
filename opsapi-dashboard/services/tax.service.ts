@@ -3,15 +3,20 @@ import apiClient, { buildQueryString } from '@/lib/api-client';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface TaxBankAccount {
-  id: number;
-  uuid: string;
-  user_id: number;
-  namespace_id: number;
+  // The list endpoint returns `uuid as id`, so `id` is the uuid STRING that all
+  // bank-account endpoints (show/update/delete/upload) key on — not a numeric id.
+  // `uuid` is not returned by the list; keep it optional for other responses.
+  id: string;
+  uuid?: string;
+  user_id?: number;
+  namespace_id?: number;
   bank_name: string;
+  account_name?: string;
   account_number?: string;
   sort_code?: string;
   account_type?: string;
   currency?: string;
+  is_primary?: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -30,7 +35,12 @@ export interface TaxStatement {
   statement_date?: string;
   start_date?: string;
   end_date?: string;
-  status: 'uploaded' | 'processing' | 'extracted' | 'classified' | 'error';
+  // The API exposes workflow_step (UPLOADED/EXTRACTED/CLASSIFIED) and
+  // processing_status (UPLOADED/PROCESSING/COMPLETED/ERROR), not a lowercase
+  // `status`. Use statementStatus() to derive the UI status from these.
+  status?: 'uploaded' | 'processing' | 'extracted' | 'classified' | 'error';
+  workflow_step?: string;
+  processing_status?: string;
   transaction_count?: number;
   error_message?: string;
   created_at: string;
@@ -243,10 +253,11 @@ export const taxService = {
     return response.data?.data || response.data;
   },
 
-  async uploadStatement(file: File, bankAccountId: number, statementDate?: string): Promise<TaxStatement> {
+  async uploadStatement(file: File, bankAccountId: string, statementDate?: string): Promise<TaxStatement> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('bank_account_id', String(bankAccountId));
+    // Backend /tax/upload identifies the account by uuid (sent as bank_account_id).
+    formData.append('bank_account_id', bankAccountId);
     if (statementDate) formData.append('statement_date', statementDate);
 
     const response = await apiClient.post(`${TAX_BASE}/upload`, formData, {
