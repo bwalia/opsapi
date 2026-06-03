@@ -280,11 +280,16 @@ export const taxService = {
   async getTransactions(filters: TaxTransactionFilters = {}): Promise<PaginatedResponse<TaxTransaction>> {
     const response = await apiClient.get(`${TAX_BASE}/transactions`, { params: buildParams(filters as unknown as Record<string, unknown>) });
     const d = response.data;
+    // The transactions list route returns the array under `items` (and the page
+    // size as `limit`), unlike most list endpoints which use `data`/`per_page`.
+    // Accept both shapes so the table doesn't silently render empty when only
+    // `total` is read correctly (the symptom: "60 results" header with no rows).
+    const list = Array.isArray(d?.items) ? d.items : (Array.isArray(d?.data) ? d.data : []);
     return {
-      data: Array.isArray(d?.data) ? d.data : [],
+      data: list,
       total: d?.total || 0,
       page: d?.page || 1,
-      per_page: d?.per_page || 20,
+      per_page: d?.limit || d?.per_page || 20,
       total_pages: d?.total_pages || 0,
     };
   },
