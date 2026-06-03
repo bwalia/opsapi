@@ -1,0 +1,53 @@
+# Dashboard dev override — hot-reload mode (no production build)
+#
+# Merge this on top of docker-compose.yml to run the Next.js dashboard with
+# `next dev` and the source bind-mounted, so code changes hot-reload instantly
+# instead of requiring a `next build` image rebuild every time.
+#
+# Enabled by start.sh via the -D / --dashboard-dev flag, which runs:
+#   docker compose -f docker-compose.yml -f docker-compose.dashboard-dev.yml up -d
+#
+# `build: !reset null` drops the prod build stanza from the base service so
+# `up --build` does NOT build the dashboard image; the node base image runs
+# `npm install && npm run dev` against the mounted source instead.
+services:
+  dashboard:
+    build: !reset null
+    image: node:24.14-alpine
+    working_dir: /app
+    # Use webpack dev (not Turbopack): Turbopack's native file watcher doesn't
+    # receive inotify events across the Colima/virtiofs bind mount, so edits
+    # never trigger a recompile. Webpack honors WATCHPACK_POLLING (set below)
+    # and reliably hot-reloads host edits.
+    command: sh -c "npm install && npx next dev --webpack -p 8039"
+    # Pull runtime config from lapis/.env (NEXT_PUBLIC_API_URL, FRONTEND_URL, …).
+    # In dev these are read at runtime (not baked at build), and next.config.ts
+    # uses FRONTEND_URL/NEXT_PUBLIC_API_URL to build allowedDevOrigins so the
+    # dashboard works when reached through a public proxy host, not just localhost.
+    env_file: ".env"
+    environment:
+      - NODE_ENV=development
+      # Fall back to localhost only if .env didn't define it.
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://127.0.0.1:4010}
+      - FRONTEND_URL=${FRONTEND_URL:-http://127.0.0.1:8039}
+      # Optional extra hosts (comma-separated) allowed to reach the dev server.
+      - ALLOWED_DEV_ORIGINS=${ALLOWED_DEV_ORIGINS:-}
+      # Poll the filesystem — virtiofs/Colima bind mounts don't reliably emit
+      # inotify events, so without this hot reload silently stops working.
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      # Mount the source for hot reload...
+      - ../opsapi-dashboard:/app
+      # ...but keep node_modules and .next inside the container (anonymous
+      # volumes) so the host dir never shadows the container's installed deps.
+      - /app/node_modules
+      - /app/.next
+    # First compile after boot can take a while; give the dev server time
+    # before the healthcheck starts marking it unhealthy.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8039"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 120s

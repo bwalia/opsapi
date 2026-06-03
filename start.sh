@@ -40,6 +40,7 @@ show_help() {
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
+    echo "  -D, --dashboard-dev   Run the Next.js dashboard in dev mode (hot reload, no image build)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Preset Environments:${NC}"
@@ -102,6 +103,7 @@ TARGET_ENV=""
 CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
+DASHBOARD_DEV=false
 PROJECT_CODE=""
 APEX_DOMAIN=""
 ADMIN_EMAIL=""
@@ -155,6 +157,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -C|--ci)
             CI_MODE=true
+            shift
+            ;;
+        -D|--dashboard-dev)
+            DASHBOARD_DEV=true
             shift
             ;;
         -d|--domain)
@@ -1036,11 +1042,16 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
-# Build docker compose command based on CI mode
-# CI mode uses a separate compose file without dev volume mounts
+# Build docker compose command based on CI / dashboard-dev mode
+# CI mode uses a separate compose file without dev volume mounts.
+# Dashboard-dev mode layers an override that runs Next.js via `next dev`
+# (hot reload, source bind-mounted) instead of building the production image.
 if $CI_MODE; then
     echo -e "${BLUE}[i] CI/CD mode enabled - using docker-compose.ci.yml (no dev volume mounts)${NC}"
     COMPOSE_CMD="docker compose -f docker-compose.ci.yml"
+elif $DASHBOARD_DEV; then
+    echo -e "${BLUE}[i] Dashboard dev mode enabled - Next.js runs via 'next dev' with hot reload (no image build)${NC}"
+    COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.dashboard-dev.yml"
 else
     COMPOSE_CMD="docker compose"
 fi

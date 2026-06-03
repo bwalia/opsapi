@@ -34,6 +34,20 @@ const STATUS_CONFIG: Record<string, { label: string; classes: string; icon: Reac
   error: { label: 'Error', classes: 'bg-red-100 text-red-700', icon: <AlertCircle className="w-3 h-3" /> },
 };
 
+// The API returns workflow_step (UPLOADED/EXTRACTED/CLASSIFIED) and
+// processing_status (PROCESSING/COMPLETED/ERROR), not a lowercase `status`.
+// Derive the UI status the badge + action buttons expect.
+function statementStatus(item: TaxStatement): 'uploaded' | 'processing' | 'extracted' | 'classified' | 'error' {
+  if (item.status) return item.status;
+  const proc = (item.processing_status || '').toUpperCase();
+  if (proc === 'PROCESSING') return 'processing';
+  if (proc === 'ERROR') return 'error';
+  const step = (item.workflow_step || '').toUpperCase();
+  if (step === 'CLASSIFIED') return 'classified';
+  if (step === 'EXTRACTED') return 'extracted';
+  return 'uploaded';
+}
+
 function StatementsContent() {
   const [statements, setStatements] = useState<TaxStatement[]>([]);
   const [bankAccounts, setBankAccounts] = useState<TaxBankAccount[]>([]);
@@ -44,7 +58,9 @@ function StatementsContent() {
 
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedBankAccountId, setSelectedBankAccountId] = useState<number | ''>('');
+  // Holds the bank account UUID (string). The list endpoint returns `uuid as id`,
+  // so the account identifier is a string, and the backend /tax/upload keys on it.
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('');
   const [statementDate, setStatementDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
@@ -113,7 +129,7 @@ function StatementsContent() {
 
     setIsUploading(true);
     try {
-      await taxService.uploadStatement(selectedFile, Number(selectedBankAccountId), statementDate || undefined);
+      await taxService.uploadStatement(selectedFile, selectedBankAccountId, statementDate || undefined);
       toast.success('Statement uploaded successfully');
       setShowUploadModal(false);
       setSelectedFile(null);
@@ -198,7 +214,7 @@ function StatementsContent() {
       key: 'status',
       header: 'Status',
       render: (item) => {
-        const config = STATUS_CONFIG[item.status] || STATUS_CONFIG.uploaded;
+        const config = STATUS_CONFIG[statementStatus(item)] || STATUS_CONFIG.uploaded;
         return (
           <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${config.classes}`}>
             {config.icon}
@@ -223,7 +239,7 @@ function StatementsContent() {
       width: 'w-36',
       render: (item) => (
         <div className="flex items-center gap-1">
-          {item.status === 'uploaded' && (
+          {statementStatus(item) === 'uploaded' && (
             <button
               onClick={(e) => { e.stopPropagation(); handleExtract(item); }}
               disabled={processingId === item.id}
@@ -233,7 +249,7 @@ function StatementsContent() {
               {processingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             </button>
           )}
-          {item.status === 'extracted' && (
+          {statementStatus(item) === 'extracted' && (
             <button
               onClick={(e) => { e.stopPropagation(); handleClassify(item); }}
               disabled={processingId === item.id}
@@ -328,15 +344,20 @@ function StatementsContent() {
               <label className="block text-sm font-medium text-secondary-700 mb-1">Bank Account *</label>
               <select
                 value={selectedBankAccountId}
-                onChange={(e) => setSelectedBankAccountId(e.target.value ? Number(e.target.value) : '')}
+                onChange={(e) => setSelectedBankAccountId(e.target.value)}
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
                 <option value="">Select a bank account...</option>
-                {bankAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.bank_name} {acc.account_number ? `(****${acc.account_number.slice(-4)})` : ''}
-                  </option>
-                ))}
+                {bankAccounts.map((acc) => {
+                  // List endpoint returns `uuid as id`, so `id` is the uuid the
+                  // backend keys on. Prefer an explicit `uuid` if present.
+                  const accountId = acc.uuid ?? acc.id;
+                  return (
+                    <option key={accountId} value={accountId}>
+                      {acc.bank_name} {acc.account_number ? `(****${acc.account_number.slice(-4)})` : ''}
+                    </option>
+                  );
+                })}
               </select>
               {bankAccounts.length === 0 && (
                 <p className="text-xs text-amber-600 mt-1">
