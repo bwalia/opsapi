@@ -1,2 +1,5 @@
 # Service account credentials
 iosapp-97bac-b3a53c94e206.json
+
+# Runtime core dump (multi-hundred-MB process image, never commit)
+/core
