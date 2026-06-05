@@ -49,36 +49,65 @@ export interface TaxStatement {
   account_number?: string;
 }
 
+// Mirrors the backend GET /api/v2/tax/transactions list item shape.
 export interface TaxTransaction {
-  id: number;
   uuid: string;
-  statement_id: number;
-  user_id: number;
-  namespace_id: number;
   transaction_date: string;
   description: string;
   amount: number;
   balance?: number;
-  transaction_type: 'credit' | 'debit';
-  category_id?: number;
-  category_name?: string;
+  transaction_type: 'CREDIT' | 'DEBIT';
+  category?: string;
   hmrc_category?: string;
-  confidence?: number;
-  classification_source?: string;
-  is_business: boolean;
-  is_verified: boolean;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
+  confidence_score?: number;
+  is_tax_deductible?: boolean;
+  is_vat_applicable?: boolean;
+  vat_rate?: number;
+  confirmation_status?: string;
+  classification_status?: string;
+  is_manually_reviewed?: boolean;
+  user_notes?: string;
+  created_at?: string;
+  statement_uuid?: string;
+  statement_file_name?: string;
+  statement_tax_year?: string;
+  bank_account_uuid?: string;
+  bank_name?: string;
+  account_name?: string;
+}
+
+export interface TaxTransactionSummary {
+  total_transactions: number;
+  total_income: number;
+  total_expenses: number;
+  pending_classification: number;
+}
+
+export interface TaxExtractionResult {
+  message: string;
+  parsed: number;   // total transactions read from the statement
+  saved: number;    // newly inserted
+  skipped: number;  // skipped as duplicates of existing rows
+  failed: number;   // failed to insert
 }
 
 export interface TaxCategory {
   id: number;
   uuid: string;
+  key?: string;
   name: string;
   hmrc_box?: string;
   category_type: 'income' | 'expense';
   is_deductible: boolean;
+  description?: string;
+  // true => seeded global category (read-only); false => owned by this namespace.
+  is_global?: boolean;
+}
+
+export interface TaxCategoryInput {
+  name: string;
+  category_type: 'income' | 'expense';
+  is_deductible?: boolean;
   description?: string;
 }
 
@@ -131,17 +160,25 @@ export interface TaxDashboardStats {
 }
 
 // Filter types
+// All filtering/sorting/pagination is applied server-side; these map 1:1
+// to the query params the backend's build_user_filters / SORT_COLUMNS accept.
 export interface TaxTransactionFilters {
   page?: number;
-  per_page?: number;
+  limit?: number;
   statement_id?: number;
-  category_id?: number;
-  transaction_type?: string;
-  is_verified?: boolean;
-  is_business?: boolean;
   search?: string;
+  transaction_type?: 'CREDIT' | 'DEBIT' | string;
+  category?: string;
+  hmrc_category?: string;
+  classification_status?: 'PENDING' | 'CONFIRMED' | 'MODIFIED' | string;
+  is_tax_deductible?: boolean;
+  amount_min?: number;
+  amount_max?: number;
   date_from?: string;
   date_to?: string;
+  bank_account_id?: number;
+  sort_by?: string;
+  sort_order?: 'ASC' | 'DESC';
 }
 
 export interface TaxStatementFilters {
@@ -170,16 +207,6 @@ function buildParams(filters: Record<string, unknown> | object): Record<string, 
     }
   });
   return params;
-}
-
-function normalizeList<T>(response: { data?: { data?: T[] } & T[] }): T[] {
-  const d = response.data;
-  if (!d) return [];
-  if (Array.isArray(d)) return d;
-  if (d && typeof d === 'object' && 'data' in d && Array.isArray((d as Record<string, unknown>).data)) {
-    return (d as Record<string, unknown>).data as T[];
-  }
-  return [];
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -267,16 +294,27 @@ export const taxService = {
     return response.data?.data || response.data;
   },
 
-  async deleteStatement(uuid: string): Promise<void> {
+  // The statements list returns `s.uuid as id`, so the identifier the UI holds
+  // (statement.id) is the uuid STRING the backend keys delete/show/update on.
+  // Accept string | number to match that loosely-typed reality (extract/classify
+  // do the same), so callers can pass statement.id directly.
+  async deleteStatement(uuid: string | number): Promise<void> {
     await apiClient.delete(`${TAX_BASE}/statements/${uuid}`);
   },
 
   // ── Extraction ──────────────────────────────────────────────────────────────
-  async extractTransactions(statementId: number): Promise<{ message: string; count?: number }> {
+  async extractTransactions(statementId: number): Promise<TaxExtractionResult> {
     const params = new URLSearchParams();
     params.append('statement_id', String(statementId));
     const response = await apiClient.post(`${TAX_BASE}/extract`, params.toString());
-    return response.data;
+    const d = response.data || {};
+    return {
+      message: d.message || 'Extraction complete',
+      parsed: d.transactions_parsed ?? d.transactions_saved ?? 0,
+      saved: d.transactions_saved ?? d.transactions_extracted ?? 0,
+      skipped: d.transactions_skipped ?? 0,
+      failed: d.transactions_failed ?? 0,
+    };
   },
 
   async getExtractedTransactions(statementId: number): Promise<TaxTransaction[]> {
@@ -300,8 +338,20 @@ export const taxService = {
       data: list,
       total: d?.total || 0,
       page: d?.page || 1,
-      per_page: d?.limit || d?.per_page || 20,
+      per_page: d?.limit || d?.per_page || 25,
       total_pages: d?.total_pages || 0,
+    };
+  },
+
+  // Server-side aggregate over ALL of the user's transactions (not just a page).
+  async getTransactionsSummary(): Promise<TaxTransactionSummary> {
+    const response = await apiClient.get(`${TAX_BASE}/transactions/summary`);
+    const d = response.data;
+    return {
+      total_transactions: d?.total_transactions || 0,
+      total_income: d?.total_income || 0,
+      total_expenses: d?.total_expenses || 0,
+      pending_classification: d?.pending_classification || 0,
     };
   },
 
@@ -315,16 +365,45 @@ export const taxService = {
   },
 
   // ── Classification ──────────────────────────────────────────────────────────
-  async classifyTransactions(statementId: number): Promise<{ message: string; classified?: number }> {
+  async classifyTransactions(
+    statementId: number,
+    profileType?: string,
+  ): Promise<{ message: string; classified?: number; profile_type?: string }> {
     const params = new URLSearchParams();
     params.append('statement_id', String(statementId));
-    const response = await apiClient.post(`${TAX_BASE}/classify`, params.toString());
+    // Optional per-run business profile. When provided it wins over the user's saved
+    // default; when omitted the backend uses the saved default (then sole_trader).
+    if (profileType) params.append('profile_type', profileType);
+    // AI classification runs the LLM per transaction (a local model can take
+    // several seconds each), so a whole statement easily exceeds the global
+    // 30s axios timeout and the request gets cancelled. Allow up to 5 minutes.
+    const response = await apiClient.post(`${TAX_BASE}/classify`, params.toString(), {
+      timeout: 300000,
+    });
     return response.data;
   },
 
   async getClassificationProviders(): Promise<Array<{ name: string; available: boolean }>> {
     const response = await apiClient.get(`${TAX_BASE}/classify/providers`);
     return response.data?.data || response.data || [];
+  },
+
+  // ── Business profile (drives classification) ─────────────────────────────────
+  async getProfileOptions(): Promise<
+    Array<{ profile_key: string; display_name: string; sa_form: string; filing_supported: boolean }>
+  > {
+    const response = await apiClient.get(`${TAX_BASE}/profiles`);
+    return response.data?.data || [];
+  },
+
+  // The user's saved default business profile key (may be null if never set).
+  async getDefaultProfileKey(): Promise<string | null> {
+    const response = await apiClient.get(`${TAX_BASE}/profile`);
+    return response.data?.default_profile_key ?? null;
+  },
+
+  async setDefaultProfileKey(profileKey: string): Promise<void> {
+    await apiClient.put(`${TAX_BASE}/profile/preferences`, { default_profile_key: profileKey });
   },
 
   // ── Categories ──────────────────────────────────────────────────────────────
@@ -334,6 +413,28 @@ export const taxService = {
     if (Array.isArray(d?.data)) return d.data;
     if (Array.isArray(d)) return d;
     return [];
+  },
+
+  async createCategory(data: TaxCategoryInput): Promise<TaxCategory> {
+    const params = new URLSearchParams();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+    const response = await apiClient.post(`${TAX_BASE}/categories`, params.toString());
+    return response.data?.data || response.data;
+  },
+
+  async updateCategory(uuid: string, data: Partial<TaxCategoryInput>): Promise<TaxCategory> {
+    const params = new URLSearchParams();
+    Object.entries(data).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) params.append(k, String(v));
+    });
+    const response = await apiClient.put(`${TAX_BASE}/categories/${uuid}`, params.toString());
+    return response.data?.data || response.data;
+  },
+
+  async deleteCategory(uuid: string): Promise<void> {
+    await apiClient.delete(`${TAX_BASE}/categories/${uuid}`);
   },
 
   // ── Reports ─────────────────────────────────────────────────────────────────

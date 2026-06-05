@@ -29,6 +29,36 @@ local function findStatement(statement_id, user_id)
     return db.select("* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1", statement_id, user_id)
 end
 
+-- Resolve the business profile for a classification run.
+-- Precedence: the user's stored `tax_user_profiles.default_profile_key` → an explicit
+-- request `profile_type` → "sole_trader". The result is validated against
+-- `tax_profile_guidance` (Phase 0) so the classifier never runs on a profile that has
+-- no guidance — an unknown/inactive key falls back to "sole_trader". DB lookups are
+-- pcall-guarded so the route degrades gracefully if the guidance table is absent.
+local function resolveProfileType(user_id, requested)
+    local stored
+    local ok, rows = pcall(db.select,
+        "default_profile_key FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+    if ok and rows and rows[1] and rows[1].default_profile_key
+        and rows[1].default_profile_key ~= "" then
+        stored = rows[1].default_profile_key
+    end
+
+    -- Precedence: an explicit per-run choice (the classify dropdown) wins, then the
+    -- user's saved default, then sole_trader. Empty string counts as "not provided".
+    if requested == "" then requested = nil end
+    local candidate = requested or stored or "sole_trader"
+
+    local ok2, known = pcall(db.select,
+        "profile_key FROM tax_profile_guidance WHERE profile_key = ? AND is_active = true LIMIT 1",
+        candidate)
+    if ok2 and not (known and known[1]) then
+        candidate = "sole_trader"
+    end
+
+    return candidate
+end
+
 return function(app)
 
     -- GET /api/v2/tax/classify/providers — list available LLM providers
@@ -47,7 +77,6 @@ return function(app)
         RateLimit.wrap({ rate = 5, window = 60, prefix = "classify" },
             AuthMiddleware.requireAuth(function(self)
                 local statement_id = self.params.statement_id
-                local profile_type = self.params.profile_type or "sole_trader"
                 local llm_provider = self.params.llm_provider
 
                 if not statement_id then
@@ -58,6 +87,10 @@ return function(app)
                 if not user_id then
                     return { status = 401, json = { error = "User not found" } }
                 end
+
+                -- Resolve the profile from the user's stored default (falling back to
+                -- the request param, then sole_trader). See resolveProfileType.
+                local profile_type = resolveProfileType(user_id, self.params.profile_type)
 
                 -- Verify statement ownership and workflow state (accepts uuid or id)
                 local statements = findStatement(statement_id, user_id)
@@ -127,11 +160,18 @@ return function(app)
                             is_tax_deductible = cls.is_tax_deductible,
                             classification_status = "CLASSIFIED",
                             classified_by = cls.classified_by or "ai",
-                            ai_reasoning = cls.reasoning,
+                            -- tax_transactions has no ai_reasoning column; the
+                            -- shared schema stores the model's explanation in
+                            -- llm_response (text).
+                            llm_response = cls.reasoning,
                             updated_at = db.raw("NOW()"),
                         }
 
-                        if cls.confidence and cls.confidence < 0.7 then
+                        -- Route to human review on low confidence OR any Phase 4
+                        -- filing-safety gate (invalid box, capital item, large amount,
+                        -- filing-unsupported profile). Filing-critical: never auto-file
+                        -- a flagged transaction.
+                        if cls.needs_review or (cls.confidence and cls.confidence < 0.7) then
                             updates.classification_status = "NEEDS_REVIEW"
                             low_confidence_count = low_confidence_count + 1
                         end

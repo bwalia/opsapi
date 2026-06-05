@@ -32,6 +32,20 @@ local function findStatement(statement_id, user_id)
     return db.select("* FROM tax_statements WHERE uuid = ? AND user_id = ? LIMIT 1", statement_id, user_id)
 end
 
+-- Fingerprint a transaction so re-extraction can't create duplicates. Date,
+-- normalized description, amount, direction and running balance together
+-- uniquely identify a row within a statement (the balance differs even when two
+-- transactions share the same day/description/amount).
+local function txnKey(date, description, amount, ttype, balance)
+    return table.concat({
+        tostring(date or ""),
+        (tostring(description or "")):lower():gsub("%s+", " "):match("^%s*(.-)%s*$") or "",
+        string.format("%.2f", tonumber(amount) or 0),
+        tostring(ttype or ""),
+        balance ~= nil and balance ~= db.NULL and string.format("%.2f", tonumber(balance) or 0) or "",
+    }, "|")
+end
+
 return function(app)
 
     -- POST /api/v2/tax/extract/bank-details — detect bank details from file
@@ -59,7 +73,8 @@ return function(app)
                 statement_id = stmt.id
 
                 -- Download file from MinIO to temp path
-                local file_key = stmt.minio_key or stmt.file_path
+                -- Canonical column is minio_object_key; keep legacy fallbacks.
+                local file_key = stmt.minio_object_key or stmt.minio_key or stmt.file_path
                 if not file_key then
                     return { status = 400, json = { error = "Statement has no file attached" } }
                 end
@@ -122,8 +137,9 @@ return function(app)
 
                 -- Update statement with detected details if found
                 if details and details.bank_name then
+                    -- tax_statements has no bank_name column (it lives on
+                    -- tax_bank_accounts), so only persist the balance/period fields.
                     local updates = {}
-                    if details.bank_name then updates.bank_name = details.bank_name end
                     if details.opening_balance then updates.opening_balance = details.opening_balance end
                     if details.closing_balance then updates.closing_balance = details.closing_balance end
                     if details.period_start then updates.period_start = details.period_start end
@@ -167,7 +183,8 @@ return function(app)
                     return { status = 409, json = { error = "Statement is past extraction stage" } }
                 end
 
-                local file_key = stmt.minio_key or stmt.file_path
+                -- Canonical column is minio_object_key; keep legacy fallbacks.
+                local file_key = stmt.minio_object_key or stmt.minio_key or stmt.file_path
                 if not file_key then
                     return { status = 400, json = { error = "Statement has no file attached" } }
                 end
@@ -241,39 +258,78 @@ return function(app)
                     return { status = 422, json = { error = "Extraction failed: " .. tostring(err) } }
                 end
 
-                -- Insert extracted transactions
-                local inserted = 0
+                -- Insert extracted transactions, skipping any that already exist
+                -- for this bank account (so re-extracting the same statement OR
+                -- re-uploading the same file as a new statement is idempotent, and
+                -- we keep any manual edits/classifications on rows already stored).
+                -- Scope is the bank account, not the statement: the same file
+                -- uploaded twice creates a new statement_id, so a statement-scoped
+                -- check would never see the earlier rows and would duplicate them.
+                local seen = {}
+                local existing
+                if stmt.bank_account_id then
+                    existing = db.query(
+                        "SELECT transaction_date, description, amount, transaction_type, balance " ..
+                        "FROM tax_transactions WHERE user_id = ? AND bank_account_id = ?",
+                        user_id, stmt.bank_account_id
+                    )
+                else
+                    -- No account on the statement: fall back to a statement-scoped check.
+                    existing = db.query(
+                        "SELECT transaction_date, description, amount, transaction_type, balance " ..
+                        "FROM tax_transactions WHERE statement_id = ?",
+                        tonumber(statement_id)
+                    )
+                end
+                for _, row in ipairs(existing or {}) do
+                    seen[txnKey(row.transaction_date, row.description, row.amount,
+                        row.transaction_type, row.balance)] = true
+                end
+
+                local inserted, skipped, failed = 0, 0, 0
                 for _, txn in ipairs(result.transactions or {}) do
-                    local ok_insert = pcall(function()
-                        db.insert("tax_transactions", {
-                            uuid = Global.generateStaticUUID(),
-                            statement_id = tonumber(statement_id),
-                            bank_account_id = stmt.bank_account_id,
-                            user_id = user_id,
-                            transaction_date = txn.date,
-                            description = txn.description,
-                            amount = txn.amount,
-                            balance = txn.balance or db.NULL,
-                            transaction_type = txn.transaction_type,
-                            confirmation_status = "PENDING",
-                            classification_status = "PENDING",
-                            created_at = db.raw("NOW()"),
-                            updated_at = db.raw("NOW()"),
-                        })
-                    end)
-                    if ok_insert then
-                        inserted = inserted + 1
+                    local key = txnKey(txn.date, txn.description, txn.amount,
+                        txn.transaction_type, txn.balance)
+                    if seen[key] then
+                        skipped = skipped + 1
+                    else
+                        local ok_insert = pcall(function()
+                            db.insert("tax_transactions", {
+                                -- Let Postgres mint the UUID: Global.generateStaticUUID()
+                                -- uses an unseeded RNG, so it repeats the same sequence
+                                -- each run and collides with rows from a prior extraction.
+                                uuid = db.raw("gen_random_uuid()::text"),
+                                statement_id = tonumber(statement_id),
+                                bank_account_id = stmt.bank_account_id,
+                                user_id = user_id,
+                                transaction_date = txn.date,
+                                description = txn.description,
+                                amount = txn.amount,
+                                balance = txn.balance or db.NULL,
+                                transaction_type = txn.transaction_type,
+                                confirmation_status = "PENDING",
+                                classification_status = "PENDING",
+                                created_at = db.raw("NOW()"),
+                                updated_at = db.raw("NOW()"),
+                            })
+                        end)
+                        if ok_insert then
+                            inserted = inserted + 1
+                            seen[key] = true  -- dedupe within this batch too
+                        else
+                            failed = failed + 1
+                        end
                     end
                 end
 
-                -- Update statement
+                -- Update statement. Note: tax_statements has no transaction_count
+                -- or bank_name column (txn count is computed in the list query, and
+                -- the bank name lives on tax_bank_accounts), so we don't write them.
                 local stmt_updates = {
                     processing_status = "COMPLETED",
                     workflow_step = "EXTRACTED",
-                    transaction_count = inserted,
                     updated_at = db.raw("NOW()"),
                 }
-                if result.bank then stmt_updates.bank_name = result.bank end
                 if result.bank_details then
                     if result.bank_details.opening_balance then
                         stmt_updates.opening_balance = result.bank_details.opening_balance
@@ -293,7 +349,8 @@ return function(app)
                         action = "EXTRACT",
                         user_id = user_id,
                         new_values = cjson.encode({
-                            transactions_extracted = inserted,
+                            transactions_saved = inserted,
+                            transactions_skipped = skipped,
                             bank = result.bank,
                             format = result.format,
                         }),
@@ -301,11 +358,16 @@ return function(app)
                     })
                 end)
 
+                local parsed = #(result.transactions or {})
                 return {
                     status = 200,
                     json = {
                         message = "Extraction complete",
-                        transactions_extracted = inserted,
+                        transactions_extracted = inserted,  -- kept for compatibility
+                        transactions_parsed = parsed,
+                        transactions_saved = inserted,
+                        transactions_skipped = skipped,
+                        transactions_failed = failed,
                         bank = result.bank,
                         format = result.format,
                         statement_id = statement_id,

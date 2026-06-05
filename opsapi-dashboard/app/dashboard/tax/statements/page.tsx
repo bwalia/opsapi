@@ -6,6 +6,7 @@ import {
   Upload,
   FileText,
   Trash2,
+  Briefcase,
   Play,
   RefreshCw,
   CheckCircle,
@@ -64,6 +65,13 @@ function StatementsContent() {
   const [statementDate, setStatementDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  // Business profile that classification runs as (prefilled from the saved default).
+  const [profileOptions, setProfileOptions] = useState<
+    Array<{ profile_key: string; display_name: string; filing_supported: boolean }>
+  >([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>('');
+  const [savedProfile, setSavedProfile] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fetchIdRef = useRef(0);
@@ -93,10 +101,37 @@ function StatementsContent() {
     }
   }, []);
 
+  const fetchProfiles = useCallback(async () => {
+    try {
+      const [opts, def] = await Promise.all([
+        taxService.getProfileOptions(),
+        taxService.getDefaultProfileKey(),
+      ]);
+      setProfileOptions(opts);
+      const initial = def || 'sole_trader';
+      setSavedProfile(def || '');
+      setSelectedProfile(initial);
+    } catch {
+      // Non-fatal: fall back to the backend default (sole_trader) at classify time.
+    }
+  }, []);
+
   useEffect(() => {
     fetchStatements();
     fetchBankAccounts();
-  }, [fetchStatements, fetchBankAccounts]);
+    fetchProfiles();
+  }, [fetchStatements, fetchBankAccounts, fetchProfiles]);
+
+  const handleSetDefaultProfile = async () => {
+    if (!selectedProfile || selectedProfile === savedProfile) return;
+    try {
+      await taxService.setDefaultProfileKey(selectedProfile);
+      setSavedProfile(selectedProfile);
+      toast.success('Default business profile saved');
+    } catch {
+      toast.error('Failed to save default profile');
+    }
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -149,7 +184,18 @@ function StatementsContent() {
     setProcessingId(statement.id);
     try {
       const result = await taxService.extractTransactions(statement.id);
-      toast.success(result.message || 'Extraction started');
+      // Report exactly what happened: saved vs skipped duplicates.
+      const parts = [`${result.saved} saved`];
+      if (result.skipped > 0) parts.push(`${result.skipped} skipped (duplicates)`);
+      if (result.failed > 0) parts.push(`${result.failed} failed`);
+      const detail = `${result.parsed} transactions read — ${parts.join(', ')}.`;
+      if (result.saved > 0) {
+        toast.success(detail);
+      } else if (result.skipped > 0) {
+        toast(`No new transactions — ${result.skipped} already imported.`, { icon: 'ℹ️' });
+      } else {
+        toast(detail);
+      }
       fetchStatements();
     } catch {
       toast.error('Failed to extract transactions');
@@ -161,8 +207,10 @@ function StatementsContent() {
   const handleClassify = async (statement: TaxStatement) => {
     setProcessingId(statement.id);
     try {
-      const result = await taxService.classifyTransactions(statement.id);
-      toast.success(result.message || 'Classification started');
+      const result = await taxService.classifyTransactions(statement.id, selectedProfile || undefined);
+      toast.success(
+        `${result.message || 'Classification complete'}${result.profile_type ? ` (as ${result.profile_type})` : ''}`,
+      );
       fetchStatements();
     } catch {
       toast.error('Failed to classify transactions');
@@ -174,11 +222,34 @@ function StatementsContent() {
   const handleDelete = async (statement: TaxStatement) => {
     if (!confirm('Delete this statement and all its transactions? This cannot be undone.')) return;
     try {
-      await taxService.deleteStatement(statement.uuid);
+      await taxService.deleteStatement(statement.id);
       toast.success('Statement deleted');
       fetchStatements();
     } catch {
       toast.error('Failed to delete statement');
+    }
+  };
+
+  // Delete every statement (and, via the backend cascade, their transactions) so the
+  // user can start a fresh upload/test. Fetches across pages, then deletes each.
+  const handleDeleteAll = async () => {
+    if (!confirm('Delete ALL statements and their transactions? This cannot be undone.')) return;
+    setIsDeletingAll(true);
+    try {
+      const all = await taxService.getStatements({ page: 1, per_page: 1000 });
+      const list = all.data || [];
+      if (list.length === 0) {
+        toast.success('No statements to delete');
+        return;
+      }
+      await Promise.all(list.map((s) => taxService.deleteStatement(s.id)));
+      toast.success(`Deleted ${list.length} statement${list.length === 1 ? '' : 's'}`);
+      setPage(1);
+      fetchStatements();
+    } catch {
+      toast.error('Failed to delete all statements');
+    } finally {
+      setIsDeletingAll(false);
     }
   };
 
@@ -284,6 +355,16 @@ function StatementsContent() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+          {statements.length > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              disabled={isDeletingAll}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              {isDeletingAll ? 'Deleting…' : 'Delete All'}
+            </button>
+          )}
           <button
             onClick={() => setShowUploadModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
@@ -292,6 +373,36 @@ function StatementsContent() {
             Upload Statement
           </button>
         </div>
+      </div>
+
+      {/* Business profile — classification runs as this profile (saved default, overridable per run) */}
+      <div className="flex flex-wrap items-center gap-3 bg-secondary-50 border border-secondary-200 rounded-xl p-4">
+        <div className="flex items-center gap-2">
+          <Briefcase className="w-4 h-4 text-secondary-500" />
+          <span className="text-sm font-medium text-secondary-700">Classify as:</span>
+        </div>
+        <select
+          value={selectedProfile}
+          onChange={(e) => setSelectedProfile(e.target.value)}
+          className="px-3 py-2 border border-secondary-300 rounded-lg text-sm bg-white"
+        >
+          {profileOptions.length === 0 && <option value="sole_trader">Sole Trader</option>}
+          {profileOptions.map((p) => (
+            <option key={p.profile_key} value={p.profile_key}>
+              {p.display_name}{!p.filing_supported ? ' (triage only)' : ''}
+            </option>
+          ))}
+        </select>
+        {selectedProfile && selectedProfile !== savedProfile ? (
+          <button
+            onClick={handleSetDefaultProfile}
+            className="text-sm px-3 py-2 border border-primary-300 text-primary-700 rounded-lg hover:bg-primary-50"
+          >
+            Set as my default
+          </button>
+        ) : (
+          savedProfile && <span className="text-xs text-secondary-500">Your saved default</span>
+        )}
       </div>
 
       {/* Info banner */}

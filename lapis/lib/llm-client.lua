@@ -16,6 +16,10 @@ local OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 local VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
 local OLLAMA_URL = os.getenv("OLLAMA_URL") or "http://ollama:11434"
 local OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "mistral"
+-- Dedicated embedding model. MUST be an embedder (NOT the chat model): the RAG
+-- corpus is stored as vector(384) from all-MiniLM-L6-v2, so query embeddings must
+-- land in that same 384-dim space. Ollama's `all-minilm` is that model.
+local OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL") or "all-minilm"
 local DEFAULT_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER") or "ollama"
 
 local MAX_RETRIES = 3
@@ -225,6 +229,11 @@ local function _call_ollama(prompt, opts)
         model = model,
         prompt = prompt,
         stream = false,
+        -- Disable chain-of-thought for hybrid reasoning models (e.g. qwen3):
+        -- with `format = "json"` the JSON grammar is applied to the whole
+        -- output, so an enabled thinking channel collapses `response` to an
+        -- empty string. Ollama ignores this flag for non-reasoning models.
+        think = false,
         options = {
             temperature = opts.temperature or 0.1,
         },
@@ -341,7 +350,48 @@ function LLMClient.classify(opts)
         end
     end
 
-    local system_prompt = [[You are a UK tax classification expert. Classify the following bank transaction into one of the given categories.
+    local system_prompt
+    if opts.hmrc_box_map and #opts.hmrc_box_map > 0 then
+        -- Guidance-aware prompt (Phase 2). The HMRC box map is built dynamically from
+        -- tax_hmrc_categories, so `hmrc_category` is emitted as a **snake_case key**
+        -- from that catalogue (e.g. "car_van_travel") — the vocabulary the rest of the
+        -- system and downstream consumers expect. Persona + per-profile rules come from
+        -- tax_profile_guidance.
+        local persona = opts.persona
+            or "You are a UK chartered accountant classifying a sole trader's bank "
+            .. "transactions for Self Assessment (SA103). Apply the wholly-and-exclusively "
+            .. "test and separate capital purchases from revenue expenses."
+
+        local box_lines = {}
+        for _, b in ipairs(opts.hmrc_box_map) do
+            local ded = b.is_tax_deductible and "deductible" or "NOT deductible"
+            table.insert(box_lines, string.format("- %s (Box %s): %s [%s]",
+                tostring(b.key), tostring(b.box), b.label or "", ded))
+        end
+
+        local rules_text = ""
+        if opts.rules_markdown and #opts.rules_markdown > 0 then
+            rules_text = "\n\nProfile-specific HMRC guidance:\n" .. opts.rules_markdown
+        end
+
+        system_prompt = persona .. "\n\n"
+            .. "Classify the transaction into one system category and map it to the "
+            .. "correct HMRC box.\n\n"
+            .. "Respond with VALID JSON ONLY, no other text:\n"
+            .. '{"category": "category_name", "hmrc_category": "hmrc_key", '
+            .. '"confidence": 0.95, "reasoning": "brief explanation", "is_tax_deductible": true}\n\n'
+            .. "System categories: " .. cat_list .. "\n\n"
+            .. "HMRC boxes — `hmrc_category` MUST be EXACTLY one of these snake_case keys, "
+            .. "never anything else:\n" .. table.concat(box_lines, "\n") .. "\n\n"
+            .. "Rules: capital purchases (computers, plant, vehicles) map to "
+            .. "capital_allowances, never a revenue box. Business entertainment is "
+            .. "entertainment_costs and is NOT deductible. When genuinely unsure, use "
+            .. "other_expenses with lower confidence." .. rules_text
+            .. "\n\nBusiness profile: " .. (opts.profile_type or "general") .. examples_text
+    else
+        -- Legacy prompt (feature flag off / no box map supplied). NOTE: emits camelCase
+        -- HMRC keys — retained only for backward-compatible opt-out.
+        system_prompt = [[You are a UK tax classification expert. Classify the following bank transaction into one of the given categories.
 
 You MUST respond with valid JSON only, no other text. Use this exact format:
 {"category": "category_name", "hmrc_category": "hmrc_key", "confidence": 0.95, "reasoning": "brief explanation", "is_tax_deductible": true}
@@ -361,6 +411,7 @@ HMRC SA103F box mappings:
 - otherExpenses (Box 31): Bank charges, interest, depreciation
 
 Business profile: ]] .. (opts.profile_type or "general") .. examples_text
+    end
 
     local user_prompt = string.format(
         'Classify this transaction:\nDescription: "%s"\nAmount: £%.2f\nType: %s',
@@ -540,7 +591,7 @@ function LLMClient.generate_embedding(opts)
         local res, req_err = httpc:request_uri(OLLAMA_URL .. "/api/embeddings", {
             method = "POST",
             body = cjson.encode({
-                model = opts.model or OLLAMA_MODEL,
+                model = opts.model or OLLAMA_EMBED_MODEL,
                 prompt = text,
             }),
             headers = { ["Content-Type"] = "application/json" },
