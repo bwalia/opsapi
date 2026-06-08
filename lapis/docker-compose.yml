@@ -43,6 +43,12 @@ services:
       - 8.8.8.8
       - 8.8.4.4
       - 1.1.1.1
+    # Reach the host machine's Ollama (running natively on the Mac, not the
+    # opsapi-ollama container). The custom `dns:` above bypasses Docker's embedded
+    # resolver, so host.docker.internal won't resolve via DNS — this writes it to
+    # /etc/hosts instead, which takes precedence regardless of DNS.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       opsapi-network:
         ipv4_address: 172.71.0.12

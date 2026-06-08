@@ -278,6 +278,30 @@ function HMRC.submit_self_assessment(access_token, submission)
     }, nil
 end
 
+--- Get an application (client_credentials) server token. Required by HMRC's
+--- application-restricted APIs such as Create Test User.
+function HMRC.get_server_token()
+    local httpc, err = create_http_client()
+    if not httpc then return nil, err end
+
+    local base_url = get_base_url()
+    local res, req_err = httpc:request_uri(base_url .. "/oauth/token", {
+        method = "POST",
+        body = ngx.encode_args({
+            grant_type = "client_credentials",
+            client_id = HMRC_CLIENT_ID,
+            client_secret = HMRC_CLIENT_SECRET,
+        }),
+        headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
+        ssl_verify = false,
+    })
+    if not res then return nil, "Server token request failed: " .. tostring(req_err) end
+    if res.status >= 400 then return nil, "Server token HTTP " .. res.status .. ": " .. tostring(res.body) end
+    local data = cjson.decode(res.body)
+    if not data or not data.access_token then return nil, "Invalid server token response" end
+    return data.access_token, nil
+end
+
 --- Create a sandbox test user (sandbox only)
 function HMRC.create_sandbox_test_user()
     if HMRC_ENVIRONMENT ~= "sandbox" then
@@ -287,13 +311,20 @@ function HMRC.create_sandbox_test_user()
     local httpc, err = create_http_client()
     if not httpc then return nil, err end
 
+    -- Create Test User is application-restricted — it needs a server token, not a user token.
+    local server_token, st_err = HMRC.get_server_token()
+    if not server_token then return nil, st_err end
+
     local base_url = get_base_url()
     local res, req_err = httpc:request_uri(base_url .. "/create-test-user/individuals", {
         method = "POST",
         body = cjson.encode({
-            serviceNames = { "self-assessment" },
+            -- MTD ITSA filing needs the taxpayer enrolled for income-tax MTD + NI, not
+            -- just legacy self-assessment, or calculations return MATCHING_RESOURCE_NOT_FOUND.
+            serviceNames = { "national-insurance", "self-assessment", "mtd-income-tax" },
         }),
         headers = {
+            ["Authorization"] = "Bearer " .. server_token,
             ["Content-Type"] = "application/json",
             ["Accept"] = "application/vnd.hmrc.1.0+json",
         },

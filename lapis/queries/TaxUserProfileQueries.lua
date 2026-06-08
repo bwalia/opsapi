@@ -153,6 +153,16 @@ function TaxUserProfileQueries.setDefaultTaxYear(user_uuid, tax_year)
     return { success = true }
 end
 
+-- Update the user's default business profile key (e.g. "sole_trader", "amazon_seller").
+function TaxUserProfileQueries.setDefaultProfileKey(user_uuid, profile_key)
+    db.query([[
+        UPDATE tax_user_profiles
+        SET default_profile_key = ?, updated_at = NOW()
+        WHERE user_uuid = ?
+    ]], profile_key, user_uuid)
+    return { success = true }
+end
+
 -- Update HMRC connected status
 function TaxUserProfileQueries.setHmrcConnected(user_uuid, connected)
     db.query([[

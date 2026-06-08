@@ -1,28 +1,30 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Search,
   Upload,
   FileText,
   Trash2,
+  Briefcase,
   Play,
   RefreshCw,
   CheckCircle,
-  Clock,
   AlertCircle,
   Loader2,
   FileUp,
+  Eye,
+  Link2,
 } from 'lucide-react';
-import { Input, Table, Card, Modal, Pagination } from '@/components/ui';
+import { Table, Modal, Pagination } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   taxService,
   type TaxStatement,
   type TaxBankAccount,
-  type TaxStatementFilters,
+  type TaxTransaction,
+  type TaxCategory,
 } from '@/services/tax.service';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate, formatCurrency, snakeToTitle } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -48,6 +50,18 @@ function statementStatus(item: TaxStatement): 'uploaded' | 'processing' | 'extra
   return 'uploaded';
 }
 
+// Per-transaction classification status badge for the inline view modal.
+const TXN_STATUS: Record<string, { label: string; classes: string }> = {
+  CONFIRMED: { label: 'Confirmed', classes: 'bg-green-100 text-green-700' },
+  CLASSIFIED: { label: 'Classified', classes: 'bg-blue-100 text-blue-700' },
+  NEEDS_REVIEW: { label: 'Needs review', classes: 'bg-amber-100 text-amber-700' },
+  PENDING: { label: 'Pending', classes: 'bg-secondary-100 text-secondary-500' },
+};
+function txnStatusBadge(status?: string) {
+  const cfg = TXN_STATUS[(status || 'PENDING').toUpperCase()] || TXN_STATUS.PENDING;
+  return <span className={`text-xs px-2 py-0.5 rounded-full ${cfg.classes}`}>{cfg.label}</span>;
+}
+
 function StatementsContent() {
   const [statements, setStatements] = useState<TaxStatement[]>([]);
   const [bankAccounts, setBankAccounts] = useState<TaxBankAccount[]>([]);
@@ -64,9 +78,36 @@ function StatementsContent() {
   const [statementDate, setStatementDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  // Business profile that classification runs as (prefilled from the saved default).
+  const [profileOptions, setProfileOptions] = useState<
+    Array<{ profile_key: string; display_name: string; filing_supported: boolean }>
+  >([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>('');
+  const [savedProfile, setSavedProfile] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fetchIdRef = useRef(0);
+
+  // Inline transactions view — opens automatically after extract/classify and via the
+  // per-row eye button, so the user sees results without leaving the statements page.
+  const [viewStatement, setViewStatement] = useState<TaxStatement | null>(null);
+  const [viewTxns, setViewTxns] = useState<TaxTransaction[]>([]);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [categories, setCategories] = useState<TaxCategory[]>([]);
+
+  // Transactions store the category key (snake_case); show the human label.
+  const categoryLabels = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of categories) {
+      if (c.key) map[c.key] = c.name;
+    }
+    return map;
+  }, [categories]);
+  const labelForCategory = useCallback(
+    (key?: string) => (key ? categoryLabels[key] || snakeToTitle(key) : ''),
+    [categoryLabels],
+  );
 
   const fetchStatements = useCallback(async () => {
     const fetchId = ++fetchIdRef.current;
@@ -93,10 +134,60 @@ function StatementsContent() {
     }
   }, []);
 
+  const fetchProfiles = useCallback(async () => {
+    try {
+      const [opts, def] = await Promise.all([
+        taxService.getProfileOptions(),
+        taxService.getDefaultProfileKey(),
+      ]);
+      setProfileOptions(opts);
+      const initial = def || 'sole_trader';
+      setSavedProfile(def || '');
+      setSelectedProfile(initial);
+    } catch {
+      // Non-fatal: fall back to the backend default (sole_trader) at classify time.
+    }
+  }, []);
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      setCategories(await taxService.getCategories());
+    } catch {
+      // Non-fatal: the view modal falls back to title-cased keys.
+    }
+  }, []);
+
   useEffect(() => {
     fetchStatements();
     fetchBankAccounts();
-  }, [fetchStatements, fetchBankAccounts]);
+    fetchProfiles();
+    fetchCategories();
+  }, [fetchStatements, fetchBankAccounts, fetchProfiles, fetchCategories]);
+
+  // Open the inline transactions view for a statement and load its rows.
+  const openStatementView = useCallback(async (statement: TaxStatement) => {
+    setViewStatement(statement);
+    setViewTxns([]);
+    setViewLoading(true);
+    try {
+      setViewTxns(await taxService.getStatementTransactions(statement.id));
+    } catch {
+      toast.error('Failed to load transactions');
+    } finally {
+      setViewLoading(false);
+    }
+  }, []);
+
+  const handleSetDefaultProfile = async () => {
+    if (!selectedProfile || selectedProfile === savedProfile) return;
+    try {
+      await taxService.setDefaultProfileKey(selectedProfile);
+      setSavedProfile(selectedProfile);
+      toast.success('Default business profile saved');
+    } catch {
+      toast.error('Failed to save default profile');
+    }
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -149,8 +240,21 @@ function StatementsContent() {
     setProcessingId(statement.id);
     try {
       const result = await taxService.extractTransactions(statement.id);
-      toast.success(result.message || 'Extraction started');
+      // Report exactly what happened: saved vs skipped duplicates.
+      const parts = [`${result.saved} saved`];
+      if (result.skipped > 0) parts.push(`${result.skipped} skipped (duplicates)`);
+      if (result.failed > 0) parts.push(`${result.failed} failed`);
+      const detail = `${result.parsed} transactions read — ${parts.join(', ')}.`;
+      if (result.saved > 0) {
+        toast.success(detail);
+      } else if (result.skipped > 0) {
+        toast(`No new transactions — ${result.skipped} already imported.`, { icon: 'ℹ️' });
+      } else {
+        toast(detail);
+      }
       fetchStatements();
+      // Surface the freshly extracted rows inline without leaving the page.
+      if (result.saved > 0 || result.skipped > 0) openStatementView(statement);
     } catch {
       toast.error('Failed to extract transactions');
     } finally {
@@ -158,12 +262,19 @@ function StatementsContent() {
     }
   };
 
-  const handleClassify = async (statement: TaxStatement) => {
+  // `reclassify` re-runs already-classified rows (AI-set only; user-confirmed rows are
+  // preserved server-side) — used by the Re-classify action on classified statements.
+  const handleClassify = async (statement: TaxStatement, reclassify = false) => {
+    if (reclassify && !confirm('Re-run AI classification for this statement? Transactions you have already confirmed are kept; everything else is re-classified.')) return;
     setProcessingId(statement.id);
     try {
-      const result = await taxService.classifyTransactions(statement.id);
-      toast.success(result.message || 'Classification started');
+      const result = await taxService.classifyTransactions(statement.id, selectedProfile || undefined, reclassify);
+      toast.success(
+        `${result.message || 'Classification complete'}${result.profile_type ? ` (as ${result.profile_type})` : ''}`,
+      );
       fetchStatements();
+      // Show the (re)classified results inline.
+      openStatementView(statement);
     } catch {
       toast.error('Failed to classify transactions');
     } finally {
@@ -174,11 +285,34 @@ function StatementsContent() {
   const handleDelete = async (statement: TaxStatement) => {
     if (!confirm('Delete this statement and all its transactions? This cannot be undone.')) return;
     try {
-      await taxService.deleteStatement(statement.uuid);
+      await taxService.deleteStatement(statement.id);
       toast.success('Statement deleted');
       fetchStatements();
     } catch {
       toast.error('Failed to delete statement');
+    }
+  };
+
+  // Delete every statement (and, via the backend cascade, their transactions) so the
+  // user can start a fresh upload/test. Fetches across pages, then deletes each.
+  const handleDeleteAll = async () => {
+    if (!confirm('Delete ALL statements and their transactions? This cannot be undone.')) return;
+    setIsDeletingAll(true);
+    try {
+      const all = await taxService.getStatements({ page: 1, per_page: 1000 });
+      const list = all.data || [];
+      if (list.length === 0) {
+        toast.success('No statements to delete');
+        return;
+      }
+      await Promise.all(list.map((s) => taxService.deleteStatement(s.id)));
+      toast.success(`Deleted ${list.length} statement${list.length === 1 ? '' : 's'}`);
+      setPage(1);
+      fetchStatements();
+    } catch {
+      toast.error('Failed to delete all statements');
+    } finally {
+      setIsDeletingAll(false);
     }
   };
 
@@ -249,6 +383,25 @@ function StatementsContent() {
               {processingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             </button>
           )}
+          {(statementStatus(item) === 'extracted' || statementStatus(item) === 'classified') && (
+            <button
+              onClick={(e) => { e.stopPropagation(); openStatementView(item); }}
+              className="p-1.5 rounded-lg hover:bg-secondary-100 text-secondary-600"
+              title="View transactions"
+            >
+              <Eye className="w-4 h-4" />
+            </button>
+          )}
+          {statementStatus(item) === 'classified' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleClassify(item, true); }}
+              disabled={processingId === item.id}
+              className="p-1.5 rounded-lg hover:bg-purple-50 text-purple-600 disabled:opacity-50"
+              title="Re-classify transactions"
+            >
+              {processingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            </button>
+          )}
           {statementStatus(item) === 'extracted' && (
             <button
               onClick={(e) => { e.stopPropagation(); handleClassify(item); }}
@@ -284,6 +437,23 @@ function StatementsContent() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+          <a
+            href="/dashboard/tax/settings"
+            className="flex items-center gap-2 px-4 py-2 border border-secondary-300 text-secondary-700 rounded-lg hover:bg-secondary-100"
+          >
+            <Link2 className="w-4 h-4" />
+            HMRC
+          </a>
+          {statements.length > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              disabled={isDeletingAll}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              {isDeletingAll ? 'Deleting…' : 'Delete All'}
+            </button>
+          )}
           <button
             onClick={() => setShowUploadModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
@@ -292,6 +462,36 @@ function StatementsContent() {
             Upload Statement
           </button>
         </div>
+      </div>
+
+      {/* Business profile — classification runs as this profile (saved default, overridable per run) */}
+      <div className="flex flex-wrap items-center gap-3 bg-secondary-50 border border-secondary-200 rounded-xl p-4">
+        <div className="flex items-center gap-2">
+          <Briefcase className="w-4 h-4 text-secondary-500" />
+          <span className="text-sm font-medium text-secondary-700">Classify as:</span>
+        </div>
+        <select
+          value={selectedProfile}
+          onChange={(e) => setSelectedProfile(e.target.value)}
+          className="px-3 py-2 border border-secondary-300 rounded-lg text-sm bg-white"
+        >
+          {profileOptions.length === 0 && <option value="sole_trader">Sole Trader</option>}
+          {profileOptions.map((p) => (
+            <option key={p.profile_key} value={p.profile_key}>
+              {p.display_name}{!p.filing_supported ? ' (triage only)' : ''}
+            </option>
+          ))}
+        </select>
+        {selectedProfile && selectedProfile !== savedProfile ? (
+          <button
+            onClick={handleSetDefaultProfile}
+            className="text-sm px-3 py-2 border border-primary-300 text-primary-700 rounded-lg hover:bg-primary-50"
+          >
+            Set as my default
+          </button>
+        ) : (
+          savedProfile && <span className="text-xs text-secondary-500">Your saved default</span>
+        )}
       </div>
 
       {/* Info banner */}
@@ -433,6 +633,119 @@ function StatementsContent() {
               </button>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {/* Inline transactions view (auto-opens after extract/classify) */}
+      {viewStatement && (
+        <Modal
+          isOpen={!!viewStatement}
+          onClose={() => setViewStatement(null)}
+          title={`Transactions — ${viewStatement.file_name || 'Statement'}`}
+          size="2xl"
+        >
+          {viewLoading ? (
+            <div className="py-12 flex items-center justify-center text-secondary-500">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading transactions…
+            </div>
+          ) : viewTxns.length === 0 ? (
+            <div className="py-12 text-center text-secondary-500">
+              No transactions found for this statement.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Summary chips */}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="px-2 py-1 rounded-full bg-secondary-100 text-secondary-700">
+                  {viewTxns.length} transactions
+                </span>
+                <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                  {viewTxns.filter((t) => !!t.category).length} classified
+                </span>
+                {viewTxns.filter((t) => t.classification_status === 'NEEDS_REVIEW').length > 0 && (
+                  <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                    {viewTxns.filter((t) => t.classification_status === 'NEEDS_REVIEW').length} need review
+                  </span>
+                )}
+              </div>
+
+              <div className="overflow-x-auto border border-secondary-200 rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary-50 text-secondary-500 text-xs">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium">Date</th>
+                      <th className="text-left px-3 py-2 font-medium">Description</th>
+                      <th className="text-right px-3 py-2 font-medium">Amount</th>
+                      <th className="text-left px-3 py-2 font-medium">Category</th>
+                      <th className="text-center px-3 py-2 font-medium">Deductible</th>
+                      <th className="text-left px-3 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-secondary-100">
+                    {viewTxns.map((t) => {
+                      const isCredit = t.transaction_type === 'CREDIT';
+                      return (
+                        <tr key={t.uuid} className="hover:bg-secondary-50">
+                          <td className="px-3 py-2 whitespace-nowrap text-secondary-600">
+                            {formatDate(t.transaction_date)}
+                          </td>
+                          <td className="px-3 py-2 max-w-[220px] truncate" title={t.description}>
+                            {t.description}
+                          </td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
+                            <span className={isCredit ? 'text-green-700' : 'text-red-700'}>
+                              {isCredit ? '+' : '-'}
+                              {formatCurrency(Math.abs(Number(t.amount)), 'GBP', 'en-GB')}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            {t.category ? (
+                              <span>
+                                {labelForCategory(t.category)}
+                                {t.confidence_score != null && (
+                                  <span
+                                    className={`ml-1 text-[10px] ${
+                                      t.confidence_score > 0.8
+                                        ? 'text-green-500'
+                                        : t.confidence_score > 0.5
+                                          ? 'text-amber-500'
+                                          : 'text-red-500'
+                                    }`}
+                                  >
+                                    ({Math.round(t.confidence_score * 100)}%)
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-secondary-400 italic">Unclassified</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full ${
+                                t.is_tax_deductible
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-secondary-100 text-secondary-500'
+                              }`}
+                            >
+                              {t.is_tax_deductible ? 'Yes' : 'No'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">{txnStatusBadge(t.classification_status)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end">
+                <a href="/dashboard/tax/transactions" className="text-sm text-primary-600 hover:underline">
+                  Open full transactions page →
+                </a>
+              </div>
+            </div>
+          )}
         </Modal>
       )}
     </div>

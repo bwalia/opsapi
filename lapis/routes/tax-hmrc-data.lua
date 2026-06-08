@@ -15,6 +15,39 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local Global = require("helper.global")
+local respond_to = require("lapis.application").respond_to
+
+-- Resolve the numeric user id (tax_user_profiles is keyed on it) from the JWT uuid.
+local function getUserId(user_uuid)
+    local rows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+    return rows and rows[1] and rows[1].id
+end
+
+-- Resolve the NINO for HMRC calls: explicit request param → the user's stored,
+-- encrypted NINO (captured when a sandbox test user is created, or saved manually).
+local function resolveNino(user_id, requested)
+    if requested and requested ~= "" then
+        return (requested:upper():gsub("%s", ""))
+    end
+    if not user_id then return nil end
+    local rows = db.select(
+        "nino_encrypted FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+    local enc = rows and rows[1] and rows[1].nino_encrypted
+    if enc and enc ~= "" then
+        local ok, nino = pcall(Global.decryptSecret, enc)
+        if ok and nino and nino ~= "" then return (nino:upper():gsub("%s", "")) end
+    end
+    return nil
+end
+
+-- Derive the UK tax year ("YYYY-YY") a date falls in (year boundary 6 April).
+local function tax_year_of(date_str)
+    local y, m = tostring(date_str or ""):match("^(%d%d%d%d)%-(%d%d)")
+    if not y then return "" end
+    y, m = tonumber(y), tonumber(m)
+    local start = (m >= 4) and y or (y - 1)
+    return string.format("%04d-%02d", start, (start + 1) % 100)
+end
 
 return function(app)
 
@@ -52,27 +85,58 @@ return function(app)
     )
 
     -- POST /api/v2/hmrc/businesses/fetch
+    -- Pull the taxpayer's businesses from the HMRC Business Details (MTD) API. That
+    -- endpoint is NINO-scoped (/individuals/business/details/{nino}/list) — without the
+    -- NINO HMRC returns 404 MATCHING_RESOURCE_NOT_FOUND, so we resolve it first.
     app:post("/api/v2/hmrc/businesses/fetch",
         AuthMiddleware.requireAuth(function(self)
             local user_uuid = self.current_user.uuid or self.current_user.id
 
             local ok_hmrc, HMRC = pcall(require, "helper.hmrc")
-            if not ok_hmrc then
-                return { status = 500, json = { error = "HMRC module not available" } }
+            local ok_cli, Client = pcall(require, "lib.hmrc-mtd-client")
+            if not (ok_hmrc and ok_cli) then
+                return { status = 500, json = { error = "HMRC modules not available" } }
             end
 
             local access_token, token_err = HMRC.get_valid_token(user_uuid)
             if not access_token then
-                return { status = 401, json = { error = token_err } }
+                return { status = 401, json = { error = token_err or "Not connected to HMRC" } }
             end
 
-            local data, err = HMRC.fetch_businesses(access_token)
+            local user_id = getUserId(user_uuid)
+            local nino = resolveNino(user_id, self.params.nino)
+            if not nino then
+                return { status = 400, json = {
+                    code = "NINO_REQUIRED",
+                    error = "No National Insurance number on file. In the HMRC sandbox, create a "
+                        .. "test user (it stores a NINO automatically); otherwise add your NINO first." } }
+            end
+
+            local data, err, hmrc_body = Client.list_businesses(access_token, nino)
             if not data then
-                return { status = 422, json = { error = err } }
+                -- Surface the real HMRC reason instead of a silent failure.
+                local code = hmrc_body and hmrc_body.code
+                local detail = hmrc_body and hmrc_body.message
+                local msg
+                if code == "CLIENT_OR_AGENT_NOT_AUTHORISED" or tostring(err):find("403") then
+                    -- The connected HMRC login is not authorised for this NINO. In the
+                    -- sandbox the NINO must belong to the test user you signed in as.
+                    msg = "The HMRC account you signed in with isn't authorised for the National "
+                        .. "Insurance number on file (ending " .. nino:sub(-4) .. "). In the sandbox "
+                        .. "the NINO must belong to the test user you log in as — create a test user "
+                        .. "in HMRC settings, reconnect signing in with those exact credentials, then "
+                        .. "load businesses. If the NINO is wrong, change it to match your login."
+                else
+                    msg = "HMRC could not return your businesses for NINO ending "
+                        .. nino:sub(-4) .. " (" .. tostring(err) .. ")."
+                        .. (detail and (" " .. detail) or "")
+                end
+                return { status = 502, json = { error = msg, code = code, hmrc = hmrc_body } }
             end
 
-            -- Cache businesses
-            local businesses = data.businessDetails or data.selfEmployment or {}
+            -- The MTD list response nests under listOfBusinesses; older shapes vary.
+            local businesses = data.listOfBusinesses or data.businesses
+                or data.businessDetails or data.selfEmployment or {}
             for _, biz in ipairs(businesses) do
                 db.query([[
                     INSERT INTO hmrc_businesses (user_uuid, business_id, type_of_business, trading_name, raw_response, fetched_at)
@@ -103,6 +167,9 @@ return function(app)
     )
 
     -- POST /api/v2/hmrc/obligations/fetch
+    -- Pull income-tax obligations from the Obligations (MTD) API (NINO-scoped). Caches
+    -- each period with its tax year + due date so we can later remind the user a return
+    -- is due. `business_id` (optional) filters the cached/returned rows to one business.
     app:post("/api/v2/hmrc/obligations/fetch",
         AuthMiddleware.requireAuth(function(self)
             local user_uuid = self.current_user.uuid or self.current_user.id
@@ -110,45 +177,67 @@ return function(app)
             local from_date = self.params.from_date or os.date("%Y") .. "-04-06"
             local to_date = self.params.to_date or (tonumber(os.date("%Y")) + 1) .. "-04-05"
 
-            if not business_id then
-                return { status = 400, json = { error = "business_id is required" } }
-            end
-
             local ok_hmrc, HMRC = pcall(require, "helper.hmrc")
-            if not ok_hmrc then
-                return { status = 500, json = { error = "HMRC module not available" } }
+            local ok_cli, Client = pcall(require, "lib.hmrc-mtd-client")
+            if not (ok_hmrc and ok_cli) then
+                return { status = 500, json = { error = "HMRC modules not available" } }
             end
 
             local access_token, token_err = HMRC.get_valid_token(user_uuid)
             if not access_token then
-                return { status = 401, json = { error = token_err } }
+                return { status = 401, json = { error = token_err or "Not connected to HMRC" } }
             end
 
-            local data, err = HMRC.fetch_obligations(access_token, business_id, from_date, to_date)
+            local user_id = getUserId(user_uuid)
+            local nino = resolveNino(user_id, self.params.nino)
+            if not nino then
+                return { status = 400, json = {
+                    code = "NINO_REQUIRED",
+                    error = "No National Insurance number on file — add your NINO (or create a "
+                        .. "sandbox test user) before fetching obligations." } }
+            end
+
+            local data, err, hmrc_body = Client.list_obligations(access_token, nino, {
+                from = from_date, to = to_date,
+            })
             if not data then
-                return { status = 422, json = { error = err } }
+                local detail = hmrc_body and hmrc_body.message
+                return { status = 502, json = {
+                    error = "HMRC could not return your obligations (" .. tostring(err) .. ")."
+                        .. (detail and (" " .. detail) or ""),
+                    code = hmrc_body and hmrc_body.code or nil,
+                    hmrc = hmrc_body } }
             end
 
-            -- Cache obligations
+            -- Cache obligations, flattening + optionally filtering to one business.
             local obligations = data.obligations or {}
+            local returned = {}
             for _, ob in ipairs(obligations) do
-                for _, period in ipairs(ob.obligationDetails or {}) do
-                    db.query([[
-                        INSERT INTO hmrc_obligations (user_uuid, business_id, period_start, period_end, due_date, status, period_key, tax_year, fetched_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-                        ON CONFLICT ON CONSTRAINT hmrc_obligations_user_uuid_business_id_period_start_period_end_key
-                        DO UPDATE SET
-                            status = EXCLUDED.status,
-                            due_date = EXCLUDED.due_date,
-                            fetched_at = NOW()
-                    ]], user_uuid, business_id,
-                        period.periodStartDate, period.periodEndDate,
-                        period.dueDate, period.status or "Open",
-                        period.periodKey or "", "")
+                local ob_business = ob.businessId or business_id
+                if (not business_id) or (ob_business == business_id) then
+                    table.insert(returned, ob)
+                    for _, period in ipairs(ob.obligationDetails or {}) do
+                        -- Conflict target is the UNIQUE INDEX idx_hmrc_obligations_period
+                        -- (user_uuid, business_id, period_start, period_end) — there is no
+                        -- named constraint, so use the column-list form.
+                        db.query([[
+                            INSERT INTO hmrc_obligations (user_uuid, business_id, period_start, period_end, due_date, status, period_key, tax_year, fetched_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                            ON CONFLICT (user_uuid, business_id, period_start, period_end)
+                            DO UPDATE SET
+                                status = EXCLUDED.status,
+                                due_date = EXCLUDED.due_date,
+                                tax_year = EXCLUDED.tax_year,
+                                fetched_at = NOW()
+                        ]], user_uuid, ob_business or "",
+                            period.periodStartDate, period.periodEndDate,
+                            period.dueDate, period.status or "Open",
+                            period.periodKey or "", tax_year_of(period.periodStartDate))
+                    end
                 end
             end
 
-            return { status = 200, json = { data = obligations } }
+            return { status = 200, json = { data = returned } }
         end)
     )
 
@@ -170,6 +259,78 @@ return function(app)
         end)
     )
 
+    -- /api/v2/hmrc/nino — GET reports whether a NINO is on file (last 4 only);
+    -- POST stores the user's NINO (encrypted) for filing. Both methods live on one
+    -- route via respond_to — registering app:get and app:post on the same path
+    -- separately makes Lapis keep only one (the other 404s).
+    app:match("/api/v2/hmrc/nino", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            local user_id = getUserId(self.current_user.uuid or self.current_user.id)
+            if not user_id then return { status = 200, json = { has_nino = false } } end
+            local rows = db.select(
+                "nino_last4, has_nino FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+            local row = rows and rows[1]
+            local has = row and (row.has_nino == true or row.has_nino == "t"
+                or (row.nino_last4 and row.nino_last4 ~= "")) or false
+            return { status = 200, json = { has_nino = has, last4 = row and row.nino_last4 or nil } }
+        end),
+        POST = AuthMiddleware.requireAuth(function(self)
+            local raw = self.params.nino
+            if not raw or raw == "" then
+                return { status = 400, json = { error = "nino is required" } }
+            end
+            local nino = (raw:upper():gsub("%s", ""))
+            -- UK NINO format: two letters, six digits, one suffix letter.
+            if not nino:match("^%a%a%d%d%d%d%d%d%a$") then
+                return { status = 400, json = {
+                    error = "That doesn't look like a valid National Insurance number (e.g. QQ123456C)." } }
+            end
+            -- Explicit consent is required before we store this personal data (GDPR).
+            local consent = self.params.consent
+            consent = (consent == true or consent == "true" or consent == "1")
+            if not consent then
+                return { status = 400, json = { code = "CONSENT_REQUIRED",
+                    error = "Please confirm you consent to us securely storing your National "
+                        .. "Insurance number so we can file with HMRC." } }
+            end
+            local user_id = getUserId(self.current_user.uuid or self.current_user.id)
+            if not user_id then return { status = 401, json = { error = "User not found" } } end
+
+            local enc = Global.encryptSecret(nino)
+            local last4 = nino:sub(-4)
+            local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+            if existing and #existing > 0 then
+                db.update("tax_user_profiles",
+                    { nino_encrypted = enc, nino_last4 = last4, has_nino = true,
+                      nino_consent_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
+                    { user_id = user_id })
+            else
+                db.insert("tax_user_profiles", {
+                    uuid = Global.generateStaticUUID(),
+                    user_id = user_id,
+                    nino_encrypted = enc,
+                    nino_last4 = last4,
+                    has_nino = true,
+                    nino_consent_at = db.raw("NOW()"),
+                    created_at = db.raw("NOW()"),
+                    updated_at = db.raw("NOW()"),
+                })
+            end
+            return { status = 200, json = { success = true, data = { has_nino = true, last4 = last4 } } }
+        end),
+
+        -- DELETE — erase the stored NINO (GDPR right to erasure / user request).
+        DELETE = AuthMiddleware.requireAuth(function(self)
+            local user_id = getUserId(self.current_user.uuid or self.current_user.id)
+            if not user_id then return { status = 401, json = { error = "User not found" } } end
+            db.update("tax_user_profiles",
+                { nino_encrypted = db.NULL, nino_last4 = db.NULL, has_nino = false,
+                  nino_consent_at = db.NULL, updated_at = db.raw("NOW()") },
+                { user_id = user_id })
+            return { status = 200, json = { success = true, data = { has_nino = false } } }
+        end),
+    }))
+
     -- POST /api/v2/hmrc/sandbox/create-test-user
     app:post("/api/v2/hmrc/sandbox/create-test-user",
         AuthMiddleware.requireAuth(function(self)
@@ -181,6 +342,36 @@ return function(app)
             local data, err = HMRC.create_sandbox_test_user()
             if not data then
                 return { status = 422, json = { error = err } }
+            end
+
+            -- Persist the test user's NINO (encrypted) on the current user's tax profile
+            -- so HMRC filing calls can use it without asking the user to re-enter it.
+            if data.nino and data.nino ~= "" then
+                pcall(function()
+                    local user_uuid = self.current_user.uuid or self.current_user.id
+                    local urows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+                    local uid = urows and urows[1] and urows[1].id
+                    if not uid then return end
+                    local enc = Global.encryptSecret(data.nino)
+                    local last4 = data.nino:sub(-4)
+                    local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", uid)
+                    if existing and #existing > 0 then
+                        db.update("tax_user_profiles",
+                            { nino_encrypted = enc, nino_last4 = last4, has_nino = true,
+                              updated_at = db.raw("NOW()") },
+                            { user_id = uid })
+                    else
+                        db.insert("tax_user_profiles", {
+                            uuid = Global.generateStaticUUID(),
+                            user_id = uid,
+                            nino_encrypted = enc,
+                            nino_last4 = last4,
+                            has_nino = true,
+                            created_at = db.raw("NOW()"),
+                            updated_at = db.raw("NOW()"),
+                        })
+                    end
+                end)
             end
 
             return { status = 201, json = { data = data } }

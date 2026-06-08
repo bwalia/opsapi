@@ -13,12 +13,11 @@ import {
   AlertCircle,
   CheckCircle,
   RefreshCw,
+  Building2,
 } from 'lucide-react';
-import { Card } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { taxService, type TaxDashboardStats } from '@/services/tax.service';
 import { formatCurrency } from '@/lib/utils';
-import toast from 'react-hot-toast';
 
 interface StatCardProps {
   title: string;
@@ -113,6 +112,14 @@ function TaxDashboardContent() {
       icon: <BarChart3 className="w-6 h-6" />,
       path: '/dashboard/tax/reports',
       color: 'bg-green-50 text-green-600',
+    },
+    {
+      title: 'File your tax',
+      description: 'Guided: connect HMRC, check figures, and preview your Self Assessment',
+      icon: <Building2 className="w-6 h-6" />,
+      path: '/dashboard/tax/file',
+      // Themed: follows the active theme's primary colour.
+      color: 'bg-primary-50 text-primary-600',
     },
   ];
 
@@ -246,6 +253,13 @@ function TaxDashboardContent() {
           <li className="flex items-start gap-2">
             <span className="font-bold min-w-[20px]">5.</span>
             <span>View your tax summary and HMRC box mapping under <strong>Reports</strong></span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="font-bold min-w-[20px]">6.</span>
+            <span>
+              Open <strong>File your tax</strong> — a guided flow that connects HMRC, checks your figures, and
+              previews your Self Assessment via Making Tax Digital
+            </span>
           </li>
         </ol>
       </div>

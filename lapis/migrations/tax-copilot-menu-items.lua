@@ -83,6 +83,24 @@ return {
                 required_action = "read",
                 priority = 34,
             },
+            {
+                key = "tax_file",
+                name = "File your tax",
+                icon = "Building2",
+                path = "/dashboard/tax/file",
+                module = "tax_statements",
+                required_action = "read",
+                priority = 35,
+            },
+            {
+                key = "tax_hmrc",
+                name = "HMRC settings",
+                icon = "Settings",
+                path = "/dashboard/tax/settings",
+                module = "tax_statements",
+                required_action = "read",
+                priority = 36,
+            },
         }
 
         for _, item in ipairs(items) do
@@ -205,7 +223,8 @@ return {
         local MigrationUtils = require("helper.migration-utils")
         local timestamp = MigrationUtils.getCurrentTimestamp()
 
-        local keys = { "tax", "tax_bank_accounts", "tax_statements", "tax_transactions", "tax_reports" }
+        local keys = { "tax", "tax_bank_accounts", "tax_statements", "tax_transactions",
+                       "tax_reports", "tax_file", "tax_hmrc" }
         for _, key in ipairs(keys) do
             local menu_rows = db.select("* FROM menu_items WHERE key = ?", key)
             if #menu_rows > 0 then
@@ -326,5 +345,73 @@ return {
         end
 
         print("[Tax Copilot] Granted permissions for tax_app_settings + tax_custom_categories")
+    end,
+
+    -- =========================================================================
+    -- [6] Guided "File your tax" wizard menu entry. Idempotent upsert so existing
+    -- installs (where step [1] already ran) pick up the new item and the renamed
+    -- HMRC-settings entry. Adds the item, repoints/renames the old tax_hmrc row,
+    -- and enables both for every namespace.
+    -- =========================================================================
+    [6] = function()
+        local MigrationUtils = require("helper.migration-utils")
+        local timestamp = MigrationUtils.getCurrentTimestamp()
+
+        local parent = db.select("* FROM menu_items WHERE key = ? LIMIT 1", "tax")
+        local parent_id = parent and parent[1] and parent[1].id
+
+        -- Insert the wizard item if it doesn't exist yet.
+        local existing_file = db.select("* FROM menu_items WHERE key = ? LIMIT 1", "tax_file")
+        if #existing_file == 0 then
+            db.insert("menu_items", {
+                uuid = MigrationUtils.generateUUID(),
+                key = "tax_file",
+                name = "File your tax",
+                icon = "Building2",
+                path = "/dashboard/tax/file",
+                module = "tax_statements",
+                required_action = "read",
+                priority = 35,
+                parent_id = parent_id,
+                is_active = true,
+                is_admin_only = false,
+                always_show = false,
+                settings = "{}",
+                created_at = timestamp,
+                updated_at = timestamp,
+            })
+        end
+
+        -- Rename/repoint the old "File to HMRC" entry to be the HMRC settings page.
+        db.update("menu_items",
+            { name = "HMRC settings", icon = "Settings", path = "/dashboard/tax/settings",
+              priority = 36, updated_at = timestamp },
+            { key = "tax_hmrc" })
+
+        -- Enable both for every namespace.
+        for _, key in ipairs({ "tax_file", "tax_hmrc" }) do
+            local rows = db.select("* FROM menu_items WHERE key = ? LIMIT 1", key)
+            local item = rows and rows[1]
+            if item then
+                local namespaces = db.select("* FROM namespaces")
+                for _, ns in ipairs(namespaces) do
+                    local exists = db.select(
+                        "* FROM namespace_menu_config WHERE namespace_id = ? AND menu_item_id = ?",
+                        ns.id, item.id)
+                    if #exists == 0 then
+                        db.insert("namespace_menu_config", {
+                            uuid = MigrationUtils.generateUUID(),
+                            namespace_id = ns.id,
+                            menu_item_id = item.id,
+                            is_enabled = true,
+                            created_at = timestamp,
+                            updated_at = timestamp,
+                        })
+                    end
+                end
+            end
+        end
+
+        print("[Tax Copilot] Added 'File your tax' wizard menu item")
     end,
 }

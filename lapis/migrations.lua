@@ -96,6 +96,12 @@ local hospital_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.HO
 -- Tax Copilot menu items
 local tax_copilot_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-copilot-menu-items") or {}
 
+-- Tax Copilot categories management (namespace_id column + Categories menu item)
+local tax_categories_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-categories-management") or {}
+
+-- Tax Profile Guidance: opsApi-owned per-profile HMRC guidance (form, persona, rules)
+local tax_profile_guidance_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-profile-guidance") or {}
+
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
 local push_notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS,
@@ -1303,6 +1309,7 @@ local _migrations = {
     ['484_tax_add_transaction_audit_columns']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 66),
     ['485_tax_grant_custom_categories_permissions']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 5),
     ['486_tax_seed_max_custom_categories_setting']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 67),
+    ['487_tax_categories_management']                = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_categories_mgmt_migrations, 1),
     ['488_tax_seed_auth_email_taken_code']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 68),
 
     -- 490: hmrc_filings — audit-grade record of every HMRC MTD ITSA
@@ -1723,6 +1730,7 @@ local _migrations = {
     ['707_billing_audit_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 8),
     ['708_billing_drop_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 9),
     ['709_billing_payments_invoice_unique'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 10),
+    ['710_tax_profile_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_profile_guidance_migrations, 1),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
