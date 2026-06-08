@@ -837,6 +837,8 @@ return {
                 nino_hash TEXT,
                 nino_last4 CHARACTER VARYING(255),
                 has_nino BOOLEAN NOT NULL DEFAULT FALSE,
+                -- When the user explicitly consented to us storing their (encrypted) NINO.
+                nino_consent_at TIMESTAMP,
                 hmrc_connected BOOLEAN NOT NULL DEFAULT FALSE,
                 default_business_id CHARACTER VARYING(255),
                 default_tax_year CHARACTER VARYING(255),
@@ -2883,5 +2885,11 @@ return {
         })
         schema.create_index("tax_processed_apple_notifications", "processed_at")
         schema.create_index("tax_processed_apple_notifications", "original_transaction_id")
+    end,
+
+    -- 83. Record explicit consent for storing the (encrypted) NINO — GDPR audit trail.
+    [83] = function()
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS nino_consent_at TIMESTAMP")
+        print("[Tax Copilot] Added nino_consent_at column to tax_user_profiles")
     end,
 }

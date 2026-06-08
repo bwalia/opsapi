@@ -385,8 +385,12 @@ function LLMClient.classify(opts)
             .. "never anything else:\n" .. table.concat(box_lines, "\n") .. "\n\n"
             .. "Rules: capital purchases (computers, plant, vehicles) map to "
             .. "capital_allowances, never a revenue box. Business entertainment is "
-            .. "entertainment_costs and is NOT deductible. When genuinely unsure, use "
-            .. "other_expenses with lower confidence." .. rules_text
+            .. "entertainment_costs and is NOT deductible. Clearly personal or "
+            .. "non-business spending (personal coffee/meals, supermarket groceries, ATM "
+            .. "cash withdrawals) is personal_expense and is NOT deductible — prefer it "
+            .. "over a business box whenever the transaction looks personal. Use "
+            .. "uncategorised_expense ONLY as a last resort when nothing else fits, and "
+            .. "lower the confidence when you do." .. rules_text
             .. "\n\nBusiness profile: " .. (opts.profile_type or "general") .. examples_text
     else
         -- Legacy prompt (feature flag off / no box map supplied). NOTE: emits camelCase

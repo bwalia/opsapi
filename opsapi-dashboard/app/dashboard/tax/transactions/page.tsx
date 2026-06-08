@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Search,
   RefreshCw,
@@ -8,7 +8,9 @@ import {
   XCircle,
   TrendingUp,
   TrendingDown,
+  AlertTriangle,
 } from 'lucide-react';
+import Link from 'next/link';
 import { Input, Table, Card, Pagination, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
@@ -18,11 +20,20 @@ import {
   type TaxTransactionSummary,
   type TaxCategory,
 } from '@/services/tax.service';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate, formatCurrency, snakeToTitle } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
 const PER_PAGE = 25;
+
+// One-click corrections for a credit that was mis-filed as an expense. Income options
+// re-file it under the right HMRC box; "exclude" clears the box so it never reaches the
+// return. Mirrors the guided "File your tax" wizard so both surfaces behave identically.
+const CREDIT_FIX_OPTIONS = [
+  { value: 'turnover', label: 'Business income (sales / turnover)', category: 'sales_income', hmrc_category: 'turnover' },
+  { value: 'other_income', label: 'Other business income', category: 'income_other', hmrc_category: 'other_income' },
+  { value: 'exclude', label: 'Personal / transfer — exclude', category: 'transfer', hmrc_category: '' },
+];
 
 function TransactionsContent() {
   const [transactions, setTransactions] = useState<TaxTransaction[]>([]);
@@ -43,6 +54,38 @@ function TransactionsContent() {
   const [editingTxn, setEditingTxn] = useState<string | null>(null);
   const [editCategory, setEditCategory] = useState<string>('');
   const fetchIdRef = useRef(0);
+
+  // Transactions store the category *key* (snake_case, e.g. "personal_expense").
+  // Map it to the human label from the categories list for display; fall back to a
+  // title-cased version of the key for any value not present in the list.
+  const categoryLabels = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of categories) {
+      if (c.key) map[c.key] = c.name;
+    }
+    return map;
+  }, [categories]);
+  const labelForCategory = useCallback(
+    (key?: string) => (key ? categoryLabels[key] || snakeToTitle(key) : ''),
+    [categoryLabels],
+  );
+
+  // Map category key → income/expense, so we can flag the filing-breaking case: a CREDIT
+  // (money in) classified into an EXPENSE category. Left as-is it becomes a negative
+  // period value that HMRC rejects (the "negative values" filing blocker).
+  const categoryTypeByKey = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of categories) if (c.key) map[c.key] = c.category_type;
+    return map;
+  }, [categories]);
+  const isMisfiledCredit = useCallback(
+    (t: TaxTransaction) =>
+      t.transaction_type === 'CREDIT' && categoryTypeByKey[t.category || ''] === 'expense',
+    [categoryTypeByKey],
+  );
+
+  // Which flagged row has its quick-fix menu open.
+  const [fixOpen, setFixOpen] = useState<string | null>(null);
 
   // Debounce search so we don't fire a request per keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -136,6 +179,26 @@ function TransactionsContent() {
     }
   };
 
+  // Apply a one-click correction to a credit mis-filed as an expense.
+  const applyCreditFix = async (
+    txn: TaxTransaction,
+    opt: (typeof CREDIT_FIX_OPTIONS)[number],
+  ) => {
+    try {
+      await taxService.updateTransaction(txn.uuid, {
+        category: opt.category,
+        hmrc_category: opt.hmrc_category,
+        classification_status: 'CONFIRMED',
+      });
+      toast.success('Transaction corrected');
+      setFixOpen(null);
+      fetchTransactions();
+      fetchSummary();
+    } catch {
+      toast.error('Failed to correct transaction');
+    }
+  };
+
   const columns: TableColumn<TaxTransaction>[] = [
     {
       key: 'transaction_date',
@@ -186,7 +249,9 @@ function TransactionsContent() {
             <div className="min-w-[180px]">
               <SearchableSelect
                 options={categories.map((cat) => ({
-                  value: cat.name,
+                  // The transaction's `category` column stores the key, so the option
+                  // value must be the key (not the human label) or the write corrupts it.
+                  value: cat.key || cat.name,
                   label: cat.name,
                   hint: cat.category_type === 'income' ? 'Income' : 'Expense',
                 }))}
@@ -205,20 +270,60 @@ function TransactionsContent() {
           );
         }
 
+        // A credit mis-filed as an expense: offer the same one-click corrections as the
+        // wizard, inline. The quick-fix menu replaces the category button while open.
+        if (isMisfiledCredit(item) && fixOpen === item.uuid) {
+          return (
+            <div className="min-w-[210px] space-y-1">
+              {CREDIT_FIX_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  onClick={() => applyCreditFix(item, o)}
+                  className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-secondary-100 text-secondary-700"
+                >
+                  {o.label}
+                </button>
+              ))}
+              <button onClick={() => setFixOpen(null)} className="text-[10px] text-secondary-400 px-2">
+                cancel
+              </button>
+            </div>
+          );
+        }
+
+        const flagged = isMisfiledCredit(item);
         return (
-          <button
-            onClick={() => { setEditingTxn(item.uuid); setEditCategory(item.category || ''); }}
-            className="text-xs px-2 py-1 rounded hover:bg-secondary-100 text-left max-w-[150px] truncate"
-          >
-            {item.category || <span className="text-secondary-400 italic">Unclassified</span>}
-            {item.confidence_score != null && (
-              <span className={`ml-1 text-[10px] ${
-                item.confidence_score > 0.8 ? 'text-green-500' : item.confidence_score > 0.5 ? 'text-amber-500' : 'text-red-500'
-              }`}>
-                ({(item.confidence_score * 100).toFixed(0)}%)
-              </span>
+          <div className="flex items-center gap-1">
+            {flagged && (
+              <AlertTriangle
+                className="w-3.5 h-3.5 text-red-500 shrink-0"
+                aria-label="Credit filed as an expense — HMRC would reject this"
+              />
             )}
-          </button>
+            <button
+              onClick={() => { setEditingTxn(item.uuid); setEditCategory(item.category || ''); }}
+              className={`text-xs px-2 py-1 rounded hover:bg-secondary-100 text-left max-w-[150px] truncate ${
+                flagged ? 'text-red-700' : ''
+              }`}
+            >
+              {item.category ? labelForCategory(item.category) : <span className="text-secondary-400 italic">Unclassified</span>}
+              {item.confidence_score != null && (
+                <span className={`ml-1 text-[10px] ${
+                  item.confidence_score > 0.8 ? 'text-green-500' : item.confidence_score > 0.5 ? 'text-amber-500' : 'text-red-500'
+                }`}>
+                  ({(item.confidence_score * 100).toFixed(0)}%)
+                </span>
+              )}
+            </button>
+            {flagged && (
+              <button
+                onClick={() => setFixOpen(item.uuid)}
+                className="text-[10px] font-medium text-primary-600 hover:underline shrink-0"
+              >
+                Fix
+              </button>
+            )}
+          </div>
         );
       },
     },
@@ -252,6 +357,8 @@ function TransactionsContent() {
       ),
     },
   ];
+
+  const flaggedOnPage = transactions.filter(isMisfiledCredit);
 
   return (
     <div className="space-y-6">
@@ -324,6 +431,27 @@ function TransactionsContent() {
           </select>
         </div>
       </Card>
+
+      {/* Filing-blocker banner: credits classified as expenses would be rejected by HMRC. */}
+      {flaggedOnPage.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-800">
+              {flaggedOnPage.length} credit{flaggedOnPage.length > 1 ? 's' : ''} on this page{' '}
+              {flaggedOnPage.length > 1 ? 'are' : 'is'} classified as an expense.
+            </p>
+            <p className="text-xs text-red-700 mt-0.5">
+              Money coming in can&apos;t be a business expense — HMRC rejects the resulting negative value.
+              Use the <strong>Fix</strong> action on each flagged row, or the guided{' '}
+              <Link href="/dashboard/tax/file" className="underline font-medium">
+                File your tax
+              </Link>{' '}
+              flow.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <Table

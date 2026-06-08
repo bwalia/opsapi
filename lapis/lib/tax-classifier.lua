@@ -38,7 +38,7 @@ end
 --- Load the HMRC box catalogue (snake_case keys) the LLM must map into. Returns a list.
 function Classifier.get_hmrc_box_map()
     local ok, rows = pcall(db.select,
-        "key, box, label, mtd_field_name, is_tax_deductible "
+        "key, box, label, mtd_field_name, mtd_section, is_tax_deductible "
         .. "FROM tax_hmrc_categories WHERE is_active = true ORDER BY id")
     if ok and rows then return rows end
     return {}
@@ -452,7 +452,42 @@ function Classifier.classify_transaction(transaction, opts)
             if hk == "capital_allowances" then
                 table.insert(review_reasons, "capital item — confirm capital allowances/AIA")
             end
+
+            -- A CREDIT (money in) classified into an expense box is almost always income
+            -- or a refund mis-filed as a cost. Left as-is the aggregator treats it as a
+            -- NEGATIVE period expense, which HMRC rejects outright (the "negative values"
+            -- filing blocker). Never auto-file it: force human review so the user confirms
+            -- whether it is income (→ turnover/other income) or a genuine refund.
+            if box.mtd_section == "periodExpenses"
+                and tostring(transaction.transaction_type):upper() == "CREDIT" then
+                table.insert(review_reasons,
+                    "credit (money in) classified as the expense '" .. tostring(hk)
+                    .. "' — confirm whether this is income or a refund")
+                classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
+                classification.credit_in_expense = true
+            end
         end
+    end
+
+    -- Non-business categories can never be claimed as a deduction, whatever HMRC box
+    -- the model paired them with. personal_expense/drawings have NO hmrc box, so the
+    -- box-authority check above can't catch them — force non-deductible here.
+    local NON_DEDUCTIBLE_CATEGORIES = {
+        personal_expense = true,
+        drawings = true,
+        uncategorised_expense = true,
+        transfer = true,
+    }
+    if classification.category and NON_DEDUCTIBLE_CATEGORIES[classification.category] then
+        classification.is_tax_deductible = false
+    end
+
+    -- "uncategorised_expense" means the model couldn't place the transaction. It must
+    -- never auto-file and must not be silently claimed — force human review and cap
+    -- confidence so the route routes it to NEEDS_REVIEW regardless of the LLM's number.
+    if classification.category == "uncategorised_expense" or classification.category == nil then
+        table.insert(review_reasons, "model could not categorise — assign a category")
+        classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
     end
 
     -- Large/anomalous amounts get verified by a human.

@@ -197,7 +197,81 @@ export interface PaginatedResponse<T> {
   total_pages: number;
 }
 
+// ── HMRC filing flow types ──────────────────────────────────────────────────────
+
+// A business as returned by /api/v2/hmrc/businesses (cached rows) or businesses/fetch.
+export interface HmrcBusiness {
+  business_id?: string;
+  businessId?: string;
+  type_of_business?: string;
+  typeOfBusiness?: string;
+  trading_name?: string;
+  tradingName?: string;
+}
+
+// A single obligation period (one row from HMRC's obligationDetails, flattened).
+export interface HmrcObligation {
+  business_id?: string;
+  period_start: string;
+  period_end: string;
+  due_date?: string;
+  status: string; // "Open" | "Fulfilled"
+  period_key?: string;
+}
+
+// A transaction the aggregator flags as pulling an expense field negative (a credit
+// mis-filed as a cost) — surfaced so the wizard can fix it inline before filing.
+export interface HmrcOffendingTransaction {
+  uuid: string;
+  transaction_date: string;
+  description: string;
+  amount: number;
+  category?: string;
+  hmrc_category?: string;
+  field: string; // the MTD field it was wrongly placed under (e.g. wagesAndStaffCosts)
+}
+
+export interface HmrcAggregatePreview {
+  tax_year: string;
+  period: { from: string; to: string };
+  body: Record<string, Record<string, number>>;
+  stats: {
+    rows?: number;
+    applied?: number;
+    excluded_unreviewed?: number;
+    excluded_no_mtd_field?: number;
+    excluded_zero_amount?: number;
+    [k: string]: unknown;
+  };
+  warnings: string[];
+  blocking: boolean;
+  offending_transactions?: HmrcOffendingTransaction[];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// HMRC returns obligations nested as [{ obligationDetails: [{ periodStartDate, ... }] }].
+// The backend GET returns already-flat cached rows. Accept both and emit a flat list.
+function normaliseObligations(data: unknown): HmrcObligation[] {
+  if (!Array.isArray(data)) return [];
+  // Already-flat cached rows carry period_start; nested HMRC shape carries obligationDetails.
+  if (data.length > 0 && (data[0] as { period_start?: string }).period_start !== undefined) {
+    return data as HmrcObligation[];
+  }
+  const out: HmrcObligation[] = [];
+  for (const ob of data as Array<{ obligationDetails?: Array<Record<string, string>> }>) {
+    for (const p of ob.obligationDetails || []) {
+      out.push({
+        period_start: p.periodStartDate,
+        period_end: p.periodEndDate,
+        due_date: p.dueDate,
+        status: p.status || 'Open',
+        period_key: p.periodKey,
+      });
+    }
+  }
+  return out;
+}
 
 function buildParams(filters: Record<string, unknown> | object): Record<string, string | number> {
   const params: Record<string, string | number> = {};
@@ -325,6 +399,20 @@ export const taxService = {
     return [];
   },
 
+  // All transactions for a statement, including classification fields (category,
+  // confidence, deductibility, status). Keyed by the statement uuid (what the list
+  // endpoint returns as `id`). The byStatement endpoint aliases each row's uuid to
+  // `id`, so normalise it back to `uuid` for the table key extractor.
+  async getStatementTransactions(statementId: number | string): Promise<TaxTransaction[]> {
+    const response = await apiClient.get(
+      `${TAX_BASE}/statements/${statementId}/transactions`,
+      { params: { perPage: 1000 } },
+    );
+    const d = response.data;
+    const list: TaxTransaction[] = Array.isArray(d?.data) ? d.data : (Array.isArray(d) ? d : []);
+    return list.map((t) => ({ ...t, uuid: t.uuid || (t as { id?: string }).id || '' }));
+  },
+
   // ── Transactions ────────────────────────────────────────────────────────────
   async getTransactions(filters: TaxTransactionFilters = {}): Promise<PaginatedResponse<TaxTransaction>> {
     const response = await apiClient.get(`${TAX_BASE}/transactions`, { params: buildParams(filters as unknown as Record<string, unknown>) });
@@ -368,12 +456,22 @@ export const taxService = {
   async classifyTransactions(
     statementId: number,
     profileType?: string,
-  ): Promise<{ message: string; classified?: number; profile_type?: string }> {
+    reclassify?: boolean,
+  ): Promise<{
+    message: string;
+    classified?: number;
+    needs_review?: number;
+    total?: number;
+    profile_type?: string;
+  }> {
     const params = new URLSearchParams();
     params.append('statement_id', String(statementId));
     // Optional per-run business profile. When provided it wins over the user's saved
     // default; when omitted the backend uses the saved default (then sole_trader).
     if (profileType) params.append('profile_type', profileType);
+    // Opt-in re-run: also re-classify rows the AI already set (e.g. after a profile
+    // change). User-confirmed rows are always preserved server-side.
+    if (reclassify) params.append('reclassify', 'true');
     // AI classification runs the LLM per transaction (a local model can take
     // several seconds each), so a whole statement easily exceeds the global
     // 30s axios timeout and the request gets cancelled. Allow up to 5 minutes.
@@ -386,6 +484,159 @@ export const taxService = {
   async getClassificationProviders(): Promise<Array<{ name: string; available: boolean }>> {
     const response = await apiClient.get(`${TAX_BASE}/classify/providers`);
     return response.data?.data || response.data || [];
+  },
+
+  // ── HMRC connection (OAuth) ──────────────────────────────────────────────────
+  // These hit root-level routes (/api/v2/hmrc, /auth/hmrc), NOT TAX_BASE.
+  async getHmrcStatus(): Promise<{
+    connected: boolean;
+    is_valid?: boolean;
+    expires_at?: string;
+    scope?: string;
+  }> {
+    const response = await apiClient.get('/api/v2/hmrc/status');
+    return response.data;
+  },
+
+  // Returns HMRC's OAuth authorize URL. The caller redirects the browser to it; after the
+  // user authorises, HMRC → backend callback → `${redirectUrl}/${source}?hmrc_connected=true`.
+  // `redirectUrl` MUST be the base the callback appends the page segment to — i.e.
+  // `${origin}/dashboard/tax` (NOT `/dashboard/tax/file`), since the callback adds
+  // "/settings" or "/file" itself based on `source`.
+  async initiateHmrcConnect(redirectUrl: string, source: 'settings' | 'file' = 'settings'): Promise<string> {
+    const response = await apiClient.get('/auth/hmrc/initiate', {
+      params: { source, redirect_url: redirectUrl },
+    });
+    return response.data?.auth_url;
+  },
+
+  async disconnectHmrc(): Promise<void> {
+    await apiClient.delete('/auth/hmrc/disconnect');
+  },
+
+  // ── NINO (National Insurance number) ─────────────────────────────────────────
+  // HMRC's business/obligations APIs are NINO-scoped, so one must be on file.
+  async getHmrcNinoStatus(): Promise<{ has_nino: boolean; last4?: string }> {
+    const response = await apiClient.get('/api/v2/hmrc/nino');
+    return response.data || { has_nino: false };
+  },
+
+  // `consent` MUST be true — the backend rejects storage without explicit consent.
+  async saveHmrcNino(nino: string, consent: boolean): Promise<{ has_nino: boolean; last4?: string }> {
+    const params = new URLSearchParams();
+    params.append('nino', nino);
+    params.append('consent', consent ? 'true' : 'false');
+    const response = await apiClient.post('/api/v2/hmrc/nino', params.toString());
+    return response.data?.data || response.data;
+  },
+
+  // Erase the stored NINO (GDPR right to erasure).
+  async deleteHmrcNino(): Promise<void> {
+    await apiClient.delete('/api/v2/hmrc/nino');
+  },
+
+  // ── HMRC businesses & obligations ────────────────────────────────────────────
+  // Pull the taxpayer's businesses live from HMRC (caches them server-side). Throws
+  // on failure — the caller should surface response.data.error to the user.
+  async fetchHmrcBusinesses(): Promise<HmrcBusiness[]> {
+    const response = await apiClient.post('/api/v2/hmrc/businesses/fetch');
+    const d = response.data;
+    return Array.isArray(d?.data) ? d.data : [];
+  },
+
+  // Cached businesses (no HMRC round-trip).
+  async getHmrcBusinesses(): Promise<HmrcBusiness[]> {
+    const response = await apiClient.get('/api/v2/hmrc/businesses');
+    const d = response.data;
+    return Array.isArray(d?.data) ? d.data : [];
+  },
+
+  // The business id we'll file against (stored default). In sandbox this is the
+  // test-support stateful business, which the Business Details list doesn't return.
+  async getDefaultHmrcBusiness(): Promise<string | null> {
+    const response = await apiClient.get(`${TAX_BASE}/hmrc/business/default`);
+    return (response.data?.business_id as string) || null;
+  },
+
+  // Persist the chosen default self-employment business for filing.
+  async selectHmrcBusiness(businessId: string): Promise<void> {
+    const params = new URLSearchParams();
+    params.append('business_id', businessId);
+    await apiClient.post(`${TAX_BASE}/hmrc/business/select`, params.toString());
+  },
+
+  // Pull obligations (periods due to file) live from HMRC for a business + window.
+  async fetchHmrcObligations(businessId: string, from: string, to: string): Promise<HmrcObligation[]> {
+    const params = new URLSearchParams();
+    params.append('business_id', businessId);
+    params.append('from_date', from);
+    params.append('to_date', to);
+    const response = await apiClient.post('/api/v2/hmrc/obligations/fetch', params.toString());
+    return normaliseObligations(response.data?.data);
+  },
+
+  // Cached obligations for a business.
+  async getHmrcObligations(businessId: string): Promise<HmrcObligation[]> {
+    const response = await apiClient.get('/api/v2/hmrc/obligations', { params: { business_id: businessId } });
+    return normaliseObligations(response.data?.data);
+  },
+
+  // ── HMRC filing preview (Phase 1) ────────────────────────────────────────────
+  // Aggregate classified transactions into the HMRC MTD body for review. No HMRC call.
+  async getHmrcAggregatePreview(taxYear: string): Promise<HmrcAggregatePreview> {
+    const response = await apiClient.get(`${TAX_BASE}/hmrc/aggregate-preview`, {
+      params: { tax_year: taxYear },
+    });
+    return response.data?.data || response.data;
+  },
+
+  // Create a sandbox test user (and persist its NINO on the profile). Returns the
+  // Government Gateway test credentials the user signs in with during Connect.
+  async createHmrcSandboxTestUser(): Promise<{
+    userId?: string;
+    password?: string;
+    nino?: string;
+    saUtr?: string;
+    userFullName?: string;
+    emailAddress?: string;
+  }> {
+    const response = await apiClient.post('/api/v2/hmrc/sandbox/create-test-user');
+    return response.data?.data || response.data;
+  },
+
+  // Sandbox only: provision a stateful test business + MTD ITSA status for a tax year.
+  async provisionHmrcSandbox(taxYear: string): Promise<{ business_id: string; itsa_status?: string }> {
+    const params = new URLSearchParams();
+    params.append('tax_year', taxYear);
+    const response = await apiClient.post(`${TAX_BASE}/hmrc/sandbox/provision`, params.toString());
+    return response.data?.data || response.data;
+  },
+
+  // Submit the cumulative period + trigger/retrieve an in-year calculation (preview, not
+  // a filing). Slow (HMRC submit + calc polling), so allow a long timeout.
+  async calculateHmrcPreview(taxYear: string): Promise<{
+    tax_year: string;
+    business_id: string;
+    calculation_id: string;
+    sandbox_placeholder: boolean;
+    figures: {
+      total_income_tax_and_nics_due?: number;
+      total_taxable_income?: number;
+      income_tax_charged?: number;
+      personal_allowance?: number;
+      class2_nics?: number;
+      class4_nics?: number;
+      is_sandbox_placeholder?: boolean;
+    };
+    body: Record<string, Record<string, number>>;
+    stats: Record<string, unknown>;
+  }> {
+    const params = new URLSearchParams();
+    params.append('tax_year', taxYear);
+    const response = await apiClient.post(`${TAX_BASE}/hmrc/calculate-preview`, params.toString(), {
+      timeout: 180000,
+    });
+    return response.data?.data || response.data;
   },
 
   // ── Business profile (drives classification) ─────────────────────────────────
