@@ -97,16 +97,28 @@ export default function DashboardPage() {
   }, [refetch]);
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* Pending Invitations Banner */}
       <PendingInvitationsBanner />
 
-      {/* Page Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-secondary-900">Dashboard</h1>
-        <p className="text-sm sm:text-base text-secondary-500 mt-1">
-          Welcome back! Here&apos;s what&apos;s happening with your business.
-        </p>
+      {/* Hero header — brand gradient welcome */}
+      <div className="relative overflow-hidden rounded-2xl gradient-primary text-white p-6 sm:p-8 shadow-lg shadow-primary-500/20">
+        <div className="pointer-events-none absolute -top-16 -right-10 w-72 h-72 rounded-full bg-white/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-12 w-72 h-72 rounded-full bg-black/10 blur-3xl" />
+        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome back 👋</h1>
+            <p className="text-white/85 mt-1.5 text-sm sm:text-base max-w-xl">
+              Here&apos;s what&apos;s happening with your business today.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 backdrop-blur-sm px-3 py-1.5 font-medium ring-1 ring-white/20">
+              <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+              {health?.status === 'healthy' ? 'All systems operational' : 'Live overview'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Stats Cards - Responsive grid */}
@@ -124,15 +136,15 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Charts and Health Status - Responsive layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
+      {/* Charts and Health Status — equal-height columns on desktop, health scrolls internally */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 xl:h-[480px]">
         {/* Revenue Chart - Full width on mobile/tablet, 2/3 on desktop */}
-        <div className="xl:col-span-2 order-2 xl:order-1">
+        <div className="xl:col-span-2 order-2 xl:order-1 min-h-0">
           <OrdersChart data={chartData} isLoading={isLoading} />
         </div>
 
         {/* Health Status - Full width on mobile/tablet, 1/3 on desktop */}
-        <div className="order-1 xl:order-2">
+        <div className="order-1 xl:order-2 min-h-0">
           <HealthStatus health={health} isLoading={isLoading} onRefresh={handleRefresh} />
         </div>
       </div>

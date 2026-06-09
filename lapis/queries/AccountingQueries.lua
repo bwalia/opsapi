@@ -270,7 +270,7 @@ function AccountingQueries.createJournalEntry(params)
         reference = params.reference,
         status = params.status or "posted",
         total_amount = total_debits,
-        created_by_user_uuid = params.created_by_user_uuid,
+        created_by_uuid = params.created_by_user_uuid,
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
@@ -283,6 +283,7 @@ function AccountingQueries.createJournalEntry(params)
     local AccountingJournalLineModel = require("models.AccountingJournalLineModel")
     for _, line in ipairs(params.lines) do
         AccountingJournalLineModel:create({
+            uuid = Global.generateUUID(),
             journal_entry_id = entry.id,
             account_id = line.account_id,
             debit_amount = tonumber(line.debit_amount) or 0,
@@ -318,7 +319,7 @@ function AccountingQueries.voidJournalEntry(uuid, reason, user_uuid)
     local entry = AccountingQueries.getJournalEntry(uuid)
     if not entry then return nil, "Journal entry not found" end
 
-    if entry.status == "voided" then
+    if entry.status == "void" then
         return nil, "Journal entry is already voided"
     end
 
@@ -339,13 +340,12 @@ function AccountingQueries.voidJournalEntry(uuid, reason, user_uuid)
     -- Mark as voided
     db.query([[
         UPDATE accounting_journal_entries
-        SET status = 'voided',
+        SET status = 'void',
             void_reason = ?,
-            voided_by_user_uuid = ?,
             voided_at = NOW(),
             updated_at = NOW()
         WHERE uuid = ?
-    ]], reason, user_uuid, uuid)
+    ]], reason, uuid)
 
     return AccountingQueries.getJournalEntry(uuid)
 end
@@ -370,14 +370,7 @@ function AccountingQueries.importBankTransactions(namespace_id, transactions, im
 
     for _, txn in ipairs(transactions) do
         local amount = tonumber(txn.amount) or 0
-        local debit_amount = 0
-        local credit_amount = 0
-
-        if amount < 0 then
-            debit_amount = math.abs(amount)
-        else
-            credit_amount = amount
-        end
+        local transaction_type = amount < 0 and "debit" or "credit"
 
         AccountingBankTransactionModel:create({
             uuid = Global.generateUUID(),
@@ -385,14 +378,13 @@ function AccountingQueries.importBankTransactions(namespace_id, transactions, im
             transaction_date = txn.date,
             description = txn.description or "",
             amount = amount,
-            debit_amount = debit_amount,
-            credit_amount = credit_amount,
+            transaction_type = transaction_type,
             balance = txn.balance,
             category = txn.category,
             import_source = import_source or "manual",
             import_batch_id = import_batch_id,
             is_reconciled = false,
-            imported_by_user_uuid = user_uuid,
+            created_by_uuid = user_uuid,
             created_at = db.raw("NOW()"),
             updated_at = db.raw("NOW()")
         })
@@ -401,9 +393,11 @@ function AccountingQueries.importBankTransactions(namespace_id, transactions, im
     end
 
     return {
+        imported = imported,
         count = imported,
         batch_id = import_batch_id,
-        import_source = import_source
+        import_source = import_source,
+        message = string.format("Imported %d transaction(s)", imported)
     }
 end
 
@@ -545,8 +539,7 @@ function AccountingQueries.reconcileBankTransaction(uuid, account_id, user_uuid)
     db.query([[
         UPDATE accounting_bank_transactions
         SET is_reconciled = true,
-            reconciled_journal_entry_id = ?,
-            reconciled_at = NOW(),
+            reconciled_journal_id = ?,
             updated_at = NOW()
         WHERE uuid = ?
     ]], entry.id, uuid)
@@ -734,8 +727,7 @@ function AccountingQueries.approveExpense(uuid, approver_uuid)
     db.query([[
         UPDATE accounting_expenses
         SET status = 'approved',
-            approved_by_user_uuid = ?,
-            approved_at = NOW(),
+            approved_by_uuid = ?,
             updated_at = NOW()
         WHERE uuid = ?
     ]], approver_uuid, uuid)
@@ -756,11 +748,11 @@ function AccountingQueries.rejectExpense(uuid, approver_uuid, reason)
     db.query([[
         UPDATE accounting_expenses
         SET status = 'rejected',
-            approved_by_user_uuid = ?,
-            rejection_reason = ?,
+            approved_by_uuid = ?,
+            notes = COALESCE(NULLIF(?, ''), notes),
             updated_at = NOW()
         WHERE uuid = ?
-    ]], approver_uuid, reason, uuid)
+    ]], approver_uuid, reason and ("Rejected: " .. reason) or "", uuid)
 
     return AccountingQueries.getExpense(uuid)
 end
@@ -797,18 +789,19 @@ function AccountingQueries.createVatReturn(namespace_id, period_start, period_en
     local output_vat = tonumber(vat_data[1].output_vat) or 0
     local input_vat = tonumber(vat_data[1].input_vat) or 0
     local net_vat = output_vat - input_vat
+    local total_sales = tonumber(vat_data[1].total_sales) or 0
 
     local vat_return = AccountingVatReturnModel:create({
         uuid = Global.generateUUID(),
         namespace_id = namespace_id,
         period_start = period_start,
         period_end = period_end,
-        output_vat = output_vat,
-        input_vat = input_vat,
-        net_vat = net_vat,
-        total_sales = tonumber(vat_data[1].total_sales) or 0,
+        box1_vat_due_sales = output_vat,
+        box3_total_vat_due = output_vat,
+        box4_vat_reclaimed = input_vat,
+        box5_net_vat = net_vat,
+        box6_total_sales = total_sales,
         status = "draft",
-        created_by_user_uuid = user_uuid,
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
@@ -855,7 +848,7 @@ function AccountingQueries.submitVatReturn(uuid, user_uuid)
         UPDATE accounting_vat_returns
         SET status = 'submitted',
             submitted_at = NOW(),
-            submitted_by_user_uuid = ?,
+            submitted_by_uuid = ?,
             updated_at = NOW()
         WHERE uuid = ?
     ]], user_uuid, uuid)
@@ -881,7 +874,7 @@ function AccountingQueries.getTrialBalance(namespace_id, as_of_date)
             aa.account_type,
             COALESCE(SUM(jl.debit_amount), 0) as total_debits,
             COALESCE(SUM(jl.credit_amount), 0) as total_credits,
-            COALESCE(SUM(jl.debit_amount), 0) - COALESCE(SUM(jl.credit_amount), 0) as balance
+            COALESCE(SUM(jl.debit_amount), 0) - COALESCE(SUM(jl.credit_amount), 0) as net_balance
         FROM accounting_accounts aa
         LEFT JOIN accounting_journal_lines jl ON jl.account_id = aa.id
         LEFT JOIN accounting_journal_entries je ON je.id = jl.journal_entry_id
@@ -902,11 +895,9 @@ function AccountingQueries.getTrialBalance(namespace_id, as_of_date)
 
     return {
         accounts = result,
-        totals = {
-            total_debits = total_debits,
-            total_credits = total_credits,
-            is_balanced = math.abs(total_debits - total_credits) < 0.01
-        },
+        total_debits = total_debits,
+        total_credits = total_credits,
+        is_balanced = math.abs(total_debits - total_credits) < 0.01,
         as_of_date = as_of_date
     }
 end
@@ -957,9 +948,12 @@ function AccountingQueries.getBalanceSheet(namespace_id, as_of_date)
     end
 
     return {
-        assets = { accounts = assets, total = total_assets },
-        liabilities = { accounts = liabilities, total = total_liabilities },
-        equity = { accounts = equity, total = total_equity },
+        assets = assets,
+        liabilities = liabilities,
+        equity = equity,
+        total_assets = total_assets,
+        total_liabilities = total_liabilities,
+        total_equity = total_equity,
         as_of_date = as_of_date
     }
 end
@@ -999,20 +993,22 @@ function AccountingQueries.getProfitAndLoss(namespace_id, start_date, end_date)
     for _, row in ipairs(result) do
         local balance = tonumber(row.balance) or 0
         if row.account_type == "revenue" then
-            table.insert(revenue, row)
+            table.insert(revenue, { code = row.code, name = row.name, amount = balance })
             total_revenue = total_revenue + balance
         elseif row.account_type == "expense" then
-            table.insert(expenses, row)
+            table.insert(expenses, { code = row.code, name = row.name, amount = math.abs(balance) })
             total_expenses = total_expenses + math.abs(balance)
         end
     end
 
     return {
-        revenue = { accounts = revenue, total = total_revenue },
-        expenses = { accounts = expenses, total = total_expenses },
+        revenue = revenue,
+        expenses = expenses,
+        total_revenue = total_revenue,
+        total_expenses = total_expenses,
         net_profit = total_revenue - total_expenses,
-        start_date = start_date,
-        end_date = end_date
+        period_start = start_date,
+        period_end = end_date
     }
 end
 
@@ -1051,11 +1047,24 @@ function AccountingQueries.getExpenseSummary(namespace_id, start_date, end_date)
         ORDER BY month ASC
     ]], namespace_id, start_date, end_date)
 
+    local categories = {}
+    local grand_total = 0
+    for _, row in ipairs(by_category or {}) do
+        local amt = tonumber(row.total_amount) or 0
+        table.insert(categories, {
+            category = row.category,
+            total = amt,
+            count = tonumber(row.transaction_count) or 0
+        })
+        grand_total = grand_total + amt
+    end
+
     return {
-        by_category = by_category or {},
-        by_month = by_month or {},
-        start_date = start_date,
-        end_date = end_date
+        categories = categories,
+        total = grand_total,
+        period_start = start_date,
+        period_end = end_date,
+        by_month = by_month or {}
     }
 end
 
@@ -1082,11 +1091,11 @@ function AccountingQueries.getDashboardStats(namespace_id)
 
     -- VAT owed (latest draft VAT return)
     local vat_result = db.query([[
-        SELECT net_vat FROM accounting_vat_returns
+        SELECT box5_net_vat FROM accounting_vat_returns
         WHERE namespace_id = ? AND status = 'draft'
         ORDER BY period_end DESC LIMIT 1
     ]], namespace_id)
-    local vat_owed = vat_result and vat_result[1] and tonumber(vat_result[1].net_vat) or 0
+    local vat_owed = vat_result and vat_result[1] and tonumber(vat_result[1].box5_net_vat) or 0
 
     -- Unreconciled count
     local unreconciled = AccountingQueries.getUnreconciledCount(namespace_id)
@@ -1098,10 +1107,17 @@ function AccountingQueries.getDashboardStats(namespace_id)
     ]], namespace_id)
     local total_accounts = tonumber(accounts_result[1].cnt) or 0
 
+    -- Revenue & expenses for the current month (from posted journal entries)
+    local pl = AccountingQueries.getProfitAndLoss(namespace_id, month_start, os.date("%Y-%m-%d"))
+
     return {
         cash_balance = cash_balance,
         expenses_this_month = expenses_this_month,
         vat_owed = vat_owed,
+        unreconciled_count = unreconciled,
+        total_revenue = pl.total_revenue or 0,
+        total_expenses = pl.total_expenses or 0,
+        -- extra fields (not in the client type, harmless)
         unreconciled_transactions = unreconciled,
         total_accounts = total_accounts,
         period = os.date("%B %Y")

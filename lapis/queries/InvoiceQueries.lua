@@ -58,7 +58,7 @@ end
 -- ============================================================
 
 --- Create a new invoice
--- @param params table { namespace_id, customer_name, customer_email, customer_address, account_id, invoice_date, due_date, currency, notes, payment_terms, owner_user_uuid, line_items }
+-- @param params table { namespace_id, customer_name, customer_email, customer_address, account_id, issue_date, due_date, currency, notes, payment_terms_days, owner_user_uuid, line_items }
 -- @return table { data = invoice }
 function InvoiceQueries.create(params)
     local invoice_number = InvoiceQueries._getNextInvoiceNumber(params.namespace_id)
@@ -72,11 +72,11 @@ function InvoiceQueries.create(params)
         customer_email = params.customer_email,
         customer_address = params.customer_address,
         account_id = params.account_id,
-        invoice_date = params.invoice_date or db.raw("CURRENT_DATE"),
+        issue_date = params.issue_date or params.invoice_date or db.raw("CURRENT_DATE"),
         due_date = params.due_date,
         currency = params.currency or "GBP",
         notes = params.notes,
-        payment_terms = params.payment_terms,
+        payment_terms_days = params.payment_terms_days or params.payment_terms,
         owner_user_uuid = params.owner_user_uuid,
         subtotal = 0,
         tax_amount = 0,
@@ -133,10 +133,10 @@ function InvoiceQueries.list(namespace_id, params)
 
     -- Filter by date range
     if params.from_date and params.from_date ~= "" then
-        table.insert(conditions, "i.invoice_date >= " .. db.escape_literal(params.from_date))
+        table.insert(conditions, "i.issue_date >= " .. db.escape_literal(params.from_date))
     end
     if params.to_date and params.to_date ~= "" then
-        table.insert(conditions, "i.invoice_date <= " .. db.escape_literal(params.to_date))
+        table.insert(conditions, "i.issue_date <= " .. db.escape_literal(params.to_date))
     end
 
     -- Filter by owner
@@ -165,7 +165,7 @@ function InvoiceQueries.list(namespace_id, params)
             i.status,
             i.customer_name,
             i.customer_email,
-            i.invoice_date,
+            i.issue_date,
             i.due_date,
             i.currency,
             i.subtotal,
@@ -275,7 +275,7 @@ function InvoiceQueries.update(uuid, params)
     local update_data = {}
     local allowed_fields = {
         "customer_name", "customer_email", "customer_address", "account_id",
-        "invoice_date", "due_date", "currency", "notes", "payment_terms"
+        "issue_date", "due_date", "currency", "notes", "payment_terms_days"
     }
 
     for _, field in ipairs(allowed_fields) do

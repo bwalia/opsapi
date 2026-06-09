@@ -112,24 +112,48 @@ return function(app)
         end)
     ))
 
+    -- Lookup: customers in this namespace (for the timesheet customer dropdown).
+    -- Namespace-gated only (no module permission) so the timesheet author can
+    -- populate the dropdown regardless of customers.read grants.
+    app:get("/api/v2/timesheets/lookups/customers", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local rows = TimesheetQueries.lookupCustomers(self.namespace.id, self.params.q)
+            return success_response(rows)
+        end)
+    ))
+
+    -- Lookup: kanban tasks (with their project) in this namespace, for the task dropdown.
+    app:get("/api/v2/timesheets/lookups/tasks", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local rows = TimesheetQueries.lookupTasks(self.namespace.id, self.params.q)
+            return success_response(rows)
+        end)
+    ))
+
     -- Create timesheet
     app:post("/api/v2/timesheets", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local params = RequestParser.parse_request(self)
 
-            if not params.period_start or params.period_start == "" then
-                return error_response(400, "period_start is required")
-            end
-
-            if not params.period_end or params.period_end == "" then
-                return error_response(400, "period_end is required")
+            local has_work_date = params.work_date and params.work_date ~= ""
+            local has_period = params.period_start and params.period_start ~= ""
+            if not has_work_date and not has_period then
+                return error_response(400, "A work date (or a period start) is required")
             end
 
             local ok, timesheet = pcall(TimesheetQueries.create, {
                 namespace_id = self.namespace.id,
                 user_uuid = self.current_user.uuid,
-                title = params.title,
-                description = params.description,
+                customer_uuid = params.customer_uuid,
+                client_name = params.client_name,
+                task_uuid = params.task_uuid,
+                task = params.task,
+                work_date = params.work_date,
+                start_time = params.start_time,
+                end_time = params.end_time,
+                hourly_rate = params.hourly_rate,
+                is_billable = params.is_billable,
+                notes = params.notes,
                 period_start = params.period_start,
                 period_end = params.period_end
             })
@@ -164,11 +188,19 @@ return function(app)
             local params = RequestParser.parse_request(self)
 
             local updated, err = TimesheetQueries.update(self.params.uuid, {
-                title = params.title,
-                description = params.description,
+                customer_uuid = params.customer_uuid,
+                client_name = params.client_name,
+                task_uuid = params.task_uuid,
+                task = params.task,
+                work_date = params.work_date,
+                start_time = params.start_time,
+                end_time = params.end_time,
+                hourly_rate = params.hourly_rate,
+                is_billable = params.is_billable,
+                notes = params.notes,
                 period_start = params.period_start,
                 period_end = params.period_end
-            })
+            }, self.namespace.id)
 
             if err then
                 if err == "Timesheet not found" then

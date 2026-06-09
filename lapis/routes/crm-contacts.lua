@@ -70,9 +70,17 @@ return function(app)
                 metadata = cjson.encode(metadata)
             end
 
+            -- Frontend links the account by UUID (account_uuid); resolve to the
+            -- integer FK the table stores.
+            local account_id = data.account_id
+            if (not account_id) and data.account_uuid and data.account_uuid ~= "" then
+                local a = CrmQueries.getAccount(self.namespace.id, data.account_uuid)
+                if a then account_id = a.id end
+            end
+
             local contact = CrmQueries.createContact({
                 namespace_id = self.namespace.id,
-                account_id = data.account_id,
+                account_id = account_id,
                 first_name = data.first_name,
                 last_name = data.last_name,
                 email = data.email,
@@ -96,7 +104,7 @@ return function(app)
     -- GET /api/v2/crm/contacts/:uuid - Get contact
     app:get("/api/v2/crm/contacts/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local contact = CrmQueries.getContact(self.params.uuid)
+            local contact = CrmQueries.getContact(self.namespace.id, self.params.uuid)
             if not contact then
                 return api_response(404, nil, "Contact not found")
             end
@@ -112,7 +120,7 @@ return function(app)
     -- PUT /api/v2/crm/contacts/:uuid - Update contact
     app:put("/api/v2/crm/contacts/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local contact = CrmQueries.getContact(self.params.uuid)
+            local contact = CrmQueries.getContact(self.namespace.id, self.params.uuid)
             if not contact then
                 return api_response(404, nil, "Contact not found")
             end
@@ -154,7 +162,7 @@ return function(app)
     -- DELETE /api/v2/crm/contacts/:uuid - Soft delete contact
     app:delete("/api/v2/crm/contacts/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local contact = CrmQueries.getContact(self.params.uuid)
+            local contact = CrmQueries.getContact(self.namespace.id, self.params.uuid)
             if not contact then
                 return api_response(404, nil, "Contact not found")
             end

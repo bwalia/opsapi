@@ -14,7 +14,7 @@ local function _recalculate_totals(timesheet_id)
     local result = db.query([[
         SELECT
             COALESCE(SUM(hours), 0) as total_hours,
-            COALESCE(SUM(CASE WHEN billable = true THEN hours ELSE 0 END), 0) as billable_hours
+            COALESCE(SUM(CASE WHEN is_billable = true THEN hours ELSE 0 END), 0) as billable_hours
         FROM timesheet_entries
         WHERE timesheet_id = ? AND deleted_at IS NULL
     ]], timesheet_id)
@@ -32,13 +32,121 @@ end
 -- TIMESHEET CRUD
 -- ============================================================
 
+-- Parse a "HH:MM" (or "HH:MM:SS") clock string into minutes-since-midnight.
+local function time_to_minutes(t)
+    if not t or t == "" then return nil end
+    local h, m = tostring(t):match("^(%d%d?):(%d%d)")
+    if not h then return nil end
+    return tonumber(h) * 60 + tonumber(m)
+end
+
+-- Compute worked hours from a start/end clock pair (handles overnight spans).
+local function hours_from_times(start_time, end_time)
+    local sm, em = time_to_minutes(start_time), time_to_minutes(end_time)
+    if not sm or not em then return nil end
+    local diff = em - sm
+    if diff < 0 then diff = diff + 24 * 60 end -- crossed midnight
+    return math.floor((diff / 60) * 100 + 0.5) / 100
+end
+
+-- Coerce a form/string boolean into a real boolean (defaulting when absent).
+local function to_bool(v, default_value)
+    if v == nil or v == "" then return default_value end
+    if type(v) == "boolean" then return v end
+    v = tostring(v):lower()
+    return v == "true" or v == "1" or v == "yes"
+end
+
+-- Treat empty strings as NULL so DATE/TIME/NUMERIC columns don't choke.
+local function nilify(v)
+    if v == nil or v == "" then return nil end
+    return v
+end
+
+-- Resolve a customer UUID to its internal id + display name (tenant-scoped).
+-- pcall-guarded so timesheets work even when the customers module isn't enabled.
+local function resolve_customer(namespace_id, customer_uuid)
+    local ok, rows = pcall(function()
+        return db.query([[
+            SELECT id, first_name, last_name, email FROM customers
+            WHERE uuid = ? AND namespace_id = ? LIMIT 1
+        ]], customer_uuid, namespace_id)
+    end)
+    if not ok or not rows or not rows[1] then return nil end
+    local c = rows[1]
+    local name = ((c.first_name or "") .. " " .. (c.last_name or "")):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then name = c.email end
+    return { id = c.id, name = name }
+end
+
+-- Resolve a kanban task UUID to its title + parent project (tenant-scoped via the
+-- project's namespace_id). pcall-guarded so timesheets work without the kanban module.
+local function resolve_task(namespace_id, task_uuid)
+    local ok, rows = pcall(function()
+        return db.query([[
+            SELECT t.uuid AS task_uuid, t.title,
+                   p.uuid AS project_uuid, p.name AS project_name
+            FROM kanban_tasks t
+            JOIN kanban_boards b ON b.id = t.board_id
+            JOIN kanban_projects p ON p.id = b.project_id
+            WHERE t.uuid = ? AND p.namespace_id = ? AND t.deleted_at IS NULL
+            LIMIT 1
+        ]], task_uuid, namespace_id)
+    end)
+    if not ok or not rows or not rows[1] then return nil end
+    return rows[1]
+end
+
 function TimesheetQueries.create(params)
     if not params.uuid then
         params.uuid = Global.generateUUID()
     end
-    params.status = "draft"
-    params.total_hours = 0
-    params.billable_hours = 0
+
+    -- Resolve the customer (ecommerce customers.uuid -> id + name snapshot).
+    local customer_uuid = nilify(params.customer_uuid)
+    params.customer_uuid = customer_uuid
+    if customer_uuid then
+        local cust = resolve_customer(params.namespace_id, customer_uuid)
+        if cust then
+            params.customer_id = cust.id
+            if not nilify(params.client_name) then params.client_name = cust.name end
+        end
+    end
+
+    -- Resolve the task (kanban task.uuid -> title + project), tenant-scoped.
+    local task_uuid = nilify(params.task_uuid)
+    params.task_uuid = task_uuid
+    if task_uuid then
+        local t = resolve_task(params.namespace_id, task_uuid)
+        if t then
+            params.project_uuid = t.project_uuid
+            params.project_name = t.project_name
+            if not nilify(params.task) then params.task = t.title end
+        end
+    end
+    params.client_account_uuid = nil -- legacy; not a column
+
+    -- Normalise the optional single-session work fields.
+    params.work_date   = nilify(params.work_date)
+    params.start_time  = nilify(params.start_time)
+    params.end_time    = nilify(params.end_time)
+    params.task        = nilify(params.task)
+    params.client_name = nilify(params.client_name)
+    params.hourly_rate = nilify(params.hourly_rate)
+    params.is_billable = to_bool(params.is_billable, true)
+
+    -- Hours: derive from start/end time when given, else accept an explicit value.
+    local hours = hours_from_times(params.start_time, params.end_time)
+        or tonumber(params.total_hours) or 0
+    params.total_hours    = hours
+    params.billable_hours = params.is_billable and hours or 0
+
+    -- A single-session log only needs a work_date; mirror it into the (NOT NULL)
+    -- period columns so the existing period-based reports keep working.
+    if not nilify(params.period_start) then params.period_start = params.work_date end
+    if not nilify(params.period_end)   then params.period_end   = params.work_date end
+
+    params.status     = "draft"
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
 
@@ -48,6 +156,57 @@ function TimesheetQueries.create(params)
     timesheet.internal_id = timesheet.id
     timesheet.id = timesheet.uuid
     return timesheet
+end
+
+-- Namespace-scoped customer lookup for the timesheet customer dropdown.
+-- Returns up to 100 customers (optionally filtered by `q`). Empty list if the
+-- customers module isn't enabled.
+function TimesheetQueries.lookupCustomers(namespace_id, q)
+    local ok, rows = pcall(function()
+        local where = "namespace_id = ?"
+        local args = { namespace_id }
+        if q and q ~= "" then
+            where = where .. " AND (first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?)"
+            local like = "%" .. q .. "%"
+            table.insert(args, like); table.insert(args, like); table.insert(args, like)
+        end
+        table.insert(args, 100)
+        return db.query([[
+            SELECT uuid, first_name, last_name, email
+            FROM customers
+            WHERE ]] .. where .. [[
+            ORDER BY created_at DESC
+            LIMIT ?
+        ]], unpack(args))
+    end)
+    if not ok or not rows then return {} end
+    return rows
+end
+
+-- Namespace-scoped kanban task lookup (joined to its project) for the task
+-- dropdown. Tenant isolation is enforced via the project's namespace_id.
+function TimesheetQueries.lookupTasks(namespace_id, q)
+    local ok, rows = pcall(function()
+        local where = "p.namespace_id = ? AND t.deleted_at IS NULL"
+        local args = { namespace_id }
+        if q and q ~= "" then
+            where = where .. " AND t.title ILIKE ?"
+            table.insert(args, "%" .. q .. "%")
+        end
+        table.insert(args, 100)
+        return db.query([[
+            SELECT t.uuid AS task_uuid, t.title,
+                   p.uuid AS project_uuid, p.name AS project_name
+            FROM kanban_tasks t
+            JOIN kanban_boards b ON b.id = t.board_id
+            JOIN kanban_projects p ON p.id = b.project_id
+            WHERE ]] .. where .. [[
+            ORDER BY t.updated_at DESC
+            LIMIT ?
+        ]], unpack(args))
+    end)
+    if not ok or not rows then return {} end
+    return rows
 end
 
 function TimesheetQueries.list(namespace_id, params)
@@ -101,15 +260,28 @@ function TimesheetQueries.list(namespace_id, params)
         SELECT
             t.id as internal_id,
             t.uuid as id,
+            t.uuid as uuid,
             t.namespace_id,
             t.user_uuid,
-            t.title,
-            t.description,
+            t.notes,
             t.period_start,
             t.period_end,
             t.status,
             t.total_hours,
             t.billable_hours,
+            t.client_account_id,
+            t.client_name,
+            t.task,
+            t.work_date,
+            t.start_time,
+            t.end_time,
+            t.hourly_rate,
+            t.is_billable,
+            t.customer_id,
+            t.customer_uuid,
+            t.task_uuid,
+            t.project_uuid,
+            t.project_name,
             t.submitted_at,
             t.approved_at,
             t.rejected_at,
@@ -142,15 +314,28 @@ function TimesheetQueries.get(uuid)
         SELECT
             t.id as internal_id,
             t.uuid as id,
+            t.uuid as uuid,
             t.namespace_id,
             t.user_uuid,
-            t.title,
-            t.description,
+            t.notes,
             t.period_start,
             t.period_end,
             t.status,
             t.total_hours,
             t.billable_hours,
+            t.client_account_id,
+            t.client_name,
+            t.task,
+            t.work_date,
+            t.start_time,
+            t.end_time,
+            t.hourly_rate,
+            t.is_billable,
+            t.customer_id,
+            t.customer_uuid,
+            t.task_uuid,
+            t.project_uuid,
+            t.project_name,
             t.submitted_at,
             t.approved_at,
             t.approved_by_uuid,
@@ -181,9 +366,9 @@ function TimesheetQueries.get(uuid)
             timesheet_id,
             entry_date,
             hours,
-            billable,
+            is_billable,
             description,
-            project_uuid,
+            project_reference,
             category,
             task_reference,
             created_at,
@@ -215,9 +400,14 @@ function TimesheetQueries.get(uuid)
     return timesheet
 end
 
-function TimesheetQueries.update(uuid, params)
+function TimesheetQueries.update(uuid, params, namespace_id)
     local timesheet = TimesheetModel:find({ uuid = uuid })
     if not timesheet then
+        return nil, "Timesheet not found"
+    end
+
+    -- Tenant ownership guard: never let one namespace edit another's timesheet.
+    if namespace_id and tonumber(timesheet.namespace_id) ~= tonumber(namespace_id) then
         return nil, "Timesheet not found"
     end
 
@@ -234,6 +424,49 @@ function TimesheetQueries.update(uuid, params)
     params.status = nil
     params.namespace_id = nil
     params.user_uuid = nil
+
+    -- Resolve customer + task the same way create does (tenant-scoped, module-optional).
+    local customer_uuid = nilify(params.customer_uuid)
+    if customer_uuid then
+        params.customer_uuid = customer_uuid
+        local cust = resolve_customer(timesheet.namespace_id, customer_uuid)
+        if cust then
+            params.customer_id = cust.id
+            if not nilify(params.client_name) then params.client_name = cust.name end
+        end
+    end
+    local task_uuid = nilify(params.task_uuid)
+    if task_uuid then
+        params.task_uuid = task_uuid
+        local t = resolve_task(timesheet.namespace_id, task_uuid)
+        if t then
+            params.project_uuid = t.project_uuid
+            params.project_name = t.project_name
+            if not nilify(params.task) then params.task = t.title end
+        end
+    end
+    params.client_account_uuid = nil -- legacy; not a column
+
+    -- Normalise optional fields and recompute hours when a time span is supplied.
+    for _, k in ipairs({ "work_date", "start_time", "end_time", "task", "client_name", "hourly_rate" }) do
+        params[k] = nilify(params[k])
+    end
+    if params.is_billable ~= nil then
+        params.is_billable = to_bool(params.is_billable, true)
+    end
+    local hours = hours_from_times(params.start_time, params.end_time)
+    if hours then
+        params.total_hours = hours
+        local billable = params.is_billable
+        if billable == nil then billable = timesheet.is_billable end
+        params.billable_hours = billable and hours or 0
+    end
+    -- Keep the (NOT NULL) period columns in step with a single-session work_date.
+    if params.work_date then
+        if not nilify(params.period_start) then params.period_start = params.work_date end
+        if not nilify(params.period_end)   then params.period_end   = params.work_date end
+    end
+
     params.updated_at = db.raw("NOW()")
 
     local updated = timesheet:update(params, { returning = "*" })
@@ -414,10 +647,10 @@ function TimesheetQueries.getApprovalQueue(namespace_id, approver_uuid, params)
         SELECT
             t.id as internal_id,
             t.uuid as id,
+            t.uuid as uuid,
             t.namespace_id,
             t.user_uuid,
-            t.title,
-            t.description,
+            t.notes,
             t.period_start,
             t.period_end,
             t.status,
@@ -482,15 +715,28 @@ function TimesheetQueries.getMyTimesheets(namespace_id, user_uuid, params)
         SELECT
             t.id as internal_id,
             t.uuid as id,
+            t.uuid as uuid,
             t.namespace_id,
             t.user_uuid,
-            t.title,
-            t.description,
+            t.notes,
             t.period_start,
             t.period_end,
             t.status,
             t.total_hours,
             t.billable_hours,
+            t.client_account_id,
+            t.client_name,
+            t.task,
+            t.work_date,
+            t.start_time,
+            t.end_time,
+            t.hourly_rate,
+            t.is_billable,
+            t.customer_id,
+            t.customer_uuid,
+            t.task_uuid,
+            t.project_uuid,
+            t.project_name,
             t.submitted_at,
             t.approved_at,
             t.rejected_at,
@@ -559,13 +805,13 @@ function TimesheetQueries.getSummary(namespace_id, user_uuid, start_date, end_da
 
     local by_project = db.query([[
         SELECT
-            te.project_uuid,
+            te.project_reference,
             COALESCE(SUM(te.hours), 0) as total_hours,
-            COALESCE(SUM(CASE WHEN te.billable = true THEN te.hours ELSE 0 END), 0) as billable_hours
+            COALESCE(SUM(CASE WHEN te.is_billable = true THEN te.hours ELSE 0 END), 0) as billable_hours
         FROM timesheet_entries te
         JOIN timesheets t ON te.timesheet_id = t.id
         WHERE ]] .. where_sql .. [[ AND te.deleted_at IS NULL
-        GROUP BY te.project_uuid
+        GROUP BY te.project_reference
         ORDER BY total_hours DESC
     ]], unpack(by_project_params))
 
@@ -579,7 +825,7 @@ function TimesheetQueries.getSummary(namespace_id, user_uuid, start_date, end_da
         SELECT
             te.category,
             COALESCE(SUM(te.hours), 0) as total_hours,
-            COALESCE(SUM(CASE WHEN te.billable = true THEN te.hours ELSE 0 END), 0) as billable_hours
+            COALESCE(SUM(CASE WHEN te.is_billable = true THEN te.hours ELSE 0 END), 0) as billable_hours
         FROM timesheet_entries te
         JOIN timesheets t ON te.timesheet_id = t.id
         WHERE ]] .. where_sql .. [[ AND te.deleted_at IS NULL
@@ -711,9 +957,9 @@ function TimesheetQueries.getEntriesByTimesheet(timesheet_id)
             timesheet_id,
             entry_date,
             hours,
-            billable,
+            is_billable,
             description,
-            project_uuid,
+            project_reference,
             category,
             task_reference,
             created_at,
@@ -734,15 +980,15 @@ function TimesheetQueries.getEntriesByDate(namespace_id, user_uuid, date)
             te.timesheet_id,
             te.entry_date,
             te.hours,
-            te.billable,
+            te.is_billable,
             te.description,
-            te.project_uuid,
+            te.project_reference,
             te.category,
             te.task_reference,
             te.created_at,
             te.updated_at,
             t.uuid as timesheet_uuid,
-            t.title as timesheet_title
+            t.notes as timesheet_title
         FROM timesheet_entries te
         JOIN timesheets t ON te.timesheet_id = t.id
         WHERE t.namespace_id = ?

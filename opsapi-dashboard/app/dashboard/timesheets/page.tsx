@@ -15,7 +15,7 @@ import {
   X,
   FileText,
 } from 'lucide-react';
-import { Input, Table, Badge, Pagination, Card, Modal } from '@/components/ui';
+import { Input, Table, Badge, Pagination, Card, Modal, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   timesheetsService,
@@ -23,11 +23,24 @@ import {
   type TimesheetStatus,
   type TimesheetsResponse,
   type TimesheetSummaryResponse,
+  type CustomerOption,
+  type TaskOption,
 } from '@/services/timesheets.service';
 import { formatDate } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
+
+// Compute decimal hours between two "HH:MM" clock strings (handles overnight).
+function computeHours(start: string, end: string): number | null {
+  if (!start || !end) return null;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+  let diff = eh * 60 + em - (sh * 60 + sm);
+  if (diff < 0) diff += 24 * 60;
+  return Math.round((diff / 60) * 100) / 100;
+}
 
 // ============================================
 // Stats Card Component
@@ -87,30 +100,112 @@ interface CreateTimesheetModalProps {
   onCreated: () => void;
 }
 
+const inputClass =
+  'w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface';
+const labelClass = 'block text-sm font-medium text-secondary-700 mb-1';
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
 const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onClose, onCreated }) => {
-  const [periodStart, setPeriodStart] = useState('');
-  const [periodEnd, setPeriodEnd] = useState('');
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [tasks, setTasks] = useState<TaskOption[]>([]);
+
+  const [customerUuid, setCustomerUuid] = useState('');
+  const [taskUuid, setTaskUuid] = useState('');
+  const [workDate, setWorkDate] = useState(todayISO());
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+  const [isBillable, setIsBillable] = useState(true);
+  const [hourlyRate, setHourlyRate] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Load namespace-scoped customers + tasks for the searchable dropdowns on open.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      const [cust, tsk] = await Promise.all([
+        timesheetsService.lookupCustomers().catch(() => []),
+        timesheetsService.lookupTasks().catch(() => []),
+      ]);
+      if (!cancelled) {
+        setCustomers(cust);
+        setTasks(tsk);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  const customerOptions = useMemo(
+    () =>
+      customers.map((c) => ({
+        value: c.uuid,
+        label: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Unnamed',
+        hint: c.email,
+      })),
+    [customers]
+  );
+  const taskOptions = useMemo(
+    () =>
+      tasks.map((t) => ({
+        value: t.task_uuid,
+        label: t.title,
+        hint: t.project_name || undefined,
+      })),
+    [tasks]
+  );
+
+  const hours = useMemo(() => computeHours(startTime, endTime), [startTime, endTime]);
+  const rateNum = parseFloat(hourlyRate);
+  const amount = hours != null && !Number.isNaN(rateNum) ? hours * rateNum : null;
+
+  const resetForm = () => {
+    setCustomerUuid('');
+    setTaskUuid('');
+    setWorkDate(todayISO());
+    setStartTime('09:00');
+    setEndTime('17:00');
+    setIsBillable(true);
+    setHourlyRate('');
+    setNotes('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!periodStart || !periodEnd) {
-      toast.error('Please select both start and end dates');
+    if (!workDate) {
+      toast.error('Please pick the work date');
       return;
     }
+    if (hours == null || hours <= 0) {
+      toast.error('End time must be after start time');
+      return;
+    }
+
+    const selectedCustomer = customers.find((c) => c.uuid === customerUuid);
+    const selectedTask = tasks.find((t) => t.task_uuid === taskUuid);
 
     setIsSubmitting(true);
     try {
       await timesheetsService.createTimesheet({
-        period_start: periodStart,
-        period_end: periodEnd,
+        work_date: workDate,
+        customer_uuid: customerUuid || undefined,
+        client_name: selectedCustomer
+          ? [selectedCustomer.first_name, selectedCustomer.last_name].filter(Boolean).join(' ') ||
+            selectedCustomer.email
+          : undefined,
+        task_uuid: taskUuid || undefined,
+        task: selectedTask?.title || undefined,
+        start_time: startTime,
+        end_time: endTime,
+        is_billable: isBillable,
+        hourly_rate: Number.isNaN(rateNum) ? undefined : rateNum,
         notes: notes || undefined,
       });
-      toast.success('Timesheet created successfully');
-      setPeriodStart('');
-      setPeriodEnd('');
-      setNotes('');
+      toast.success('Timesheet logged successfully');
+      resetForm();
       onClose();
       onCreated();
     } catch (error) {
@@ -122,38 +217,107 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create Timesheet">
+    <Modal isOpen={isOpen} onClose={onClose} title="Log Work / New Timesheet">
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Customer — searchable, namespace-scoped */}
         <div>
-          <label className="block text-sm font-medium text-secondary-700 mb-1">Period Start</label>
-          <input
-            type="date"
-            value={periodStart}
-            onChange={(e) => setPeriodStart(e.target.value)}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
-            required
+          <label className={labelClass}>Customer / Client</label>
+          <SearchableSelect
+            options={customerOptions}
+            value={customerUuid}
+            onChange={setCustomerUuid}
+            placeholder="Select a customer…"
+            searchPlaceholder="Search customers…"
+            emptyMessage="No customers found"
+            clearable
           />
         </div>
+
+        {/* Task — searchable, from kanban projects/tasks (namespace-scoped) */}
         <div>
-          <label className="block text-sm font-medium text-secondary-700 mb-1">Period End</label>
-          <input
-            type="date"
-            value={periodEnd}
-            onChange={(e) => setPeriodEnd(e.target.value)}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
-            required
+          <label className={labelClass}>Task (from a project)</label>
+          <SearchableSelect
+            options={taskOptions}
+            value={taskUuid}
+            onChange={setTaskUuid}
+            placeholder="Select a task…"
+            searchPlaceholder="Search tasks…"
+            emptyMessage="No tasks found"
+            clearable
           />
         </div>
+
+        {/* Date + time */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className={labelClass}>Work date</label>
+            <input type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} className={inputClass} required />
+          </div>
+          <div>
+            <label className={labelClass}>Start time</label>
+            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={inputClass} required />
+          </div>
+          <div>
+            <label className={labelClass}>End time</label>
+            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={inputClass} required />
+          </div>
+        </div>
+
+        {/* Live hours + amount summary */}
+        <div className="flex items-center justify-between rounded-xl border border-primary-100 bg-primary-50/60 px-4 py-3">
+          <div className="flex items-center gap-2 text-secondary-700">
+            <Clock className="w-4 h-4 text-primary-500" />
+            <span className="text-sm font-medium">Worked hours</span>
+          </div>
+          <div className="text-right">
+            <span className="text-lg font-bold text-secondary-900">
+              {hours != null ? `${hours.toFixed(2)} h` : '—'}
+            </span>
+            {amount != null && (
+              <span className="block text-xs text-secondary-500">
+                ≈ {amount.toLocaleString(undefined, { style: 'currency', currency: 'GBP' })}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Billable + rate */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+          <label className="flex items-center gap-2 text-sm text-secondary-700 select-none cursor-pointer pb-2">
+            <input
+              type="checkbox"
+              checked={isBillable}
+              onChange={(e) => setIsBillable(e.target.checked)}
+              className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500/30"
+            />
+            Billable to client
+          </label>
+          <div>
+            <label className={labelClass}>Hourly rate (optional)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={hourlyRate}
+              onChange={(e) => setHourlyRate(e.target.value)}
+              placeholder="e.g. 75"
+              className={inputClass}
+            />
+          </div>
+        </div>
+
+        {/* Notes */}
         <div>
-          <label className="block text-sm font-medium text-secondary-700 mb-1">Notes (optional)</label>
+          <label className={labelClass}>Notes (optional)</label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface resize-none"
-            placeholder="Add any notes about this timesheet..."
+            rows={2}
+            className={`${inputClass} resize-none`}
+            placeholder="Anything else worth noting…"
           />
         </div>
+
         <div className="flex justify-end gap-3 pt-2">
           <button
             type="button"
@@ -167,7 +331,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
             disabled={isSubmitting}
             className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
-            {isSubmitting ? 'Creating...' : 'Create Timesheet'}
+            {isSubmitting ? 'Saving…' : 'Log Timesheet'}
           </button>
         </div>
       </form>
@@ -409,19 +573,22 @@ function TimesheetsPageContent() {
 
   const myTimesheetsColumns: TableColumn<Timesheet>[] = useMemo(() => [
     {
-      key: 'period',
-      header: 'Period',
+      key: 'work',
+      header: 'Customer / Work',
       render: (ts) => (
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-secondary-100 rounded-lg flex items-center justify-center">
-            <FileText className="w-5 h-5 text-secondary-500" />
+          <div className="w-10 h-10 bg-primary-50 rounded-lg flex items-center justify-center flex-shrink-0">
+            <FileText className="w-5 h-5 text-primary-500" />
           </div>
-          <div>
-            <p className="font-medium text-secondary-900">
-              {formatDate(ts.period_start)} - {formatDate(ts.period_end)}
+          <div className="min-w-0">
+            <p className="font-medium text-secondary-900 truncate">
+              {ts.client_name || 'No customer'}
             </p>
-            <p className="text-xs text-secondary-500">
-              {ts.notes ? ts.notes.slice(0, 40) + (ts.notes.length > 40 ? '...' : '') : 'No notes'}
+            <p className="text-xs text-secondary-500 truncate">
+              {ts.task || (ts.notes ? ts.notes.slice(0, 40) : '—')}
+              {ts.project_name ? ` · ${ts.project_name}` : ''}
+              {' · '}
+              {ts.work_date ? formatDate(ts.work_date) : `${formatDate(ts.period_start)} – ${formatDate(ts.period_end)}`}
             </p>
           </div>
         </div>
@@ -434,17 +601,36 @@ function TimesheetsPageContent() {
     },
     {
       key: 'total_hours',
-      header: 'Total Hours',
+      header: 'Hours',
       render: (ts) => (
-        <span className="font-semibold text-secondary-900">{ts.total_hours?.toFixed(1) || '0.0'}</span>
+        <div>
+          <span className="font-semibold text-secondary-900">{ts.total_hours?.toFixed(2) || '0.00'}</span>
+          {ts.start_time && ts.end_time && (
+            <span className="block text-xs text-secondary-400">
+              {ts.start_time.slice(0, 5)}–{ts.end_time.slice(0, 5)}
+            </span>
+          )}
+        </div>
       ),
     },
     {
-      key: 'billable_hours',
-      header: 'Billable Hours',
-      render: (ts) => (
-        <span className="text-secondary-700">{ts.billable_hours?.toFixed(1) || '0.0'}</span>
-      ),
+      key: 'amount',
+      header: 'Amount',
+      render: (ts) => {
+        const rate = typeof ts.hourly_rate === 'string' ? parseFloat(ts.hourly_rate) : ts.hourly_rate;
+        if (!rate || Number.isNaN(rate)) {
+          return <span className="text-secondary-400">—</span>;
+        }
+        const amount = (ts.billable_hours || 0) * rate;
+        return (
+          <div>
+            <span className="font-semibold text-secondary-900">
+              {amount.toLocaleString(undefined, { style: 'currency', currency: 'GBP' })}
+            </span>
+            <span className="block text-xs text-secondary-400">@ {rate}/h</span>
+          </div>
+        );
+      },
     },
     {
       key: 'submitted_at',

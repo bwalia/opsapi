@@ -101,7 +101,7 @@ return function(app)
     -- GET /api/v2/crm/accounts/:uuid - Get account with stats
     app:get("/api/v2/crm/accounts/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local account = CrmQueries.getAccount(self.params.uuid)
+            local account = CrmQueries.getAccount(self.namespace.id, self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
             end
@@ -117,7 +117,7 @@ return function(app)
     -- PUT /api/v2/crm/accounts/:uuid - Update account
     app:put("/api/v2/crm/accounts/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local account = CrmQueries.getAccount(self.params.uuid)
+            local account = CrmQueries.getAccount(self.namespace.id, self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
             end
@@ -161,7 +161,7 @@ return function(app)
     -- DELETE /api/v2/crm/accounts/:uuid - Soft delete account
     app:delete("/api/v2/crm/accounts/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local account = CrmQueries.getAccount(self.params.uuid)
+            local account = CrmQueries.getAccount(self.namespace.id, self.params.uuid)
             if not account then
                 return api_response(404, nil, "Account not found")
             end

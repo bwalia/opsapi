@@ -218,17 +218,17 @@ export const crmService = {
 
   async getAccount(uuid: string): Promise<CrmAccount> {
     const response = await apiClient.get(`/api/v2/crm/accounts/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createAccount(data: Record<string, unknown>): Promise<CrmAccount> {
     const response = await apiClient.post('/api/v2/crm/accounts', toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateAccount(uuid: string, data: Record<string, unknown>): Promise<CrmAccount> {
     const response = await apiClient.put(`/api/v2/crm/accounts/${uuid}`, toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteAccount(uuid: string): Promise<void> {
@@ -247,17 +247,17 @@ export const crmService = {
 
   async getContact(uuid: string): Promise<CrmContact> {
     const response = await apiClient.get(`/api/v2/crm/contacts/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createContact(data: Record<string, unknown>): Promise<CrmContact> {
     const response = await apiClient.post('/api/v2/crm/contacts', toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateContact(uuid: string, data: Record<string, unknown>): Promise<CrmContact> {
     const response = await apiClient.put(`/api/v2/crm/contacts/${uuid}`, toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteContact(uuid: string): Promise<void> {
@@ -276,17 +276,17 @@ export const crmService = {
 
   async getDeal(uuid: string): Promise<CrmDeal> {
     const response = await apiClient.get(`/api/v2/crm/deals/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createDeal(data: Record<string, unknown>): Promise<CrmDeal> {
     const response = await apiClient.post('/api/v2/crm/deals', toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateDeal(uuid: string, data: Record<string, unknown>): Promise<CrmDeal> {
     const response = await apiClient.put(`/api/v2/crm/deals/${uuid}`, toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteDeal(uuid: string): Promise<void> {
@@ -300,7 +300,7 @@ export const crmService = {
 
   async getDashboardStats(): Promise<CrmDashboardStats> {
     const response = await apiClient.get('/api/v2/crm/dashboard/stats');
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ----------------------------------------------------------
@@ -314,17 +314,17 @@ export const crmService = {
 
   async getPipeline(uuid: string): Promise<CrmPipeline> {
     const response = await apiClient.get(`/api/v2/crm/pipelines/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createPipeline(data: Record<string, unknown>): Promise<CrmPipeline> {
     const response = await apiClient.post('/api/v2/crm/pipelines', toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updatePipeline(uuid: string, data: Record<string, unknown>): Promise<CrmPipeline> {
     const response = await apiClient.put(`/api/v2/crm/pipelines/${uuid}`, toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deletePipeline(uuid: string): Promise<void> {
@@ -343,12 +343,12 @@ export const crmService = {
 
   async createActivity(data: Record<string, unknown>): Promise<CrmActivity> {
     const response = await apiClient.post('/api/v2/crm/activities', toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateActivity(uuid: string, data: Record<string, unknown>): Promise<CrmActivity> {
     const response = await apiClient.put(`/api/v2/crm/activities/${uuid}`, toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteActivity(uuid: string): Promise<void> {
@@ -357,7 +357,7 @@ export const crmService = {
 
   async completeActivity(uuid: string): Promise<CrmActivity> {
     const response = await apiClient.put(`/api/v2/crm/activities/${uuid}/complete`, toFormData({}));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ----------------------------------------------------------
@@ -372,17 +372,17 @@ export const crmService = {
 
   async getLead(uuid: string): Promise<CrmLead> {
     const response = await apiClient.get(`/api/v2/crm/leads/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createLead(data: Record<string, unknown>): Promise<CrmLead> {
     const response = await apiClient.post('/api/v2/crm/leads', toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateLead(uuid: string, data: Record<string, unknown>): Promise<CrmLead> {
     const response = await apiClient.put(`/api/v2/crm/leads/${uuid}`, toFormData(data));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteLead(uuid: string): Promise<void> {
@@ -393,7 +393,7 @@ export const crmService = {
     const payload: Record<string, unknown> = {};
     if (dealData) payload.deal = dealData;
     const response = await apiClient.post(`/api/v2/crm/leads/${uuid}/convert`, toFormData(payload));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async getLeadStats(): Promise<CrmLeadStats> {
