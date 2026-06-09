@@ -81,6 +81,31 @@ See `routes/crm-accounts.lua` for the canonical CRUD example (note the explicit 
 ### Code generators
 `./generate-api.sh` (interactive) and `./quick-api.sh <ModelName>` scaffold a Model+Queries+Routes triple and auto-register the route in `app.lua`. See `API-GENERATOR.md`.
 
+### HMRC MTD Income Tax filing (UK Self Assessment)
+End-to-end "File your tax" flow against HMRC's Making Tax Digital APIs. Feature-gated under `tax_copilot`. **Read this before touching tax filing — it captures non-obvious HMRC behaviour that is expensive to rediscover.**
+
+**Layers**
+- `lib/hmrc-mtd-client.lua` — the MTD API client (one function per HMRC endpoint). Env-switched by `HMRC_ENVIRONMENT` (`sandbox`→`test-api.service.hmrc.gov.uk`, `production`→`api.service.hmrc.gov.uk`); `Client.is_sandbox()` gates sandbox-only behaviour. Endpoints + Accept versions: `list_businesses` (Business Details v2), `list_obligations` (Obligations v3), `submit_cumulative` (Self-Employment cumulative v5, `STATEFUL`), `trigger_calculation`/`get_calculation`/`poll_calculation` (Individual Calculations v8), `submit_final_declaration` (Calculations v8 — the BINDING crystallisation), `create_test_business`/`set_itsa_status` (Self Assessment Test Support v1, sandbox only).
+- `helper/hmrc.lua` — OAuth token storage/refresh (`get_valid_token`), and `build_fraud_headers()` (HMRC mandatory anti-fraud `Gov-Client-*`/`Gov-Vendor-*` headers).
+- `lib/hmrc-aggregator.lua` — rolls classified transactions into the MTD cumulative body (`build_cumulative_body`); flags negative fields (a credit mis-filed as an expense) which HMRC rejects.
+- Routes: `routes/tax-hmrc-auth.lua` (OAuth initiate/callback/disconnect), `routes/tax-hmrc-data.lua` (status, businesses/obligations fetch+cache, NINO get/save/delete), `routes/tax-hmrc-filing.lua` (`aggregate-preview`, `calculate-preview`, **`submit-final-declaration`**, `business/default|select`, `sandbox/provision`).
+- Frontend: `app/dashboard/tax/file/page.tsx` (the 6-step wizard), `services/tax.service.ts`, `lib/hmrc-fraud.ts` (browser anti-fraud signal collection).
+
+**Wizard flow (6 steps, auto-advancing):** connect (OAuth) → business (auto-fetched) → obligations (auto-fetched) → check figures (auto-aggregated; inline-fix negative credits) → preview calculation (submits cumulative + in-year calc, non-binding) → **finalise & declare** (binding final declaration, gated on a declaration checkbox). Steps 2–4 run themselves via `useEffect` guards (refs `autoBizFor`/`autoOblFor`/`autoPreviewFor`) — no "Load"/"Fetch" buttons; only genuinely-human steps need a click.
+
+**Sandbox gotchas (each cost real debugging):**
+- **Obligations return 2018-era data unless you send `Gov-Test-Scenario: DYNAMIC`** — the default sandbox response is a fixed historical sample ignoring your `from`/`to`. DYNAMIC echoes periods matching the requested dates. It returns synthetic businessIds (`XBIS…` self-employment, `XPIS…` UK property, `XFIS…` foreign property) for ALL three business types → filter to self-employment and don't filter by the real `business_id` in sandbox, or you get triplicate/empty results. The header is auto-dropped outside sandbox.
+- **`calculate-preview`/final-declaration are STATEFUL** — they only work against a business created via the Test Support API. The businesses from Business Details / obligations (e.g. `XBIS12345678901`) are NOT fileable → HMRC returns `MATCHING_RESOURCE_NOT_FOUND`. Both routes **self-heal** in sandbox: on that error they auto-call `provisionSandboxBusiness()` (create test business + set MTD ITSA status, store as `default_business_id`) and retry once.
+- **Calculation figures nest under `calculation.taxCalculation.*`** (with sub-totals in `.incomeTax` and `allowancesAndDeductions`), NOT top-level — `parse_figures` reads the right paths. Sandbox always returns `-99999999999.99` for the grand total (a placeholder, flagged via `is_sandbox_placeholder`); other figures are real.
+- The final declaration must reference an **`intent-to-finalise`** calc (not `in-year`), and real HMRC rejects finalising a tax year before it ends (`RULE_FINAL_DECLARATION_TAX_YEAR`); sandbox simulates success.
+
+**Production readiness (env-only is NOT enough — needs the code already in place + these):**
+- `ssl_verify` is env-aware (`not Client.is_sandbox()` / `tls_verify()`): verified TLS in production, off in sandbox. Production requires `lua_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt` in the nginx http block (already in `nginx.conf` + `nginx-values-template.conf`).
+- **Anti-fraud headers** pass HMRC's "Test Fraud Prevention Headers" validator. Browser-only signals are collected in `lib/hmrc-fraud.ts`, forwarded as `X-Gov-Client-*` headers (allow-listed in `middleware/cors.lua`), and remapped server-side in `build_fraud_headers`. `Gov-Vendor-Public-IP`/`Gov-Vendor-Forwarded` need `HMRC_SERVER_PUBLIC_IP` (the backend's egress IP) set in prod — omitted if unset (HMRC rejects private IPs). The only remaining validator output is a non-blocking `Gov-Client-Multi-Factor` warning (fine for username+password+OTP).
+- **Env vars** (in `.sample.env`): `HMRC_ENVIRONMENT`, `HMRC_CLIENT_ID`, `HMRC_CLIENT_SECRET`, `HMRC_REDIRECT_URI`, `HMRC_SERVER_PUBLIC_IP`. OAuth scopes must include `read:self-assessment` + `write:self-assessment`. The HMRC app must subscribe (Developer Hub) to: Business Details / Obligations / Self Employment Business / Individual Calculations (MTD) — plus Self Assessment Test Support, Create Test User, Test Fraud Prevention Headers for sandbox only.
+
+**Testing without a browser OAuth flow:** mint a JWT for a user with a stored `hmrc_tokens` row by HMAC-signing `{userinfo:{uuid,sub}, iat, exp, iss:"opsapi"}` with `$JWT_SECRET_KEY` (the container lacks `perl`, so `resty` CLI won't run — build the JWT with `openssl dgst -sha256 -hmac`). Syntax-check Lua via `docker exec opsapi /usr/local/openresty/luajit/bin/luajit -b <file> /dev/null`.
+
 ## Frontend architecture (opsapi-dashboard/)
 
 Next.js 16 App Router + React 19 + TypeScript + Tailwind v4 + Zustand. Runs on port 8039, built with `output: "standalone"` for Docker.

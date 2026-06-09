@@ -639,6 +639,34 @@ export const taxService = {
     return response.data?.data || response.data;
   },
 
+  // Submit the BINDING final declaration (crystallisation) — this actually FILES the
+  // return with HMRC. Requires explicit declaration consent. Slow (cumulative submit +
+  // intent-to-finalise calc polling + declaration), so allow a long timeout.
+  async submitHmrcFinalDeclaration(taxYear: string): Promise<{
+    filed: boolean;
+    tax_year: string;
+    business_id: string;
+    calculation_id: string;
+    sandbox: boolean;
+    figures: {
+      total_income_tax_and_nics_due?: number;
+      total_taxable_income?: number;
+      income_tax_charged?: number;
+      personal_allowance?: number;
+      class2_nics?: number;
+      class4_nics?: number;
+      is_sandbox_placeholder?: boolean;
+    };
+  }> {
+    const params = new URLSearchParams();
+    params.append('tax_year', taxYear);
+    params.append('declaration_accepted', 'true');
+    const response = await apiClient.post(`${TAX_BASE}/hmrc/submit-final-declaration`, params.toString(), {
+      timeout: 180000,
+    });
+    return response.data?.data || response.data;
+  },
+
   // ── Business profile (drives classification) ─────────────────────────────────
   async getProfileOptions(): Promise<
     Array<{ profile_key: string; display_name: string; sa_form: string; filing_supported: boolean }>

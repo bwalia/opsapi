@@ -14,9 +14,16 @@
  * Steps unlock in order; each shows done / active / locked. The hard gate before the
  * HMRC calculation is step 4: it must report no blocking issues (e.g. a negative period
  * field from a credit mis-filed as an expense), which the user fixes right here.
+ *
+ * Auto-advance: the read-only pulls run themselves so the user never hunts for a
+ * "Load…" / "Fetch…" button. Once connected with a NINO on file we fetch the business,
+ * auto-pick it, fetch its obligations, and aggregate the figures — all without a click.
+ * The only deliberate actions left are the ones that genuinely need a human: the OAuth
+ * connect, entering the NINO, choosing between multiple businesses, fixing a flagged
+ * figure, and the step-5 calculation (the one call that submits data to HMRC).
  */
 
-import React, { useEffect, useState, useCallback, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -78,6 +85,75 @@ const FIX_OPTIONS: Array<{ value: string; label: string; category: string; hmrc_
   { value: 'other_income', label: 'Other business income', category: 'income_other', hmrc_category: 'other_income' },
   { value: 'exclude', label: 'Personal / transfer — exclude from return', category: 'transfer', hmrc_category: '' },
 ];
+
+// Plain-English labels for the HMRC MTD self-employment fields we actually submit, so the
+// user can see exactly what's going to HMRC rather than raw API field names.
+const HMRC_SECTION_LABELS: Record<string, string> = {
+  periodIncome: 'Income',
+  periodExpenses: 'Expenses',
+  periodDisallowableExpenses: 'Disallowable expenses (added back to profit)',
+};
+const HMRC_FIELD_LABELS: Record<string, string> = {
+  turnover: 'Sales / turnover',
+  other: 'Other business income',
+  costOfGoods: 'Cost of goods bought for resale',
+  paymentsToSubcontractors: 'Payments to subcontractors',
+  wagesAndStaffCosts: 'Wages & staff costs',
+  carVanTravelExpenses: 'Car, van & travel',
+  premisesRunningCosts: 'Premises running costs',
+  maintenanceCosts: 'Repairs & maintenance',
+  adminCosts: 'Office & admin costs',
+  businessEntertainmentCosts: 'Business entertainment',
+  advertisingCosts: 'Advertising & marketing',
+  interestOnBankOtherLoans: 'Interest on loans',
+  financeCharges: 'Bank & finance charges',
+  irrecoverableDebts: 'Bad debts written off',
+  professionalFees: 'Accountancy, legal & professional fees',
+  depreciation: 'Depreciation & loss on sale',
+  otherExpenses: 'Other business expenses',
+};
+
+// Render the exact MTD body (income / expense lines) we'll submit to HMRC, with friendly
+// labels and per-section totals. Only non-zero lines are shown to keep it readable.
+function FiguresBreakdown({ body, taxYear }: { body?: Record<string, Record<string, number>>; taxYear: string }) {
+  const fmt = (n: number) => formatCurrency(n, 'GBP', 'en-GB');
+  const sections = ['periodIncome', 'periodExpenses', 'periodDisallowableExpenses'].filter(
+    (s) => body?.[s] && Object.values(body[s]).some((v) => Number(v) !== 0),
+  );
+  if (sections.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-secondary-200 bg-surface p-3 space-y-3">
+      <p className="text-sm font-medium text-secondary-900">Exactly what we&apos;ll send to HMRC</p>
+      {sections.map((s) => {
+        const entries = Object.entries(body![s]).filter(([, v]) => Number(v) !== 0);
+        const total = entries.reduce((a, [, v]) => a + Number(v), 0);
+        return (
+          <div key={s} className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">
+              {HMRC_SECTION_LABELS[s] || s}
+            </p>
+            <div className="divide-y divide-secondary-100">
+              {entries.map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between py-1 text-sm">
+                  <span className="text-secondary-700">{HMRC_FIELD_LABELS[k] || k}</span>
+                  <span className="font-medium text-secondary-900 tabular-nums">{fmt(Number(v))}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between pt-1 text-sm font-semibold border-t border-secondary-200">
+              <span className="text-secondary-600">Total {(HMRC_SECTION_LABELS[s] || s).toLowerCase()}</span>
+              <span className="tabular-nums text-secondary-900">{fmt(total)}</span>
+            </div>
+          </div>
+        );
+      })}
+      <p className="text-xs text-secondary-400">
+        These figures come from your classified transactions for tax year {taxYear}. HMRC works out the tax
+        and allowances from them in the next step.
+      </p>
+    </div>
+  );
+}
 
 type StepState = 'done' | 'active' | 'locked';
 
@@ -166,6 +242,19 @@ function FileWizardContent() {
   // Step 5 — calculation
   const [calc, setCalc] = useState<CalcResult | null>(null);
   const [calculating, setCalculating] = useState(false);
+
+  // Step 6 — final declaration (the binding filing)
+  const [declarationAccepted, setDeclarationAccepted] = useState(false);
+  const [filing, setFiling] = useState(false);
+  const [filed, setFiled] = useState<Awaited<ReturnType<typeof taxService.submitHmrcFinalDeclaration>> | null>(null);
+
+  // Auto-advance guards: remember what each read-only pull last auto-ran for, so the
+  // effects fire exactly once per change instead of looping. Keyed by the input that
+  // should trigger a fresh pull (the NINO for businesses, the chosen business for
+  // obligations, the tax year for figures).
+  const autoBizFor = useRef<string>('');
+  const autoOblFor = useRef<string>('');
+  const autoPreviewFor = useRef<string>('');
 
   const gbp = (n?: number) => (n == null ? '—' : formatCurrency(n, 'GBP', 'en-GB'));
 
@@ -323,6 +412,17 @@ function FileWizardContent() {
     }
   };
 
+  // Auto-fetch the business once we're connected and have a NINO — no button needed.
+  // Re-runs only when the NINO changes (keyed by last-4); a failed pull won't loop
+  // because the key is marked done either way (user can retry via "Refresh from HMRC").
+  useEffect(() => {
+    if (!(connected && valid) || !hasNino || loadingBiz) return;
+    const key = ninoLast4 || 'nino';
+    if (autoBizFor.current === key) return;
+    autoBizFor.current = key;
+    if (businesses.length === 0) loadBusinesses();
+  }, [connected, valid, hasNino, ninoLast4, loadingBiz, businesses.length, loadBusinesses]);
+
   // ── Step 3: obligations ─────────────────────────────────────────────────────
   const loadObligations = useCallback(async () => {
     if (!selectedBusiness) return;
@@ -358,6 +458,15 @@ function FileWizardContent() {
     }
   }, [selectedBusiness, taxYear]);
 
+  // Auto-fetch obligations once a business is chosen (the obvious next step), once per
+  // business. The user can still re-pull with "Refresh" if HMRC's answer changes.
+  useEffect(() => {
+    if (!selectedBusiness || loadingObl) return;
+    if (autoOblFor.current === selectedBusiness) return;
+    autoOblFor.current = selectedBusiness;
+    loadObligations();
+  }, [selectedBusiness, loadingObl, loadObligations]);
+
   // ── Step 4: figures ─────────────────────────────────────────────────────────
   const loadPreview = useCallback(async () => {
     setLoadingPreview(true);
@@ -371,6 +480,16 @@ function FileWizardContent() {
       setLoadingPreview(false);
     }
   }, [taxYear]);
+
+  // Auto-aggregate the figures once a business is chosen, re-running when the filing
+  // tax year settles (it's derived from the selected obligation). Read-only — it only
+  // tallies already-classified transactions; nothing is sent to HMRC here.
+  useEffect(() => {
+    if (!selectedBusiness || loadingPreview) return;
+    if (autoPreviewFor.current === taxYear) return;
+    autoPreviewFor.current = taxYear;
+    loadPreview();
+  }, [selectedBusiness, taxYear, loadingPreview, loadPreview]);
 
   const applyFix = async (tx: HmrcOffendingTransaction) => {
     const choiceKey = fixChoice[tx.uuid];
@@ -410,6 +529,24 @@ function FileWizardContent() {
     }
   };
 
+  // ── Step 6: final declaration (the binding filing) ──────────────────────────────
+  const submitFinalDeclaration = async () => {
+    if (!declarationAccepted) {
+      toast.error('Please tick the declaration box first');
+      return;
+    }
+    setFiling(true);
+    try {
+      const res = await taxService.submitHmrcFinalDeclaration(taxYear);
+      setFiled(res);
+      toast.success('Your return has been filed with HMRC');
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, 'Final declaration failed'));
+    } finally {
+      setFiling(false);
+    }
+  };
+
   // ── Derived step states ───────────────────────────────────────────────────────
   const s1: StepState = connected && valid ? 'done' : 'active';
   const s2: StepState = s1 !== 'done' ? 'locked' : selectedBusiness ? 'done' : 'active';
@@ -420,7 +557,7 @@ function FileWizardContent() {
   const figuresOk = preview !== null && !preview.blocking && !figuresEmpty;
   const s4: StepState = s2 !== 'done' ? 'locked' : figuresOk ? 'done' : 'active';
   const s5: StepState = !figuresOk ? 'locked' : calc ? 'done' : 'active';
-  const s6: StepState = !calc ? 'locked' : 'active';
+  const s6: StepState = filed ? 'done' : !calc ? 'locked' : 'active';
 
   const openObligations = (obligations || []).filter(isOpen);
 
@@ -572,7 +709,12 @@ function FileWizardContent() {
               </div>
             )}
 
-            {businesses.length === 0 ? (
+            {loadingBiz && businesses.length === 0 ? (
+              <p className="text-sm text-secondary-500 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Finding your business at HMRC…
+              </p>
+            ) : businesses.length === 0 ? (
+              // Auto-fetch ran but came back empty or errored — offer a manual retry.
               <button
                 onClick={loadBusinesses}
                 disabled={loadingBiz || !hasNino}
@@ -580,7 +722,7 @@ function FileWizardContent() {
                 className="flex items-center gap-2 px-4 py-2 border border-secondary-300 text-secondary-700 rounded-lg hover:bg-secondary-100 disabled:opacity-50"
               >
                 {loadingBiz ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
-                Load businesses from HMRC
+                Try again
               </button>
             ) : (
               <div className="space-y-2">
@@ -640,19 +782,16 @@ function FileWizardContent() {
       {/* Step 3 — Obligations */}
       <Card padding="lg">
         <StepHeader index={3} state={s3} icon={<CalendarClock className="w-4 h-4" />}
-          title="Fetch your obligations"
-          subtitle="See which period HMRC says is open to file."
+          title="Your filing period"
+          subtitle="We check with HMRC which period is open to file — no action needed."
         />
         {s3 !== 'locked' && (
           <div className="mt-4 pl-12 space-y-3">
-            <button
-              onClick={loadObligations}
-              disabled={loadingObl || !selectedBusiness}
-              className="flex items-center gap-2 px-4 py-2 border border-secondary-300 text-secondary-700 rounded-lg hover:bg-secondary-100 disabled:opacity-50"
-            >
-              {loadingObl ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              {obligations === null ? 'Fetch obligations' : 'Refresh obligations'}
-            </button>
+            {loadingObl && obligations === null && (
+              <p className="text-sm text-secondary-500 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Checking what HMRC needs from you…
+              </p>
+            )}
 
             {obligations !== null && (
               openObligations.length > 0 ? (
@@ -699,6 +838,12 @@ function FileWizardContent() {
                 </p>
               )
             )}
+
+            {obligations !== null && !loadingObl && (
+              <button onClick={loadObligations} className="flex items-center gap-1.5 text-xs text-primary-600 hover:underline">
+                <RefreshCw className="w-3 h-3" /> Refresh from HMRC
+              </button>
+            )}
           </div>
         )}
       </Card>
@@ -715,14 +860,16 @@ function FileWizardContent() {
               Checking figures for tax year <strong>{taxYear}</strong>
               {selectedObligation ? ' (from your selected HMRC obligation)' : ''}.
             </p>
-            <button
-              onClick={loadPreview}
-              disabled={loadingPreview}
-              className="flex items-center gap-2 px-4 py-2 border border-secondary-300 text-secondary-700 rounded-lg hover:bg-secondary-100 disabled:opacity-50"
-            >
-              {loadingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
-              {preview ? 'Re-check figures' : 'Check my figures'}
-            </button>
+            {loadingPreview && !preview && (
+              <p className="text-sm text-secondary-500 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Adding up your figures…
+              </p>
+            )}
+            {preview && !loadingPreview && (
+              <button onClick={loadPreview} className="flex items-center gap-1.5 text-xs text-primary-600 hover:underline">
+                <ListChecks className="w-3 h-3" /> Re-check figures
+              </button>
+            )}
 
             {preview && (
               <div className="space-y-3">
@@ -740,6 +887,9 @@ function FileWizardContent() {
                     </div>
                   ))}
                 </div>
+
+                {/* The exact income/expense lines we'll submit to HMRC. */}
+                <FiguresBreakdown body={preview.body} taxYear={taxYear} />
 
                 {/* blocking: offending credits with inline fix */}
                 {preview.blocking && (
@@ -840,6 +990,16 @@ function FileWizardContent() {
               {calculating ? 'Calculating…' : 'Run preview calculation'}
             </button>
 
+            {calculating && !calc && (
+              <p className="flex items-start gap-2 text-xs text-secondary-500">
+                <Loader2 className="w-3.5 h-3.5 mt-0.5 shrink-0 animate-spin" />
+                <span>
+                  Setting things up with HMRC and working out your figures — the first run can take
+                  a little longer. Please don&apos;t close this page.
+                </span>
+              </p>
+            )}
+
             {calc && (
               <div className="space-y-3">
                 {calc.sandbox_placeholder && (
@@ -878,14 +1038,70 @@ function FileWizardContent() {
           subtitle="The binding final declaration that files your return with HMRC."
         />
         {s6 !== 'locked' && (
-          <div className="mt-4 pl-12">
-            <div className="rounded-lg border border-secondary-200 bg-secondary-50 p-3 text-sm text-secondary-600 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-secondary-400" />
-              <span>
-                The final declaration (crystallisation) is the next phase. Your figures above have been submitted to
-                HMRC and the calculation is non-binding — nothing has been filed yet.
-              </span>
-            </div>
+          <div className="mt-4 pl-12 space-y-3">
+            {filed ? (
+              // Done — the return is filed with HMRC.
+              <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
+                <p className="flex items-center gap-2 font-semibold text-green-800">
+                  <CheckCircle2 className="w-5 h-5" /> Your tax return has been filed with HMRC.
+                </p>
+                <p className="text-sm text-green-700">
+                  Tax year <strong>{filed.tax_year}</strong> · business{' '}
+                  <span className="font-mono">{filed.business_id}</span>
+                </p>
+                {filed.calculation_id && (
+                  <p className="text-xs text-green-700">
+                    HMRC calculation reference: <span className="font-mono">{filed.calculation_id}</span>
+                  </p>
+                )}
+                {filed.sandbox && (
+                  <p className="flex items-start gap-1.5 text-xs text-green-700">
+                    <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    Sandbox test submission — no real return was filed with HMRC.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>
+                    This is the <strong>binding final declaration</strong> for tax year <strong>{taxYear}</strong>.
+                    Once submitted, you are confirming the figures are correct and complete — this files your
+                    Self Assessment return with HMRC.
+                  </span>
+                </div>
+
+                <label className="flex items-start gap-2 text-sm text-secondary-700">
+                  <input
+                    type="checkbox"
+                    checked={declarationAccepted}
+                    onChange={(e) => setDeclarationAccepted(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I declare that the information I have given is correct and complete to the best of my
+                    knowledge and belief, and I want to submit this as my final declaration to HMRC.
+                  </span>
+                </label>
+
+                <button
+                  onClick={submitFinalDeclaration}
+                  disabled={filing || !declarationAccepted}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {filing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}
+                  {filing ? 'Filing your return…' : 'Submit final declaration & file'}
+                </button>
+
+                {filing && (
+                  <p className="flex items-start gap-2 text-xs text-secondary-500">
+                    <Loader2 className="w-3.5 h-3.5 mt-0.5 shrink-0 animate-spin" />
+                    <span>Sending your figures and final declaration to HMRC — please don&apos;t close this page.</span>
+                  </p>
+                )}
+              </>
+            )}
           </div>
         )}
       </Card>
