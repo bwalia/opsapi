@@ -197,8 +197,14 @@ return function(app)
                         .. "sandbox test user) before fetching obligations." } }
             end
 
+            -- Sandbox only: with no Gov-Test-Scenario the HMRC sandbox returns a fixed
+            -- historical sample (2017-18/2018-19) and ignores our dates — which is why
+            -- testers see ancient obligations. DYNAMIC makes HMRC echo periods matching
+            -- the from/to we send, giving current-tax-year obligations for real testing.
+            -- The header is automatically dropped outside the sandbox (see headers()).
             local data, err, hmrc_body = Client.list_obligations(access_token, nino, {
                 from = from_date, to = to_date,
+                test_scenario = Client.is_sandbox() and "DYNAMIC" or nil,
             })
             if not data then
                 local detail = hmrc_body and hmrc_body.message
@@ -209,12 +215,29 @@ return function(app)
                     hmrc = hmrc_body } }
             end
 
-            -- Cache obligations, flattening + optionally filtering to one business.
+            -- Cache obligations, flattening + filtering to one business.
+            -- In the sandbox, DYNAMIC returns the SAME period windows for three synthetic
+            -- businesses (self-employment XBIS…, UK property XPIS…, foreign property XFIS…).
+            -- Keeping all three makes every period show up three times. We file
+            -- self-employment, so keep only that one, and store it under the user's real
+            -- filing business id so the rows map to the business they actually selected.
+            -- Production returns the real business's obligations and is filtered by id.
+            local is_sandbox = Client.is_sandbox()
             local obligations = data.obligations or {}
             local returned = {}
             for _, ob in ipairs(obligations) do
-                local ob_business = ob.businessId or business_id
-                if (not business_id) or (ob_business == business_id) then
+                local include
+                if is_sandbox then
+                    include = (ob.typeOfBusiness == "self-employment")
+                else
+                    include = (not business_id) or (ob.businessId == business_id)
+                end
+                if include then
+                    -- Sandbox: persist under the selected/real business id (or the synthetic
+                    -- one if we have nothing better) so obligations link to the filing business.
+                    local ob_business = is_sandbox and (business_id or ob.businessId)
+                        or (ob.businessId or business_id)
+                    ob.businessId = ob_business
                     table.insert(returned, ob)
                     for _, period in ipairs(ob.obligationDetails or {}) do
                         -- Conflict target is the UNIQUE INDEX idx_hmrc_obligations_period

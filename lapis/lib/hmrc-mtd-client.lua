@@ -68,7 +68,7 @@ function Client.list_businesses(token, nino)
     if not httpc then return nil, err end
     local res, rerr = httpc:request_uri(
         base_url() .. "/individuals/business/details/" .. nino .. "/list",
-        { method = "GET", headers = headers(token, "2.0"), ssl_verify = false })
+        { method = "GET", headers = headers(token, "2.0"), ssl_verify = not Client.is_sandbox() })
     if not res then return nil, "list_businesses request failed: " .. tostring(rerr) end
     if res.status >= 400 then
         return nil, "HTTP " .. res.status, decode(res.body)
@@ -111,7 +111,7 @@ function Client.list_obligations(token, nino, opts)
     local res, rerr = httpc:request_uri(url, {
         method = "GET",
         headers = headers(token, "3.0", { test_scenario = opts.test_scenario }),
-        ssl_verify = false,
+        ssl_verify = not Client.is_sandbox(),
     })
     if not res then return nil, "list_obligations request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
@@ -132,7 +132,7 @@ function Client.submit_cumulative(token, nino, business_id, tax_year, body)
         method = "PUT",
         body = cjson.encode(body),
         headers = headers(token, "5.0", { json_body = true, test_scenario = "STATEFUL" }),
-        ssl_verify = false,
+        ssl_verify = not Client.is_sandbox(),
     })
     if not res then return nil, "submit_cumulative request failed: " .. tostring(rerr) end
     if res.status >= 400 then
@@ -155,7 +155,7 @@ function Client.trigger_calculation(token, nino, tax_year, calc_type)
     local res, rerr = httpc:request_uri(url, {
         method = "POST",
         headers = headers(token, "8.0"),
-        ssl_verify = false,
+        ssl_verify = not Client.is_sandbox(),
     })
     if not res then return nil, "trigger_calculation request failed: " .. tostring(rerr) end
     if res.status >= 400 then
@@ -176,7 +176,7 @@ function Client.get_calculation(token, nino, tax_year, calc_id)
     local res, rerr = httpc:request_uri(url, {
         method = "GET",
         headers = headers(token, "8.0", { test_scenario = "DYNAMIC" }),
-        ssl_verify = false,
+        ssl_verify = not Client.is_sandbox(),
     })
     if not res then return nil, "get_calculation request failed: " .. tostring(rerr) end
     if res.status == 404 then
@@ -209,19 +209,48 @@ function Client.poll_calculation(token, nino, tax_year, calc_id)
     return nil, "calculation_timeout", nil, attempts
 end
 
--- Pull the headline figures out of a retrieved calculation. Sandbox returns the fixed
--- placeholder -99999999999.99 for the total — flag that so the UI can disclaim it.
+-- Submit the BINDING final declaration (crystallisation) for a tax year. The calc_id
+-- MUST come from an intent-to-finalise trigger (HMRC validates this). POST with no body;
+-- HMRC returns 204 No Content on success. This is the ONLY call in this flow that
+-- legally files the return. Sandbox simulates success with the DEFAULT scenario (no
+-- Gov-Test-Scenario header needed).
+function Client.submit_final_declaration(token, nino, tax_year, calc_id)
+    local httpc, err = http_client()
+    if not httpc then return nil, err end
+    local url = string.format(
+        "%s/individuals/calculations/%s/self-assessment/%s/%s/final-declaration",
+        base_url(), nino, tax_year, calc_id)
+    local res, rerr = httpc:request_uri(url, {
+        method = "POST",
+        headers = headers(token, "8.0"),
+        ssl_verify = not Client.is_sandbox(),
+    })
+    if not res then return nil, "submit_final_declaration request failed: " .. tostring(rerr) end
+    if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
+    return { status = res.status,
+             correlation_id = res.headers and res.headers["X-CorrelationId"] }, nil
+end
+
+-- Pull the headline figures out of a retrieved calculation. The real figures are nested
+-- under `calculation` (not the top level), with sub-totals split across taxCalculation,
+-- taxCalculation.incomeTax and allowancesAndDeductions — reading the top level (the old
+-- bug) left every field nil, so the UI showed "—" everywhere. Sandbox returns the fixed
+-- placeholder -99999999999.99 for the grand total only — flag that so the UI disclaims it.
 function Client.parse_figures(calc_data)
-    local tc = (calc_data and calc_data.taxCalculation) or {}
+    local root = (calc_data and calc_data.calculation) or calc_data or {}
+    local tc = root.taxCalculation or {}
+    local it = tc.incomeTax or {}
+    local ad = root.allowancesAndDeductions or {}
     local nics = tc.nics or {}
     local total = tonumber(tc.totalIncomeTaxAndNicsDue)
     return {
         total_income_tax_and_nics_due = total,
-        total_taxable_income = tonumber(tc.totalTaxableIncome),
-        income_tax_charged = tonumber(tc.incomeTaxCharged),
-        personal_allowance = tonumber(tc.personalAllowance),
-        class2_nics = nics.class2Nics and tonumber(nics.class2Nics.amount) or nil,
-        class4_nics = nics.class4Nics and tonumber(nics.class4Nics.totalAmount) or nil,
+        total_taxable_income = tonumber(it.totalTaxableIncome) or tonumber(tc.totalTaxableIncome),
+        total_income_received = tonumber(it.totalIncomeReceivedFromAllSources),
+        income_tax_charged = tonumber(it.incomeTaxCharged) or tonumber(tc.incomeTaxCharged),
+        personal_allowance = tonumber(ad.personalAllowance),
+        class2_nics = (nics.class2Nics and tonumber(nics.class2Nics.amount)) or tonumber(nics.nic2Amount),
+        class4_nics = (nics.class4Nics and tonumber(nics.class4Nics.totalAmount)) or tonumber(nics.nic4Amount),
         is_sandbox_placeholder = (total ~= nil and total <= -99999999999),
     }
 end
@@ -238,7 +267,7 @@ function Client.create_test_business(token, nino, params)
             method = "POST",
             body = cjson.encode(params),
             headers = headers(token, "1.0", { json_body = true }),
-            ssl_verify = false,
+            ssl_verify = not Client.is_sandbox(),
         })
     if not res then return nil, "create_test_business request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
@@ -254,7 +283,7 @@ function Client.set_itsa_status(token, nino, tax_year, details)
             method = "POST",
             body = cjson.encode({ itsaStatusDetails = details }),
             headers = headers(token, "1.0", { json_body = true }),
-            ssl_verify = false,
+            ssl_verify = not Client.is_sandbox(),
         })
     if not res then return nil, "set_itsa_status request failed: " .. tostring(rerr) end
     if res.status >= 400 then return nil, "HTTP " .. res.status, decode(res.body) end
