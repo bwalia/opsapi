@@ -153,12 +153,15 @@ local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COP
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
 local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
+local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
+local timesheet_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-menu-items") or {}
 
 -- Invoicing
 local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-system") or {}
+local invoicing_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-menu-items") or {}
 
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
@@ -166,6 +169,7 @@ local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVO
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
 local accounting_hmrc_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-hmrc-categories") or {}
+local accounting_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-menu-items") or {}
 
 -- Theme system (platform-level; enabled for every preset)
 local theme_system_migrations = load_if_enabled(ProjectConfig.FEATURES.THEMES, "migrations.theme-system") or {}
@@ -1017,6 +1021,15 @@ local _migrations = {
         kanban_project_migrations, 39),
     ['249_create_kanban_comment_reply_trigger'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_project_migrations, 40),
+    -- Deferred FK-default repairs. Keyed in the 76x range so they run after every
+    -- table/column above has been created (migrations run in sorted-key order).
+    -- [41] drops the bogus DEFAULT 0 on kanban_tasks.parent_task_id / sprint_id
+    -- (a 0 violates the self/sprint FK on tasks created without a parent/sprint).
+    ['760_kanban_drop_fk_defaults'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 41),
+    -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
+    -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
+    ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
     ['250_create_kanban_time_entries_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_enhancement_migrations, 1),
     ['251_add_kanban_time_entries_indexes'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
@@ -1503,12 +1516,26 @@ local _migrations = {
     ['510_crm_create_leads'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 1),
     ['511_crm_leads_enquiry_link'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 2),
 
+    -- CRM menu items (720-723): surface CRM in the backend-driven sidebar
+    ['720_seed_crm_menu_items'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 1),
+    ['721_seed_crm_modules'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 2),
+    ['722_grant_crm_permissions'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 3),
+    ['723_enable_crm_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 4),
+
     -- =========================================================================
     -- TIMESHEET SYSTEM (520-529)
     -- =========================================================================
     ['520_ts_create_timesheets'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 1),
     ['521_ts_create_entries'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 2),
     ['522_ts_create_approvals'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 3),
+    ['523_ts_enrich_client_fields'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 4),
+    ['524_ts_link_customer_task'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 5),
+
+    -- Timesheet menu items (730-733): surface Timesheets in the sidebar
+    ['730_seed_timesheet_menu_items'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 1),
+    ['731_seed_timesheet_modules'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 2),
+    ['732_grant_timesheet_permissions'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 3),
+    ['733_enable_timesheet_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 4),
 
     -- =========================================================================
     -- INVOICING SYSTEM (540-549)
@@ -1518,6 +1545,13 @@ local _migrations = {
     ['542_inv_create_payments'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 3),
     ['543_inv_create_tax_rates'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 4),
     ['544_inv_create_sequences'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 5),
+    ['545_inv_widen_tax_rate'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 6),
+
+    -- Invoicing menu items (740-743): surface Invoices in the sidebar
+    ['740_seed_invoicing_menu_items'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 1),
+    ['741_seed_invoicing_modules'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 2),
+    ['742_grant_invoicing_permissions'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 3),
+    ['743_enable_invoicing_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 4),
 
     -- =========================================================================
     -- KAFKA / AUDIT SYSTEM (560-561)
@@ -1554,6 +1588,12 @@ local _migrations = {
     ['608_acct_bank_txn_tags_columns'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 2),
     ['609_acct_seed_hmrc_categories'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 3),
     ['610_acct_seed_dummy_transactions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 4),
+
+    -- Accounting menu items (750-753): surface Bookkeeping in the sidebar
+    ['750_seed_accounting_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 1),
+    ['751_seed_accounting_modules'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 2),
+    ['752_grant_accounting_permissions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 3),
+    ['753_enable_accounting_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 4),
 
     -- =========================================================================
     -- Theme System (Phase 1) — tables for multi-tenant theming

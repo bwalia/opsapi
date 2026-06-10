@@ -199,7 +199,10 @@ return {
                 uuid TEXT UNIQUE NOT NULL,
                 namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
                 name TEXT NOT NULL,
-                rate DECIMAL(5,4) NOT NULL,
+                -- Stored as a PERCENT (e.g. 20.00 = 20%), matching how line-item
+                -- tax_rate is applied (tax = subtotal * rate/100). DECIMAL(5,4)
+                -- here would overflow on any rate >= 10%.
+                rate DECIMAL(6,2) NOT NULL,
                 description TEXT,
                 is_default BOOLEAN DEFAULT false,
                 is_active BOOLEAN DEFAULT true,
@@ -236,5 +239,17 @@ return {
                 UNIQUE (namespace_id)
             )
         ]])
+    end,
+
+    -- ========================================
+    -- [6] Widen invoice_tax_rates.rate from DECIMAL(5,4) to DECIMAL(6,2)
+    -- ========================================
+    -- The original DECIMAL(5,4) (max 9.9999) could not store a percent rate of
+    -- 10 or more — createTaxRate({rate=20}) failed with "numeric field overflow".
+    -- Rates are percents (20 = 20%), so widen to hold up to 9999.99.
+    [6] = function()
+        pcall(function()
+            db.query("ALTER TABLE invoice_tax_rates ALTER COLUMN rate TYPE DECIMAL(6,2)")
+        end)
     end
 }

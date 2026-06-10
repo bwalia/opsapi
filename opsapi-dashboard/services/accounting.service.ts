@@ -218,6 +218,13 @@ const BASE = '/api/v2/accounting';
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
 
+// Coerce a value to an array. Empty Lua tables can serialise as `{}` (object)
+// rather than `[]`, so report list fields are guarded before the UI calls .map().
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function asArray<T = any>(v: any): T[] {
+  return Array.isArray(v) ? v : [];
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildParams(filters: any): Record<string, string | number> {
   const params: Record<string, string | number> = {};
@@ -253,17 +260,17 @@ export const accountingService = {
 
   async getAccount(uuid: string): Promise<AccountingAccount> {
     const response = await apiClient.get(`${BASE}/accounts/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createAccount(data: Partial<AccountingAccount>): Promise<AccountingAccount> {
     const response = await apiClient.post(`${BASE}/accounts`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateAccount(uuid: string, data: Partial<AccountingAccount>): Promise<AccountingAccount> {
     const response = await apiClient.put(`${BASE}/accounts/${uuid}`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteAccount(uuid: string): Promise<void> {
@@ -287,17 +294,17 @@ export const accountingService = {
 
   async getJournalEntry(uuid: string): Promise<JournalEntry> {
     const response = await apiClient.get(`${BASE}/journal-entries/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createJournalEntry(data: { entry_date: string; description: string; reference?: string; lines: Omit<JournalLine, 'id'>[] }): Promise<JournalEntry> {
     const response = await apiClient.post(`${BASE}/journal-entries`, toFormData(data as unknown as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async voidJournalEntry(uuid: string): Promise<{ message: string }> {
     const response = await apiClient.post(`${BASE}/journal-entries/${uuid}/void`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ── Bank Transactions ──────────────────────────────────────────────────────
@@ -317,22 +324,22 @@ export const accountingService = {
 
   async getBankTransaction(uuid: string): Promise<BankTransaction> {
     const response = await apiClient.get(`${BASE}/bank-transactions/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateBankTransaction(uuid: string, data: Partial<BankTransaction>): Promise<BankTransaction> {
     const response = await apiClient.put(`${BASE}/bank-transactions/${uuid}`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async importBankTransactions(data: { csv_content?: string; transactions?: Partial<BankTransaction>[] }): Promise<{ imported: number; message: string }> {
     const response = await apiClient.post(`${BASE}/bank-transactions/import`, toFormData(data as unknown as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async reconcileTransaction(uuid: string, data: { account_id: number }): Promise<BankTransaction> {
     const response = await apiClient.post(`${BASE}/bank-transactions/${uuid}/reconcile`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ── Expenses ───────────────────────────────────────────────────────────────
@@ -352,17 +359,17 @@ export const accountingService = {
 
   async getExpense(uuid: string): Promise<Expense> {
     const response = await apiClient.get(`${BASE}/expenses/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createExpense(data: Partial<Expense>): Promise<Expense> {
     const response = await apiClient.post(`${BASE}/expenses`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async updateExpense(uuid: string, data: Partial<Expense>): Promise<Expense> {
     const response = await apiClient.put(`${BASE}/expenses/${uuid}`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async deleteExpense(uuid: string): Promise<void> {
@@ -371,12 +378,12 @@ export const accountingService = {
 
   async approveExpense(uuid: string): Promise<Expense> {
     const response = await apiClient.post(`${BASE}/expenses/${uuid}/approve`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async rejectExpense(uuid: string): Promise<Expense> {
     const response = await apiClient.post(`${BASE}/expenses/${uuid}/reject`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ── VAT Returns ────────────────────────────────────────────────────────────
@@ -388,17 +395,17 @@ export const accountingService = {
 
   async getVatReturn(uuid: string): Promise<VatReturn> {
     const response = await apiClient.get(`${BASE}/vat-returns/${uuid}`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async createVatReturn(data: { period_start: string; period_end: string }): Promise<VatReturn> {
     const response = await apiClient.post(`${BASE}/vat-returns`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async submitVatReturn(uuid: string): Promise<VatReturn> {
     const response = await apiClient.post(`${BASE}/vat-returns/${uuid}/submit`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ── Reports ────────────────────────────────────────────────────────────────
@@ -406,52 +413,56 @@ export const accountingService = {
   async getTrialBalance(params?: { date_from?: string; date_to?: string }): Promise<TrialBalance> {
     const qs = params ? buildQueryString(params) : '';
     const response = await apiClient.get(`${BASE}/reports/trial-balance${qs}`);
-    return response.data;
+    const d = response.data?.data ?? response.data;
+    return { ...d, accounts: asArray(d?.accounts) };
   },
 
   async getBalanceSheet(params?: { as_of_date?: string }): Promise<BalanceSheet> {
     const qs = params ? buildQueryString(params) : '';
     const response = await apiClient.get(`${BASE}/reports/balance-sheet${qs}`);
-    return response.data;
+    const d = response.data?.data ?? response.data;
+    return { ...d, assets: asArray(d?.assets), liabilities: asArray(d?.liabilities), equity: asArray(d?.equity) };
   },
 
   async getProfitAndLoss(params?: { date_from?: string; date_to?: string }): Promise<ProfitAndLoss> {
     const qs = params ? buildQueryString(params) : '';
     const response = await apiClient.get(`${BASE}/reports/profit-and-loss${qs}`);
-    return response.data;
+    const d = response.data?.data ?? response.data;
+    return { ...d, revenue: asArray(d?.revenue), expenses: asArray(d?.expenses) };
   },
 
   async getExpenseSummary(params?: { date_from?: string; date_to?: string }): Promise<ExpenseSummary> {
     const qs = params ? buildQueryString(params) : '';
     const response = await apiClient.get(`${BASE}/reports/expense-summary${qs}`);
-    return response.data;
+    const d = response.data?.data ?? response.data;
+    return { ...d, categories: asArray(d?.categories) };
   },
 
   async getDashboardStats(): Promise<DashboardStats> {
     const response = await apiClient.get(`${BASE}/reports/dashboard-stats`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   // ── AI ─────────────────────────────────────────────────────────────────────
 
   async aiCategorize(data: { description: string; amount: number }): Promise<AiCategorization> {
     const response = await apiClient.post(`${BASE}/ai/categorize`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async aiSuggestVat(data: { description: string; amount: number; category?: string }): Promise<AiVatSuggestion> {
     const response = await apiClient.post(`${BASE}/ai/suggest-vat`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async aiQuery(data: { query: string }): Promise<AiQueryResponse> {
     const response = await apiClient.post(`${BASE}/ai/query`, toFormData(data as Record<string, unknown>));
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 
   async aiStatus(): Promise<AiStatusResponse> {
     const response = await apiClient.get(`${BASE}/ai/status`);
-    return response.data;
+    return response.data?.data ?? response.data;
   },
 };
 

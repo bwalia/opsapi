@@ -100,15 +100,16 @@ end
 ThemePresets.LIST = {
     {
         slug         = "light",
-        name         = "Light",
-        description  = "Clean, bright default with blue brand accents. Suitable for most dashboards.",
+        name         = "OpsAPI Bright",
+        description  = "The signature OpsAPI look — vivid #ff004e on clean white. The platform default.",
         project_code = "*",
         tokens = build_tokens({
+            -- Brand pink scale (must mirror opsapi-dashboard/app/globals.css :root)
             primary = {
-                ["50"]  = "#eff6ff", ["100"] = "#dbeafe", ["200"] = "#bfdbfe",
-                ["300"] = "#93c5fd", ["400"] = "#60a5fa", ["500"] = "#3b82f6",
-                ["600"] = "#2563eb", ["700"] = "#1d4ed8", ["800"] = "#1e40af",
-                ["900"] = "#1e3a8a",
+                ["50"]  = "#fff0f3", ["100"] = "#ffe0e8", ["200"] = "#ffc6d5",
+                ["300"] = "#ff9fb5", ["400"] = "#ff6088", ["500"] = "#ff004e",
+                ["600"] = "#e6003f", ["700"] = "#c20035", ["800"] = "#a00030",
+                ["900"] = "#84002c",
             },
             secondary = {
                 ["50"]  = "#f8fafc", ["100"] = "#f1f5f9", ["200"] = "#e2e8f0",
@@ -116,7 +117,7 @@ ThemePresets.LIST = {
                 ["600"] = "#475569", ["700"] = "#334155", ["800"] = "#1e293b",
                 ["900"] = "#0f172a",
             },
-            accent           = "#3b82f6",
+            accent           = "#ff004e",
             background       = "#ffffff",
             foreground       = "#0f172a",
             surface          = "#ffffff",

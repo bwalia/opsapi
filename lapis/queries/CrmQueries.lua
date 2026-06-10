@@ -67,14 +67,15 @@ function CrmQueries.getPipelines(namespace_id, params)
     }
 end
 
---- Get a single pipeline by UUID
+--- Get a single pipeline by UUID (scoped to the tenant)
+-- @param namespace_id number Namespace ID
 -- @param uuid string Pipeline UUID
 -- @return table|nil Pipeline
-function CrmQueries.getPipeline(uuid)
+function CrmQueries.getPipeline(namespace_id, uuid)
     local result = db.query([[
         SELECT * FROM crm_pipelines
-        WHERE uuid = ? AND deleted_at IS NULL
-    ]], uuid)
+        WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL
+    ]], uuid, namespace_id)
     return result and result[1] or nil
 end
 
@@ -180,18 +181,19 @@ function CrmQueries.getAccounts(namespace_id, params)
     }
 end
 
---- Get a single account by UUID with aggregated stats
+--- Get a single account by UUID with aggregated stats (scoped to the tenant)
+-- @param namespace_id number Namespace ID
 -- @param uuid string Account UUID
 -- @return table|nil Account with stats
-function CrmQueries.getAccount(uuid)
+function CrmQueries.getAccount(namespace_id, uuid)
     local result = db.query([[
         SELECT a.*,
                (SELECT COUNT(*) FROM crm_contacts WHERE account_id = a.id AND deleted_at IS NULL) as contact_count,
                (SELECT COUNT(*) FROM crm_deals WHERE account_id = a.id AND deleted_at IS NULL) as deal_count,
                (SELECT COALESCE(SUM(value), 0) FROM crm_deals WHERE account_id = a.id AND deleted_at IS NULL) as total_deal_value
         FROM crm_accounts a
-        WHERE a.uuid = ? AND a.deleted_at IS NULL
-    ]], uuid)
+        WHERE a.uuid = ? AND a.namespace_id = ? AND a.deleted_at IS NULL
+    ]], uuid, namespace_id)
     return result and result[1] or nil
 end
 
@@ -300,16 +302,17 @@ function CrmQueries.getContacts(namespace_id, params)
     }
 end
 
---- Get a single contact by UUID with account name
+--- Get a single contact by UUID with account name (scoped to the tenant)
+-- @param namespace_id number Namespace ID
 -- @param uuid string Contact UUID
 -- @return table|nil Contact
-function CrmQueries.getContact(uuid)
+function CrmQueries.getContact(namespace_id, uuid)
     local result = db.query([[
         SELECT c.*, a.name as account_name
         FROM crm_contacts c
         LEFT JOIN crm_accounts a ON a.id = c.account_id
-        WHERE c.uuid = ? AND c.deleted_at IS NULL
-    ]], uuid)
+        WHERE c.uuid = ? AND c.namespace_id = ? AND c.deleted_at IS NULL
+    ]], uuid, namespace_id)
     return result and result[1] or nil
 end
 
@@ -431,10 +434,11 @@ function CrmQueries.getDeals(namespace_id, params)
     }
 end
 
---- Get a single deal by UUID with account/contact/pipeline joins
+--- Get a single deal by UUID with account/contact/pipeline joins (scoped to the tenant)
+-- @param namespace_id number Namespace ID
 -- @param uuid string Deal UUID
 -- @return table|nil Deal
-function CrmQueries.getDeal(uuid)
+function CrmQueries.getDeal(namespace_id, uuid)
     local result = db.query([[
         SELECT d.*,
                a.name as account_name,
@@ -447,8 +451,8 @@ function CrmQueries.getDeal(uuid)
         LEFT JOIN crm_accounts a ON a.id = d.account_id
         LEFT JOIN crm_contacts ct ON ct.id = d.contact_id
         LEFT JOIN crm_pipelines p ON p.id = d.pipeline_id
-        WHERE d.uuid = ? AND d.deleted_at IS NULL
-    ]], uuid)
+        WHERE d.uuid = ? AND d.namespace_id = ? AND d.deleted_at IS NULL
+    ]], uuid, namespace_id)
     return result and result[1] or nil
 end
 
@@ -556,12 +560,68 @@ function CrmQueries.getDashboardStats(namespace_id)
 
     stats.deals_by_stage = by_stage or {}
 
+    -- Account count (frontend CrmDashboardStats.total_accounts)
+    local acc_result = db.query([[
+        SELECT COUNT(*) as total_accounts
+        FROM crm_accounts
+        WHERE namespace_id = ? AND deleted_at IS NULL
+    ]], namespace_id)
+    stats.total_accounts = acc_result and tonumber(acc_result[1].total_accounts) or 0
+
+    -- Activities scheduled today (frontend CrmDashboardStats.activities_today)
+    local act_result = db.query([[
+        SELECT COUNT(*) as activities_today
+        FROM crm_activities
+        WHERE namespace_id = ? AND deleted_at IS NULL
+          AND activity_date::date = CURRENT_DATE
+    ]], namespace_id)
+    stats.activities_today = act_result and tonumber(act_result[1].activities_today) or 0
+
+    -- Aliases matching the frontend interface field names
+    stats.active_deals = tonumber(stats.open_deals) or 0
+    stats.total_deal_value = tonumber(stats.total_value) or 0
+
     return stats
 end
 
 --------------------------------------------------------------------------------
 -- Activity CRUD
 --------------------------------------------------------------------------------
+
+--- Map a raw crm_activities row to the API shape expected by the frontend.
+-- Aliases activity_type -> type, activity_date -> due_date, derives related_*
+-- from whichever FK is set, and maps the DB status (planned) to the UI status
+-- (pending). Mutates and returns the row.
+-- @param row table|nil Raw activity row (may contain joined *_name columns)
+-- @return table|nil Reshaped activity
+function CrmQueries.shapeActivity(row)
+    if not row then return row end
+
+    row.type = row.activity_type
+    row.due_date = row.activity_date
+
+    -- Map DB status to the UI status vocabulary
+    if row.status == "planned" then
+        row.status = "pending"
+    end
+
+    -- Derive a single related_* descriptor from whichever entity is linked
+    if row.deal_id then
+        row.related_type = "deal"
+        row.related_name = row.deal_name
+    elseif row.contact_id then
+        row.related_type = "contact"
+        local first = row.contact_first_name or ""
+        local last = row.contact_last_name or ""
+        local name = (first .. " " .. last):gsub("^%s+", ""):gsub("%s+$", "")
+        row.related_name = name ~= "" and name or nil
+    elseif row.account_id then
+        row.related_type = "account"
+        row.related_name = row.account_name
+    end
+
+    return row
+end
 
 --- Create a new activity
 -- @param params table Activity parameters
@@ -573,7 +633,7 @@ function CrmQueries.createActivity(params)
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
 
-    return CrmActivityModel:create(params, { returning = "*" })
+    return CrmQueries.shapeActivity(CrmActivityModel:create(params, { returning = "*" }))
 end
 
 --- List activities for a namespace with pagination and filters
@@ -641,6 +701,10 @@ function CrmQueries.getActivities(namespace_id, params)
     ]], where_clause)
     local activities = db.query(data_sql, unpack(data_values))
 
+    for _, act in ipairs(activities or {}) do
+        CrmQueries.shapeActivity(act)
+    end
+
     return {
         items = activities,
         meta = {
@@ -668,7 +732,7 @@ function CrmQueries.getActivity(uuid)
         LEFT JOIN crm_deals d ON d.id = act.deal_id
         WHERE act.uuid = ? AND act.deleted_at IS NULL
     ]], uuid)
-    return result and result[1] or nil
+    return CrmQueries.shapeActivity(result and result[1] or nil)
 end
 
 --- Update an activity
@@ -680,7 +744,7 @@ function CrmQueries.updateActivity(uuid, params)
     if not activity then return nil end
 
     params.updated_at = db.raw("NOW()")
-    return activity:update(params, { returning = "*" })
+    return CrmQueries.shapeActivity(activity:update(params, { returning = "*" }))
 end
 
 --- Soft-delete an activity
@@ -703,11 +767,11 @@ function CrmQueries.completeActivity(uuid)
     local activity = CrmActivityModel:find({ uuid = uuid })
     if not activity then return nil end
 
-    return activity:update({
+    return CrmQueries.shapeActivity(activity:update({
         completed_at = db.raw("NOW()"),
         status = "completed",
         updated_at = db.raw("NOW()")
-    }, { returning = "*" })
+    }, { returning = "*" }))
 end
 
 return CrmQueries

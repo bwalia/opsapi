@@ -28,6 +28,11 @@ export interface SearchableSelectProps {
   autoFocus?: boolean;
   // Called when the dropdown closes without a selection (e.g. on blur/escape).
   onClose?: () => void;
+  // Optional server-side search. When provided, the typed query is forwarded
+  // (debounced) so the parent can fetch matching options — letting the dropdown
+  // reach records beyond a server-side result cap instead of only filtering the
+  // initial page client-side. Client-side filtering of `options` still applies.
+  onSearch?: (query: string) => void;
 }
 
 const SearchableSelect: React.FC<SearchableSelectProps> = ({
@@ -44,6 +49,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
   className,
   autoFocus = false,
   onClose,
+  onSearch,
 }) => {
   const [open, setOpen] = useState(autoFocus);
   const [query, setQuery] = useState('');
@@ -65,6 +71,16 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
         o.hint?.toLowerCase().includes(q)
     );
   }, [options, query]);
+
+  // Debounced server-side search: forward the typed query to the parent so it
+  // can refetch options. Only active when an onSearch handler is supplied.
+  const onSearchRef = useRef(onSearch);
+  onSearchRef.current = onSearch;
+  useEffect(() => {
+    if (!onSearchRef.current || !open) return;
+    const t = setTimeout(() => onSearchRef.current?.(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query, open]);
 
   const close = () => {
     setOpen(false);
