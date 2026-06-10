@@ -1217,32 +1217,72 @@ sleep 5
 HOSTNAME="opsapi-dev.local"
 K3S_LB_IP=127.0.0.1
 HOSTS_FILE="/etc/hosts"
+DESIRED_ENTRY="$K3S_LB_IP $HOSTNAME"
 
-echo "[+] Removing lines matching '$HOSTNAME' from $HOSTS_FILE"
+# ------------------------------------------------------------------
+# Map opsapi-dev.local -> 127.0.0.1 in /etc/hosts.
+#
+# This is purely a convenience: the stack is always reachable at
+# http://127.0.0.1:<port> regardless. So editing /etc/hosts must NEVER block
+# startup and must NEVER prompt for a sudo password. We write only when we can do
+# so without prompting; otherwise we print a friendly "add this line yourself"
+# hint and carry on.
+# ------------------------------------------------------------------
 
-# Backup before change
-sudo cp "$HOSTS_FILE" "$HOSTS_FILE.bak"
+# Escape dots so the grep below matches literally (127.0.0.1, opsapi-dev.local).
+_HOST_RE="${HOSTNAME//./\\.}"
+_IP_RE="${K3S_LB_IP//./\\.}"
 
-# Delete lines containing the host entry (cross-platform sed -i)
-if [[ "$(uname)" == "Darwin" ]]; then
-    sudo sed -i '' "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
+if grep -qE "^[[:space:]]*${_IP_RE}[[:space:]]+${_HOST_RE}([[:space:]]|\$)" "$HOSTS_FILE" 2>/dev/null; then
+    # Already correct — nothing to do, and crucially no sudo needed. This is the
+    # common case on every run after the first.
+    echo -e "${GREEN}[+] /etc/hosts already maps ${HOSTNAME} -> ${K3S_LB_IP}; nothing to do${NC}"
 else
-    sudo sed -i "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
-fi
-
-echo "[+] House keeping Done. Backup saved as $HOSTS_FILE.bak"
-
-# Check if the entry already exists
-if grep -q "$HOSTNAME" $HOSTS_FILE; then
-    echo "[+] Updating existing entry for $HOSTNAME"
-    if [[ "$(uname)" == "Darwin" ]]; then
-        sudo sed -i '' "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+    # Work out how (or whether) we can write to /etc/hosts WITHOUT ever prompting.
+    # start.sh must never block on a sudo password prompt, so we only use sudo
+    # when it is non-interactive: passwordless sudo, or credentials the user has
+    # already cached this session (e.g. by running `sudo -v` first). Anything
+    # that would prompt is treated as "can't edit" and we fall back to the hint.
+    HOSTS_SUDO=""
+    CAN_EDIT_HOSTS=true
+    if [ "$(id -u)" -eq 0 ] || [ -w "$HOSTS_FILE" ]; then
+        HOSTS_SUDO=""
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        HOSTS_SUDO="sudo -n"   # non-interactive sudo only — never prompts
     else
-        sudo sed -i "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+        CAN_EDIT_HOSTS=false
     fi
-else
-    echo "[+] Adding new entry: $K3S_LB_IP $HOSTNAME"
-    echo "$K3S_LB_IP $HOSTNAME" | sudo tee -a $HOSTS_FILE > /dev/null
+
+    if [ "$CAN_EDIT_HOSTS" = true ]; then
+        echo "[+] Configuring ${HOSTNAME} -> ${K3S_LB_IP} in $HOSTS_FILE"
+
+        # Best-effort backup; not fatal if it fails.
+        $HOSTS_SUDO cp "$HOSTS_FILE" "$HOSTS_FILE.bak" 2>/dev/null || true
+
+        # Drop any stale entry for the host (cross-platform sed -i), then append
+        # the fresh mapping. If any step fails (e.g. not actually a sudoer), fall
+        # through to the manual hint instead of leaving a half-applied change.
+        if [[ "$(uname)" == "Darwin" ]]; then
+            $HOSTS_SUDO sed -i '' "/${_HOST_RE}/d" "$HOSTS_FILE" 2>/dev/null || CAN_EDIT_HOSTS=false
+        else
+            $HOSTS_SUDO sed -i "/${_HOST_RE}/d" "$HOSTS_FILE" 2>/dev/null || CAN_EDIT_HOSTS=false
+        fi
+
+        if [ "$CAN_EDIT_HOSTS" = true ] && echo "$DESIRED_ENTRY" | $HOSTS_SUDO tee -a "$HOSTS_FILE" >/dev/null 2>&1; then
+            echo -e "${GREEN}[+] Added '${DESIRED_ENTRY}' to ${HOSTS_FILE} (backup: ${HOSTS_FILE}.bak)${NC}"
+        else
+            CAN_EDIT_HOSTS=false
+        fi
+    fi
+
+    if [ "$CAN_EDIT_HOSTS" != true ]; then
+        echo -e "${YELLOW}[!] Skipping the /etc/hosts update — would need a sudo password (not prompting).${NC}"
+        echo -e "${YELLOW}    This step is optional: everything still works at http://127.0.0.1:<port>.${NC}"
+        echo -e "${YELLOW}    To also use http://${HOSTNAME}, add this line to ${HOSTS_FILE} yourself:${NC}"
+        echo -e "${CYAN}        ${DESIRED_ENTRY}${NC}"
+        echo -e "${YELLOW}    e.g.  echo '${DESIRED_ENTRY}' | sudo tee -a ${HOSTS_FILE}${NC}"
+        echo -e "${YELLOW}    Tip: run 'sudo -v' once before start.sh and it'll be applied automatically.${NC}"
+    fi
 fi
 
 sleep 5

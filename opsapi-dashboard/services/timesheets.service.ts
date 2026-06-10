@@ -319,16 +319,28 @@ export const timesheetsService = {
     const queryString = buildQueryString(queryParams);
     const response = await apiClient.get(`/api/v2/timesheets/approval-queue${queryString}`);
 
-    const data = Array.isArray(response.data?.data) ? response.data.data : [];
+    // Backend shape: { success, data: { data: [...], meta: { total, page, per_page, total_pages } } }
+    // Unwrap the {success,data} envelope, then read the inner list + meta — the
+    // meta lives one level deeper than a naive response.data.total read assumes.
+    const body = response.data?.data ?? response.data;
+    const data: Timesheet[] = Array.isArray(body?.data)
+      ? body.data
+      : Array.isArray(body)
+        ? body
+        : [];
+    const meta = body?.meta ?? {};
+    const page = meta.page ?? params.page ?? 1;
+    const perPage = meta.per_page ?? params.per_page ?? 10;
+    const totalPages = meta.total_pages ?? 0;
 
     return {
       data,
-      total: response.data?.total || 0,
-      page: response.data?.page || params.page || 1,
-      per_page: response.data?.per_page || params.per_page || 10,
-      total_pages: response.data?.total_pages || 0,
-      has_next: response.data?.has_next || false,
-      has_prev: response.data?.has_prev || false,
+      total: meta.total ?? data.length,
+      page,
+      per_page: perPage,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_prev: page > 1,
     };
   },
 
@@ -367,7 +379,26 @@ export const timesheetsService = {
   async getSummary(params: TimesheetSummaryParams = {}): Promise<TimesheetSummaryResponse> {
     const queryString = buildQueryString(params as Record<string, unknown>);
     const response = await apiClient.get(`/api/v2/timesheets/summary${queryString}`);
-    return response.data?.data || response.data;
+    // Backend shape: { summary: { total_hours, billable_hours, submitted_count, approved_count, ... },
+    //                  by_project: [{ project_reference, total_hours, billable_hours }],
+    //                  by_category: [{ category, total_hours, billable_hours }] }
+    // Flatten it into the flat TimesheetSummaryResponse the UI expects.
+    const raw = response.data?.data || response.data || {};
+    const s = raw.summary || raw || {};
+    return {
+      total_hours: Number(s.total_hours) || 0,
+      billable_hours: Number(s.billable_hours) || 0,
+      pending_count: Number(s.submitted_count ?? s.pending_count) || 0,
+      approved_count: Number(s.approved_count) || 0,
+      by_project: (raw.by_project || []).map((p: { project_reference?: string; total_hours?: number; hours?: number }) => ({
+        project_reference: p.project_reference || 'No Project',
+        hours: Number(p.total_hours ?? p.hours) || 0,
+      })),
+      by_category: (raw.by_category || []).map((c: { category?: string; total_hours?: number; hours?: number }) => ({
+        category: c.category || 'Uncategorized',
+        hours: Number(c.total_hours ?? c.hours) || 0,
+      })),
+    };
   },
 };
 

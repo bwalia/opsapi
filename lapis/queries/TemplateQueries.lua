@@ -86,10 +86,11 @@ function TemplateQueries.update(id, params)
             template_type = reqData.template_type,
             description = reqData.description
         }
-        local updateData = template:update(tempData, {
+        -- :update() returns a boolean; the refreshed row was merged into `template` via returning = "*"
+        template:update(tempData, {
             returning = "*"
         })
-        return { data = updateData }
+        return { data = template }
     end
 end
 

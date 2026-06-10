@@ -714,4 +714,31 @@ return {
             end
         end
     end,
+
+    -- ========================================
+    -- [29] Drop the bogus `DEFAULT 0` on every namespace_id FK column
+    -- ========================================
+    -- Lapis' types.integer (and types.integer({ null = true })) emit a
+    -- `DEFAULT 0` that the namespace_id columns inherited across many tables
+    -- (e.g. customers, kanban_projects). A namespace_id of 0 references a
+    -- namespace that never exists (serial ids start at 1), so any insert that
+    -- omits namespace_id silently writes 0 instead of failing — either
+    -- FK-violating or slipping past tenant scoping. Strip the default everywhere
+    -- so such inserts fail loudly. Keyed to run after all namespace_id columns
+    -- have been added (see migrations.lua). Idempotent: DROP DEFAULT is a no-op
+    -- once the default is gone.
+    [29] = function()
+        local cols = db.query([[
+            SELECT table_name
+            FROM information_schema.columns
+            WHERE column_name = 'namespace_id'
+              AND column_default = '0'
+              AND table_schema = 'public'
+        ]])
+        for _, row in ipairs(cols or {}) do
+            pcall(function()
+                db.query("ALTER TABLE " .. row.table_name .. " ALTER COLUMN namespace_id DROP DEFAULT")
+            end)
+        end
+    end,
 }

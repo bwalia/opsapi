@@ -30,9 +30,8 @@ function InvoiceQueries._getNextInvoiceNumber(namespace_id)
     local seq = InvoiceSequenceModel:find({ namespace_id = namespace_id })
 
     if not seq then
-        -- Create sequence starting at 1
+        -- Create sequence starting at 1 (invoice_sequences has no uuid column)
         seq = InvoiceSequenceModel:create({
-            uuid = Global.generateUUID(),
             namespace_id = namespace_id,
             prefix = "INV",
             current_number = 1,
@@ -223,7 +222,6 @@ function InvoiceQueries.get(uuid)
             tax_rate,
             tax_amount,
             discount_percent,
-            discount_amount,
             line_total,
             sort_order,
             created_at,
@@ -241,7 +239,7 @@ function InvoiceQueries.get(uuid)
             invoice_id,
             amount,
             payment_method,
-            payment_reference,
+            reference_number,
             payment_date,
             notes,
             created_at
@@ -397,8 +395,10 @@ end
 --- Recalculate invoice totals from line items and payments
 -- @param invoice_id number (internal id)
 function InvoiceQueries.recalculateTotals(invoice_id)
+    -- invoice_line_items has no discount_amount column; the per-line discount is
+    -- already folded into line_total by addLineItem, so totals stay correct.
     local line_items = db.query([[
-        SELECT quantity, unit_price, tax_amount, discount_amount, line_total
+        SELECT quantity, unit_price, tax_amount, line_total
         FROM invoice_line_items
         WHERE invoice_id = ?
     ]], invoice_id)
@@ -424,59 +424,295 @@ function InvoiceQueries.recalculateTotals(invoice_id)
        amount_paid, balance_due, invoice_id)
 end
 
---- Create an invoice from an approved timesheet
+--- Create an invoice from an APPROVED timesheet.
+-- Tenant-scoped: the timesheet must belong to `namespace_id`. Only billable entries
+-- that have NOT already been invoiced are included (idempotent — re-running bills only
+-- new hours). Each line item is linked back to its timesheet_entry via timesheet_entry_id.
+-- Per-entry rate falls back to the timesheet's hourly_rate, then `opts.hourly_rate`.
 -- @param namespace_id number
--- @param timesheet_id number|string timesheet UUID or ID
+-- @param timesheet_uuid string timesheet UUID (preferred) — also accepts the public id
 -- @param owner_user_uuid string
--- @param hourly_rate number
--- @return table { data = invoice }
--- @return string|nil error message
-function InvoiceQueries.createFromTimesheet(namespace_id, timesheet_id, owner_user_uuid, hourly_rate)
-    hourly_rate = tonumber(hourly_rate) or 0
+-- @param opts table { hourly_rate?, due_date?, currency? }
+-- @return table { data = invoice } | nil, string error
+function InvoiceQueries.createFromTimesheet(namespace_id, timesheet_uuid, owner_user_uuid, opts)
+    opts = opts or {}
+    local fallback_rate = tonumber(opts.hourly_rate) or 0
 
-    -- Get billable timesheet entries
-    local entries = db.query([[
-        SELECT te.id, te.description, te.hours, te.date, te.task_name
-        FROM timesheet_entries te
-        WHERE te.timesheet_id = ?
-          AND te.is_billable = true
-        ORDER BY te.date ASC
-    ]], timesheet_id)
-
-    if not entries or #entries == 0 then
-        return nil, "No billable timesheet entries found"
+    -- Resolve the timesheet, strictly tenant-scoped (this IS the ownership check).
+    local ts_rows = db.query([[
+        SELECT id, uuid, status, hourly_rate, client_name, customer_uuid
+        FROM timesheets
+        WHERE namespace_id = ? AND uuid = ? AND deleted_at IS NULL
+        LIMIT 1
+    ]], namespace_id, tostring(timesheet_uuid))
+    local timesheet = ts_rows and ts_rows[1]
+    if not timesheet then
+        return nil, "Timesheet not found"
     end
 
-    -- Build line items from entries
+    -- Only approved timesheets can be billed to a client.
+    if timesheet.status ~= "approved" then
+        return nil, "Only approved timesheets can be invoiced"
+    end
+
+    local ts_rate = tonumber(timesheet.hourly_rate) or 0
+
+    -- Billable entries not already invoiced (LEFT JOIN guard = idempotency).
+    local entries = db.query([[
+        SELECT te.id, te.description, te.hours, te.entry_date,
+               te.task_reference, te.project_reference, te.hourly_rate
+        FROM timesheet_entries te
+        LEFT JOIN invoice_line_items ili ON ili.timesheet_entry_id = te.id
+        WHERE te.timesheet_id = ?
+          AND te.namespace_id = ?
+          AND te.is_billable = true
+          AND te.deleted_at IS NULL
+          AND ili.id IS NULL
+        ORDER BY te.entry_date ASC
+    ]], timesheet.id, namespace_id)
+
+    if not entries or #entries == 0 then
+        return nil, "No un-invoiced billable entries found for this timesheet"
+    end
+
+    -- Build line items; resolve a per-entry rate first.
     local line_items = {}
     for i, entry in ipairs(entries) do
-        local description = (entry.task_name or "Work") .. " - " .. (entry.description or entry.date or "")
+        local rate = tonumber(entry.hourly_rate)
+        if not rate or rate <= 0 then rate = ts_rate end
+        if rate <= 0 then rate = fallback_rate end
+        if rate <= 0 then
+            return nil, "No hourly rate found. Set a rate on the timesheet/entries or pass hourly_rate."
+        end
+
         local hours = tonumber(entry.hours) or 0
-        local calc = InvoiceGenerator.calculateLineTotal(hours, hourly_rate, 0, 0)
+        local label = entry.task_reference or entry.project_reference or "Work"
+        local detail = entry.description or (entry.entry_date and tostring(entry.entry_date)) or ""
+        local description = label .. (detail ~= "" and (" - " .. detail) or "")
+        local calc = InvoiceGenerator.calculateLineTotal(hours, rate, 0, 0)
 
         table.insert(line_items, {
             description = description,
             quantity = hours,
-            unit_price = hourly_rate,
+            unit_price = rate,
             tax_rate = 0,
             discount_percent = 0,
-            tax_amount = 0,
-            discount_amount = 0,
             line_total = calc.total,
-            sort_order = i
+            sort_order = i,
+            timesheet_entry_id = entry.id,
         })
     end
 
-    -- Create invoice with line items
-    local result = InvoiceQueries.create({
+    -- Best-effort customer email snapshot (tenant-scoped; customers module may be absent).
+    local customer_email = nil
+    if timesheet.customer_uuid then
+        local ok, c = pcall(function()
+            return db.query([[SELECT email FROM customers WHERE uuid = ? AND namespace_id = ? LIMIT 1]],
+                timesheet.customer_uuid, namespace_id)
+        end)
+        if ok and c and c[1] then customer_email = c[1].email end
+    end
+
+    return InvoiceQueries.create({
         namespace_id = namespace_id,
-        customer_name = "Timesheet Invoice",
+        customer_name = timesheet.client_name or "Timesheet Invoice",
+        customer_email = customer_email,
         owner_user_uuid = owner_user_uuid,
-        notes = "Generated from timesheet #" .. tostring(timesheet_id),
+        due_date = opts.due_date,
+        currency = opts.currency,
+        notes = "Generated from timesheet " .. tostring(timesheet.uuid),
         line_items = line_items
     })
+end
 
-    return result
+-- ============================================================
+-- Invoice from a customer's approved timesheets over a period
+-- ============================================================
+
+-- Resolve a per-entry billing rate: entry rate → timesheet rate → fallback.
+local function _resolve_rate(entry_rate, ts_rate, fallback_rate)
+    local rate = tonumber(entry_rate)
+    if not rate or rate <= 0 then rate = tonumber(ts_rate) or 0 end
+    if rate <= 0 then rate = tonumber(fallback_rate) or 0 end
+    return rate
+end
+
+-- Collect a customer's billable, un-invoiced, APPROVED timesheet entries over an
+-- optional [period_start, period_end] window (filtered on the entry's work date).
+-- Tenant-scoped via the parent timesheet's namespace_id + customer_uuid. The
+-- LEFT JOIN on invoice_line_items.timesheet_entry_id is the idempotency guard:
+-- an entry already on an invoice is excluded, so re-running only bills new hours.
+local function _collect_customer_entries(namespace_id, customer_uuid, period_start, period_end)
+    local conds = {
+        "t.namespace_id = " .. db.escape_literal(namespace_id),
+        "t.customer_uuid = " .. db.escape_literal(tostring(customer_uuid)),
+        "t.status = 'approved'",
+        "t.deleted_at IS NULL",
+        "te.is_billable = true",
+        "te.deleted_at IS NULL",
+        "ili.id IS NULL",
+    }
+    if period_start and period_start ~= "" then
+        table.insert(conds, "te.entry_date >= " .. db.escape_literal(period_start))
+    end
+    if period_end and period_end ~= "" then
+        table.insert(conds, "te.entry_date <= " .. db.escape_literal(period_end))
+    end
+    return db.query([[
+        SELECT te.id, te.description, te.hours, te.entry_date,
+               te.task_reference, te.project_reference, te.hourly_rate,
+               t.uuid AS timesheet_uuid, t.hourly_rate AS ts_rate,
+               t.client_name
+        FROM timesheet_entries te
+        JOIN timesheets t ON t.id = te.timesheet_id
+        LEFT JOIN invoice_line_items ili ON ili.timesheet_entry_id = te.id
+        WHERE ]] .. table.concat(conds, " AND ") .. [[
+        ORDER BY te.entry_date ASC, te.id ASC
+    ]])
+end
+
+-- Round to 2dp the same way the line-item totals do.
+local function _round2(n) return math.floor((tonumber(n) or 0) * 100 + 0.5) / 100 end
+
+--- Preview the un-invoiced billable work for a customer over a period.
+-- Read-only: creates nothing, so the UI can show "here's all the work, hours,
+-- rate and total" before the user commits to generating the invoice.
+-- @param namespace_id number
+-- @param customer_uuid string
+-- @param period_start string|nil  (YYYY-MM-DD)
+-- @param period_end string|nil    (YYYY-MM-DD)
+-- @param opts table { hourly_rate?, currency? }
+-- @return table { customer, period, currency, entries[], totals }
+function InvoiceQueries.getCustomerBillablePreview(namespace_id, customer_uuid, period_start, period_end, opts)
+    opts = opts or {}
+    local fallback_rate = tonumber(opts.hourly_rate) or 0
+    local entries = _collect_customer_entries(namespace_id, customer_uuid, period_start, period_end)
+
+    -- Customer name/email snapshot (tenant-scoped; customers module may be absent).
+    local customer = { uuid = customer_uuid, name = nil, email = nil }
+    local ok, c = pcall(function()
+        return db.query([[SELECT first_name, last_name, email FROM customers
+                          WHERE uuid = ? AND namespace_id = ? LIMIT 1]], customer_uuid, namespace_id)
+    end)
+    if ok and c and c[1] then
+        local name = ((c[1].first_name or "") .. " " .. (c[1].last_name or "")):gsub("^%s+", ""):gsub("%s+$", "")
+        customer.name = name ~= "" and name or c[1].email
+        customer.email = c[1].email
+    end
+
+    local lines = {}
+    local total_hours, total_amount, missing_rate = 0, 0, false
+    for _, e in ipairs(entries or {}) do
+        local rate = _resolve_rate(e.hourly_rate, e.ts_rate, fallback_rate)
+        local hours = tonumber(e.hours) or 0
+        local amount = _round2(hours * rate)
+        if not customer.name and e.client_name then customer.name = e.client_name end
+        if rate <= 0 then missing_rate = true end
+        total_hours = total_hours + hours
+        total_amount = total_amount + amount
+        table.insert(lines, {
+            entry_id = e.id,
+            timesheet_uuid = e.timesheet_uuid,
+            entry_date = e.entry_date,
+            description = e.description,
+            task_reference = e.task_reference,
+            project_reference = e.project_reference,
+            hours = hours,
+            rate = rate,
+            amount = amount,
+            has_rate = rate > 0,
+        })
+    end
+
+    return {
+        customer = customer,
+        period = { from = period_start, to = period_end },
+        currency = opts.currency or "GBP",
+        entries = lines,
+        totals = {
+            count = #lines,
+            total_hours = _round2(total_hours),
+            total_amount = _round2(total_amount),
+            missing_rate = missing_rate,
+        },
+    }
+end
+
+--- Create one invoice aggregating ALL of a customer's un-invoiced billable hours
+-- over a period (across however many approved timesheets). One line item per
+-- entry, each linked back to its timesheet_entry_id (so it can't be billed twice).
+-- @param namespace_id number
+-- @param customer_uuid string
+-- @param owner_user_uuid string
+-- @param opts table { period_start?, period_end?, hourly_rate?, due_date?, currency? }
+-- @return table { data = invoice } | nil, string error
+function InvoiceQueries.createFromCustomerTimesheets(namespace_id, customer_uuid, owner_user_uuid, opts)
+    opts = opts or {}
+    if not customer_uuid or customer_uuid == "" then
+        return nil, "customer_uuid is required"
+    end
+    local fallback_rate = tonumber(opts.hourly_rate) or 0
+
+    local entries = _collect_customer_entries(namespace_id, customer_uuid, opts.period_start, opts.period_end)
+    if not entries or #entries == 0 then
+        return nil, "No un-invoiced billable hours found for this customer in the selected period"
+    end
+
+    local line_items = {}
+    local customer_name = nil
+    for i, entry in ipairs(entries) do
+        local rate = _resolve_rate(entry.hourly_rate, entry.ts_rate, fallback_rate)
+        if rate <= 0 then
+            return nil, "No hourly rate found for some hours. Set a rate on the timesheet/entries or pass an hourly_rate."
+        end
+        customer_name = customer_name or entry.client_name
+        local hours = tonumber(entry.hours) or 0
+        local label = entry.task_reference or entry.project_reference or "Work"
+        local detail = entry.description or ""
+        local date_prefix = entry.entry_date and (tostring(entry.entry_date) .. ": ") or ""
+        local description = date_prefix .. label .. (detail ~= "" and (" - " .. detail) or "")
+        local calc = InvoiceGenerator.calculateLineTotal(hours, rate, 0, 0)
+        table.insert(line_items, {
+            description = description,
+            quantity = hours,
+            unit_price = rate,
+            tax_rate = 0,
+            discount_percent = 0,
+            line_total = calc.total,
+            sort_order = i,
+            timesheet_entry_id = entry.id,
+        })
+    end
+
+    -- Customer email + name fallback snapshot.
+    local customer_email = nil
+    local ok, c = pcall(function()
+        return db.query([[SELECT first_name, last_name, email FROM customers
+                          WHERE uuid = ? AND namespace_id = ? LIMIT 1]], customer_uuid, namespace_id)
+    end)
+    if ok and c and c[1] then
+        customer_email = c[1].email
+        if not customer_name then
+            local name = ((c[1].first_name or "") .. " " .. (c[1].last_name or "")):gsub("^%s+", ""):gsub("%s+$", "")
+            customer_name = name ~= "" and name or c[1].email
+        end
+    end
+
+    local period_note = ""
+    if opts.period_start or opts.period_end then
+        period_note = " (" .. tostring(opts.period_start or "…") .. " to " .. tostring(opts.period_end or "…") .. ")"
+    end
+
+    return InvoiceQueries.create({
+        namespace_id = namespace_id,
+        customer_name = customer_name or "Customer Invoice",
+        customer_email = customer_email,
+        owner_user_uuid = owner_user_uuid,
+        due_date = opts.due_date,
+        currency = opts.currency,
+        notes = "Generated from approved timesheets" .. period_note,
+        line_items = line_items,
+    })
 end
 
 --- Get dashboard statistics for a namespace
@@ -495,9 +731,9 @@ function InvoiceQueries.getDashboardStats(namespace_id)
           AND status != 'void'
     ]], namespace_id)
 
-    -- Overdue count
+    -- Overdue count + outstanding amount on overdue invoices
     local overdue = db.query([[
-        SELECT COUNT(*) as count
+        SELECT COUNT(*) as count, COALESCE(SUM(balance_due), 0) as amount
         FROM invoices
         WHERE namespace_id = ?
           AND deleted_at IS NULL
@@ -520,6 +756,7 @@ function InvoiceQueries.getDashboardStats(namespace_id)
         total_invoiced = tonumber(stats_totals.total_invoiced) or 0,
         total_paid = tonumber(stats_totals.total_paid) or 0,
         total_outstanding = tonumber(stats_totals.total_outstanding) or 0,
+        total_overdue = overdue and overdue[1] and tonumber(overdue[1].amount) or 0,
         overdue_count = overdue and overdue[1] and tonumber(overdue[1].count) or 0,
         by_status = by_status or {}
     }
@@ -550,9 +787,9 @@ function InvoiceQueries.addLineItem(invoice_id, params)
         tax_rate = tax_rate,
         tax_amount = calc.tax,
         discount_percent = discount_percent,
-        discount_amount = calc.discount,
         line_total = calc.total,
         sort_order = params.sort_order or 0,
+        timesheet_entry_id = params.timesheet_entry_id,
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
@@ -591,7 +828,6 @@ function InvoiceQueries.updateLineItem(uuid, params)
         tax_rate = tax_rate,
         tax_amount = calc.tax,
         discount_percent = discount_percent,
-        discount_amount = calc.discount,
         line_total = calc.total,
         sort_order = params.sort_order or item.sort_order,
         updated_at = db.raw("NOW()")
@@ -642,7 +878,6 @@ function InvoiceQueries.getLineItems(invoice_id)
             tax_rate,
             tax_amount,
             discount_percent,
-            discount_amount,
             line_total,
             sort_order,
             created_at,
@@ -664,13 +899,18 @@ end
 -- @return table payment
 -- @return string|nil error message
 function InvoiceQueries.recordPayment(params)
-    local invoice = InvoiceModel:find({ id = params.invoice_id })
-    if not invoice then
-        -- Try by uuid
+    -- Resolve the invoice by whichever identifier was supplied. Never call
+    -- find({ id = nil }) — Lapis turns an all-nil clause into an empty WHERE and
+    -- throws "db.encode_clause: passed an empty table".
+    local invoice
+    if params.invoice_id then
+        invoice = InvoiceModel:find({ id = params.invoice_id })
+    end
+    if not invoice and params.invoice_uuid then
         invoice = InvoiceModel:find({ uuid = params.invoice_uuid })
-        if not invoice then
-            return nil, "Invoice not found"
-        end
+    end
+    if not invoice then
+        return nil, "Invoice not found"
     end
 
     if invoice.status == "void" then
@@ -688,10 +928,12 @@ function InvoiceQueries.recordPayment(params)
 
     local payment = InvoicePaymentModel:create({
         uuid = Global.generateUUID(),
+        namespace_id = invoice.namespace_id,  -- NOT NULL on invoice_payments
         invoice_id = invoice.id,
         amount = amount,
+        currency = params.currency or invoice.currency,
         payment_method = params.payment_method,
-        payment_reference = params.payment_reference,
+        reference_number = params.reference_number or params.payment_reference,
         payment_date = params.payment_date or db.raw("CURRENT_DATE"),
         notes = params.notes,
         created_at = db.raw("NOW()"),
@@ -728,7 +970,7 @@ function InvoiceQueries.getPayments(invoice_id)
             invoice_id,
             amount,
             payment_method,
-            payment_reference,
+            reference_number,
             payment_date,
             notes,
             created_at

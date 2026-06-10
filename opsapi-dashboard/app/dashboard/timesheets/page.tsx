@@ -139,6 +139,15 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
     };
   }, [isOpen]);
 
+  // Server-side search: the lookups cap at 100 rows, so refetch as the user types
+  // to reach customers/tasks beyond the first page rather than filtering locally.
+  const handleCustomerSearch = useCallback((q: string) => {
+    timesheetsService.lookupCustomers(q).then(setCustomers).catch(() => {});
+  }, []);
+  const handleTaskSearch = useCallback((q: string) => {
+    timesheetsService.lookupTasks(q).then(setTasks).catch(() => {});
+  }, []);
+
   const customerOptions = useMemo(
     () =>
       customers.map((c) => ({
@@ -156,6 +165,13 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
         hint: t.project_name || undefined,
       })),
     [tasks]
+  );
+
+  // Project derived from the selected task (resolved server-side too, but shown
+  // here so the user sees which project this timesheet will be pinned to).
+  const derivedProjectName = useMemo(
+    () => tasks.find((t) => t.task_uuid === taskUuid)?.project_name || '',
+    [tasks, taskUuid]
   );
 
   const hours = useMemo(() => computeHours(startTime, endTime), [startTime, endTime]);
@@ -226,6 +242,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
             options={customerOptions}
             value={customerUuid}
             onChange={setCustomerUuid}
+            onSearch={handleCustomerSearch}
             placeholder="Select a customer…"
             searchPlaceholder="Search customers…"
             emptyMessage="No customers found"
@@ -240,11 +257,18 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
             options={taskOptions}
             value={taskUuid}
             onChange={setTaskUuid}
+            onSearch={handleTaskSearch}
             placeholder="Select a task…"
             searchPlaceholder="Search tasks…"
             emptyMessage="No tasks found"
             clearable
           />
+          {/* Derived project — selecting a task pins its parent project on the timesheet. */}
+          {derivedProjectName && (
+            <p className="mt-1 text-xs text-secondary-500">
+              Project: <span className="font-medium text-secondary-700">{derivedProjectName}</span>
+            </p>
+          )}
         </div>
 
         {/* Date + time */}

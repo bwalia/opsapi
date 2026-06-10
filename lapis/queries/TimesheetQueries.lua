@@ -154,6 +154,29 @@ function TimesheetQueries.create(params)
         returning = "*"
     })
     timesheet.internal_id = timesheet.id
+
+    -- Seed the create-time working session as the first entry, so the hours the
+    -- user enters on creation are counted consistently. total_hours is ALWAYS the
+    -- SUM of entries (_recalculate_totals runs on every entry change and on submit);
+    -- without a seed entry those create-time hours would be silently overwritten to 0.
+    if hours and hours > 0 and hours <= 24 then
+        TimesheetQueries.createEntry({
+            timesheet_id      = timesheet.internal_id,
+            namespace_id      = params.namespace_id,
+            user_uuid         = params.user_uuid,
+            entry_date        = params.work_date or params.period_start or db.raw("CURRENT_DATE"),
+            hours             = hours,
+            is_billable       = params.is_billable,
+            description       = nilify(params.notes) or params.task or "Work session",
+            project_reference = params.project_name,
+            task_reference    = params.task,
+            hourly_rate       = nilify(params.hourly_rate),
+        })
+        -- createEntry recalculated totals from entries; reflect that on our snapshot.
+        timesheet.total_hours = hours
+        timesheet.billable_hours = params.is_billable and hours or 0
+    end
+
     timesheet.id = timesheet.uuid
     return timesheet
 end
@@ -363,8 +386,10 @@ function TimesheetQueries.get(uuid)
         SELECT
             id as internal_id,
             uuid as id,
+            uuid,
             timesheet_id,
             entry_date,
+            entry_date as date,
             hours,
             is_billable,
             description,
@@ -469,15 +494,20 @@ function TimesheetQueries.update(uuid, params, namespace_id)
 
     params.updated_at = db.raw("NOW()")
 
-    local updated = timesheet:update(params, { returning = "*" })
-    updated.internal_id = updated.id
-    updated.id = updated.uuid
-    return updated
+    timesheet:update(params, { returning = "*" })
+    timesheet.internal_id = timesheet.id
+    timesheet.id = timesheet.uuid
+    return timesheet
 end
 
-function TimesheetQueries.delete(uuid)
+function TimesheetQueries.delete(uuid, namespace_id)
     local timesheet = TimesheetModel:find({ uuid = uuid })
     if not timesheet then
+        return nil, "Timesheet not found"
+    end
+
+    -- Tenant ownership guard: never let one namespace delete another's timesheet.
+    if namespace_id and tonumber(timesheet.namespace_id) ~= tonumber(namespace_id) then
         return nil, "Timesheet not found"
     end
 
@@ -496,13 +526,18 @@ end
 -- WORKFLOW
 -- ============================================================
 
-function TimesheetQueries.submit(uuid, user_uuid)
+function TimesheetQueries.submit(uuid, user_uuid, namespace_id)
     local timesheet = TimesheetModel:find({ uuid = uuid })
     if not timesheet then
         return nil, "Timesheet not found"
     end
 
     if timesheet.deleted_at then
+        return nil, "Timesheet not found"
+    end
+
+    -- Tenant ownership guard.
+    if namespace_id and tonumber(timesheet.namespace_id) ~= tonumber(namespace_id) then
         return nil, "Timesheet not found"
     end
 
@@ -517,18 +552,18 @@ function TimesheetQueries.submit(uuid, user_uuid)
     -- Recalculate totals from entries before submitting
     _recalculate_totals(timesheet.id)
 
-    local updated = timesheet:update({
+    timesheet:update({
         status = "submitted",
         submitted_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
 
-    updated.internal_id = updated.id
-    updated.id = updated.uuid
-    return updated
+    timesheet.internal_id = timesheet.id
+    timesheet.id = timesheet.uuid
+    return timesheet
 end
 
-function TimesheetQueries.approve(uuid, approver_uuid, comments)
+function TimesheetQueries.approve(uuid, approver_uuid, comments, namespace_id)
     local timesheet = TimesheetModel:find({ uuid = uuid })
     if not timesheet then
         return nil, "Timesheet not found"
@@ -538,11 +573,16 @@ function TimesheetQueries.approve(uuid, approver_uuid, comments)
         return nil, "Timesheet not found"
     end
 
+    -- Tenant ownership guard.
+    if namespace_id and tonumber(timesheet.namespace_id) ~= tonumber(namespace_id) then
+        return nil, "Timesheet not found"
+    end
+
     if timesheet.status ~= "submitted" then
         return nil, "Only submitted timesheets can be approved"
     end
 
-    local updated = timesheet:update({
+    timesheet:update({
         status = "approved",
         approved_at = db.raw("NOW()"),
         approved_by_uuid = approver_uuid,
@@ -551,6 +591,8 @@ function TimesheetQueries.approve(uuid, approver_uuid, comments)
 
     -- Create approval record
     TimesheetApprovalModel:create({
+        uuid = Global.generateUUID(),
+        namespace_id = timesheet.namespace_id,
         timesheet_id = timesheet.id,
         approver_uuid = approver_uuid,
         action = "approved",
@@ -558,12 +600,12 @@ function TimesheetQueries.approve(uuid, approver_uuid, comments)
         created_at = db.raw("NOW()")
     })
 
-    updated.internal_id = updated.id
-    updated.id = updated.uuid
-    return updated
+    timesheet.internal_id = timesheet.id
+    timesheet.id = timesheet.uuid
+    return timesheet
 end
 
-function TimesheetQueries.reject(uuid, approver_uuid, reason, comments)
+function TimesheetQueries.reject(uuid, approver_uuid, reason, comments, namespace_id)
     local timesheet = TimesheetModel:find({ uuid = uuid })
     if not timesheet then
         return nil, "Timesheet not found"
@@ -573,11 +615,16 @@ function TimesheetQueries.reject(uuid, approver_uuid, reason, comments)
         return nil, "Timesheet not found"
     end
 
+    -- Tenant ownership guard.
+    if namespace_id and tonumber(timesheet.namespace_id) ~= tonumber(namespace_id) then
+        return nil, "Timesheet not found"
+    end
+
     if timesheet.status ~= "submitted" then
         return nil, "Only submitted timesheets can be rejected"
     end
 
-    local updated = timesheet:update({
+    timesheet:update({
         status = "rejected",
         rejected_at = db.raw("NOW()"),
         rejected_by_uuid = approver_uuid,
@@ -587,6 +634,8 @@ function TimesheetQueries.reject(uuid, approver_uuid, reason, comments)
 
     -- Create approval record
     TimesheetApprovalModel:create({
+        uuid = Global.generateUUID(),
+        namespace_id = timesheet.namespace_id,
         timesheet_id = timesheet.id,
         approver_uuid = approver_uuid,
         action = "rejected",
@@ -594,12 +643,12 @@ function TimesheetQueries.reject(uuid, approver_uuid, reason, comments)
         created_at = db.raw("NOW()")
     })
 
-    updated.internal_id = updated.id
-    updated.id = updated.uuid
-    return updated
+    timesheet.internal_id = timesheet.id
+    timesheet.id = timesheet.uuid
+    return timesheet
 end
 
-function TimesheetQueries.reopen(uuid)
+function TimesheetQueries.reopen(uuid, namespace_id)
     local timesheet = TimesheetModel:find({ uuid = uuid })
     if not timesheet then
         return nil, "Timesheet not found"
@@ -609,11 +658,16 @@ function TimesheetQueries.reopen(uuid)
         return nil, "Timesheet not found"
     end
 
+    -- Tenant ownership guard.
+    if namespace_id and tonumber(timesheet.namespace_id) ~= tonumber(namespace_id) then
+        return nil, "Timesheet not found"
+    end
+
     if timesheet.status ~= "rejected" then
         return nil, "Only rejected timesheets can be reopened"
     end
 
-    local updated = timesheet:update({
+    timesheet:update({
         status = "draft",
         submitted_at = db.raw("NULL"),
         approved_at = db.raw("NULL"),
@@ -624,9 +678,9 @@ function TimesheetQueries.reopen(uuid)
         updated_at = db.raw("NOW()")
     }, { returning = "*" })
 
-    updated.internal_id = updated.id
-    updated.id = updated.uuid
-    return updated
+    timesheet.internal_id = timesheet.id
+    timesheet.id = timesheet.uuid
+    return timesheet
 end
 
 function TimesheetQueries.getApprovalQueue(namespace_id, approver_uuid, params)
@@ -845,6 +899,14 @@ end
 -- ============================================================
 
 function TimesheetQueries.createEntry(params)
+    -- Validate the NOT NULL columns up front. The HTTP route guards these, but
+    -- internal/direct callers (e.g. the create-time seed entry) rely on this so
+    -- a missing field fails with a clear message instead of a raw NOT NULL 500.
+    if not params.timesheet_id then return nil, "timesheet_id is required" end
+    if not params.namespace_id then return nil, "namespace_id is required" end
+    if not params.user_uuid or params.user_uuid == "" then return nil, "user_uuid is required" end
+    if not params.entry_date or params.entry_date == "" then return nil, "entry_date is required" end
+
     -- Validate hours
     local hours = tonumber(params.hours)
     if not hours or hours < 0 or hours > 24 then
@@ -883,13 +945,18 @@ function TimesheetQueries.createEntry(params)
     return entry
 end
 
-function TimesheetQueries.updateEntry(uuid, params)
+function TimesheetQueries.updateEntry(uuid, params, namespace_id)
     local entry = TimesheetEntryModel:find({ uuid = uuid })
     if not entry then
         return nil, "Entry not found"
     end
 
     if entry.deleted_at then
+        return nil, "Entry not found"
+    end
+
+    -- Tenant isolation: never touch an entry from another namespace.
+    if namespace_id and entry.namespace_id ~= namespace_id then
         return nil, "Entry not found"
     end
 
@@ -912,23 +979,28 @@ function TimesheetQueries.updateEntry(uuid, params)
     params.timesheet_id = nil
     params.updated_at = db.raw("NOW()")
 
-    local updated = entry:update(params, { returning = "*" })
+    entry:update(params, { returning = "*" })
 
     -- Recalculate timesheet totals
     _recalculate_totals(entry.timesheet_id)
 
-    updated.internal_id = updated.id
-    updated.id = updated.uuid
-    return updated
+    entry.internal_id = entry.id
+    entry.id = entry.uuid
+    return entry
 end
 
-function TimesheetQueries.deleteEntry(uuid)
+function TimesheetQueries.deleteEntry(uuid, namespace_id)
     local entry = TimesheetEntryModel:find({ uuid = uuid })
     if not entry then
         return nil, "Entry not found"
     end
 
     if entry.deleted_at then
+        return nil, "Entry not found"
+    end
+
+    -- Tenant isolation: never touch an entry from another namespace.
+    if namespace_id and entry.namespace_id ~= namespace_id then
         return nil, "Entry not found"
     end
 
@@ -954,8 +1026,10 @@ function TimesheetQueries.getEntriesByTimesheet(timesheet_id)
         SELECT
             id as internal_id,
             uuid as id,
+            uuid,
             timesheet_id,
             entry_date,
+            entry_date as date,
             hours,
             is_billable,
             description,

@@ -1021,6 +1021,15 @@ local _migrations = {
         kanban_project_migrations, 39),
     ['249_create_kanban_comment_reply_trigger'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_project_migrations, 40),
+    -- Deferred FK-default repairs. Keyed in the 76x range so they run after every
+    -- table/column above has been created (migrations run in sorted-key order).
+    -- [41] drops the bogus DEFAULT 0 on kanban_tasks.parent_task_id / sprint_id
+    -- (a 0 violates the self/sprint FK on tasks created without a parent/sprint).
+    ['760_kanban_drop_fk_defaults'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 41),
+    -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
+    -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
+    ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
     ['250_create_kanban_time_entries_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_enhancement_migrations, 1),
     ['251_add_kanban_time_entries_indexes'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
@@ -1536,6 +1545,7 @@ local _migrations = {
     ['542_inv_create_payments'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 3),
     ['543_inv_create_tax_rates'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 4),
     ['544_inv_create_sequences'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 5),
+    ['545_inv_widen_tax_rate'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 6),
 
     -- Invoicing menu items (740-743): surface Invoices in the sidebar
     ['740_seed_invoicing_menu_items'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 1),
