@@ -820,6 +820,31 @@ return function(app)
             end
 
             local body = parseJSON(self)
+
+            -- Reference rows are gold-standard: the RAG layer reads category,
+            -- hmrc_category and is_tax_deductible together and copies them verbatim
+            -- onto a winning override (tax-classifier.lua:248-250). So when the
+            -- category changes we MUST re-derive hmrc_category + is_tax_deductible
+            -- from the canonical tax_categories catalogue rather than trust the
+            -- client — otherwise the row keeps the OLD category's HMRC box and a
+            -- future match gets filed under the wrong SA103F box. We use
+            -- tax_hmrc_categories.key (the snake_case catalogue key the RAG
+            -- valid_hmrc guard accepts) and the category's own deductibility
+            -- (e.g. client_entertainment → other_expenses but not deductible).
+            if body.category ~= nil then
+                local cat = db.query([[
+                    SELECT c.is_tax_deductible, h.key AS hmrc_category
+                    FROM tax_categories c
+                    LEFT JOIN tax_hmrc_categories h ON h.id = c.hmrc_category_id
+                    WHERE c.key = ? AND c.is_active = true
+                    LIMIT 1
+                ]], body.category)
+                if cat and #cat > 0 then
+                    body.hmrc_category = cat[1].hmrc_category or ""
+                    body.is_tax_deductible = cat[1].is_tax_deductible
+                end
+            end
+
             local sets = {}
             local function add(col, val)
                 if val ~= nil then
