@@ -7,12 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       TARGET_ENV:
-        description: "Environment to deploy (dev, acc, prod)"
+        description: "Environment to deploy (dev, int, acc, prod)"
         required: true
         default: "acc"
         type: choice
         options:
           - dev
+          - int
           - acc
           - prod
       SKIP_BUILD:
@@ -210,8 +211,8 @@ jobs:
           kubectl create namespace ${{ steps.env.outputs.TARGET_ENV }} --dry-run=client -o yaml | kubectl apply -f -
 
       # For dev: Vault ExternalSecrets are disabled, so create secrets manually.
-      # For acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
-      - name: Create Secrets (dev only — acc/prod use Vault)
+      # For int/acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
+      - name: Create Secrets (dev only — int/acc/prod use Vault)
         if: steps.env.outputs.TARGET_ENV == 'dev'
         env:
           ENV_CONTENT: ${{ secrets.OPSAPI_ENV_FILE }}
