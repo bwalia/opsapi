@@ -6,6 +6,7 @@ local Global = require("helper.global")
 local db = require("lapis.db")
 local Errors = require("lib.errors")
 local NamespaceAssignment = require("helper.namespace_assignment")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 --- Validate that a business profile key is acceptable.
 -- @param profile_key string|nil The candidate key (e.g. "amazon_seller")
@@ -70,13 +71,17 @@ end
 local function save_default_profile_key(user_id, user_uuid, profile_key)
     if not profile_key or profile_key == "" then return end
     local ok, err = pcall(function()
+        -- tax_user_profiles.namespace_id is NOT NULL with no DB default —
+        -- and NOT NULL is checked before ON CONFLICT, so we must set it
+        -- here even if a row already exists for this user.
+        local namespace_id = NamespaceResolver.getByUuid(user_uuid)
         db.query([[
-            INSERT INTO tax_user_profiles (user_id, user_uuid, default_profile_key, created_at, updated_at)
-            VALUES (?, ?, ?, NOW(), NOW())
+            INSERT INTO tax_user_profiles (user_id, user_uuid, namespace_id, default_profile_key, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NOW(), NOW())
             ON CONFLICT (user_uuid) DO UPDATE
             SET default_profile_key = EXCLUDED.default_profile_key,
                 updated_at = NOW()
-        ]], user_id, user_uuid, profile_key)
+        ]], user_id, user_uuid, namespace_id, profile_key)
     end)
     if not ok then
         ngx.log(ngx.ERR, "[Register] Failed to save default_profile_key: ", tostring(err))

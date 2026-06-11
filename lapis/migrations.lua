@@ -1771,6 +1771,9 @@ local _migrations = {
     ['708_billing_drop_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 9),
     ['709_billing_payments_invoice_unique'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 10),
     ['710_tax_profile_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_profile_guidance_migrations, 1),
+    ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
+    ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
+    ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

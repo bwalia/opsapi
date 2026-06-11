@@ -4,6 +4,7 @@
 
 local cjson = require("cjson")
 local db = require("lapis.db")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 local HMRC = {}
 
@@ -191,17 +192,20 @@ function HMRC.refresh_token(user_uuid, refresh_token)
         return nil, "Invalid refresh response"
     end
 
-    -- Store new tokens
+    -- Store new tokens — hmrc_tokens.namespace_id is NOT NULL with no DB
+    -- default, so we must set it explicitly. See HMRCTokenQueries.upsert
+    -- for the same fix applied to the initial-auth path.
+    local namespace_id = NamespaceResolver.getByUuid(user_uuid)
     local expires_at = db.raw("NOW() + INTERVAL '" .. (data.expires_in or 14400) .. " seconds'")
     db.query([[
-        INSERT INTO hmrc_tokens (user_uuid, access_token, refresh_token, scope, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, NOW())
+        INSERT INTO hmrc_tokens (user_uuid, namespace_id, access_token, refresh_token, scope, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
         ON CONFLICT (user_uuid) DO UPDATE SET
             access_token = EXCLUDED.access_token,
             refresh_token = EXCLUDED.refresh_token,
             scope = EXCLUDED.scope,
             expires_at = EXCLUDED.expires_at
-    ]], user_uuid, data.access_token, data.refresh_token or refresh_token, data.scope or "", expires_at)
+    ]], user_uuid, namespace_id, data.access_token, data.refresh_token or refresh_token, data.scope or "", expires_at)
 
     return data.access_token, nil
 end
