@@ -768,7 +768,7 @@ return function(app)
             local offset = (page - 1) * limit
 
             local rows = db.query([[
-                SELECT description, description_raw, amount, transaction_type,
+                SELECT uuid, description, description_raw, amount, transaction_type,
                        category, hmrc_category, original_label, source_file, row_index
                 FROM classification_reference_data
                 WHERE client_business_type = ?
@@ -790,6 +790,92 @@ return function(app)
                     limit = limit,
                 }
             }
+        end)
+    )
+
+    -- ========================================
+    -- UPDATE a single reference transaction
+    -- ========================================
+    app:put("/api/v2/tax/admin/profiles/:uuid/transactions/:tx_uuid",
+        AuthMiddleware.requireAuth(function(self)
+            if not isAdmin(self.current_user) then
+                return { status = 403, json = { error = "Admin access required" } }
+            end
+
+            local profile = db.query("SELECT profile_key FROM classification_profiles WHERE uuid = ?",
+                self.params.uuid)
+            if not profile or #profile == 0 then
+                return { status = 404, json = { error = "Profile not found" } }
+            end
+            local profile_key = profile[1].profile_key
+
+            -- Scope the row to this profile so an admin can't edit another
+            -- profile's data by guessing a uuid.
+            local existing = db.query([[
+                SELECT uuid FROM classification_reference_data
+                WHERE uuid = ? AND client_business_type = ?
+            ]], self.params.tx_uuid, profile_key)
+            if not existing or #existing == 0 then
+                return { status = 404, json = { error = "Reference transaction not found" } }
+            end
+
+            local body = parseJSON(self)
+
+            -- Reference rows are gold-standard: the RAG layer reads category,
+            -- hmrc_category and is_tax_deductible together and copies them verbatim
+            -- onto a winning override (tax-classifier.lua:248-250). So when the
+            -- category changes we MUST re-derive hmrc_category + is_tax_deductible
+            -- from the canonical tax_categories catalogue rather than trust the
+            -- client — otherwise the row keeps the OLD category's HMRC box and a
+            -- future match gets filed under the wrong SA103F box. We use
+            -- tax_hmrc_categories.key (the snake_case catalogue key the RAG
+            -- valid_hmrc guard accepts) and the category's own deductibility
+            -- (e.g. client_entertainment → other_expenses but not deductible).
+            if body.category ~= nil then
+                local cat = db.query([[
+                    SELECT c.is_tax_deductible, h.key AS hmrc_category
+                    FROM tax_categories c
+                    LEFT JOIN tax_hmrc_categories h ON h.id = c.hmrc_category_id
+                    WHERE c.key = ? AND c.is_active = true
+                    LIMIT 1
+                ]], body.category)
+                if cat and #cat > 0 then
+                    body.hmrc_category = cat[1].hmrc_category or ""
+                    body.is_tax_deductible = cat[1].is_tax_deductible
+                end
+            end
+
+            local sets = {}
+            local function add(col, val)
+                if val ~= nil then
+                    table.insert(sets, col .. " = " .. db.interpolate_query("?", val))
+                end
+            end
+
+            add("category", body.category)
+            add("hmrc_category", body.hmrc_category)
+            add("is_tax_deductible", body.is_tax_deductible)
+            add("description", body.description)
+            add("amount", body.amount)
+            add("transaction_type", body.transaction_type)
+            add("original_label", body.original_label)
+
+            if #sets == 0 then
+                return { status = 400, json = { error = "No valid fields to update" } }
+            end
+            table.insert(sets, "updated_at = NOW()")
+
+            db.query("UPDATE classification_reference_data SET " .. table.concat(sets, ", ") ..
+                " WHERE uuid = ? AND client_business_type = ?",
+                self.params.tx_uuid, profile_key)
+
+            local updated = db.query([[
+                SELECT uuid, description, description_raw, amount, transaction_type,
+                       category, hmrc_category, original_label, source_file, row_index
+                FROM classification_reference_data WHERE uuid = ?
+            ]], self.params.tx_uuid)
+
+            return { status = 200, json = { data = updated and updated[1] or {} } }
         end)
     )
 
