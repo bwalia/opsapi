@@ -19,6 +19,43 @@ local Global = require("helper.global")
 
 local _M = {}
 
+--- Look up a user's namespace_id by their UUID — read-only, no side effects.
+-- Use this in INSERT paths where the row needs a NOT-NULL namespace_id but
+-- the calling context only has the user UUID (e.g. HMRC OAuth callback,
+-- queries module functions that take user_uuid).
+--
+-- Unlike _M.resolve() this does NOT assign a default namespace if missing —
+-- it just returns 0, matching the legacy column default for grandfathered
+-- rows. That keeps INSERTs safe even for edge users who somehow lack a
+-- namespace_members or user_namespace_settings row.
+--
+-- @param user_uuid string The user UUID
+-- @return number The namespace_id, or 0 if not found
+function _M.getByUuid(user_uuid)
+    if not user_uuid or user_uuid == "" then return 0 end
+    -- Preferred source: user_namespace_settings.default_namespace_id (the
+    -- "currently active" namespace the user picked in the UI).
+    local row = db.select(
+        "default_namespace_id FROM user_namespace_settings " ..
+        "WHERE user_id = (SELECT id FROM users WHERE uuid = ? LIMIT 1) LIMIT 1",
+        user_uuid
+    )
+    if row and #row > 0 and row[1].default_namespace_id and row[1].default_namespace_id > 0 then
+        return tonumber(row[1].default_namespace_id) or 0
+    end
+    -- Fallback source: namespace_members (covers users whose settings row
+    -- hasn't been written yet but who are a member of at least one ns).
+    row = db.select(
+        "namespace_id FROM namespace_members " ..
+        "WHERE user_id = (SELECT id FROM users WHERE uuid = ? LIMIT 1) LIMIT 1",
+        user_uuid
+    )
+    if row and #row > 0 and row[1].namespace_id and row[1].namespace_id > 0 then
+        return tonumber(row[1].namespace_id) or 0
+    end
+    return 0
+end
+
 --- Resolve and attach namespace_id to the current user context.
 -- Idempotent: safe to call on every request.
 -- @param user table The authenticated user (ngx.ctx.user)

@@ -6,19 +6,23 @@
 ]]
 
 local db = require("lapis.db")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 local HMRCObligationQueries = {}
 
 -- Upsert an obligation (insert or update on user_uuid + business_id + period conflict)
 function HMRCObligationQueries.upsert(data)
+    -- hmrc_obligations.namespace_id is NOT NULL with no DB default —
+    -- resolve from the user's namespace settings.
+    local namespace_id = NamespaceResolver.getByUuid(data.user_uuid)
     db.query([[
         INSERT INTO hmrc_obligations (
-            uuid, user_uuid, business_id, tax_year,
+            uuid, user_uuid, namespace_id, business_id, tax_year,
             period_start, period_end, due_date, status,
             received_date, period_key,
             fetched_at, created_at, updated_at
         ) VALUES (
-            gen_random_uuid()::text, ?, ?, ?,
+            gen_random_uuid()::text, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?,
             NOW(), NOW(), NOW()
@@ -33,6 +37,7 @@ function HMRCObligationQueries.upsert(data)
             updated_at = NOW()
     ]],
         data.user_uuid,
+        namespace_id,
         data.business_id,
         data.tax_year,
         data.period_start,

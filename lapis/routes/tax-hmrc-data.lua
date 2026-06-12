@@ -15,6 +15,7 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local Global = require("helper.global")
+local NamespaceResolver = require("helper.namespace-resolver")
 local respond_to = require("lapis.application").respond_to
 
 -- Resolve the numeric user id (tax_user_profiles is keyed on it) from the JWT uuid.
@@ -137,16 +138,18 @@ return function(app)
             -- The MTD list response nests under listOfBusinesses; older shapes vary.
             local businesses = data.listOfBusinesses or data.businesses
                 or data.businessDetails or data.selfEmployment or {}
+            -- hmrc_businesses.namespace_id is NOT NULL — resolve once per request.
+            local namespace_id = NamespaceResolver.getByUuid(user_uuid)
             for _, biz in ipairs(businesses) do
                 db.query([[
-                    INSERT INTO hmrc_businesses (user_uuid, business_id, type_of_business, trading_name, raw_response, fetched_at)
-                    VALUES (?, ?, ?, ?, ?, NOW())
+                    INSERT INTO hmrc_businesses (user_uuid, namespace_id, business_id, type_of_business, trading_name, raw_response, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
                     ON CONFLICT (user_uuid, business_id) DO UPDATE SET
                         type_of_business = EXCLUDED.type_of_business,
                         trading_name = EXCLUDED.trading_name,
                         raw_response = EXCLUDED.raw_response,
                         fetched_at = NOW()
-                ]], user_uuid, biz.businessId or biz.id, biz.typeOfBusiness or "",
+                ]], user_uuid, namespace_id, biz.businessId or biz.id, biz.typeOfBusiness or "",
                     biz.tradingName or "", cjson.encode(biz))
             end
 
@@ -239,20 +242,22 @@ return function(app)
                         or (ob.businessId or business_id)
                     ob.businessId = ob_business
                     table.insert(returned, ob)
+                    -- hmrc_obligations.namespace_id is NOT NULL — resolve per ob batch.
+                    local ob_namespace_id = NamespaceResolver.getByUuid(user_uuid)
                     for _, period in ipairs(ob.obligationDetails or {}) do
                         -- Conflict target is the UNIQUE INDEX idx_hmrc_obligations_period
                         -- (user_uuid, business_id, period_start, period_end) — there is no
                         -- named constraint, so use the column-list form.
                         db.query([[
-                            INSERT INTO hmrc_obligations (user_uuid, business_id, period_start, period_end, due_date, status, period_key, tax_year, fetched_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                            INSERT INTO hmrc_obligations (user_uuid, namespace_id, business_id, period_start, period_end, due_date, status, period_key, tax_year, fetched_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                             ON CONFLICT (user_uuid, business_id, period_start, period_end)
                             DO UPDATE SET
                                 status = EXCLUDED.status,
                                 due_date = EXCLUDED.due_date,
                                 tax_year = EXCLUDED.tax_year,
                                 fetched_at = NOW()
-                        ]], user_uuid, ob_business or "",
+                        ]], user_uuid, ob_namespace_id, ob_business or "",
                             period.periodStartDate, period.periodEndDate,
                             period.dueDate, period.status or "Open",
                             period.periodKey or "", tax_year_of(period.periodStartDate))
