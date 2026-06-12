@@ -7,12 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       TARGET_ENV:
-        description: "Environment to deploy (dev, acc, prod)"
+        description: "Environment to deploy (dev, int, acc, prod)"
         required: true
         default: "acc"
         type: choice
         options:
           - dev
+          - int
           - acc
           - prod
       SKIP_BUILD:
@@ -149,6 +150,9 @@ jobs:
     needs: [smoke-test]
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure')
     runs-on: [self-hosted, Linux, X64]
+    # Backstop: never let a hung kubectl step hold the (single) self-hosted
+    # runner for GitHub's 6h default — fail fast and free it for the next run.
+    timeout-minutes: 15
     steps:
       - name: Identify Runner
         run: echo "Running on $(hostname)"
@@ -210,8 +214,8 @@ jobs:
           kubectl create namespace ${{ steps.env.outputs.TARGET_ENV }} --dry-run=client -o yaml | kubectl apply -f -
 
       # For dev: Vault ExternalSecrets are disabled, so create secrets manually.
-      # For acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
-      - name: Create Secrets (dev only — acc/prod use Vault)
+      # For int/acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
+      - name: Create Secrets (dev only — int/acc/prod use Vault)
         if: steps.env.outputs.TARGET_ENV == 'dev'
         env:
           ENV_CONTENT: ${{ secrets.OPSAPI_ENV_FILE }}
@@ -257,9 +261,18 @@ jobs:
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
           NS=${{ steps.env.outputs.TARGET_ENV }}
-          # Remove failed pods so K3s recreates them with new config
-          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed || true
-          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis || true
+          # Remove failed pods so K3s recreates them with new config.
+          # --wait=false is REQUIRED: kubectl delete otherwise blocks until
+          # the pods fully terminate, and a pod stuck in Terminating (a
+          # finalizer, a container ignoring SIGTERM, or an unresponsive
+          # kubelet) hangs the whole job for hours — this exact step hung
+          # the acc deploy for 2h+ on 2026-06-11. We only want to *issue*
+          # the deletes; the Deployment recreates pods and the next step
+          # waits on the rollout. --grace-period=30 bounds termination.
+          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed \
+            --wait=false --grace-period=30 || true
+          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis \
+            --wait=false --grace-period=30 || true
 
       - name: Wait for rollout
         run: |
