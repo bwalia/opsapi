@@ -16,7 +16,7 @@ import {
   Plus,
   DollarSign,
 } from 'lucide-react';
-import { Input, Table, Pagination, Card, Modal } from '@/components/ui';
+import { Input, Table, Pagination, Card, Modal, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   invoicesService,
@@ -25,10 +25,17 @@ import {
   type Invoice,
   type InvoiceStatus,
   type InvoicePayload,
+  type CustomerBillablePreview,
 } from '@/services/invoices.service';
+import { timesheetsService, type CustomerOption } from '@/services/timesheets.service';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
+
+// Shared form field styling for the modals on this page.
+const inputClass =
+  'w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface';
+const labelClass = 'block text-sm font-medium text-secondary-700 mb-1';
 
 // Stats card component
 interface StatCardProps {
@@ -278,6 +285,264 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({ isOpen, onClose
   );
 };
 
+// ============================================
+// Generate Invoice From Timesheets Modal
+// ============================================
+// Search a customer, pick a period, see every un-invoiced billable hour logged
+// for them in that window (with rate + amount), then generate one invoice for
+// the lot. Mirrors "all the work I've done for this customer this period".
+
+const startOfMonthISO = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+};
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+interface GenerateFromTimesheetsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onGenerated: (uuid: string) => void;
+}
+
+const GenerateFromTimesheetsModal: React.FC<GenerateFromTimesheetsModalProps> = ({
+  isOpen,
+  onClose,
+  onGenerated,
+}) => {
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [customerUuid, setCustomerUuid] = useState('');
+  const [from, setFrom] = useState(startOfMonthISO());
+  const [to, setTo] = useState(todayISO());
+  const [preview, setPreview] = useState<CustomerBillablePreview | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Load an initial customer page on open; refine server-side as the user types.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    timesheetsService.lookupCustomers().then((c) => !cancelled && setCustomers(c)).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  // Reset when closed so the next open starts clean.
+  useEffect(() => {
+    if (!isOpen) {
+      setCustomerUuid('');
+      setPreview(null);
+      setFrom(startOfMonthISO());
+      setTo(todayISO());
+    }
+  }, [isOpen]);
+
+  const handleCustomerSearch = useCallback((q: string) => {
+    timesheetsService.lookupCustomers(q).then(setCustomers).catch(() => {});
+  }, []);
+
+  const customerOptions = useMemo(
+    () =>
+      customers.map((c) => ({
+        value: c.uuid,
+        label: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Unnamed',
+        hint: c.email,
+      })),
+    [customers]
+  );
+
+  // Auto-load the preview whenever the customer or period changes.
+  const loadPreview = useCallback(async () => {
+    if (!customerUuid) {
+      setPreview(null);
+      return;
+    }
+    setIsLoadingPreview(true);
+    try {
+      const p = await invoicesService.getCustomerBillable(customerUuid, from || undefined, to || undefined);
+      setPreview(p);
+    } catch {
+      toast.error('Failed to load the customer’s work');
+      setPreview(null);
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  }, [customerUuid, from, to]);
+
+  useEffect(() => {
+    loadPreview();
+  }, [loadPreview]);
+
+  const currency = preview?.currency || 'GBP';
+  const canGenerate = !!preview && preview.totals.count > 0 && !preview.totals.missing_rate;
+
+  const handleGenerate = async () => {
+    if (!customerUuid) {
+      toast.error('Pick a customer first');
+      return;
+    }
+    if (!preview || preview.totals.count === 0) {
+      toast.error('No un-invoiced billable hours in this period');
+      return;
+    }
+    if (preview.totals.missing_rate) {
+      toast.error('Some hours have no rate — set an hourly rate on the timesheet first');
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const invoice = await invoicesService.createFromCustomer({
+        customer_uuid: customerUuid,
+        period_start: from || undefined,
+        period_end: to || undefined,
+      });
+      toast.success(`Invoice ${invoice.invoice_number} created`);
+      onGenerated(invoice.uuid);
+    } catch {
+      toast.error('Failed to generate invoice');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Generate Invoice from Timesheets" size="lg">
+      <div className="space-y-4">
+        <p className="text-sm text-secondary-500">
+          Pick a customer and a period to bill every approved, un-invoiced hour logged for them.
+          Already-invoiced hours are skipped automatically.
+        </p>
+
+        {/* Customer + period */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-3">
+            <label className={labelClass}>Customer</label>
+            <SearchableSelect
+              options={customerOptions}
+              value={customerUuid}
+              onChange={setCustomerUuid}
+              onSearch={handleCustomerSearch}
+              placeholder="Select a customer…"
+              searchPlaceholder="Search customers…"
+              emptyMessage="No customers found"
+              clearable
+            />
+          </div>
+          <div>
+            <label className={labelClass}>From</label>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>To</label>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={loadPreview}
+              disabled={!customerUuid || isLoadingPreview}
+              className="w-full px-3 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 disabled:opacity-50 transition-colors"
+            >
+              {isLoadingPreview ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {/* Work preview */}
+        {!customerUuid ? (
+          <div className="rounded-xl border border-dashed border-secondary-300 px-4 py-8 text-center text-sm text-secondary-400">
+            Select a customer to see their billable work.
+          </div>
+        ) : isLoadingPreview ? (
+          <div className="rounded-xl border border-secondary-200 px-4 py-8 text-center text-sm text-secondary-400">
+            Loading work…
+          </div>
+        ) : !preview || preview.totals.count === 0 ? (
+          <div className="rounded-xl border border-secondary-200 px-4 py-8 text-center text-sm text-secondary-500">
+            No un-invoiced billable hours for this customer in the selected period.
+          </div>
+        ) : (
+          <div className="rounded-xl border border-secondary-200 overflow-hidden">
+            <div className="max-h-72 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary-50 text-secondary-500 sticky top-0">
+                  <tr>
+                    <th className="text-left font-medium px-3 py-2">Date</th>
+                    <th className="text-left font-medium px-3 py-2">Work</th>
+                    <th className="text-right font-medium px-3 py-2">Hours</th>
+                    <th className="text-right font-medium px-3 py-2">Rate</th>
+                    <th className="text-right font-medium px-3 py-2">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-secondary-100">
+                  {preview.entries.map((e) => (
+                    <tr key={e.entry_id}>
+                      <td className="px-3 py-2 text-secondary-600 whitespace-nowrap">{formatDate(e.entry_date)}</td>
+                      <td className="px-3 py-2 text-secondary-900">
+                        {e.task_reference || e.project_reference || e.description || 'Work'}
+                        {e.description && (e.task_reference || e.project_reference) && (
+                          <span className="block text-xs text-secondary-400">{e.description}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-secondary-700">{e.hours.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right text-secondary-700">
+                        {e.has_rate ? formatCurrency(e.rate, currency) : <span className="text-red-500">no rate</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium text-secondary-900">
+                        {formatCurrency(e.amount, currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-secondary-50 sticky bottom-0">
+                  <tr className="font-semibold text-secondary-900">
+                    <td className="px-3 py-2" colSpan={2}>
+                      {preview.totals.count} item{preview.totals.count === 1 ? '' : 's'}
+                    </td>
+                    <td className="px-3 py-2 text-right">{preview.totals.total_hours.toFixed(2)}</td>
+                    <td className="px-3 py-2" />
+                    <td className="px-3 py-2 text-right text-primary-600">
+                      {formatCurrency(preview.totals.total_amount, currency)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {preview?.totals.missing_rate && (
+          <p className="text-xs text-red-600">
+            Some hours have no hourly rate. Set a rate on the timesheet (or its entries) before invoicing.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={!canGenerate || isGenerating}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {isGenerating
+              ? 'Generating…'
+              : preview && preview.totals.count > 0
+                ? `Generate Invoice · ${formatCurrency(preview.totals.total_amount, currency)}`
+                : 'Generate Invoice'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 function InvoicesPageContent() {
   const router = useRouter();
 
@@ -286,6 +551,7 @@ function InvoicesPageContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<InvoiceDashboardStats | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isFromTimesheetsOpen, setIsFromTimesheetsOpen] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -516,6 +782,13 @@ function InvoicesPageContent() {
             Refresh
           </button>
           <button
+            onClick={() => setIsFromTimesheetsOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 transition-colors"
+          >
+            <Clock className="w-4 h-4" />
+            From Timesheets
+          </button>
+          <button
             onClick={() => setIsCreateModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
           >
@@ -682,6 +955,17 @@ function InvoicesPageContent() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onCreated={handleInvoiceCreated}
+      />
+
+      {/* Generate Invoice from Timesheets Modal */}
+      <GenerateFromTimesheetsModal
+        isOpen={isFromTimesheetsOpen}
+        onClose={() => setIsFromTimesheetsOpen(false)}
+        onGenerated={(uuid) => {
+          setIsFromTimesheetsOpen(false);
+          handleInvoiceCreated();
+          router.push(`/dashboard/invoices/${uuid}`);
+        }}
       />
     </div>
   );

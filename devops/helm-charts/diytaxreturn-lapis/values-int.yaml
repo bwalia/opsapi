@@ -13,10 +13,6 @@ projectCode: tax_copilot
 # this to bootstrap ``namespaces.allowed_redirect_origins`` on first
 # run; runtime path also falls back to it if any namespace's column
 # is empty. See README.md → Password Reset Flow.
-#
-# Note: int currently runs on a docker-compose host (192.168.1.193),
-# not k3s. This value applies if/when int migrates to k3s. For the
-# docker-compose deployment, FRONTEND_URL is set by start.sh.
 frontendUrl: "https://int.diytaxreturn.co.uk"
 # passwordResetAllowedOrigins: ""
 
@@ -41,8 +37,11 @@ ingress:
 database:
   host: "10.96.129.108"
 
+# int runs on k3s and follows the acc/prod path: secrets come from Vault
+# via ExternalSecret (dataFrom secret/diytaxreturnuk/opsapi/int/config),
+# not a manually-created Kubernetes secret.
 externalSecret:
-  enabled: false
+  enabled: true
 
 setup:
   adminEmail: ""

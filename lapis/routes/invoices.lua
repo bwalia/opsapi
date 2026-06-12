@@ -47,13 +47,26 @@ return function(app)
     local function parse_request_body()
         ngx.req.read_body()
 
-        -- First, check if we have form params
+        local content_type = ngx.req.get_headers()["content-type"] or ""
+
+        -- JSON body: parse explicitly. We must NOT call get_post_args() for JSON —
+        -- it parses the raw JSON string as urlencoded form data and returns a single
+        -- garbage key, which masks the real fields (every JSON POST then looks empty).
+        if content_type:find("application/json", 1, true) then
+            local body = ngx.req.get_body_data()
+            if not body or body == "" then return {} end
+            local ok, result = pcall(cjson.decode, body)
+            if ok and type(result) == "table" then return result end
+            return {}
+        end
+
+        -- Form-encoded / multipart
         local post_args = ngx.req.get_post_args()
         if post_args and next(post_args) then
             return post_args
         end
 
-        -- Fallback to JSON parsing
+        -- Last-resort: attempt JSON even without the header
         local ok, result = pcall(function()
             local body = ngx.req.get_body_data()
             if not body or body == "" then
@@ -177,21 +190,78 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local body = parse_json_body()
 
-            local valid, err = validate_required(body, { "timesheet_id" })
-            if not valid then
-                return api_response(400, nil, err)
+            local ts_ref = body.timesheet_uuid or body.timesheet_id
+            if not ts_ref or ts_ref == "" then
+                return api_response(400, nil, "timesheet_uuid is required")
             end
 
-            local hourly_rate = tonumber(body.hourly_rate) or 0
-            if hourly_rate <= 0 then
-                return api_response(400, nil, "hourly_rate must be greater than zero")
-            end
-
+            -- hourly_rate is optional: per-entry / timesheet rate is used when present.
             local result, create_err = InvoiceQueries.createFromTimesheet(
                 self.namespace.id,
-                body.timesheet_id,
+                ts_ref,
                 self.current_user.uuid,
-                hourly_rate
+                {
+                    hourly_rate = body.hourly_rate,
+                    due_date = body.due_date,
+                    currency = body.currency,
+                }
+            )
+
+            if not result then
+                return api_response(400, nil, create_err)
+            end
+
+            return api_response(201, result.data)
+        end)
+    ))
+
+    -- ============================================================
+    -- FROM CUSTOMER TIMESHEETS (must be before :uuid routes)
+    -- ============================================================
+
+    -- GET /api/v2/invoices/customer-billable - Preview a customer's un-invoiced
+    -- billable work over a period (read-only; nothing is created).
+    -- Query: customer_uuid (required), from, to, hourly_rate, currency
+    app:get("/api/v2/invoices/customer-billable", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local customer_uuid = self.params.customer_uuid
+            if not customer_uuid or customer_uuid == "" then
+                return api_response(400, nil, "customer_uuid is required")
+            end
+            local preview = InvoiceQueries.getCustomerBillablePreview(
+                self.namespace.id,
+                customer_uuid,
+                self.params.from,
+                self.params.to,
+                { hourly_rate = self.params.hourly_rate, currency = self.params.currency }
+            )
+            return api_response(200, preview)
+        end)
+    ))
+
+    -- POST /api/v2/invoices/from-customer - Generate one invoice aggregating all of
+    -- a customer's un-invoiced billable hours over a period.
+    -- Body: { customer_uuid (required), period_start, period_end, hourly_rate, due_date, currency }
+    app:post("/api/v2/invoices/from-customer", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local body = parse_json_body()
+
+            local customer_uuid = body.customer_uuid
+            if not customer_uuid or customer_uuid == "" then
+                return api_response(400, nil, "customer_uuid is required")
+            end
+
+            local result, create_err = InvoiceQueries.createFromCustomerTimesheets(
+                self.namespace.id,
+                customer_uuid,
+                self.current_user.uuid,
+                {
+                    period_start = body.period_start or body.from,
+                    period_end = body.period_end or body.to,
+                    hourly_rate = body.hourly_rate,
+                    due_date = body.due_date,
+                    currency = body.currency,
+                }
             )
 
             if not result then

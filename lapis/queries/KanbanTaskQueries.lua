@@ -314,7 +314,8 @@ function KanbanTaskQueries.update(uuid, params, user_uuid)
         end
     end
 
-    return updated
+    -- :update() returns a boolean; the refreshed row was merged into `task` via returning = "*"
+    return task
 end
 
 --- Move task to different column
@@ -355,7 +356,8 @@ function KanbanTaskQueries.moveToColumn(uuid, column_id, position, user_uuid)
             tostring(old_column_id), tostring(column_id))
     end
 
-    return updated
+    -- :update() returns a boolean; the refreshed row was merged into `task` via returning = "*"
+    return task
 end
 
 --- Archive task

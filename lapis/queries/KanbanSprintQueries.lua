@@ -237,7 +237,8 @@ function KanbanSprintQueries.start(uuid)
         KanbanSprintQueries.recordBurndown(sprint.id)
     end
 
-    return updated
+    -- :update() returns a boolean; the refreshed row was merged into `sprint` via returning = "*"
+    return sprint
 end
 
 --- Complete a sprint

@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShieldCheck, AlertCircle, Loader2, ArrowLeft, RotateCw } from 'lucide-react';
 import { Card, Button } from '@/components/ui';
+import PublicThemeStyles from '@/components/layout/PublicThemeStyles';
 import { useAuthStore } from '@/store/auth.store';
 import { authService } from '@/services/auth.service';
 import { AUTH_TOKEN_KEY } from '@/lib/api-client';
@@ -196,6 +197,8 @@ export default function VerifyOtpPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-secondary-900 via-secondary-800 to-primary-900 p-4">
+      {/* Apply the active/default theme so 2FA matches the rest of the site */}
+      <PublicThemeStyles />
       {/* Background Pattern */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-1/2 -right-1/2 w-full h-full bg-primary-500/10 rounded-full blur-3xl" />

@@ -20,6 +20,71 @@ local function is_kubernetes()
     return false
 end
 
+-- ── Runtime / platform introspection helpers ─────────────────────────────────
+-- Used by getSystemInfo(); all reads are defensive (return nil on absence) so
+-- the health endpoint still works on bare metal / minimal containers.
+local function read_first_line(path)
+    local f = io.open(path, "r"); if not f then return nil end
+    local line = f:read("*l"); f:close()
+    return line
+end
+
+local function read_all(path)
+    local f = io.open(path, "r"); if not f then return nil end
+    local s = f:read("*a"); f:close()
+    return s
+end
+
+local function read_kv_kb(path, key)
+    -- Parse "Key: 12345 kB" style lines (/proc/meminfo, /proc/self/status).
+    local f = io.open(path, "r"); if not f then return nil end
+    for line in f:lines() do
+        local v = line:match("^" .. key .. ":%s+(%d+)")
+        if v then f:close(); return tonumber(v) end
+    end
+    f:close(); return nil
+end
+
+local function detect_platform()
+    -- K8s first (most specific): SA token is always projected into pods.
+    if is_kubernetes() then return "kubernetes" end
+    -- Docker indicators.
+    if io.open("/.dockerenv", "r") then return "docker" end
+    local cg = read_all("/proc/self/cgroup")
+    if cg and (cg:find("docker", 1, true) or cg:find("containerd", 1, true)) then
+        return "docker"
+    end
+    if cg and cg:find("kubepods", 1, true) then return "kubernetes" end
+    return "bare-metal"
+end
+
+-- Process uptime (seconds since this process — typically PID 1 of the
+-- container — started). Approximates container/pod uptime.
+local function process_uptime_seconds()
+    local host_line = read_first_line("/proc/uptime")
+    local stat_line = read_first_line("/proc/self/stat")
+    if not host_line or not stat_line then return nil end
+    local host_uptime = tonumber(host_line:match("^(%S+)"))
+    -- Field 22 of /proc/[pid]/stat is starttime in clock ticks. The comm
+    -- (field 2) is parenthesised and may contain spaces, so skip past ") ".
+    local after_comm = stat_line:match("%)%s+(.+)$")
+    if not host_uptime or not after_comm then return nil end
+    local idx, starttime = 0, nil
+    for tok in after_comm:gmatch("%S+") do
+        idx = idx + 1
+        if idx == 20 then starttime = tonumber(tok); break end
+    end
+    if not starttime then return nil end
+    return math.floor(host_uptime - (starttime / 100)) -- CLK_TCK is 100 on Linux
+end
+
+local function openresty_version_string()
+    local v = ngx.config.nginx_version
+    if not v then return nil end
+    return string.format("%d.%d.%d",
+        math.floor(v / 1000000), math.floor(v / 1000) % 1000, v % 1000)
+end
+
 local function resolve_for_health_check(url)
     if not url or url == "" then return url end
     if not is_kubernetes() then return url end
@@ -410,6 +475,64 @@ function HealthCheck.checkSystemResources()
     return status
 end
 
+-- Runtime / platform information about *where* this process is running.
+-- Informational only (no checks, never "unhealthy") — surfaces what operators
+-- usually paste into incident channels: kind of host (docker / k8s / bare),
+-- container/pod identity, uptime, OpenResty/Lua versions, memory footprint.
+-- For the k8s pod_namespace/pod_ip/node_name fields to populate, the
+-- deployment must expose POD_NAMESPACE/POD_IP/NODE_NAME via the downward API
+-- AND those names must be declared in nginx.conf (`env POD_NAMESPACE;` …).
+function HealthCheck.getSystemInfo()
+    local platform = detect_platform()
+    local hostname = os.getenv("HOSTNAME") or read_first_line("/etc/hostname")
+    local info = {
+        platform = platform,
+        hostname = hostname,
+        machine_id = read_first_line("/etc/machine-id"),
+        process = {
+            pid = ngx.worker.pid(),
+            -- Seconds since the container/pod's main process started.
+            uptime_seconds = process_uptime_seconds(),
+            nginx_workers = ngx.worker.count(),
+        },
+        runtime = {
+            openresty = openresty_version_string(),
+            lua = _VERSION,
+            jit = (jit and jit.version) or nil,
+        },
+        environment = {
+            lapis_environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+            deploy_env = os.getenv("OPSAPI_DEPLOY_ENV"),
+            project_code = os.getenv("PROJECT_CODE"),
+            app_version = os.getenv("VERSION") or "1.0.0",
+            stack = os.getenv("STACK"),
+            deployment_time = os.getenv("VITE_DEPLOYMENT_TIME"),
+        },
+        memory = {
+            lua_kb = math.floor(collectgarbage("count")),
+            rss_kb = read_kv_kb("/proc/self/status", "VmRSS"),
+            vsz_kb = read_kv_kb("/proc/self/status", "VmSize"),
+            host_total_kb = read_kv_kb("/proc/meminfo", "MemTotal"),
+            host_available_kb = read_kv_kb("/proc/meminfo", "MemAvailable"),
+        },
+    }
+
+    if platform == "kubernetes" then
+        info.kubernetes = {
+            pod_name = os.getenv("POD_NAME") or hostname,
+            pod_namespace = os.getenv("POD_NAMESPACE"),
+            pod_ip = os.getenv("POD_IP"),
+            node_name = os.getenv("NODE_NAME"),
+        }
+    elseif platform == "docker" then
+        -- In docker the hostname is typically the first 12 chars of the
+        -- container id; if it's shorter (custom hostname) we return it as-is.
+        info.docker = { container_id = hostname }
+    end
+
+    return info
+end
+
 -- Comprehensive health check
 function HealthCheck.getFullStatus()
     local overall_start = ngx.now()
@@ -448,6 +571,7 @@ function HealthCheck.getFullStatus()
         timestamp_iso = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         version = "1.0.0",
         environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+        system_info = HealthCheck.getSystemInfo(),
         total_checks = #checks,
         unhealthy_checks = unhealthy_count,
         degraded_checks = degraded_count,
@@ -478,6 +602,7 @@ function HealthCheck.getQuickStatus()
         timestamp_iso = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         version = "1.0.0",
         environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
+        system_info = HealthCheck.getSystemInfo(),
         services = {
             database = {
                 status = db_check.status,

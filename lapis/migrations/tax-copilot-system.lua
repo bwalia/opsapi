@@ -837,6 +837,8 @@ return {
                 nino_hash TEXT,
                 nino_last4 CHARACTER VARYING(255),
                 has_nino BOOLEAN NOT NULL DEFAULT FALSE,
+                -- When the user explicitly consented to us storing their (encrypted) NINO.
+                nino_consent_at TIMESTAMP,
                 hmrc_connected BOOLEAN NOT NULL DEFAULT FALSE,
                 default_business_id CHARACTER VARYING(255),
                 default_tax_year CHARACTER VARYING(255),
@@ -2883,5 +2885,105 @@ return {
         })
         schema.create_index("tax_processed_apple_notifications", "processed_at")
         schema.create_index("tax_processed_apple_notifications", "original_transaction_id")
+    end,
+
+    -- 83. Record explicit consent for storing the (encrypted) NINO — GDPR audit trail.
+    [83] = function()
+        db.query("ALTER TABLE tax_user_profiles ADD COLUMN IF NOT EXISTS nino_consent_at TIMESTAMP")
+        print("[Tax Copilot] Added nino_consent_at column to tax_user_profiles")
+    end,
+
+    -- 84. Backfill workflow_step='FILED' for statements that are filed but
+    --     stuck at TAX_CALCULATED.
+    --
+    -- Backwards-compat fix: the Python final-declaration filing path in
+    -- backend/app/api/hmrc.py used to UPDATE tax_statements to set
+    -- is_filed / filed_at / hmrc_submission_id but FORGOT to advance
+    -- workflow_step. So statements ended up in an inconsistent state:
+    --     is_filed = TRUE  AND  workflow_step = 'TAX_CALCULATED'
+    -- The dashboard's "Recent Activity" and "Statements by period" cards
+    -- both render the badge from workflow_step, so users saw a confusing
+    -- "Calculated" badge on statements they'd already submitted to HMRC.
+    --
+    -- Going-forward fix is in the Python endpoint (the UPDATE now includes
+    -- workflow_step='FILED'); this migration heals the inconsistency on
+    -- existing rows. Idempotent — re-running is a no-op once everything
+    -- is in sync.
+    [84] = function()
+        local result = db.query([[
+            UPDATE tax_statements
+            SET workflow_step = 'FILED',
+                updated_at = NOW()
+            WHERE is_filed = TRUE
+              AND workflow_step IS DISTINCT FROM 'FILED'
+        ]])
+        local n = (result and result.affected_rows) or 0
+        print(string.format(
+            "[Tax Copilot] Backfilled workflow_step='FILED' on %d already-filed " ..
+            "tax_statements row(s)", n
+        ))
+    end,
+
+    -- 87. Seed UPLOAD_DUPLICATE_FILED row in message_catalog so the new
+    --     409 error surfaces through the standard envelope (carrying
+    --     http_status=409 + title/user_message looked up from the
+    --     translations layer) instead of falling back to the generic
+    --     "Something went wrong" code.
+    --
+    --     Matches the newer convention from step 52: catalog row only.
+    --     Translations live in backend/app/errors/translations/*.json
+    --     (already added in en.json) and are loaded by FastAPI on
+    --     startup — seeding message_translations here would duplicate
+    --     the source of truth and risk drift.
+    --
+    --     Idempotent via ON CONFLICT (code) DO NOTHING.
+    [87] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES (
+                'UPLOAD_DUPLICATE_FILED',
+                'error',
+                'warn',
+                409,
+                'User attempted to re-upload a file whose SHA-256 matches a prior is_filed=TRUE tax_statements row for the same user_id. Blocked at backend/app/api/upload.py before the MinIO write.'
+            )
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded UPLOAD_DUPLICATE_FILED in message_catalog")
+    end,
+
+    -- 86. Per-user duplicate-upload guard via content hash.
+    --
+    -- Today /api/upload has zero duplicate detection — the user could
+    -- re-upload the same april_2026.pdf an unlimited number of times for
+    -- the same user, even after that statement had already been filed to
+    -- HMRC. The /file/{id}/check-duplicate endpoint exists but only keys
+    -- on tax_year / period_start / period_end (all NULL at upload time)
+    -- and has zero frontend callers anyway. The cleanest realistic guard
+    -- is a content hash: same hash + same user + already filed → block;
+    -- everything else still flows.
+    --
+    -- We deliberately do NOT add a global UNIQUE on (user_id, file_hash):
+    -- the user may legitimately re-upload a draft they later replace, or
+    -- re-upload an unfiled statement after deleting a half-broken
+    -- extract. The hard guard is application-level and only fires when
+    -- the prior row has is_filed=TRUE.
+    --
+    -- The column is nullable on purpose — pre-existing rows have no
+    -- hash and we don't want to break them. New uploads stamp the hash.
+    [86] = function()
+        db.query([[
+            ALTER TABLE tax_statements
+            ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64)
+        ]])
+        -- Partial index — only rows that have a hash (i.e. new uploads
+        -- post-this-migration). Keeps the index small while still
+        -- supporting the duplicate-lookup query at upload time.
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_tax_statements_user_file_hash
+            ON tax_statements (user_id, file_hash)
+            WHERE file_hash IS NOT NULL
+        ]])
+        print("[Tax Copilot] Added file_hash column + index to tax_statements")
     end,
 }

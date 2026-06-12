@@ -1,7 +1,21 @@
 local CustomerModel = require "models.CustomerModel"
 local Global = require "helper.global"
+local cjson = require "cjson"
 
 local CustomerQueries = {}
+
+-- These columns are TEXT but the client sends structured data (e.g. addresses as
+-- a JSON array). RequestParser decodes such values into Lua tables, which Postgres
+-- cannot escape ("unknown table passed to escape_literal"). Serialize any
+-- table-valued field back to a JSON string before it reaches the DB.
+local JSON_TEXT_FIELDS = { "addresses", "tags" }
+local function encode_json_text_fields(p)
+    for _, field in ipairs(JSON_TEXT_FIELDS) do
+        if type(p[field]) == "table" then
+            p[field] = cjson.encode(p[field])
+        end
+    end
+end
 
 -- Valid fields for customer creation (matches database schema)
 local VALID_CUSTOMER_FIELDS = {
@@ -53,6 +67,8 @@ function CustomerQueries.create(params)
             filtered_params.tax_exempt = filtered_params.tax_exempt == "true"
         end
     end
+
+    encode_json_text_fields(filtered_params)
 
     return CustomerModel:create(filtered_params, { returning = "*" })
 end
@@ -117,7 +133,13 @@ function CustomerQueries.update(id, params)
         end
     end
 
-    return record:update(filtered_params, { returning = "*" })
+    encode_json_text_fields(filtered_params)
+
+    -- record:update() returns a boolean; with returning="*" it refreshes the
+    -- instance in place, so hand back the record itself (callers/route expect the
+    -- updated customer object, not `true`).
+    record:update(filtered_params, { returning = "*" })
+    return record
 end
 
 function CustomerQueries.destroy(id)

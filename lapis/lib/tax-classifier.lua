@@ -6,6 +6,44 @@ local db = require("lapis.db")
 
 local Classifier = {}
 
+-- Phase 2 feature flag. Guidance-aware classification (per-profile persona/rules +
+-- dynamic snake_case HMRC box map) is ON by default; a consumer can opt out by
+-- setting TAX_CLASSIFIER_GUIDANCE to a falsy value, which reverts to the legacy prompt.
+local function guidance_enabled()
+    local v = os.getenv("TAX_CLASSIFIER_GUIDANCE")
+    if v == nil or v == "" then return true end
+    v = v:lower()
+    return not (v == "0" or v == "false" or v == "off" or v == "no")
+end
+
+-- Decode a JSON-text array column (category_affinity / excluded_categories) to a Lua
+-- list; returns {} on nil/empty/malformed.
+local function decode_json_array(s)
+    if type(s) ~= "string" or s == "" then return {} end
+    local ok, t = pcall(cjson.decode, s)
+    if ok and type(t) == "table" then return t end
+    return {}
+end
+
+--- Load opsApi-owned per-profile guidance (Phase 0 table). Returns the row or nil.
+function Classifier.get_profile_guidance(profile_type)
+    if not profile_type then return nil end
+    local ok, rows = pcall(db.select,
+        "* FROM tax_profile_guidance WHERE profile_key = ? AND is_active = true LIMIT 1",
+        profile_type)
+    if ok and rows and rows[1] then return rows[1] end
+    return nil
+end
+
+--- Load the HMRC box catalogue (snake_case keys) the LLM must map into. Returns a list.
+function Classifier.get_hmrc_box_map()
+    local ok, rows = pcall(db.select,
+        "key, box, label, mtd_field_name, mtd_section, is_tax_deductible "
+        .. "FROM tax_hmrc_categories WHERE is_active = true ORDER BY id")
+    if ok and rows then return rows end
+    return {}
+end
+
 -- ---------------------------------------------------------------------------
 -- Layer 1: Merchant Cleaner
 -- ---------------------------------------------------------------------------
@@ -100,22 +138,24 @@ local PROFILE_CATEGORIES = {
     },
 }
 
---- Narrow categories based on business profile, returning all but marking preferred
-function Classifier.narrow_categories(all_categories, profile_type)
-    if not profile_type or not PROFILE_CATEGORIES[profile_type] then
-        return all_categories
-    end
-
-    local preferred_set = {}
-    for _, name in ipairs(PROFILE_CATEGORIES[profile_type].preferred) do
-        preferred_set[name] = true
-    end
+--- Narrow categories for a profile: drop excluded keys, mark affinity keys preferred.
+-- @param all_categories list of {name=...} (or plain strings)
+-- @param affinity list of preferred category keys
+-- @param excluded list of category keys to drop entirely
+function Classifier.narrow_categories(all_categories, affinity, excluded)
+    local preferred_set, excluded_set = {}, {}
+    for _, name in ipairs(affinity or {}) do preferred_set[name] = true end
+    for _, name in ipairs(excluded or {}) do excluded_set[name] = true end
 
     local narrowed = {}
     for _, cat in ipairs(all_categories) do
         local name = cat.name or cat
-        cat.is_preferred = preferred_set[name] or false
-        table.insert(narrowed, cat)
+        if not excluded_set[name] then
+            if type(cat) == "table" then
+                cat.is_preferred = preferred_set[name] or false
+            end
+            table.insert(narrowed, cat)
+        end
     end
 
     return narrowed
@@ -185,7 +225,9 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Adjust confidence based on RAG agreement, profile fit, and anomalies
-function Classifier.adjust_confidence(llm_result, rag_results, profile_type, transaction)
+-- @param affinity list of preferred category keys for the profile (may be empty)
+-- @param valid_hmrc set (key->true) of catalogue HMRC keys; guards RAG overrides
+function Classifier.adjust_confidence(llm_result, rag_results, affinity, transaction, valid_hmrc)
     local confidence = tonumber(llm_result.confidence) or 0.5
 
     if rag_results and #rag_results > 0 then
@@ -196,21 +238,34 @@ function Classifier.adjust_confidence(llm_result, rag_results, profile_type, tra
             -- RAG agrees with LLM — boost confidence
             confidence = math.min(0.99, confidence + 0.10)
         elseif top.category ~= llm_result.category and similarity > 0.90 then
-            -- RAG disagrees with high confidence — prefer RAG
-            llm_result.category = top.category
-            llm_result.hmrc_category = top.hmrc_category
-            llm_result.is_tax_deductible = top.is_tax_deductible
-            confidence = similarity
-            llm_result.reasoning = (llm_result.reasoning or "") ..
-                " [Overridden by RAG match: " .. top.description .. " (similarity=" ..
-                string.format("%.2f", similarity) .. ")]"
+            -- RAG disagrees with high confidence. The reference corpus may carry a
+            -- STALE/camelCase hmrc_category (pre-Phase-2 data); only override when its
+            -- hmrc_category is a valid snake_case catalogue key, otherwise keep the
+            -- LLM's category/hmrc_category and just nudge confidence. This prevents RAG
+            -- from re-injecting the vocabulary Phase 2 fixed.
+            local rag_hmrc_ok = (not valid_hmrc) or (top.hmrc_category and valid_hmrc[top.hmrc_category])
+            if rag_hmrc_ok then
+                llm_result.category = top.category
+                llm_result.hmrc_category = top.hmrc_category
+                llm_result.is_tax_deductible = top.is_tax_deductible
+                confidence = similarity
+                llm_result.reasoning = (llm_result.reasoning or "") ..
+                    " [Overridden by RAG match: " .. tostring(top.description) .. " (similarity=" ..
+                    string.format("%.2f", similarity) .. ")]"
+            else
+                -- Strong neighbour but unusable label: flag for review, don't override.
+                confidence = math.min(confidence, 0.6)
+                llm_result.reasoning = (llm_result.reasoning or "") ..
+                    " [RAG neighbour '" .. tostring(top.description) .. "' had a non-catalogue " ..
+                    "hmrc_category; not applied — review]"
+            end
         end
     end
 
     -- Profile fit boost
-    if profile_type and PROFILE_CATEGORIES[profile_type] then
+    if affinity and #affinity > 0 then
         local preferred = {}
-        for _, name in ipairs(PROFILE_CATEGORIES[profile_type].preferred) do
+        for _, name in ipairs(affinity) do
             preferred[name] = true
         end
         if preferred[llm_result.category] then
@@ -256,12 +311,47 @@ function Classifier.classify_transaction(transaction, opts)
     -- Layer 1: Clean merchant description
     local cleaned = Classifier.clean_merchant(transaction.description)
 
-    -- Layer 2: Get and narrow categories
+    -- Layer 2: Get categories + profile guidance, then narrow
     local categories = opts.categories
     if not categories then
-        categories = db.select("name, hmrc_category_id FROM tax_categories WHERE is_active = true ORDER BY name")
+        -- tax_categories has no `name` column: the machine identity is `key`
+        -- (e.g. "sales_income"), which is what the affinity lists, the LLM prompt
+        -- (via c.name) and the value written back to tax_transactions.category all
+        -- use. Alias key->name so the whole pipeline stays consistent.
+        categories = db.select("key as name, hmrc_category_id FROM tax_categories WHERE is_active = true ORDER BY key")
     end
-    categories = Classifier.narrow_categories(categories, opts.profile_type)
+
+    -- Phase 2: resolve per-profile guidance + the HMRC box map (preloaded by
+    -- classify_batch, or looked up here for single-transaction calls). opts.guidance
+    -- may be `false` to mean "looked up, none found".
+    local guidance = opts.guidance
+    if guidance == nil and guidance_enabled() then
+        guidance = Classifier.get_profile_guidance(opts.profile_type)
+    end
+    if guidance == false then guidance = nil end
+
+    local box_map = opts.box_map
+    if box_map == nil and guidance_enabled() then
+        box_map = Classifier.get_hmrc_box_map()
+    end
+
+    -- Affinity/exclusions come from guidance, falling back to the legacy hardcoded
+    -- PROFILE_CATEGORIES when no guidance row exists.
+    local affinity, excluded = {}, {}
+    if guidance then
+        affinity = decode_json_array(guidance.category_affinity)
+        excluded = decode_json_array(guidance.excluded_categories)
+    elseif opts.profile_type and PROFILE_CATEGORIES[opts.profile_type] then
+        affinity = PROFILE_CATEGORIES[opts.profile_type].preferred
+    end
+
+    -- Capture the full set of valid category keys BEFORE narrowing. This is the
+    -- vocabulary downstream filing keys on (tax_categories.key), so we validate the
+    -- model's `category` against it in the Phase 4 gates.
+    local all_category_keys = {}
+    for _, c in ipairs(categories) do all_category_keys[c.name or c] = true end
+
+    categories = Classifier.narrow_categories(categories, affinity, excluded)
 
     -- Layer 4 (run before LLM to get few-shot examples): RAG lookup
     local rag_results = {}
@@ -295,12 +385,16 @@ function Classifier.classify_transaction(transaction, opts)
         provider = opts.llm_provider,
         trace_id = opts.trace_id,
         few_shot_examples = few_shot,
+        -- Phase 2 guidance: persona + per-profile rules + dynamic snake_case box map
+        persona = guidance and guidance.persona or nil,
+        rules_markdown = guidance and guidance.rules_markdown or nil,
+        hmrc_box_map = box_map,
     })
 
     if not classification then
         return {
             category = "uncategorised_expense",
-            hmrc_category = "otherExpenses",
+            hmrc_category = "other_expenses",
             confidence = 0,
             reasoning = "Classification failed: " .. tostring(err),
             is_tax_deductible = false,
@@ -308,8 +402,115 @@ function Classifier.classify_transaction(transaction, opts)
         }
     end
 
-    -- Layer 5: Confidence adjustment
-    classification = Classifier.adjust_confidence(classification, rag_results, opts.profile_type, transaction)
+    -- Build the catalogue key-set once: used to guard RAG overrides and to validate
+    -- the final hmrc_category.
+    local valid = nil
+    if box_map and #box_map > 0 then
+        valid = {}
+        for _, b in ipairs(box_map) do valid[b.key] = true end
+    end
+
+    -- Layer 5: Confidence adjustment (valid set guards RAG from re-injecting stale keys)
+    classification = Classifier.adjust_confidence(classification, rag_results, affinity, transaction, valid)
+
+    -- Phase 4: filing-safety gates. Anything that could produce a wrong/un-fileable
+    -- return is forced to human review (regardless of confidence) so it never auto-files.
+    local review_reasons = {}
+
+    -- `category` is the key downstream filing aggregates on (tax_categories.key); an
+    -- unknown value is silently dropped from the return, so it must be reviewed.
+    if next(all_category_keys) ~= nil and classification.category
+        and not all_category_keys[classification.category] then
+        table.insert(review_reasons, "category '" .. tostring(classification.category)
+            .. "' not in tax_categories — would be excluded from filing")
+        classification.category_invalid = true
+        classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
+    end
+
+    if valid then
+        local box_by_key = {}
+        for _, b in ipairs(box_map) do box_by_key[b.key] = b end
+        local hk = classification.hmrc_category
+        local box = hk and box_by_key[hk]
+
+        if not box then
+            -- Unknown/legacy-camelCase/hallucinated key: never persist as fileable.
+            table.insert(review_reasons,
+                "hmrc_category '" .. tostring(hk) .. "' not in HMRC catalogue")
+            classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
+            classification.hmrc_category_invalid = true
+        else
+            -- The catalogue box is authoritative for deductibility — the LLM cannot mark
+            -- a non-deductible box (e.g. entertainment_costs) as deductible.
+            local cat_ded = box.is_tax_deductible
+            if cat_ded == "f" or cat_ded == 0 then cat_ded = false end
+            if cat_ded == "t" or cat_ded == 1 then cat_ded = true end
+            if type(cat_ded) == "boolean" and classification.is_tax_deductible ~= cat_ded then
+                classification.is_tax_deductible = cat_ded
+            end
+            -- Capital purchases need a human AIA/capital-allowances decision.
+            if hk == "capital_allowances" then
+                table.insert(review_reasons, "capital item — confirm capital allowances/AIA")
+            end
+
+            -- A CREDIT (money in) classified into an expense box is almost always income
+            -- or a refund mis-filed as a cost. Left as-is the aggregator treats it as a
+            -- NEGATIVE period expense, which HMRC rejects outright (the "negative values"
+            -- filing blocker). Never auto-file it: force human review so the user confirms
+            -- whether it is income (→ turnover/other income) or a genuine refund.
+            if box.mtd_section == "periodExpenses"
+                and tostring(transaction.transaction_type):upper() == "CREDIT" then
+                table.insert(review_reasons,
+                    "credit (money in) classified as the expense '" .. tostring(hk)
+                    .. "' — confirm whether this is income or a refund")
+                classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
+                classification.credit_in_expense = true
+            end
+        end
+    end
+
+    -- Non-business categories can never be claimed as a deduction, whatever HMRC box
+    -- the model paired them with. personal_expense/drawings have NO hmrc box, so the
+    -- box-authority check above can't catch them — force non-deductible here.
+    local NON_DEDUCTIBLE_CATEGORIES = {
+        personal_expense = true,
+        drawings = true,
+        uncategorised_expense = true,
+        transfer = true,
+    }
+    if classification.category and NON_DEDUCTIBLE_CATEGORIES[classification.category] then
+        classification.is_tax_deductible = false
+    end
+
+    -- "uncategorised_expense" means the model couldn't place the transaction. It must
+    -- never auto-file and must not be silently claimed — force human review and cap
+    -- confidence so the route routes it to NEEDS_REVIEW regardless of the LLM's number.
+    if classification.category == "uncategorised_expense" or classification.category == nil then
+        table.insert(review_reasons, "model could not categorise — assign a category")
+        classification.confidence = math.min(tonumber(classification.confidence) or 0.5, 0.4)
+    end
+
+    -- Large/anomalous amounts get verified by a human.
+    local amount = math.abs(tonumber(transaction.amount) or 0)
+    if amount > 10000 then
+        table.insert(review_reasons, string.format("large amount (£%.2f) — verify", amount))
+    end
+
+    -- A profile whose filing isn't supported yet (e.g. landlord/SA105) must NEVER
+    -- auto-file: triage only.
+    local fs = guidance and guidance.filing_supported
+    if fs == false or fs == "f" or fs == 0 then
+        table.insert(review_reasons,
+            "profile filing not yet supported (" .. tostring(guidance.sa_form) .. ") — triage only")
+    end
+
+    if #review_reasons > 0 then
+        classification.needs_review = true
+        classification.review_reasons = review_reasons
+        classification.reasoning = (classification.reasoning or "")
+            .. " [REVIEW: " .. table.concat(review_reasons, "; ") .. "]"
+    end
+
     classification.classified_by = "ai"
     classification.cleaned_description = cleaned
 
@@ -325,9 +526,17 @@ function Classifier.classify_batch(transactions, opts)
     local max_concurrent = opts.max_concurrent or 5
     local results = {}
 
-    -- Pre-fetch categories once for all transactions
-    local categories = db.select("name, hmrc_category_id FROM tax_categories WHERE is_active = true ORDER BY name")
+    -- Pre-fetch categories once for all transactions (see classify_transaction:
+    -- the machine identity is `key`, aliased to name for the pipeline).
+    local categories = db.select("key as name, hmrc_category_id FROM tax_categories WHERE is_active = true ORDER BY key")
     opts.categories = categories
+
+    -- Phase 2: preload the HMRC box map + per-profile guidance once for the whole batch
+    -- (avoids a DB round-trip per transaction). `false` means "looked up, none found".
+    if guidance_enabled() then
+        opts.box_map = Classifier.get_hmrc_box_map()
+        opts.guidance = Classifier.get_profile_guidance(opts.profile_type) or false
+    end
 
     -- Process in batches of max_concurrent using ngx.thread.spawn
     for batch_start = 1, #transactions, max_concurrent do

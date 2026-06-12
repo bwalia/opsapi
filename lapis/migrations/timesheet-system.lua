@@ -170,4 +170,58 @@ return {
             ]])
         end)
     end,
+
+    -- ========================================
+    -- [4] Enrich timesheets for client work logging + invoicing
+    --     (customer link, task, single-session time, rate/billable)
+    --     Idempotent: ADD COLUMN IF NOT EXISTS so it is safe to re-run.
+    -- ========================================
+    [4] = function()
+        if not table_exists("timesheets") then return end
+
+        db.query([[
+            ALTER TABLE timesheets
+                ADD COLUMN IF NOT EXISTS client_account_id BIGINT,
+                ADD COLUMN IF NOT EXISTS client_name       TEXT,
+                ADD COLUMN IF NOT EXISTS task               TEXT,
+                ADD COLUMN IF NOT EXISTS work_date          DATE,
+                ADD COLUMN IF NOT EXISTS start_time         TIME,
+                ADD COLUMN IF NOT EXISTS end_time           TIME,
+                ADD COLUMN IF NOT EXISTS hourly_rate        DECIMAL(10,2),
+                ADD COLUMN IF NOT EXISTS is_billable        BOOLEAN NOT NULL DEFAULT true
+        ]])
+
+        pcall(function()
+            db.query([[
+                CREATE INDEX IF NOT EXISTS timesheets_client_account_idx
+                ON timesheets (namespace_id, client_account_id)
+            ]])
+        end)
+    end,
+
+    -- ========================================
+    -- [5] Relate a timesheet to a Customer (ecommerce) and a Task (kanban).
+    --     Soft references (id + uuid + name snapshot) rather than hard FKs, so
+    --     timesheets keep working when the customers/kanban modules aren't
+    --     enabled for a given PROJECT_CODE. Idempotent.
+    -- ========================================
+    [5] = function()
+        if not table_exists("timesheets") then return end
+
+        db.query([[
+            ALTER TABLE timesheets
+                ADD COLUMN IF NOT EXISTS customer_id   BIGINT,
+                ADD COLUMN IF NOT EXISTS customer_uuid TEXT,
+                ADD COLUMN IF NOT EXISTS task_uuid     TEXT,
+                ADD COLUMN IF NOT EXISTS project_uuid  TEXT,
+                ADD COLUMN IF NOT EXISTS project_name  TEXT
+        ]])
+
+        pcall(function()
+            db.query([[
+                CREATE INDEX IF NOT EXISTS timesheets_customer_idx
+                ON timesheets (namespace_id, customer_id)
+            ]])
+        end)
+    end,
 }

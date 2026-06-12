@@ -46,12 +46,12 @@ return function(app)
         end)
     ))
 
-    -- GET /api/v2/crm/deals/pipeline/:pipeline_uuid - Deals grouped by stage (kanban)
-    -- NOTE: This route must be defined before /api/v2/crm/deals/:uuid to avoid
+    -- GET deals grouped by stage (kanban) for a pipeline.
+    -- NOTE: These must be defined before /api/v2/crm/deals/:uuid to avoid
     -- "pipeline" being captured as a :uuid parameter.
-    app:get("/api/v2/crm/deals/pipeline/:pipeline_uuid", AuthMiddleware.requireAuth(
+    local deals_by_pipeline = AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local pipeline = CrmQueries.getPipeline(self.params.pipeline_uuid)
+            local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.pipeline_uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
             end
@@ -63,7 +63,11 @@ return function(app)
             local stages = CrmQueries.getDealsByPipeline(self.namespace.id, pipeline.id)
             return api_response(200, stages)
         end)
-    ))
+    )
+    -- Original path:
+    app:get("/api/v2/crm/deals/pipeline/:pipeline_uuid", deals_by_pipeline)
+    -- Alias matching the frontend service (crm.service.ts getDealsByPipeline):
+    app:get("/api/v2/crm/pipelines/:pipeline_uuid/deals", deals_by_pipeline)
 
     -- GET /api/v2/crm/deals - List deals
     app:get("/api/v2/crm/deals", AuthMiddleware.requireAuth(
@@ -103,11 +107,29 @@ return function(app)
                 metadata = cjson.encode(metadata)
             end
 
+            -- Frontend links related records by UUID (account_uuid/contact_uuid/
+            -- pipeline_uuid); resolve to the integer FKs the table stores.
+            local account_id = data.account_id
+            local contact_id = data.contact_id
+            local pipeline_id = data.pipeline_id
+            if (not account_id) and data.account_uuid and data.account_uuid ~= "" then
+                local a = CrmQueries.getAccount(self.namespace.id, data.account_uuid)
+                if a then account_id = a.id end
+            end
+            if (not contact_id) and data.contact_uuid and data.contact_uuid ~= "" then
+                local c = CrmQueries.getContact(self.namespace.id, data.contact_uuid)
+                if c then contact_id = c.id end
+            end
+            if (not pipeline_id) and data.pipeline_uuid and data.pipeline_uuid ~= "" then
+                local p = CrmQueries.getPipeline(self.namespace.id, data.pipeline_uuid)
+                if p then pipeline_id = p.id end
+            end
+
             local deal = CrmQueries.createDeal({
                 namespace_id = self.namespace.id,
-                pipeline_id = data.pipeline_id,
-                account_id = data.account_id,
-                contact_id = data.contact_id,
+                pipeline_id = pipeline_id,
+                account_id = account_id,
+                contact_id = contact_id,
                 name = data.name,
                 value = data.value or 0,
                 currency = data.currency or "USD",
@@ -130,7 +152,7 @@ return function(app)
     -- GET /api/v2/crm/deals/:uuid - Get deal with joins
     app:get("/api/v2/crm/deals/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local deal = CrmQueries.getDeal(self.params.uuid)
+            local deal = CrmQueries.getDeal(self.namespace.id, self.params.uuid)
             if not deal then
                 return api_response(404, nil, "Deal not found")
             end
@@ -146,7 +168,7 @@ return function(app)
     -- PUT /api/v2/crm/deals/:uuid - Update deal
     app:put("/api/v2/crm/deals/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local deal = CrmQueries.getDeal(self.params.uuid)
+            local deal = CrmQueries.getDeal(self.namespace.id, self.params.uuid)
             if not deal then
                 return api_response(404, nil, "Deal not found")
             end
@@ -190,7 +212,7 @@ return function(app)
     -- DELETE /api/v2/crm/deals/:uuid - Soft delete deal
     app:delete("/api/v2/crm/deals/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local deal = CrmQueries.getDeal(self.params.uuid)
+            local deal = CrmQueries.getDeal(self.namespace.id, self.params.uuid)
             if not deal then
                 return api_response(404, nil, "Deal not found")
             end
