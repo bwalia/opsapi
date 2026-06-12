@@ -1,9 +1,21 @@
 name: Build and Deploy OpsAPI to K3s
 
 on:
+  # Auto-deploy rules:
+  #   push to `main`     → fans out to `dev` + `int` in parallel (low tiers)
+  #   push to `release`  → deploys to `acc` (single-tier promotion)
+  #   manual dispatch    → single env chosen via TARGET_ENV input
+  #
+  # `acc` is INTENTIONALLY excluded from main pushes — every commit
+  # landing on main used to redeploy acc and risk breaking it. The
+  # weekly-acc-release workflow still promotes main → acc on Fridays
+  # as a scheduled safety net; this workflow's on-demand acc path is
+  # now the `release` branch (cut from main when you want to promote).
+  # `prod` is never auto-deployed — manual dispatch only.
   push:
     branches:
       - main
+      - release
   workflow_dispatch:
     inputs:
       TARGET_ENV:
@@ -143,19 +155,57 @@ jobs:
         run: docker rm -f opsapi-smoke-test || true
 
   # =========================================================================
-  # 3. DEPLOY TO K3S
+  # 3. PLAN — derive which env(s) this run targets, based on the trigger
   # =========================================================================
-  deploy-to-k3s:
-    name: Deploy OpsAPI to K3s
+  # Why a separate job rather than computing inside deploy-to-k3s: matrix
+  # strategies must be defined at job-level and YAML can't conditionally
+  # expand them, so we compute a JSON array here and feed it into the
+  # next job's matrix via `fromJson(needs.plan.outputs.envs)`.
+  plan:
+    name: Plan target environment(s)
     needs: [smoke-test]
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure')
     runs-on: [self-hosted, Linux, X64]
+    outputs:
+      envs: ${{ steps.plan.outputs.envs }}
+    steps:
+      - id: plan
+        name: Resolve envs from trigger
+        run: |
+          # Manual dispatch always wins — single env from the input.
+          if [ -n "${{ github.event.inputs.TARGET_ENV }}" ]; then
+            ENVS_JSON='["${{ github.event.inputs.TARGET_ENV }}"]'
+          elif [ "${{ github.ref }}" = "refs/heads/release" ]; then
+            ENVS_JSON='["acc"]'
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            # Low tiers — fan out so dev and int receive every main commit.
+            ENVS_JSON='["dev","int"]'
+          else
+            echo "::error::Unsupported trigger: ${{ github.ref }} / ${{ github.event_name }}"
+            exit 1
+          fi
+          echo "envs=$ENVS_JSON" >> "$GITHUB_OUTPUT"
+          echo "Planned envs: $ENVS_JSON"
+
+  # =========================================================================
+  # 4. DEPLOY TO K3S — one parallel job per planned env
+  # =========================================================================
+  deploy-to-k3s:
+    name: Deploy OpsAPI to K3s (${{ matrix.target_env }})
+    needs: [smoke-test, plan]
+    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure') && needs.plan.result == 'success'
+    runs-on: [self-hosted, Linux, X64]
+    # fail-fast off: a broken dev shouldn't cancel an in-flight int deploy.
+    strategy:
+      fail-fast: false
+      matrix:
+        target_env: ${{ fromJson(needs.plan.outputs.envs) }}
     # Backstop: never let a hung kubectl step hold the (single) self-hosted
     # runner for GitHub's 6h default — fail fast and free it for the next run.
     timeout-minutes: 15
     steps:
       - name: Identify Runner
-        run: echo "Running on $(hostname)"
+        run: echo "Running on $(hostname) — target=${{ matrix.target_env }}"
 
       - name: Clean up Workspace
         run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
@@ -167,7 +217,7 @@ jobs:
       - name: Resolve target environment
         id: env
         run: |
-          TARGET_ENV="${{ github.event.inputs.TARGET_ENV || 'acc' }}"
+          TARGET_ENV="${{ matrix.target_env }}"
           echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
 
           # Select the right values file
