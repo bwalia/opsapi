@@ -188,16 +188,25 @@ function OTP.verify(user_id, code)
     -- Normalize: strip whitespace
     code = code:gsub("%s+", "")
 
-    -- Dev-only bypass: accept TEST_OTP_CODE to skip email OTP during development.
-    -- Guards: (1) only works when LAPIS_ENVIRONMENT is NOT "production",
-    --         (2) code must be at least 6 characters to prevent trivial values,
+    -- Non-prod bypass: accept TEST_OTP_CODE to skip email OTP outside production.
+    -- Guards: (1) only fires when the deploy env is NOT prod/production. The
+    --         label is taken from OPSAPI_DEPLOY_ENV (set by Helm to the env
+    --         suffix: dev / test / int / acc / prod), falling back to
+    --         LAPIS_ENVIRONMENT, then defaulting to "production" (fail-closed
+    --         — matches routes/e2e-otp.lua's deploy_env() so an unconfigured
+    --         pod can never accidentally enable the bypass).
+    --         (2) code must be at least 6 characters to prevent trivial values.
     --         (3) still invalidates DB codes so the bypass is auditable.
-    local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
-    if env ~= "production" then
+    -- LAPIS_ENVIRONMENT alone can't gate this on K8s: it's hardcoded "production"
+    -- there so the ESO-templated config.lua's single config("production") block
+    -- is selected — without OPSAPI_DEPLOY_ENV, every cluster env (int/acc)
+    -- would look like prod and the bypass would never fire.
+    local deploy = os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or "production"
+    if deploy ~= "production" and deploy ~= "prod" then
         local test_code = os.getenv("TEST_OTP_CODE")
         if test_code and #test_code >= 6 and code == test_code then
-            ngx.log(ngx.WARN, "[OTP] Dev bypass used for user_id=", user_id,
-                " env=", env, " ip=", ngx.var.remote_addr or "unknown")
+            ngx.log(ngx.WARN, "[OTP] Test bypass used for user_id=", user_id,
+                " deploy_env=", deploy, " ip=", ngx.var.remote_addr or "unknown")
             invalidate_existing(user_id)
             return true
         end
@@ -256,9 +265,12 @@ function OTP.sendToEmail(user, brand)
     -- When TEST_OTP_CODE is set, the bypass code is accepted by OTP.verify()
     -- but we still create a real OTP and send the email so users receive the code.
     -- This allows developers to bypass with the test code while real users get emails.
-    local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
+    -- Mirrors the deploy-env guard in OTP.verify() above — OPSAPI_DEPLOY_ENV-first
+    -- so cluster envs (int/acc with LAPIS_ENVIRONMENT="production") still log
+    -- the bypass notice correctly. Fail-closed default "production".
+    local deploy = os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or "production"
     local test_code = os.getenv("TEST_OTP_CODE")
-    if env ~= "production" and test_code and #test_code >= 6 then
+    if deploy ~= "production" and deploy ~= "prod" and test_code and #test_code >= 6 then
         ngx.log(ngx.NOTICE, "[OTP] Test bypass enabled — real OTP will also be created and emailed for ", user.email)
     end
 
