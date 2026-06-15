@@ -1359,6 +1359,13 @@ local _migrations = {
     ['501_tax_create_user_subscriptions']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 80),
     ['502_tax_add_user_subscriptions_indexes']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 81),
     ['503_tax_create_processed_apple_notifications'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 82),
+    -- Wizard tree depends on classification_profiles (created at 480), the
+    -- existing rules-pack seed rows (re-parented here), and
+    -- tax_user_profiles.default_profile_key (added at 496, source for the
+    -- one-time backfill into the join table). Registering after 503 puts
+    -- it safely past every direct dependency without splitting the
+    -- numbering convention used by the rest of the tax_copilot block.
+    ['504_profile_business_wizard_tree']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 37),
 
     -- =========================================================================
     -- CORE AUTH: Password reset tokens

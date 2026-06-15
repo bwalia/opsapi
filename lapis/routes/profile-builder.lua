@@ -408,13 +408,33 @@ end
 
 -- Evaluate visibility rules for a question against current answers
 local function evaluateVisibility(question_id, answer_map)
+    -- Use ``priority`` for the within-group ordering — that's the
+    -- actual column on profile_question_rules. The original code used
+    -- ``display_order``, which doesn't exist on this table, so the
+    -- pcall would silently swallow the SQL error and the function
+    -- would fall through to the early-return at "no rules" and treat
+    -- the question as always-visible. Net effect: server-side
+    -- visibility rules were a no-op for every conditional question,
+    -- which surfaced as frontend-says-100-backend-says-96 mismatches
+    -- in the completion gate.
     local ok, rules = pcall(db.query, [[
         SELECT rule_type, operator, expected_value, source_question_id, logic_group
         FROM profile_question_rules
         WHERE question_id = ? AND is_active = true AND rule_type = 'visibility'
-        ORDER BY logic_group ASC, display_order ASC
+        ORDER BY logic_group ASC, priority ASC
     ]], question_id)
-    if not ok or not rules or #rules == 0 then
+    if not ok then
+        -- Query failure must be visible — silently defaulting to
+        -- "visible" lies to the completion endpoint and the gate, and
+        -- that's exactly how the display_order typo escaped review.
+        -- Log loudly; default to visible so the user isn't locked out
+        -- of unanswerable questions, but downstream now has a paper
+        -- trail for the next time something rhymes with this.
+        ngx.log(ngx.ERR, "[ProfileBuilder] evaluateVisibility query failed for question_id=",
+            tostring(question_id), ": ", tostring(rules))
+        return true
+    end
+    if not rules or #rules == 0 then
         return true -- No rules = always visible
     end
 
@@ -430,6 +450,27 @@ local function evaluateVisibility(question_id, answer_map)
     local and_result = true
     local or_result = false
     local has_or = false
+
+    -- Boolean-aware equality. Rules authored against Yes/No questions
+    -- store expected_value = "yes" / "no" (admin UI default), but the
+    -- stored answer comes through as a boolean -> tostring("true").
+    -- Naive ``actual == expected`` would never match "true" against
+    -- "yes", so this helper normalises common yes/no/true/false/1/0
+    -- spellings to a canonical bool on both sides before comparing.
+    -- Falls back to lowercase string compare for non-boolean rules.
+    local function parseBoolish(s)
+        if s == nil then return nil end
+        local lower = tostring(s):lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if lower == "true" or lower == "yes" or lower == "1" or lower == "y" then return true end
+        if lower == "false" or lower == "no" or lower == "0" or lower == "n" then return false end
+        return nil
+    end
+    local function looseEquals(a, b)
+        local ab, bb = parseBoolish(a), parseBoolish(b)
+        if ab ~= nil and bb ~= nil then return ab == bb end
+        return tostring(a or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+            == tostring(b or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    end
 
     for group_name, group_rules in pairs(groups) do
         for _, rule in ipairs(group_rules) do
@@ -451,9 +492,9 @@ local function evaluateVisibility(question_id, answer_map)
             local num_expected = tonumber(expected) or 0
 
             if rule.operator == "equals" then
-                match = actual == expected
+                match = looseEquals(actual, expected)
             elseif rule.operator == "not_equals" then
-                match = actual ~= expected
+                match = not looseEquals(actual, expected)
             elseif rule.operator == "greater_than" then
                 match = num_actual > num_expected
             elseif rule.operator == "less_than" then
@@ -469,12 +510,12 @@ local function evaluateVisibility(question_id, answer_map)
                 if #parts >= 2 then match = num_actual >= parts[1] and num_actual <= parts[2] end
             elseif rule.operator == "in_list" then
                 for item in expected:gmatch("[^,]+") do
-                    if actual == item:match("^%s*(.-)%s*$") then match = true; break end
+                    if looseEquals(actual, item:match("^%s*(.-)%s*$")) then match = true; break end
                 end
             elseif rule.operator == "not_in_list" then
                 match = true
                 for item in expected:gmatch("[^,]+") do
-                    if actual == item:match("^%s*(.-)%s*$") then match = false; break end
+                    if looseEquals(actual, item:match("^%s*(.-)%s*$")) then match = false; break end
                 end
             elseif rule.operator == "contains" then
                 match = actual:lower():find(expected:lower(), 1, true) ~= nil
@@ -797,6 +838,217 @@ return function(app)
     end)
 
     -- =====================================================================
+    -- 1b. GET /completion-status — Lightweight authoritative completion check
+    --
+    -- Single source of truth for "has this user finished the profile?".
+    -- The /schema endpoint is heavy (full question tree, options, rules,
+    -- per-category state) and was the wrong shape for "is this user
+    -- done?" calls fired from the gate / Go-to-dashboard button.
+    --
+    -- This endpoint:
+    --   1. Reads the user's answers + every active question in their
+    --      namespace (global + per-tenant).
+    --   2. Evaluates visibility per question using the same rules engine
+    --      that the schema endpoint uses (after the boolean-aware
+    --      ``looseEquals`` fix). Conditionally-hidden questions don't
+    --      count in numerator OR denominator.
+    --   3. Counts answered (non-null answer column) over visible total.
+    --   4. Sets the ``profile_complete=true`` cookie (or clears it) so
+    --      the Next.js middleware can hard-gate routes WITHOUT calling
+    --      back into opsapi on every request.
+    --   5. Returns ``{ is_complete, overall_percent, total, answered }``
+    --      so the frontend can show a coherent state to the user.
+    --
+    -- Cookie is set with ``Path=/; SameSite=Lax`` and NO ``HttpOnly`` —
+    -- the cookie is UX (a gating hint), not credentials. The actual
+    -- authority remains this endpoint plus the same server-side
+    -- per-route checks any feature-flag would have. Cookie expiry is
+    -- session-only so a logout flushes the verdict naturally.
+    -- =====================================================================
+    app:get(PREFIX .. "/completion-status", function(self)
+        local user = requireAuth(self)
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+        local user_uuid = user.uuid or user.id
+        local user_id = getUserIdByUuid(user_uuid)
+        if not user_id then
+            return { status = 401, json = { error = "User not found" } }
+        end
+        local namespace_id = getNamespaceId(self)
+
+        -- Build the same namespace filter the schema endpoint uses so
+        -- visibility is computed against EXACTLY the questions the user
+        -- can see. Empty filter = the lapis global default scope.
+        local ns_filter = ""
+        if namespace_id and namespace_id > 0 then
+            ns_filter = " AND (pq.namespace_id = " .. db.escape_literal(namespace_id) .. " OR pq.namespace_id = 0)"
+        end
+
+        -- Single answer_map used for BOTH visibility rule evaluation
+        -- AND the answered count. Drafts are treated as real answers
+        -- here on purpose: the frontend's isAnswered only checks for a
+        -- non-empty value (not is_draft), and the user's perception is
+        -- "I typed something in that box, it's answered". The is_draft
+        -- flag is orthogonal — it tracks "the text field's value may
+        -- still change as the user keeps typing", not "this isn't a
+        -- real answer". The existing recalculateCompletion() helper
+        -- filters drafts for a different signal ("officially committed
+        -- answers used by tag rules"), but the gate cookie must match
+        -- what the user sees on the /profile UI — otherwise text-only
+        -- categories sit at 0% on the server while showing 100% to
+        -- the user, exactly the trap we just hit.
+        local answer_map = {}
+        local ok_ans, ans_rows = pcall(db.query, [[
+            SELECT question_id, answer_text, answer_number, answer_boolean,
+                   answer_date, answer_json
+            FROM user_profile_answers
+            WHERE user_id = ?
+        ]], user_id)
+        if ok_ans and ans_rows then
+            for _, a in ipairs(ans_rows) do
+                answer_map[a.question_id] = a
+            end
+        end
+
+        -- Active, non-archived questions in the user's scope. Include
+        -- question_key + label so debug mode can name them; cheap
+        -- columns, no measurable perf impact.
+        local ok_qs, questions = pcall(db.query, [[
+            SELECT pq.id, pq.question_key, pq.label, pq.is_required
+            FROM profile_questions pq
+            JOIN profile_categories pc ON pc.id = pq.category_id
+            WHERE pq.is_active = true AND pq.is_archived = false
+              AND pc.is_active = true AND pc.is_archived = false
+            ]] .. ns_filter)
+        if not ok_qs then
+            ngx.log(ngx.ERR, "[ProfileBuilder] completion-status questions query failed: ", tostring(questions))
+            return { status = 500, json = { error = "Failed to compute completion" } }
+        end
+
+        -- ?debug=true returns a per-question breakdown alongside the
+        -- summary so the next-vs-backend gap can be pinpointed without
+        -- adding instrumentation each time something rhymes with this.
+        -- Cheap to emit; not gated by admin role because the user only
+        -- ever sees their OWN answers.
+        local debug_mode = self.params.debug == "true" or self.params.debug == "1"
+        local debug_rows = debug_mode and {} or nil
+
+        local total_visible = 0
+        local answered = 0
+        for _, q in ipairs(questions or {}) do
+            local is_visible = evaluateVisibility(q.id, answer_map)
+            local a = answer_map[q.id]   -- drafts INCLUDED — see note above answer_map
+            local has_answer = false
+            if a then
+                has_answer = (a.answer_text ~= nil and a.answer_text ~= "")
+                    or a.answer_number ~= nil
+                    or a.answer_boolean ~= nil
+                    or a.answer_date ~= nil
+                    or (a.answer_json ~= nil and a.answer_json ~= "" and a.answer_json ~= "null" and a.answer_json ~= "[]")
+            end
+            if is_visible then
+                total_visible = total_visible + 1
+                if has_answer then
+                    answered = answered + 1
+                end
+            end
+            if debug_mode then
+                -- Stringify each answer column so the response is
+                -- safe to JSON-encode regardless of underlying type
+                -- (booleans / numbers / pgmoon's NULL sentinel).
+                local function show(v)
+                    if v == nil then return nil end
+                    if type(v) == "boolean" then return tostring(v) end
+                    if type(v) == "number" then return v end
+                    return tostring(v)
+                end
+                table.insert(debug_rows, {
+                    question_id = q.id,
+                    question_key = q.question_key,
+                    label = q.label,
+                    is_required = q.is_required,
+                    is_visible = is_visible,
+                    has_answer = has_answer,
+                    counted_in_total = is_visible,
+                    counted_in_answered = is_visible and has_answer,
+                    answer = a and {
+                        answer_text = show(a.answer_text),
+                        answer_number = show(a.answer_number),
+                        answer_boolean = show(a.answer_boolean),
+                        answer_date = show(a.answer_date),
+                        answer_json = show(a.answer_json),
+                    } or nil,
+                })
+            end
+        end
+
+        local pct
+        if total_visible == 0 then
+            pct = 100 -- vacuously complete: nothing to fill in
+        else
+            pct = math.floor((answered / total_visible) * 100)
+        end
+        local is_complete = pct >= 100
+
+        -- Single cookie set via the Set-Cookie header. The Next.js
+        -- middleware reads this verbatim — no client-side js needed.
+        -- Clearing uses Max-Age=0 so the browser drops the cookie
+        -- immediately rather than waiting for session end.
+        --
+        -- Domain resolution mirrors helper/auth-cookies.lua for the
+        -- refresh-token cookie: AUTH_COOKIE_TRUSTED_DOMAINS gives us a
+        -- comma-separated allowlist of apex domains; we longest-suffix
+        -- match it against the Origin and emit ``Domain=.<apex>`` so
+        -- the cookie crosses the api-vs-app subdomain boundary in
+        -- production. No match → omit Domain (host-scoped, correct
+        -- for local dev). Secure default-on; AUTH_COOKIE_INSECURE=true
+        -- opts out for localhost HTTP. Reusing the existing env vars
+        -- keeps operators from having to configure a second allowlist
+        -- (per [[reference_secret_distribution]] / per [[auth_refresh_cookie]]).
+        local cookie_parts = is_complete
+            and { "profile_complete=true", "Path=/", "SameSite=Lax" }
+            or  { "profile_complete=",     "Path=/", "Max-Age=0", "SameSite=Lax" }
+        do
+            local override = os.getenv("AUTH_COOKIE_DOMAIN")
+            local domain = nil
+            if override and override ~= "" then
+                domain = override
+            else
+                local raw = os.getenv("AUTH_COOKIE_TRUSTED_DOMAINS") or ""
+                local allowed_list = {}
+                for item in raw:gmatch("[^,%s]+") do table.insert(allowed_list, item:lower()) end
+                local origin = (self.req and self.req.headers and
+                    (self.req.headers["Origin"] or self.req.headers["origin"])) or nil
+                if origin and #allowed_list > 0 then
+                    local host = origin:gsub("^https?://", ""):gsub(":%d+$", ""):gsub("/.*$", ""):lower()
+                    local best
+                    for _, allowed in ipairs(allowed_list) do
+                        local matches = host == allowed
+                            or host:sub(-(#allowed + 1)) == "." .. allowed
+                        if matches and (not best or #allowed > #best) then best = allowed end
+                    end
+                    if best then domain = "." .. best end
+                end
+            end
+            if domain then table.insert(cookie_parts, "Domain=" .. domain) end
+            if os.getenv("AUTH_COOKIE_INSECURE") ~= "true" then
+                table.insert(cookie_parts, "Secure")
+            end
+        end
+        ngx.header["Set-Cookie"] = table.concat(cookie_parts, "; ")
+
+        local body = {
+            is_complete = is_complete,
+            overall_percent = pct,
+            total = total_visible,
+            answered = answered,
+        }
+        if debug_mode then body.questions = debug_rows end
+        return { status = 200, json = body }
+    end)
+
+    -- =====================================================================
     -- 2. GET /schema/preview — Admin: preview schema as a specific user
     -- =====================================================================
     app:get(PREFIX .. "/schema/preview", function(self)
@@ -915,6 +1167,114 @@ return function(app)
         end
 
         return { status = 200, json = { schema = result, preview_user_uuid = target_uuid } }
+    end)
+
+    -- =====================================================================
+    -- 2b. GET /business-wizard — tree of pickable business profiles
+    --
+    -- User-facing endpoint that powers the post-signup business-profile
+    -- picker. Returns a nested tree of all classification_profiles rows
+    -- that have ``wizard_label`` set, grouped by parent_profile_key:
+    --
+    --   tree: [
+    --     { profile_key: "sole_trader", is_leaf: false,
+    --       wizard_question: "What kind of work do you do?",
+    --       wizard_label: "I work for myself as a sole trader",
+    --       children: [
+    --         { profile_key: "sole_trader_tradesperson", is_leaf: false,
+    --           children: [
+    --             { profile_key: "electrician", is_leaf: true, children: [] },
+    --             …
+    --           ] },
+    --         …
+    --       ] },
+    --     { profile_key: "ltd_director", is_leaf: true, children: [] },
+    --     { profile_key: "landlord",     is_leaf: true, children: [] },
+    --     …
+    --   ]
+    --
+    -- The FE walks this once and renders a 3-step wizard (root multi-select
+    -- → drill into ticked branches → confirm). Leaves with children = [] are
+    -- terminal picks; branches require a follow-up question.
+    --
+    -- ``wizard_label`` is the discriminator that lets us exclude DB rows
+    -- that are catalog-only (rules-pack carriers) rather than wizard-visible.
+    -- After migration 450_profile_business_wizard_tree, every active row
+    -- has a wizard_label set, so the filter is currently a no-op — but
+    -- it keeps the contract future-proof when admins add rule-only rows
+    -- via the admin UI without exposing them in onboarding.
+    --
+    -- Returns the GLOBAL catalogue (namespace_id = 0). Per-tenant overrides
+    -- are a future extension once a customer actually needs custom packs.
+    -- =====================================================================
+    app:get(PREFIX .. "/business-wizard", function(self)
+        local user = requireAuth(self)
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        -- COALESCE parent_profile_key to '' so we don't have to fight
+        -- pgmoon's NULL representation in Lua (ngx.null vs nil vs cjson.null
+        -- depending on driver build) — empty-string is unambiguous.
+        local ok, rows = pcall(db.query, [[
+            SELECT profile_key,
+                   display_name,
+                   industry,
+                   user_profile_type,
+                   COALESCE(parent_profile_key, '') AS parent_profile_key,
+                   wizard_question,
+                   wizard_label,
+                   display_order,
+                   is_leaf
+            FROM classification_profiles
+            WHERE is_active = true
+              AND wizard_label IS NOT NULL
+              AND wizard_label <> ''
+            ORDER BY display_order ASC, profile_key ASC
+        ]])
+        if not ok then
+            ngx.log(ngx.ERR, "[ProfileBuilder] business-wizard query failed: ", tostring(rows))
+            return { status = 500, json = { error = "Failed to load business profile wizard" } }
+        end
+
+        -- Single-pass build: map profile_key -> node, then a second pass to
+        -- attach children to parents. O(n) and order-independent.
+        local nodes_by_key = {}
+        for _, r in ipairs(rows or {}) do
+            nodes_by_key[r.profile_key] = {
+                profile_key       = r.profile_key,
+                display_name      = r.display_name,
+                industry          = r.industry or "",
+                user_profile_type = r.user_profile_type or "",
+                wizard_question   = r.wizard_question,   -- may be nil for leaves
+                wizard_label      = r.wizard_label,
+                is_leaf           = (r.is_leaf == true) or (r.is_leaf == "t"),
+                display_order     = tonumber(r.display_order) or 0,
+                children          = {},
+            }
+        end
+
+        local roots = {}
+        for _, r in ipairs(rows or {}) do
+            local node = nodes_by_key[r.profile_key]
+            local parent_key = r.parent_profile_key
+            if not parent_key or parent_key == "" then
+                table.insert(roots, node)
+            elseif nodes_by_key[parent_key] then
+                table.insert(nodes_by_key[parent_key].children, node)
+            else
+                -- Parent referenced but parent row not in the visible set
+                -- (e.g. parent has wizard_label NULL or is_active false).
+                -- Surface as a root so the data isn't lost; log so the
+                -- admin notices the inconsistency.
+                ngx.log(ngx.WARN, "[ProfileBuilder] orphan wizard node: ",
+                        r.profile_key, " (parent ", parent_key,
+                        " not in visible set)")
+                table.insert(roots, node)
+            end
+        end
+
+        return { status = 200, json = { tree = roots } }
     end)
 
     -- =====================================================================
