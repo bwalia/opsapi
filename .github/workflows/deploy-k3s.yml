@@ -331,6 +331,64 @@ jobs:
           echo "Waiting for diytaxreturn-lapis rollout..."
           kubectl rollout status deployment/diytaxreturn-lapis -n "$NS" --timeout=180s || true
 
+      # Why this gate exists:
+      # `kubectl rollout status` only proves the Pod is Ready. It does NOT
+      # prove the public URL actually returns 200 — and on 2026-06-15 we
+      # had a 4-day intermittent outage of int-api where the Pod was healthy
+      # but a stale Ingress in a different namespace was sharing the host
+      # claim, so the wslproxy ingress controller flapped between a working
+      # backend and an orphaned one. Symptom: 9/10 requests succeeded; 1/10
+      # returned the wslproxy ingress controller's stock 404 page. Both
+      # `kubectl get pods` and the rollout step happily reported success.
+      #
+      # The gate below requires 5 CONSECUTIVE fast 200s within 2 minutes
+      # before the deploy is declared green. The consecutive bar is the
+      # important part — it catches the "sometimes works" regression mode
+      # that a single-shot probe would have missed today.
+      - name: Public-URL health gate
+        run: |
+          # Map env -> public URL. dev/int/acc follow the `<env>-api.*`
+          # convention; prod's public URL is bare `api.*`. New envs need
+          # to be added here explicitly rather than left to a default,
+          # so a typo in an env name fails CI instead of silently passing.
+          case "${{ matrix.target_env }}" in
+            prod) URL="https://api.diytaxreturn.co.uk/health" ;;
+            dev|int|acc) URL="https://${{ matrix.target_env }}-api.diytaxreturn.co.uk/health" ;;
+            *)
+              echo "::error::Unknown env '${{ matrix.target_env }}' — extend the case above with its public URL"
+              exit 1
+              ;;
+          esac
+          echo "Health-gating against $URL — need 5 consecutive fast 200s within 2 min"
+          ok_run=0
+          last_code=""
+          last_time=""
+          # ~30 attempts * 4s sleep = ~2 min ceiling. The 8s connect timeout
+          # is intentional: any single probe taking longer than the slow-path
+          # threshold (3s) breaks the streak — that's how we catch the
+          # Ingress-conflict pattern where one backend works and another
+          # times out at ~5s.
+          for i in $(seq 1 30); do
+            t=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" -m 8 "$URL" 2>&1 || true)
+            last_code=$(echo "$t" | awk '{print $1}')
+            last_time=$(echo "$t" | awk '{print $2}')
+            slow=$(echo "$last_time" | awk '{print ($1 >= 3.0) ? 1 : 0}')
+            if [ "$last_code" = "200" ] && [ "$slow" = "0" ]; then
+              ok_run=$((ok_run+1))
+              echo "  attempt $i: code=$last_code time=${last_time}s — streak=$ok_run/5"
+              if [ "$ok_run" -ge 5 ]; then
+                echo "::notice::$URL healthy — 5 consecutive fast 200s"
+                exit 0
+              fi
+            else
+              ok_run=0
+              echo "  attempt $i: code=$last_code time=${last_time}s — streak reset"
+            fi
+            sleep 4
+          done
+          echo "::error::Public health gate failed — $URL did not produce 5 consecutive fast 200s in ~2 min (last: code=$last_code time=${last_time}s)"
+          exit 1
+
       - name: Cleanup Kubeconfig
         if: always()
         run: |

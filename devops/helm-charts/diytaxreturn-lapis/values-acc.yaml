@@ -29,6 +29,13 @@ service:
   type: ClusterIP
   port: 80
 
+# INTENTIONALLY DISABLED — see the same block in values-int.yaml for the full
+# story. tl;dr: `acc-api.diytaxreturn.co.uk` is already owned by the
+# `diytaxreturn-fastapi` chart (sibling diy-tax-return-uk repo), which does
+# path-based routing into THIS chart's lapis Service via `/`, `/auth`,
+# `/opsapi`. Enabling the block below creates a second Ingress for the same
+# host and starts an intermittent two-Ingress conflict on the wslproxy
+# ingress controller — exactly the failure mode that bit int on 2026-06-15.
 ingress:
   enabled: false
   className: wslproxy
