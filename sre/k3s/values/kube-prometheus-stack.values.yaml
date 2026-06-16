@@ -56,6 +56,23 @@ alertmanager:
 grafana:
   adminPassword: ""          # set via --set or a sealed secret; do NOT commit
   defaultDashboardsEnabled: true
+  # Expose Grafana via wslproxy (+ cert-manager TLS), unique host per env.
+  # Set grafana.ini root_url to the same host so redirects work. Override the
+  # host per env with --set on install (int-/acc-/prod- prefix).
+  ingress:
+    enabled: true
+    ingressClassName: wslproxy
+    annotations:
+      cert-manager.io/cluster-issuer: main-issuer
+    hosts:
+      - acc-sre-grafana.diytaxreturn.co.uk
+    tls:
+      - secretName: grafana-sre-tls
+        hosts:
+          - acc-sre-grafana.diytaxreturn.co.uk
+  grafana.ini:
+    server:
+      root_url: https://acc-sre-grafana.diytaxreturn.co.uk
   # Auto-load OpsAPI dashboards from ConfigMaps labelled grafana_dashboard=1
   # (../manifests/grafana-dashboards-configmap.yaml).
   sidecar:

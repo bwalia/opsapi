@@ -100,11 +100,14 @@ metadata:
   name: gatus
   namespace: monitoring
   annotations:
-    # k3s ships Traefik by default; swap class/annotations for your ingress.
-    kubernetes.io/ingress.class: traefik
+    # wslproxy ingress + cert-manager TLS — same pattern as the rest of the platform.
+    cert-manager.io/cluster-issuer: main-issuer
 spec:
+  ingressClassName: wslproxy
   rules:
-    - host: status.opsapi.example          # ← set your public status hostname
+    # Unique host (sre- prefix) so it never collides with the app's own
+    # <env>-gatus host → avoids the wslproxy two-Ingress flapping incident.
+    - host: acc-sre-status.diytaxreturn.co.uk    # ← set per env (int-/acc-/prod uses sre-status)
       http:
         paths:
           - path: /
@@ -114,3 +117,6 @@ spec:
                 name: gatus
                 port:
                   number: 80
+  tls:
+    - hosts: [acc-sre-status.diytaxreturn.co.uk]
+      secretName: gatus-sre-tls

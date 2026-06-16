@@ -95,6 +95,9 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_FEATURE_TOGGLES_ENABLE: "traceqlEditor"
+      # Set to the wslproxy domain (https://sre-grafana.diytaxreturn.co.uk) when
+      # exposing via k3s/local-docker-wslproxy.yaml so login/redirects are correct.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3012}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
