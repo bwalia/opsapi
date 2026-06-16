@@ -911,16 +911,76 @@ return function(app)
             end
         end
 
-        -- Active, non-archived questions in the user's scope. Include
-        -- question_key + label so debug mode can name them; cheap
-        -- columns, no measurable perf impact.
+        -- Resolve the user's business profile (e.g. amazon_seller,
+        -- landlord). The schema endpoint uses this exact pattern to
+        -- gate which questions ever surface in the UI:
+        --
+        --   * a question with NO business-profile tags applies to everyone
+        --   * a question with tags only appears if the user's
+        --     default_profile_key is in that set
+        --
+        -- Without applying the same filter here, completion-status
+        -- inflates ``total`` with questions the user can never see —
+        -- e.g. amazon_seller users were being counted on
+        -- ``is_construction_worker`` (tagged construction_company)
+        -- and the gate said 26/27 = 96% even though the frontend
+        -- showed 100% (because frontend honours the tag filter via
+        -- the schema response).
+        --
+        -- This mirrors lines 615-635 / 645-675 of the schema endpoint
+        -- below; keep them in lock-step. ``default_profile_key`` is
+        -- the singular wizard-primary pick (the wizard mirrors
+        -- is_primary→default_profile_key on save, so this stays the
+        -- right key to consult for non-multi-pick gating).
+        local user_profile_key = nil
+        local ok_up, up_rows = pcall(db.query, [[
+            SELECT default_profile_key FROM tax_user_profiles
+            WHERE user_id = ? LIMIT 1
+        ]], user_id)
+        if ok_up and up_rows and #up_rows > 0 then
+            local k = up_rows[1].default_profile_key
+            if k and k ~= "" and k ~= cjson.null then
+                user_profile_key = k
+            end
+        end
+
+        -- Active, non-archived questions in the user's scope, with the
+        -- business-profile tag filter applied. Include question_key +
+        -- label so ?debug=true can name them; cheap columns, no
+        -- measurable perf impact.
+        local bp_filter
+        local query_params = {}
+        if user_profile_key then
+            bp_filter = [[
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM profile_question_business_profiles
+                  WHERE question_id = pq.id
+                )
+                OR EXISTS (
+                  SELECT 1 FROM profile_question_business_profiles
+                  WHERE question_id = pq.id AND profile_key = ?
+                )
+              )]]
+            table.insert(query_params, user_profile_key)
+        else
+            -- No business profile chosen yet: only universal questions
+            -- (with no tag link set) surface. Strictest filter; matches
+            -- schema endpoint's same-branch behaviour.
+            bp_filter = [[
+              AND NOT EXISTS (
+                SELECT 1 FROM profile_question_business_profiles
+                WHERE question_id = pq.id
+              )]]
+        end
+
         local ok_qs, questions = pcall(db.query, [[
             SELECT pq.id, pq.question_key, pq.label, pq.is_required
             FROM profile_questions pq
             JOIN profile_categories pc ON pc.id = pq.category_id
             WHERE pq.is_active = true AND pq.is_archived = false
               AND pc.is_active = true AND pc.is_archived = false
-            ]] .. ns_filter)
+            ]] .. ns_filter .. bp_filter, unpack(query_params))
         if not ok_qs then
             ngx.log(ngx.ERR, "[ProfileBuilder] completion-status questions query failed: ", tostring(questions))
             return { status = 500, json = { error = "Failed to compute completion" } }
