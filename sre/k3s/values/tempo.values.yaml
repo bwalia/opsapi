@@ -1,0 +1,29 @@
+# Grafana Tempo (single binary) for k3s prod — traces pillar.
+#   helm install tempo grafana/tempo -n monitoring -f tempo.values.yaml
+# Receives OTLP from the OpenTelemetry Collector and generates span/service-graph
+# metrics back into Prometheus (remote_write), powering trace↔metric correlation.
+tempo:
+  retention: 720h               # 30 days
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://opsapi-monitoring-prometheus.monitoring.svc:9090/api/v1/write
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/blocks
+
+persistence:
+  enabled: true
+  size: 20Gi
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: 500m, memory: 1Gi }

@@ -1,0 +1,116 @@
+# Gatus public status page for k3s prod.
+# ConfigMap below uses cluster-internal service DNS for the OpsAPI app + deps.
+# Adjust namespaces/hostnames to your cluster. Ingress host is a placeholder.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gatus-config
+  namespace: monitoring
+  labels:
+    app: opsapi-sre
+data:
+  config.yaml: |
+    storage:
+      type: memory
+    ui:
+      title: OpsAPI Status
+      header: OpsAPI Platform Status
+    endpoints:
+      - name: OpsAPI Health
+        group: Core
+        url: "http://diytaxreturn-lapis.opsapi.svc.cluster.local/health"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 200"
+          - "[BODY].status == healthy"
+      - name: OpsAPI OpenAPI
+        group: Core
+        url: "http://diytaxreturn-lapis.opsapi.svc.cluster.local/openapi.json"
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY].info.title == OpsAPI"
+      - name: PostgreSQL
+        group: Dependencies
+        url: "tcp://postgres.opsapi.svc.cluster.local:5432"
+        interval: 30s
+        conditions:
+          - "[CONNECTED] == true"
+      - name: Grafana
+        group: Observability
+        url: "http://opsapi-monitoring-grafana.monitoring.svc/api/health"
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gatus
+  namespace: monitoring
+  labels:
+    app: gatus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gatus
+  template:
+    metadata:
+      labels:
+        app: gatus
+    spec:
+      containers:
+        - name: gatus
+          image: twinproduction/gatus:v5.13.0
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 128Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: gatus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gatus
+  namespace: monitoring
+  labels:
+    app: gatus
+spec:
+  selector:
+    app: gatus
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gatus
+  namespace: monitoring
+  annotations:
+    # k3s ships Traefik by default; swap class/annotations for your ingress.
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: status.opsapi.example          # ← set your public status hostname
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gatus
+                port:
+                  number: 80

@@ -1,0 +1,104 @@
+# kube-prometheus-stack values for OpsAPI production (k3s).
+# Installs Prometheus Operator + Prometheus + Alertmanager + Grafana +
+# node-exporter + kube-state-metrics. The OpsAPI-specific rules, dashboards and
+# Alertmanager routing are applied separately as CRs/ConfigMaps in ../manifests/
+# so they stay identical to the Docker demo.
+#
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace -f kube-prometheus-stack.values.yaml
+
+fullnameOverride: opsapi-monitoring
+
+defaultRules:
+  create: true          # baseline k8s/node alerts; OpsAPI SLO rules added via CR
+
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    retentionSize: "20GB"
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    enableRemoteWriteReceiver: true        # Tempo metrics_generator → Prometheus
+    # Discover ServiceMonitors/PrometheusRules in ALL namespaces, not just those
+    # carrying the release label — so ../manifests/*.yaml are picked up.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 25Gi
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: "1",  memory: 2Gi }
+
+alertmanager:
+  # Routing/receivers come from the AlertmanagerConfig CR in
+  # ../manifests/alertmanager-config.yaml (keeps parity with the demo).
+  alertmanagerSpec:
+    alertmanagerConfigSelector:
+      matchLabels:
+        app: opsapi-sre
+    alertmanagerConfigMatcherStrategy:
+      type: None
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+grafana:
+  adminPassword: ""          # set via --set or a sealed secret; do NOT commit
+  defaultDashboardsEnabled: true
+  # Auto-load OpsAPI dashboards from ConfigMaps labelled grafana_dashboard=1
+  # (../manifests/grafana-dashboards-configmap.yaml).
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc:80
+      jsonData:
+        derivedFields:
+          - name: TraceID
+            matcherRegex: '"trace_id":"(\w+)"'
+            url: '$${__value.raw}'
+            datasourceUid: tempo
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      access: proxy
+      url: http://tempo.monitoring.svc:3200
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+  persistence:
+    enabled: true
+    size: 5Gi
+
+nodeExporter:
+  enabled: true
+kube-state-metrics:
+  enabled: true

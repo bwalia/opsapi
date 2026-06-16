@@ -1,0 +1,74 @@
+# Alertmanager routing for k3s (AlertmanagerConfig CR), matching the demo's
+# severity-based routing and inhibition. Selected by the stack's
+# alertmanagerConfigSelector (app=opsapi-sre). Receivers are placeholders —
+# create the referenced Secret (opsapi-alert-secrets) with your Slack/PagerDuty
+# creds (e.g. via SealedSecrets, consistent with devops/kubeseal) before relying
+# on real paging.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: opsapi-routing
+  namespace: monitoring
+  labels:
+    app: opsapi-sre
+spec:
+  route:
+    receiver: 'null'
+    groupBy: ['alertname', 'slo', 'service']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    routes:
+      - matchers:
+          - name: severity
+            value: page
+        receiver: pager
+        groupWait: 10s
+        repeatInterval: 1h
+        continue: true
+      - matchers:
+          - name: severity
+            value: page
+        receiver: slack-critical
+        continue: true
+      - matchers:
+          - name: severity
+            value: ticket
+        receiver: slack-warnings
+  inhibitRules:
+    - sourceMatch:
+        - name: alertname
+          value: OpsAPIServiceDown
+      targetMatch:
+        - name: severity
+          value: ticket
+      equal: ['service']
+    - sourceMatch:
+        - name: severity
+          value: page
+      targetMatch:
+        - name: severity
+          value: ticket
+      equal: ['slo']
+  receivers:
+    - name: 'null'
+    - name: pager
+      pagerdutyConfigs:
+        - routingKey:
+            name: opsapi-alert-secrets
+            key: pagerduty-routing-key
+          severity: '{{ if eq .CommonLabels.priority "P1" }}critical{{ else }}error{{ end }}'
+    - name: slack-critical
+      slackConfigs:
+        - apiURL:
+            name: opsapi-alert-secrets
+            key: slack-webhook-url
+          channel: '#incidents'
+          title: '[{{ .CommonLabels.priority }}] {{ .CommonAnnotations.summary }}'
+          text: "{{ range .Alerts }}{{ .Annotations.description }}\nRunbook: {{ .Annotations.runbook_url }}\n{{ end }}"
+    - name: slack-warnings
+      slackConfigs:
+        - apiURL:
+            name: opsapi-alert-secrets
+            key: slack-webhook-url
+          channel: '#alerts'

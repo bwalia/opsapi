@@ -1,0 +1,75 @@
+# OpenTelemetry Collector — the single ingestion funnel for the three pillars
+# (Layer 3). Apps/load-generators send OTLP here; the collector fans out:
+#   traces  → Tempo
+#   metrics → exposed on :8889 for Prometheus to scrape
+#   logs    → Loki
+# This is the "OpenTelemetry everywhere" entry point: instrument once, send to
+# the collector, and the backend is swappable without touching the app.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  # Scrape the collector's own internal telemetry.
+  prometheus/self:
+    config:
+      scrape_configs:
+        - job_name: otel-collector-internal
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['localhost:8888']
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+
+exporters:
+  # Traces → Tempo (OTLP gRPC).
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  # Metrics → Prometheus scrape endpoint on :8889.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
+  # Logs → Loki.
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  debug:
+    verbosity: basic
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp, prometheus/self]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/loki]
+  telemetry:
+    logs:
+      level: warn

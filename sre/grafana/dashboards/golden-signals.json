@@ -1,0 +1,94 @@
+{
+  "uid": "opsapi-golden",
+  "title": "OpsAPI · Golden Signals",
+  "tags": ["opsapi", "sre", "golden-signals"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "row", "title": "Traffic", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries", "title": "Request rate (req/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "expr": "opsapi:http_requests:rate5m", "legendFormat": "total" },
+        { "expr": "opsapi:http_requests:rate5m_by_endpoint", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "stat", "title": "Current RPS",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [ { "expr": "opsapi:http_requests:rate5m" } ]
+    },
+    {
+      "type": "row", "title": "Errors", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+    },
+    {
+      "type": "timeseries", "title": "5xx error ratio",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.001 } ] } } },
+      "targets": [ { "expr": "opsapi:http_error_ratio:rate5m", "legendFormat": "5xx ratio" } ]
+    },
+    {
+      "type": "timeseries", "title": "4xx ratio",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "targets": [ { "expr": "opsapi:http_4xx_ratio:rate5m", "legendFormat": "4xx ratio" } ]
+    },
+    {
+      "type": "row", "title": "Latency", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+    },
+    {
+      "type": "timeseries", "title": "Latency P50 / P95 / P99",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.2 } ] } } },
+      "targets": [
+        { "expr": "opsapi:http_latency:p50", "legendFormat": "p50" },
+        { "expr": "opsapi:http_latency:p95", "legendFormat": "p95" },
+        { "expr": "opsapi:http_latency:p99", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "row", "title": "Saturation", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 }
+    },
+    {
+      "type": "gauge", "title": "CPU utilisation",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.85 } ] } } },
+      "targets": [ { "expr": "opsapi:node_cpu_utilization:ratio" } ]
+    },
+    {
+      "type": "gauge", "title": "Memory utilisation",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "red", "value": 0.9 } ] } } },
+      "targets": [ { "expr": "opsapi:node_memory_utilization:ratio" } ]
+    },
+    {
+      "type": "gauge", "title": "DB connection pool",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.85 } ] } } },
+      "targets": [ { "expr": "opsapi:pg_connection_utilization:ratio" } ]
+    },
+    {
+      "type": "stat", "title": "Waiting connections",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 28 },
+      "targets": [ { "expr": "opsapi:nginx_waiting_connections" } ]
+    }
+  ]
+}

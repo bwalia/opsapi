@@ -1,0 +1,59 @@
+{
+  "uid": "opsapi-capacity",
+  "title": "OpsAPI · Capacity Planning",
+  "tags": ["opsapi", "sre", "capacity"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "type": "timeseries", "title": "Disk utilisation — current vs predicted 30d",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.85 } ] } } },
+      "targets": [
+        { "expr": "opsapi:node_disk_utilization:ratio", "legendFormat": "current" },
+        { "expr": "opsapi:disk_util_predicted_30d:ratio", "legendFormat": "predicted 30d" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Memory utilisation — current vs predicted 7d",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 } },
+      "targets": [
+        { "expr": "opsapi:node_memory_utilization:ratio", "legendFormat": "current" },
+        { "expr": "opsapi:mem_util_predicted_7d:ratio", "legendFormat": "predicted 7d" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Database size — current vs predicted 30d",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        { "expr": "sum(pg_database_size_bytes)", "legendFormat": "current" },
+        { "expr": "opsapi:pg_database_size_predicted_30d_bytes", "legendFormat": "predicted 30d" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Traffic — current vs predicted 30d (req/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "expr": "opsapi:http_requests:rate5m", "legendFormat": "current" },
+        { "expr": "opsapi:traffic_predicted_30d:rate", "legendFormat": "predicted 30d" }
+      ]
+    },
+    {
+      "type": "stat", "title": "Days until disk full (forecast)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 345600 }, { "color": "green", "value": 1209600 } ] } } },
+      "targets": [ { "expr": "clamp_min(opsapi:disk_will_fill_seconds, 0)", "legendFormat": "{{mountpoint}}" } ]
+    }
+  ]
+}

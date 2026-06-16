@@ -1,0 +1,92 @@
+# Gatus — public status page & synthetic uptime monitoring.
+# Already part of the OpsAPI stack; here it is wired to the SRE SLO thresholds
+# so the status page tells the same story as the dashboards. Conditions mirror
+# the SLOs: 200 OK, response time under the latency budget, healthy body.
+#
+# In the Docker demo, targets use container names on opsapi-network. The k3s
+# equivalent (cluster-internal service DNS) lives in ../k3s/manifests/gatus.yaml.
+
+storage:
+  type: sqlite
+  path: /data/gatus.db
+
+ui:
+  title: OpsAPI Status
+  header: OpsAPI Platform Status
+  logo: ""
+
+alerting:
+  # Fire into the same webhook sink as Alertmanager in the demo. Swap for
+  # slack/pagerduty in prod (env-driven).
+  custom:
+    url: "http://alert-logger:9000/gatus"
+    method: POST
+    body: |
+      {"endpoint":"[ENDPOINT_NAME]","status":"[ALERT_TRIGGERED_OR_RESOLVED]","desc":"[ALERT_DESCRIPTION]"}
+
+endpoints:
+  # Demo defaults target the SRE stack's own services. For the REAL app, swap
+  # `synthetic-opsapi` → `lapis`, `demo-postgres` → `postgres`, `demo-redis`
+  # → `redis` (and re-add Dashboard/MinIO). The k3s equivalent is in
+  # ../k3s/manifests/gatus.yaml with cluster-internal service DNS.
+  - name: OpsAPI Health
+    group: Core
+    url: "http://synthetic-opsapi:80/health"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 200"      # latency SLO
+      - "[BODY].status == healthy"
+    alerts:
+      - type: custom
+        send-on-resolved: true
+        description: "OpsAPI health check failing"
+
+  - name: OpsAPI Metrics
+    group: Core
+    url: "http://synthetic-opsapi:80/metrics"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY] contains nginx_http_requests_total"
+
+  - name: OpsAPI OpenAPI
+    group: Core
+    url: "http://synthetic-opsapi:80/openapi.json"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].info.title == OpsAPI"
+      - "len([BODY].paths) > 5"
+
+  - name: PostgreSQL
+    group: Dependencies
+    url: "tcp://demo-postgres:5432"
+    interval: 30s
+    conditions:
+      - "[CONNECTED] == true"
+    alerts:
+      - type: custom
+        send-on-resolved: true
+        description: "PostgreSQL unreachable"
+
+  - name: Redis
+    group: Dependencies
+    url: "tcp://demo-redis:6379"
+    interval: 30s
+    conditions:
+      - "[CONNECTED] == true"
+
+  - name: Grafana
+    group: Observability
+    url: "http://grafana:3000/api/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+
+  - name: Prometheus
+    group: Observability
+    url: "http://prometheus:9090/-/healthy"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"

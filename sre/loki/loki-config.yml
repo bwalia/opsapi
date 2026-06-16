@@ -1,0 +1,49 @@
+# Loki — logs pillar (Layer 3). Single-binary, filesystem storage — perfect for
+# the demo and small prod; for large prod swap storage to S3/MinIO (see k3s
+# values). TSDB schema, no auth (front it with the ingress in prod).
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 168h            # 7 days in the demo
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+  max_query_series: 5000
+  allow_structured_metadata: true
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+ruler:
+  alertmanager_url: http://alertmanager:9093
+
+analytics:
+  reporting_enabled: false

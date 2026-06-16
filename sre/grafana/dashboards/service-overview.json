@@ -1,0 +1,78 @@
+{
+  "uid": "opsapi-overview",
+  "title": "OpsAPI · Service Overview",
+  "tags": ["opsapi", "sre", "overview"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat", "title": "API up",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+      "targets": [ { "expr": "up{job=\"opsapi\"}" } ]
+    },
+    {
+      "type": "stat", "title": "Postgres up",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+      "targets": [ { "expr": "pg_up" } ]
+    },
+    {
+      "type": "stat", "title": "Redis up",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+      "targets": [ { "expr": "redis_up" } ]
+    },
+    {
+      "type": "stat", "title": "RPS",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [ { "expr": "opsapi:http_requests:rate5m" } ]
+    },
+    {
+      "type": "stat", "title": "Error ratio",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.001 } ] } } },
+      "targets": [ { "expr": "opsapi:http_error_ratio:rate5m" } ]
+    },
+    {
+      "type": "stat", "title": "P95 latency",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.2 } ] } } },
+      "targets": [ { "expr": "opsapi:http_latency:p95" } ]
+    },
+    {
+      "type": "timeseries", "title": "RED — Rate / Errors / Duration",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 5 },
+      "targets": [
+        { "expr": "opsapi:http_requests:rate5m", "legendFormat": "rate (req/s)" },
+        { "expr": "opsapi:http_5xx:rate5m", "legendFormat": "5xx/s" },
+        { "expr": "opsapi:http_latency:p95", "legendFormat": "p95 (s)" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Error budget remaining (30d)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [ { "expr": "clamp_min(opsapi:error_budget_remaining:ratio, 0)", "legendFormat": "budget" } ]
+    },
+    {
+      "type": "logs", "title": "Recent 5xx access logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 14 },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [ { "expr": "{job=\"opsapi\", log_type=\"nginx-access\"} | status =~ \"5..\"" } ]
+    }
+  ]
+}
