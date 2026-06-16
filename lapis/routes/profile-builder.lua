@@ -1051,30 +1051,54 @@ return function(app)
         end
         local is_complete = pct >= 100
 
-        -- Single cookie set via the Set-Cookie header. The Next.js
-        -- middleware reads this verbatim — no client-side js needed.
-        -- Clearing uses Max-Age=0 so the browser drops the cookie
-        -- immediately rather than waiting for session end.
+        -- Two cookies — both onboarding-state gates the Next.js
+        -- middleware reads verbatim:
+        --   * profile_complete       — all visible/required questions answered
+        --   * business_profile_set   — user picked at least one business type
+        --                              (default_profile_key set on tax_user_profiles)
         --
-        -- Domain resolution mirrors helper/auth-cookies.lua for the
-        -- refresh-token cookie: AUTH_COOKIE_TRUSTED_DOMAINS gives us a
-        -- comma-separated allowlist of apex domains; we longest-suffix
-        -- match it against the Origin and emit ``Domain=.<apex>`` so
-        -- the cookie crosses the api-vs-app subdomain boundary in
-        -- production. No match → omit Domain (host-scoped, correct
-        -- for local dev). Secure default-on; AUTH_COOKIE_INSECURE=true
-        -- opts out for localhost HTTP. Reusing the existing env vars
-        -- keeps operators from having to configure a second allowlist
-        -- (per [[reference_secret_distribution]] / per [[auth_refresh_cookie]]).
-        local cookie_parts = is_complete
-            and { "profile_complete=true", "Path=/", "SameSite=Lax" }
-            or  { "profile_complete=",     "Path=/", "Max-Age=0", "SameSite=Lax" }
+        -- Set together in one response so the middleware never sees a
+        -- half-state. Clearing uses Max-Age=0 so the browser drops the
+        -- cookie immediately rather than waiting for session end.
+        --
+        -- Domain resolution — three sources of truth, first match wins:
+        --   1. AUTH_COOKIE_DOMAIN              (explicit override)
+        --   2. AUTH_COOKIE_TRUSTED_DOMAINS     (Origin allowlist —
+        --                                       matches auth-cookies.lua)
+        --   3. FRONTEND_URL                    (derived parent domain;
+        --                                       a no-extra-config
+        --                                       fallback so envs that
+        --                                       only set FRONTEND_URL —
+        --                                       like int — still emit
+        --                                       a cross-subdomain
+        --                                       cookie that the
+        --                                       frontend middleware
+        --                                       can actually read)
+        -- No source → omit Domain (host-scoped — correct for local dev
+        -- where api + app share the same host:port).
+        --
+        -- Why the FRONTEND_URL fallback exists: ops on int forgot to
+        -- set AUTH_COOKIE_TRUSTED_DOMAINS but FRONTEND_URL was always
+        -- there. Without a Domain attribute the cookie scoped to
+        -- int-api.X only — the middleware on int.X never saw it →
+        -- every navigation bounced back to /profile. The 3rd source
+        -- closes that gap without adding a new env var to operators'
+        -- runbooks.
+        --
+        -- Secure default-on; AUTH_COOKIE_INSECURE=true opts out for
+        -- localhost HTTP. Same flag the refresh-token cookie honours.
+        local has_business_profile = user_profile_key ~= nil
+
+        local cookie_domain
         do
+            -- Source 1: explicit override
             local override = os.getenv("AUTH_COOKIE_DOMAIN")
-            local domain = nil
             if override and override ~= "" then
-                domain = override
-            else
+                cookie_domain = override
+            end
+
+            -- Source 2: trusted-domains allowlist matched against Origin
+            if not cookie_domain then
                 local raw = os.getenv("AUTH_COOKIE_TRUSTED_DOMAINS") or ""
                 local allowed_list = {}
                 for item in raw:gmatch("[^,%s]+") do table.insert(allowed_list, item:lower()) end
@@ -1088,21 +1112,75 @@ return function(app)
                             or host:sub(-(#allowed + 1)) == "." .. allowed
                         if matches and (not best or #allowed > #best) then best = allowed end
                     end
-                    if best then domain = "." .. best end
+                    if best then cookie_domain = "." .. best end
                 end
             end
-            if domain then table.insert(cookie_parts, "Domain=" .. domain) end
-            if os.getenv("AUTH_COOKIE_INSECURE") ~= "true" then
-                table.insert(cookie_parts, "Secure")
+
+            -- Source 3: derive parent domain from FRONTEND_URL.
+            -- Strip the first subdomain label so the cookie is visible
+            -- on both the API subdomain and the app subdomain (assumed
+            -- same parent, which is the standard same-origin-with-api
+            -- pattern). E.g. https://int.diytaxreturn.co.uk → strip
+            -- "int" → ".diytaxreturn.co.uk".
+            -- Skip the strip when the host is already at parent
+            -- (≤2 labels — example.com, etc.) because Domain=.com is
+            -- rejected by browsers as a public suffix.
+            if not cookie_domain then
+                local frontend_url = os.getenv("FRONTEND_URL")
+                if frontend_url and frontend_url ~= "" then
+                    local host = frontend_url
+                        :gsub("^https?://", "")
+                        :gsub(":%d+$", "")
+                        :gsub("/.*$", "")
+                        :lower()
+                    if host ~= "" then
+                        local labels = {}
+                        for label in host:gmatch("[^%.]+") do
+                            table.insert(labels, label)
+                        end
+                        -- 3+ labels (foo.example.co.uk) → strip first
+                        -- 2 labels (example.com) → leave as host-scoped
+                        if #labels >= 3 then
+                            local apex = table.concat(labels, ".", 2)
+                            cookie_domain = "." .. apex
+                        end
+                    end
+                end
             end
         end
-        ngx.header["Set-Cookie"] = table.concat(cookie_parts, "; ")
+
+        local secure_attr = os.getenv("AUTH_COOKIE_INSECURE") ~= "true"
+
+        -- Build a single Set-Cookie header value for the given name.
+        -- ``is_set=true`` sets the cookie to "true"; ``is_set=false``
+        -- clears it via Max-Age=0. Domain/Secure attributes are shared
+        -- with the refresh-token cookie (see helper/auth-cookies.lua).
+        local function build_cookie(name, is_set)
+            local parts = is_set
+                and { name .. "=true", "Path=/", "SameSite=Lax" }
+                or  { name .. "=",     "Path=/", "Max-Age=0", "SameSite=Lax" }
+            if cookie_domain then table.insert(parts, "Domain=" .. cookie_domain) end
+            if secure_attr then table.insert(parts, "Secure") end
+            return table.concat(parts, "; ")
+        end
+
+        -- OpenResty allows ngx.header["Set-Cookie"] to be a table —
+        -- each element becomes its own Set-Cookie response header,
+        -- which is the correct way to emit multiple cookies in one
+        -- response (a single comma-joined value gets misparsed by
+        -- some browsers because Set-Cookie values can themselves
+        -- contain commas in Expires=...).
+        ngx.header["Set-Cookie"] = {
+            build_cookie("profile_complete", is_complete),
+            build_cookie("business_profile_set", has_business_profile),
+        }
 
         local body = {
             is_complete = is_complete,
             overall_percent = pct,
             total = total_visible,
             answered = answered,
+            has_business_profile = has_business_profile,
         }
         if debug_mode then body.questions = debug_rows end
         return { status = 200, json = body }
