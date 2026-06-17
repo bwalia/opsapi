@@ -120,37 +120,90 @@ local function auditLog(params)
     end
 end
 
+-- Per-category cache refresh — written on each save so /schema can
+-- render the per-category strip on first paint without re-running the
+-- rule engine. Mirrors /completion-status's loop (same visibility +
+-- dynamic-requirement evaluators) so the cache never disagrees with
+-- the gate. If the two ever drift it shows up as the user staring at
+-- "100% complete" on the category strip while the gate still says
+-- "answer this required question" — exactly the rhyme we just fixed
+-- in /completion-status.
+--
+-- Note: the cache row is intentionally NOT filtered by business profile
+-- tags or namespace. Those filters belong to the live gate (which has
+-- request context — Origin header, JWT namespace claim, etc.). The
+-- per-category cache is a coarse "this category is done as far as the
+-- raw question set goes" signal. The frontend's liveSchema and the
+-- /completion-status endpoint do the request-time filtering.
+--
+-- Forward-declare the rule evaluators so this function's closure
+-- captures them as upvalues even though their bodies appear later in
+-- the file. Without this, ``evaluateVisibility``/``evaluateRequirement``
+-- here would compile to global lookups against an empty _ENV and the
+-- save handler would silently no-op the cache refresh at runtime.
+local evaluateVisibility, evaluateRequirement
+
 local function recalculateCompletion(user_id, user_uuid, category_id)
     local ok, err = pcall(function()
-        local total_rows = db.query([[
-            SELECT COUNT(*) AS cnt FROM profile_questions
+        local ok_qs, questions = pcall(db.query, [[
+            SELECT id, is_required
+            FROM profile_questions
             WHERE category_id = ? AND is_active = true AND is_archived = false
         ]], category_id)
-        local total = total_rows and total_rows[1] and tonumber(total_rows[1].cnt) or 0
+        if not ok_qs or not questions then
+            ngx.log(ngx.ERR, "[ProfileBuilder] recalculateCompletion questions query failed: ", tostring(questions))
+            return
+        end
 
-        local required_rows = db.query([[
-            SELECT COUNT(*) AS cnt FROM profile_questions
-            WHERE category_id = ? AND is_active = true AND is_archived = false AND is_required = true
-        ]], category_id)
-        local required = required_rows and required_rows[1] and tonumber(required_rows[1].cnt) or 0
+        -- Pre-load the user's answers once; ipairs(questions) iterates
+        -- over the SAME data the evaluators need.
+        local answer_map = {}
+        local ok_ans, ans_rows = pcall(db.query, [[
+            SELECT question_id, answer_text, answer_number, answer_boolean,
+                   answer_date, answer_json, is_draft
+            FROM user_profile_answers
+            WHERE user_id = ?
+        ]], user_id)
+        if ok_ans and ans_rows then
+            for _, a in ipairs(ans_rows) do
+                answer_map[a.question_id] = a
+            end
+        end
 
-        local answered_rows = db.query([[
-            SELECT COUNT(DISTINCT upa.question_id) AS cnt
-            FROM user_profile_answers upa
-            JOIN profile_questions pq ON pq.id = upa.question_id
-            WHERE upa.user_id = ? AND pq.category_id = ? AND pq.is_active = true AND pq.is_archived = false
-              AND upa.is_draft = false
-        ]], user_id, category_id)
-        local answered = answered_rows and answered_rows[1] and tonumber(answered_rows[1].cnt) or 0
+        local total, answered, required, req_answered = 0, 0, 0, 0
+        for _, q in ipairs(questions) do
+            local is_visible = evaluateVisibility(q.id, answer_map)
+            if is_visible then
+                local a = answer_map[q.id]
+                -- Same is_draft = false convention as the legacy
+                -- cache here — recalculateCompletion exists for the
+                -- "committed answer count" downstream uses, distinct
+                -- from /completion-status which treats drafts as
+                -- answered for the gate cookie.
+                local has_committed_answer = false
+                if a and not a.is_draft then
+                    has_committed_answer =
+                        (a.answer_text ~= nil and a.answer_text ~= "")
+                        or a.answer_number ~= nil
+                        or a.answer_boolean ~= nil
+                        or a.answer_date ~= nil
+                        or (a.answer_json ~= nil and a.answer_json ~= "" and a.answer_json ~= "null" and a.answer_json ~= "[]")
+                end
+                local effectively_required = q.is_required
+                    or evaluateRequirement(q.id, answer_map)
 
-        local req_answered_rows = db.query([[
-            SELECT COUNT(DISTINCT upa.question_id) AS cnt
-            FROM user_profile_answers upa
-            JOIN profile_questions pq ON pq.id = upa.question_id
-            WHERE upa.user_id = ? AND pq.category_id = ? AND pq.is_active = true AND pq.is_archived = false
-              AND pq.is_required = true AND upa.is_draft = false
-        ]], user_id, category_id)
-        local req_answered = req_answered_rows and req_answered_rows[1] and tonumber(req_answered_rows[1].cnt) or 0
+                total = total + 1
+                if has_committed_answer then
+                    answered = answered + 1
+                end
+                if effectively_required then
+                    required = required + 1
+                    if has_committed_answer then
+                        req_answered = req_answered + 1
+                    end
+                end
+            end
+        end
 
         local pct = 0
         if total > 0 then
@@ -406,8 +459,27 @@ local function replaceQuestionBusinessProfiles(question_id, keys)
     end
 end
 
--- Evaluate visibility rules for a question against current answers
-local function evaluateVisibility(question_id, answer_map)
+-- Evaluate a set of rules of a given type against the user's answer map.
+--
+-- This is the single source of truth for AND/OR / operator semantics —
+-- both the visibility gate (rule_type='visibility') and the dynamic
+-- requirement gate (rule_type='requirement') share it. Adding a future
+-- rule_type (e.g. 'validation') plugs in by passing the new type string
+-- without touching the operator table below.
+--
+-- Defaults must reflect rule SEMANTICS, not just absence:
+--   * For visibility, "no rules" = visible (open by default).
+--   * For requirement, "no rules" = NOT dynamically required (the
+--     static is_required column handles the baseline).
+-- Callers pass ``default_on_empty`` to control this.
+--
+-- Failure mode (query errored): we log loudly and return ``fail_safe``,
+-- which the caller chooses to fit its own safety stance. Visibility
+-- defaults fail-safe = true so users aren't locked out of questions
+-- they can't see. Requirement defaults fail-safe = false so a transient
+-- DB hiccup never inflates the gate denominator.
+local function evaluateRuleSet(question_id, answer_map, rule_type,
+                               default_on_empty, fail_safe)
     -- Use ``priority`` for the within-group ordering — that's the
     -- actual column on profile_question_rules. The original code used
     -- ``display_order``, which doesn't exist on this table, so the
@@ -420,22 +492,17 @@ local function evaluateVisibility(question_id, answer_map)
     local ok, rules = pcall(db.query, [[
         SELECT rule_type, operator, expected_value, source_question_id, logic_group
         FROM profile_question_rules
-        WHERE question_id = ? AND is_active = true AND rule_type = 'visibility'
+        WHERE question_id = ? AND is_active = true AND rule_type = ?
         ORDER BY logic_group ASC, priority ASC
-    ]], question_id)
+    ]], question_id, rule_type)
     if not ok then
-        -- Query failure must be visible — silently defaulting to
-        -- "visible" lies to the completion endpoint and the gate, and
-        -- that's exactly how the display_order typo escaped review.
-        -- Log loudly; default to visible so the user isn't locked out
-        -- of unanswerable questions, but downstream now has a paper
-        -- trail for the next time something rhymes with this.
-        ngx.log(ngx.ERR, "[ProfileBuilder] evaluateVisibility query failed for question_id=",
+        ngx.log(ngx.ERR, "[ProfileBuilder] evaluateRuleSet(",
+            tostring(rule_type), ") query failed for question_id=",
             tostring(question_id), ": ", tostring(rules))
-        return true
+        return fail_safe
     end
     if not rules or #rules == 0 then
-        return true -- No rules = always visible
+        return default_on_empty
     end
 
     -- Group rules by logic_group
@@ -547,6 +614,28 @@ local function evaluateVisibility(question_id, answer_map)
         return and_result and or_result
     end
     return and_result
+end
+
+-- Thin wrappers — keep the call sites readable + lock in the semantic
+-- defaults for each rule_type. New rule types should add a wrapper here
+-- (not call evaluateRuleSet directly) so the defaults stay near the
+-- definition.
+--
+-- These are ASSIGNED to the forward-declared locals at the top of the
+-- file (not ``local function`` declarations) so any function defined
+-- earlier in the chunk (e.g. recalculateCompletion) can capture them
+-- as upvalues.
+evaluateVisibility = function(question_id, answer_map)
+    -- No rules → visible. Query failure → visible (don't lock out).
+    return evaluateRuleSet(question_id, answer_map, "visibility", true, true)
+end
+
+evaluateRequirement = function(question_id, answer_map)
+    -- No rules → NOT dynamically required (static is_required is the
+    -- baseline). Query failure → not required (don't inflate the gate
+    -- denominator on a transient DB hiccup; the user is the one who'd
+    -- pay for that with a stuck cookie).
+    return evaluateRuleSet(question_id, answer_map, "requirement", false, false)
 end
 
 local function getUserIdByUuid(user_uuid)
@@ -994,8 +1083,28 @@ return function(app)
         local debug_mode = self.params.debug == "true" or self.params.debug == "1"
         local debug_rows = debug_mode and {} or nil
 
+        -- Two parallel counters because the system has two distinct
+        -- questions:
+        --
+        --   "Are all required questions answered?"     → gate
+        --   "How far through the whole form is the user?" → display
+        --
+        -- The denominator differs but the loop is one pass over the same
+        -- visible-question set. Optional questions count toward
+        -- ``total/answered`` (so the user's progress bar is honest about
+        -- what's left) but do NOT count toward ``required_*`` (so they
+        -- don't block dashboard access).
+        --
+        -- ``effectively_required`` combines static + dynamic:
+        --   * Static — profile_questions.is_required (admin set this)
+        --   * Dynamic — any active requirement rule on this question
+        --              fires given the user's current answers
+        -- The dynamic side is what catches cases like "Did you have
+        -- rental income? → Yes → rental_property_count is now required."
         local total_visible = 0
         local answered = 0
+        local required_visible = 0
+        local required_answered = 0
         for _, q in ipairs(questions or {}) do
             local is_visible = evaluateVisibility(q.id, answer_map)
             local a = answer_map[q.id]   -- drafts INCLUDED — see note above answer_map
@@ -1007,10 +1116,23 @@ return function(app)
                     or a.answer_date ~= nil
                     or (a.answer_json ~= nil and a.answer_json ~= "" and a.answer_json ~= "null" and a.answer_json ~= "[]")
             end
+            local effectively_required = false
             if is_visible then
                 total_visible = total_visible + 1
                 if has_answer then
                     answered = answered + 1
+                end
+                -- Skip the requirement-rule query when the static flag
+                -- already settles it true — fewer DB hits per request
+                -- on the typical schema where most required questions
+                -- have no dynamic rule.
+                effectively_required = q.is_required
+                    or evaluateRequirement(q.id, answer_map)
+                if effectively_required then
+                    required_visible = required_visible + 1
+                    if has_answer then
+                        required_answered = required_answered + 1
+                    end
                 end
             end
             if debug_mode then
@@ -1028,10 +1150,13 @@ return function(app)
                     question_key = q.question_key,
                     label = q.label,
                     is_required = q.is_required,
+                    effectively_required = effectively_required,
                     is_visible = is_visible,
                     has_answer = has_answer,
                     counted_in_total = is_visible,
                     counted_in_answered = is_visible and has_answer,
+                    counted_in_required = is_visible and effectively_required,
+                    counted_in_required_answered = is_visible and effectively_required and has_answer,
                     answer = a and {
                         answer_text = show(a.answer_text),
                         answer_number = show(a.answer_number),
@@ -1043,13 +1168,35 @@ return function(app)
             end
         end
 
+        -- Display percent — across ALL visible questions, so the
+        -- progress bar honestly tells the user how much of the form
+        -- has been filled in.
         local pct
         if total_visible == 0 then
-            pct = 100 -- vacuously complete: nothing to fill in
+            pct = 100
         else
             pct = math.floor((answered / total_visible) * 100)
         end
-        local is_complete = pct >= 100
+
+        -- Gate percent — only required-visible questions count.
+        -- Vacuously 100 when there are no required questions in the
+        -- user's scope (could happen for users with a business profile
+        -- that only has optional questions, or for a freshly seeded
+        -- schema with everything optional).
+        local required_pct
+        if required_visible == 0 then
+            required_pct = 100
+        else
+            required_pct = math.floor((required_answered / required_visible) * 100)
+        end
+
+        -- The cookie + downstream "is_complete" gate is REQUIRED-ONLY.
+        -- The display percent is independent and may stay below 100
+        -- when the user has skipped optionals — that's a deliberate
+        -- UX signal ("you've finished what's mandatory; here's what
+        -- else you could add"), not a bug.
+        local is_complete = required_visible == 0
+                         or required_answered >= required_visible
 
         -- Two cookies — both onboarding-state gates the Next.js
         -- middleware reads verbatim:
@@ -1175,11 +1322,18 @@ return function(app)
             build_cookie("business_profile_set", has_business_profile),
         }
 
+        -- Response carries both metrics. Old fields stay so any
+        -- existing consumer keeps working; new ``required_*`` fields
+        -- are additive. ``is_complete`` is now the required-only
+        -- gate (see comment above the cookie block).
         local body = {
             is_complete = is_complete,
             overall_percent = pct,
             total = total_visible,
             answered = answered,
+            required_percent = required_pct,
+            required_total = required_visible,
+            required_answered = required_answered,
             has_business_profile = has_business_profile,
         }
         if debug_mode then body.questions = debug_rows end
