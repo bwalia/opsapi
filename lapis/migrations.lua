@@ -145,6 +145,9 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- My Income (tax_copilot feature) — manually-entered income source-of-truth
+local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1781,6 +1784,11 @@ local _migrations = {
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
+
+    -- MY INCOME — manually-entered income source-of-truth
+    -- =========================================================================
+    ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
+    ['716_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
