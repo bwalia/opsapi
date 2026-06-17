@@ -12,6 +12,29 @@ local TaxStatementQueries = require "queries.TaxStatementQueries"
 local TaxAuditLogQueries = require "queries.TaxAuditLogQueries"
 local AuthMiddleware = require("middleware.auth")
 
+-- See tax-transactions.lua for the rationale; bodies that exceed
+-- nginx's ``client_body_buffer_size`` get spilled to disk and
+-- ``get_body_data()`` returns nil for them, silently zeroing out
+-- the request payload. ``read_request_body`` recovers the file path
+-- via ``get_body_file()``.
+local function read_request_body()
+    local body = ngx.req.get_body_data()
+    if body and body ~= "" then
+        return body
+    end
+    local body_file = ngx.req.get_body_file()
+    if body_file then
+        local f, err = io.open(body_file, "rb")
+        if f then
+            local data = f:read("*all")
+            f:close()
+            return data
+        end
+        ngx.log(ngx.ERR, "Failed to open buffered body file ", body_file, ": ", err)
+    end
+    return nil
+end
+
 -- Parse request body (supports both JSON and form-urlencoded)
 local function parse_request_body()
     ngx.req.read_body()
@@ -21,14 +44,11 @@ local function parse_request_body()
 
     -- If JSON content type, parse as JSON
     if content_type:find("application/json", 1, true) then
-        local ok, result = pcall(function()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then
-                return {}
-            end
-            return cjson.decode(body)
-        end)
-
+        local body = read_request_body()
+        if not body or body == "" then
+            return {}
+        end
+        local ok, result = pcall(cjson.decode, body)
         if ok and type(result) == "table" then
             return result
         end

@@ -112,24 +112,48 @@ return function(app)
         end)
     ))
 
+    -- Lookup: customers in this namespace (for the timesheet customer dropdown).
+    -- Namespace-gated only (no module permission) so the timesheet author can
+    -- populate the dropdown regardless of customers.read grants.
+    app:get("/api/v2/timesheets/lookups/customers", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local rows = TimesheetQueries.lookupCustomers(self.namespace.id, self.params.q)
+            return success_response(rows)
+        end)
+    ))
+
+    -- Lookup: kanban tasks (with their project) in this namespace, for the task dropdown.
+    app:get("/api/v2/timesheets/lookups/tasks", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            local rows = TimesheetQueries.lookupTasks(self.namespace.id, self.params.q)
+            return success_response(rows)
+        end)
+    ))
+
     -- Create timesheet
     app:post("/api/v2/timesheets", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local params = RequestParser.parse_request(self)
 
-            if not params.period_start or params.period_start == "" then
-                return error_response(400, "period_start is required")
-            end
-
-            if not params.period_end or params.period_end == "" then
-                return error_response(400, "period_end is required")
+            local has_work_date = params.work_date and params.work_date ~= ""
+            local has_period = params.period_start and params.period_start ~= ""
+            if not has_work_date and not has_period then
+                return error_response(400, "A work date (or a period start) is required")
             end
 
             local ok, timesheet = pcall(TimesheetQueries.create, {
                 namespace_id = self.namespace.id,
                 user_uuid = self.current_user.uuid,
-                title = params.title,
-                description = params.description,
+                customer_uuid = params.customer_uuid,
+                client_name = params.client_name,
+                task_uuid = params.task_uuid,
+                task = params.task,
+                work_date = params.work_date,
+                start_time = params.start_time,
+                end_time = params.end_time,
+                hourly_rate = params.hourly_rate,
+                is_billable = params.is_billable,
+                notes = params.notes,
                 period_start = params.period_start,
                 period_end = params.period_end
             })
@@ -164,11 +188,19 @@ return function(app)
             local params = RequestParser.parse_request(self)
 
             local updated, err = TimesheetQueries.update(self.params.uuid, {
-                title = params.title,
-                description = params.description,
+                customer_uuid = params.customer_uuid,
+                client_name = params.client_name,
+                task_uuid = params.task_uuid,
+                task = params.task,
+                work_date = params.work_date,
+                start_time = params.start_time,
+                end_time = params.end_time,
+                hourly_rate = params.hourly_rate,
+                is_billable = params.is_billable,
+                notes = params.notes,
                 period_start = params.period_start,
                 period_end = params.period_end
-            })
+            }, self.namespace.id)
 
             if err then
                 if err == "Timesheet not found" then
@@ -184,7 +216,7 @@ return function(app)
     -- Soft delete timesheet (draft only)
     app:delete("/api/v2/timesheets/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local deleted, err = TimesheetQueries.delete(self.params.uuid)
+            local deleted, err = TimesheetQueries.delete(self.params.uuid, self.namespace.id)
 
             if err then
                 if err == "Timesheet not found" then
@@ -204,7 +236,7 @@ return function(app)
     -- Submit timesheet for approval
     app:post("/api/v2/timesheets/:uuid/submit", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local result, err = TimesheetQueries.submit(self.params.uuid, self.current_user.uuid)
+            local result, err = TimesheetQueries.submit(self.params.uuid, self.current_user.uuid, self.namespace.id)
 
             if err then
                 if err == "Timesheet not found" then
@@ -217,15 +249,16 @@ return function(app)
         end)
     ))
 
-    -- Approve timesheet (manager action)
+    -- Approve timesheet (manager action — requires timesheet_approvals.approve)
     app:post("/api/v2/timesheets/:uuid/approve", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("timesheet_approvals", "approve", function(self)
             local params = RequestParser.parse_request(self)
 
             local result, err = TimesheetQueries.approve(
                 self.params.uuid,
                 self.current_user.uuid,
-                params.comments
+                params.comments,
+                self.namespace.id
             )
 
             if err then
@@ -239,9 +272,9 @@ return function(app)
         end)
     ))
 
-    -- Reject timesheet with reason
+    -- Reject timesheet with reason (manager action — requires timesheet_approvals.reject)
     app:post("/api/v2/timesheets/:uuid/reject", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("timesheet_approvals", "reject", function(self)
             local params = RequestParser.parse_request(self)
 
             if not params.reason or params.reason == "" then
@@ -252,7 +285,8 @@ return function(app)
                 self.params.uuid,
                 self.current_user.uuid,
                 params.reason,
-                params.comments
+                params.comments,
+                self.namespace.id
             )
 
             if err then
@@ -269,7 +303,7 @@ return function(app)
     -- Reopen rejected timesheet
     app:post("/api/v2/timesheets/:uuid/reopen", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local result, err = TimesheetQueries.reopen(self.params.uuid)
+            local result, err = TimesheetQueries.reopen(self.params.uuid, self.namespace.id)
 
             if err then
                 if err == "Timesheet not found" then
@@ -308,7 +342,11 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local params = RequestParser.parse_request(self)
 
-            if not params.entry_date or params.entry_date == "" then
+            -- Frontend sends `date`; accept either field name.
+            local entry_date = params.entry_date
+            if not entry_date or entry_date == "" then entry_date = params.date end
+
+            if not entry_date or entry_date == "" then
                 return error_response(400, "entry_date is required")
             end
 
@@ -330,13 +368,23 @@ return function(app)
                 return error_response(403, "Timesheet not found in this namespace")
             end
 
+            -- is_billable defaults to true; accept is_billable (frontend) or legacy billable.
+            local is_billable = true
+            local billable_param = params.is_billable
+            if billable_param == nil then billable_param = params.billable end
+            if billable_param ~= nil then
+                is_billable = billable_param == true or billable_param == "true"
+            end
+
             local entry, err = TimesheetQueries.createEntry({
                 timesheet_id = timesheet.internal_id,
-                entry_date = params.entry_date,
+                namespace_id = self.namespace.id,
+                user_uuid = timesheet.user_uuid,
+                entry_date = entry_date,
                 hours = tonumber(params.hours),
-                billable = params.billable == true or params.billable == "true",
+                is_billable = is_billable,
                 description = params.description,
-                project_uuid = params.project_uuid,
+                project_reference = params.project_reference,
                 category = params.category,
                 task_reference = params.task_reference
             })
@@ -354,15 +402,22 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local params = RequestParser.parse_request(self)
 
-            local updated, err = TimesheetQueries.updateEntry(self.params.entry_uuid, {
-                entry_date = params.entry_date,
-                hours = params.hours and tonumber(params.hours),
-                billable = params.billable == true or params.billable == "true",
-                description = params.description,
-                project_uuid = params.project_uuid,
-                category = params.category,
-                task_reference = params.task_reference
-            })
+            -- Only forward fields that were actually provided, mapped to real columns.
+            local update_fields = {}
+            local entry_date = params.entry_date or params.date
+            if entry_date and entry_date ~= "" then update_fields.entry_date = entry_date end
+            if params.hours ~= nil then update_fields.hours = tonumber(params.hours) end
+            if params.description ~= nil then update_fields.description = params.description end
+            if params.project_reference ~= nil then update_fields.project_reference = params.project_reference end
+            if params.task_reference ~= nil then update_fields.task_reference = params.task_reference end
+            if params.category ~= nil then update_fields.category = params.category end
+            local billable_param = params.is_billable
+            if billable_param == nil then billable_param = params.billable end
+            if billable_param ~= nil then
+                update_fields.is_billable = billable_param == true or billable_param == "true"
+            end
+
+            local updated, err = TimesheetQueries.updateEntry(self.params.entry_uuid, update_fields, self.namespace.id)
 
             if err then
                 if err == "Entry not found" then
@@ -378,7 +433,7 @@ return function(app)
     -- Delete entry
     app:delete("/api/v2/timesheets/entries/:entry_uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local deleted, err = TimesheetQueries.deleteEntry(self.params.entry_uuid)
+            local deleted, err = TimesheetQueries.deleteEntry(self.params.entry_uuid, self.namespace.id)
 
             if err then
                 if err == "Entry not found" then

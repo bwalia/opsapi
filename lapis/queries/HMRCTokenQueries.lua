@@ -15,6 +15,7 @@
 ]]
 
 local db = require("lapis.db")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 local HMRCTokenQueries = {}
 
@@ -42,18 +43,24 @@ end
 -- @param scope         string or nil
 -- @param expires_in    number  Seconds until expiry
 function HMRCTokenQueries.upsert(user_uuid, access_token, refresh_token, scope, expires_in)
+    -- hmrc_tokens.namespace_id is NOT NULL with no DB default. Resolve from
+    -- the user's namespace settings so the row is correctly tenant-scoped.
+    -- Returns 0 (the legacy default) if the user has no settings yet — safe
+    -- for downstream tenant-scoped queries because every existing row
+    -- pre-dating the NOT-NULL constraint already had namespace_id=0 too.
+    local namespace_id = NamespaceResolver.getByUuid(user_uuid)
     local expires_at_sql = string.format("NOW() + INTERVAL '%d seconds'", expires_in or 14400)
 
     db.query([[
-        INSERT INTO hmrc_tokens (user_uuid, access_token, refresh_token, scope, expires_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ]] .. expires_at_sql .. [[, NOW(), NOW())
+        INSERT INTO hmrc_tokens (user_uuid, namespace_id, access_token, refresh_token, scope, expires_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ]] .. expires_at_sql .. [[, NOW(), NOW())
         ON CONFLICT (user_uuid) DO UPDATE SET
             access_token  = EXCLUDED.access_token,
             refresh_token = EXCLUDED.refresh_token,
             scope         = EXCLUDED.scope,
             expires_at    = EXCLUDED.expires_at,
             updated_at    = NOW()
-    ]], user_uuid, access_token, refresh_token or ngx.null, scope or ngx.null)
+    ]], user_uuid, namespace_id, access_token, refresh_token or ngx.null, scope or ngx.null)
 end
 
 -- Get a valid (non-expired) token for a user.

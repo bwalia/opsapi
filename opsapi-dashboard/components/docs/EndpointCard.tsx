@@ -36,7 +36,7 @@ export function EndpointCard({ endpoint }: { endpoint: ParsedEndpoint }) {
   return (
     <article
       id={endpoint.id}
-      className="scroll-mt-20 rounded-xl border border-secondary-200 bg-white p-5 shadow-sm"
+      className="scroll-mt-20 rounded-xl border border-secondary-200 bg-surface p-5 shadow-sm"
     >
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-secondary-100 pb-4">
         <div className="min-w-0">

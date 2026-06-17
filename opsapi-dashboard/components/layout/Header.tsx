@@ -29,7 +29,7 @@ const ProfileDropdown = memo(function ProfileDropdown({
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose} aria-hidden="true" />
-      <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-secondary-200 py-2 z-20" role="menu" aria-label="User menu">
+      <div className="absolute right-0 mt-2 w-56 bg-surface-elevated rounded-xl shadow-xl border border-secondary-200 py-2 z-20" role="menu" aria-label="User menu">
         <div className="px-4 py-3 border-b border-secondary-100">
           <p className="text-sm font-medium text-secondary-900">
             {user?.first_name} {user?.last_name}
@@ -84,7 +84,7 @@ const MobileSearchModal = memo(function MobileSearchModal({
   return (
     <div className="fixed inset-0 z-50 sm:hidden">
       <div className="absolute inset-0 bg-secondary-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="absolute top-0 left-0 right-0 bg-white p-4 shadow-lg">
+      <div className="absolute top-0 left-0 right-0 bg-surface-elevated p-4 shadow-lg">
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <label htmlFor="mobile-search" className="sr-only">Search</label>
@@ -138,7 +138,7 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
 
   return (
     <>
-      <header className="sticky top-0 z-30 h-16 bg-white border-b border-secondary-200">
+      <header className="sticky top-0 z-30 h-16 bg-surface border-b border-secondary-200">
         <div className="flex items-center justify-between h-full px-4 sm:px-6">
           {/* Left Section */}
           <div className="flex items-center gap-2 sm:gap-4">

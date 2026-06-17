@@ -148,7 +148,7 @@ export default function PurchaseLedgerPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Expenses This Month</p>
@@ -162,7 +162,7 @@ export default function PurchaseLedgerPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Pending Approval</p>
@@ -176,7 +176,7 @@ export default function PurchaseLedgerPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Total Owed</p>
@@ -190,7 +190,7 @@ export default function PurchaseLedgerPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">VAT Reclaimable</p>
@@ -206,7 +206,7 @@ export default function PurchaseLedgerPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-secondary-200 p-4">
+      <div className="bg-surface rounded-xl border border-secondary-200 p-4">
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <label htmlFor="purchase-ledger-search" className="sr-only">Search expenses</label>
@@ -223,7 +223,7 @@ export default function PurchaseLedgerPage() {
           <select
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="px-4 py-2.5 rounded-lg border border-secondary-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            className="px-4 py-2.5 rounded-lg border border-secondary-300 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
             aria-label="Filter by status"
           >
             <option value="">All Statuses</option>
@@ -235,7 +235,7 @@ export default function PurchaseLedgerPage() {
           <select
             value={categoryFilter}
             onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
-            className="px-4 py-2.5 rounded-lg border border-secondary-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            className="px-4 py-2.5 rounded-lg border border-secondary-300 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
             aria-label="Filter by category"
           >
             <option value="">All Categories</option>
@@ -251,7 +251,7 @@ export default function PurchaseLedgerPage() {
       </div>
 
       {/* Expenses Table */}
-      <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+      <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -348,7 +348,7 @@ function CategoryBreakdown({ expenses }: { expenses: Expense[] }) {
   if (total === 0) return null;
 
   return (
-    <div className="bg-white rounded-xl border border-secondary-200 p-6">
+    <div className="bg-surface rounded-xl border border-secondary-200 p-6">
       <h3 className="text-sm font-semibold text-secondary-700 mb-4">Expense Breakdown by Category</h3>
       <div className="space-y-3">
         {sorted.map(([category, amount]) => {

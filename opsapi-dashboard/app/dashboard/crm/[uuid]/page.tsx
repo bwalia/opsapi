@@ -163,7 +163,7 @@ const EditAccountModal: React.FC<EditAccountModalProps> = ({ isOpen, onClose, on
           <div className="col-span-2">
             <label className="block text-sm font-medium text-secondary-700 mb-1">Status</label>
             <div className="relative">
-              <select name="status" value={formData.status} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer">
+              <select name="status" value={formData.status} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
@@ -172,7 +172,7 @@ const EditAccountModal: React.FC<EditAccountModalProps> = ({ isOpen, onClose, on
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Saving...' : 'Save Changes'}</button>
         </div>
       </form>
@@ -242,7 +242,7 @@ const AddContactToAccountModal: React.FC<AddContactToAccountModalProps> = ({ isO
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Adding...' : 'Add Contact'}</button>
         </div>
       </form>
@@ -309,7 +309,7 @@ const AddDealToAccountModal: React.FC<AddDealToAccountModalProps> = ({ isOpen, o
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Stage</label>
             <div className="relative">
-              <select name="stage" value={formData.stage} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer">
+              <select name="stage" value={formData.stage} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
                 {DEAL_STAGE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -327,11 +327,11 @@ const AddDealToAccountModal: React.FC<AddDealToAccountModalProps> = ({ isOpen, o
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Expected Close</label>
-            <input name="expected_close_date" type="date" value={formData.expected_close_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white" />
+            <input name="expected_close_date" type="date" value={formData.expected_close_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface" />
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Adding...' : 'Add Deal'}</button>
         </div>
       </form>
@@ -394,7 +394,7 @@ const AddActivityToAccountModal: React.FC<AddActivityToAccountModalProps> = ({ i
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Type</label>
             <div className="relative">
-              <select name="type" value={formData.type} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white cursor-pointer">
+              <select name="type" value={formData.type} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
                 {ACTIVITY_TYPE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -404,7 +404,7 @@ const AddActivityToAccountModal: React.FC<AddActivityToAccountModalProps> = ({ i
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Due Date</label>
-            <input name="due_date" type="date" value={formData.due_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white" />
+            <input name="due_date" type="date" value={formData.due_date} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface" />
           </div>
           <div className="col-span-2">
             <label className="block text-sm font-medium text-secondary-700 mb-1">Description</label>
@@ -412,7 +412,7 @@ const AddActivityToAccountModal: React.FC<AddActivityToAccountModalProps> = ({ i
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Adding...' : 'Add Activity'}</button>
         </div>
       </form>
@@ -763,14 +763,14 @@ function AccountDetailContent() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsEditOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             <Edit className="w-4 h-4" />
             Edit
           </button>
           <button
             onClick={() => setDeleteDialogOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-surface border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
           >
             <Trash2 className="w-4 h-4" />
             Delete
@@ -779,7 +779,7 @@ function AccountDetailContent() {
       </div>
 
       {/* Account Header */}
-      <div className="bg-white rounded-xl border border-secondary-200 p-6 shadow-sm">
+      <div className="bg-surface rounded-xl border border-secondary-200 p-6 shadow-sm">
         <div className="flex items-start gap-5">
           <div className="w-16 h-16 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0">
             <Building2 className="w-8 h-8 text-primary-600" />

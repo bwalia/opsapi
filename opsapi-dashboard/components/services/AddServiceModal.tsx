@@ -279,7 +279,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = memo(function AddService
             rows={2}
             className={cn(
               'w-full px-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
-              'bg-white text-secondary-900 placeholder-secondary-400',
+              'bg-surface text-secondary-900 placeholder-secondary-400',
               'focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500',
               'disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed',
               'border-secondary-300 hover:border-secondary-400',
@@ -300,7 +300,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = memo(function AddService
               disabled={isSubmitting || isLoadingIntegrations}
               className={cn(
                 'w-full flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm transition-all duration-200',
-                'bg-white text-secondary-900',
+                'bg-surface text-secondary-900',
                 'focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500',
                 'disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed',
                 errors.github_integration_id
@@ -329,7 +329,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = memo(function AddService
             </button>
 
             {isIntegrationDropdownOpen && integrations.length > 0 && (
-              <div className="absolute z-50 mt-1 w-full bg-white border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
+              <div className="absolute z-50 mt-1 w-full bg-surface border border-secondary-200 rounded-lg shadow-lg py-1 max-h-48 overflow-auto">
                 {integrations.map((integration) => (
                   <button
                     key={integration.id}

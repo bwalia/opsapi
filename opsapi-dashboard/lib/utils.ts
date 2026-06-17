@@ -200,3 +200,20 @@ export function getStatusColor(status: string): string {
 
   return statusColors[status.toLowerCase()] || 'bg-secondary-500/10 text-secondary-600';
 }
+
+// Pull a human-readable string out of an axios-style error. The API can reply with a
+// plain `{ error: "..." }` or, on a 500, the error-catalog envelope
+// `{ error: { message, title, ... } }`. Never hand a raw object to toast()/React.
+export function extractApiError(err: unknown, fallback: string): string {
+  const data = (err as { response?: { data?: unknown } })?.response?.data as
+    | { error?: unknown; message?: string; title?: string }
+    | undefined;
+  if (!data) return fallback;
+  const e = data.error;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') {
+    const eo = e as { message?: string; title?: string };
+    return eo.message || eo.title || fallback;
+  }
+  return data.message || data.title || fallback;
+}

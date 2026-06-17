@@ -89,7 +89,12 @@ function Errors.response(self, code, opts)
     -- ``self`` has already been torn down — inserts silently dropped. If
     -- the sync path ever becomes a hot-spot we'll move to a lua-resty-
     -- producer queue, not back to naked timers.
-    Occurrence.record({
+    -- Capture the occurrence UUID so the envelope can carry an
+    -- `occurrence_uuid` deep-link for admin (mirrors FastAPI). When the
+    -- audit insert fails (e.g. DB hiccup), Occurrence.record returns nil
+    -- and we just omit the field — clients gracefully degrade to
+    -- correlation_id-only.
+    local occurrence_uuid = Occurrence.record({
         self = self,
         code = resolved.code,
         catalog_uuid = resolved.catalog_uuid ~= "" and resolved.catalog_uuid or nil,
@@ -109,6 +114,9 @@ function Errors.response(self, code, opts)
     }
     if resolved.title and resolved.title ~= "" then
         envelope.title = resolved.title
+    end
+    if occurrence_uuid then
+        envelope.occurrence_uuid = occurrence_uuid
     end
     if opts.context and next(opts.context) then
         envelope.context = opts.context

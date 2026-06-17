@@ -1627,6 +1627,99 @@ return function(app)
         end)
     }))
 
+    -- =====================================================================
+    -- Frontend URLs (allowed_redirect_origins) — drives password reset
+    -- email links. See README.md → Password Reset Flow.
+    --
+    -- Two endpoints:
+    --   GET  /api/v2/admin/namespaces/:id/redirect-origins
+    --        → returns the current array. Empty array = no origins set
+    --          (runtime falls back to env-var FRONTEND_URL); NULL is
+    --          surfaced as empty array for client-simplicity.
+    --   PUT  /api/v2/admin/namespaces/:id/redirect-origins
+    --        body: { origins: ["https://app.example.com", ...] }
+    --        → replaces the array. Validation in
+    --          NamespaceQueries.updateAllowedRedirectOrigins:
+    --          http(s) only, canonicalised, deduped.
+    --
+    -- Auth: platform admin only. Not exposed to namespace owners
+    -- because the wrong allow-list can lock users out of their own
+    -- accounts; tightening to platform admin keeps it inside the
+    -- support team for now. Easy to widen later.
+    -- =====================================================================
+    app:get("/api/v2/admin/namespaces/:id/redirect-origins",
+        AuthMiddleware.requireAuth(function(self)
+            if not check_platform_admin(self.current_user) then
+                return error_response(403, "Platform admin access required")
+            end
+
+            local namespace = NamespaceQueries.show(self.params.id)
+            if not namespace then
+                return error_response(404, "Namespace not found")
+            end
+
+            local origins = NamespaceQueries.getAllowedRedirectOrigins(namespace.id)
+            return success_response({
+                namespace_id = namespace.id,
+                namespace_uuid = namespace.uuid,
+                namespace_slug = namespace.slug,
+                origins = origins,
+                -- Surface the canonical primary explicitly so the UI
+                -- can label it without re-implementing "first entry"
+                -- logic (and so a future change to "primary is a
+                -- separate column" doesn't ripple to the client).
+                primary_origin = origins[1] or nil,
+            })
+        end))
+
+    app:put("/api/v2/admin/namespaces/:id/redirect-origins",
+        AuthMiddleware.requireAuth(function(self)
+            if not check_platform_admin(self.current_user) then
+                return error_response(403, "Platform admin access required")
+            end
+
+            local namespace = NamespaceQueries.show(self.params.id)
+            if not namespace then
+                return error_response(404, "Namespace not found")
+            end
+
+            local params = RequestParser.parse_request(self)
+            local origins_input = params.origins
+            if origins_input == nil then
+                return error_response(400,
+                    "Missing 'origins' field — provide an array of URL strings")
+            end
+            if type(origins_input) ~= "table" then
+                return error_response(400,
+                    "'origins' must be an array of URL strings")
+            end
+
+            local before_origins = NamespaceQueries.getAllowedRedirectOrigins(namespace.id)
+
+            local updated, err = NamespaceQueries.updateAllowedRedirectOrigins(
+                namespace.id, origins_input
+            )
+            if not updated then
+                return error_response(400, err or "validation failed")
+            end
+
+            -- Audit hook — preserve the before/after for the activity
+            -- log so investigators can reconstruct who changed what.
+            audit(self, "update", "namespace_redirect_origins", namespace.uuid,
+                { origins = before_origins },
+                { origins = NamespaceQueries.getAllowedRedirectOrigins(namespace.id) })
+
+            local fresh = NamespaceQueries.getAllowedRedirectOrigins(namespace.id)
+            return success_response({
+                namespace_id = namespace.id,
+                namespace_uuid = namespace.uuid,
+                namespace_slug = namespace.slug,
+                origins = fresh,
+                primary_origin = fresh[1] or nil,
+                message = "Allowed redirect origins updated.",
+            })
+        end))
+
     -- Get namespace statistics (platform admin)
     app:get("/api/v2/admin/namespaces/:id/stats", AuthMiddleware.requireAuth(function(self)
         if not check_platform_admin(self.current_user) then

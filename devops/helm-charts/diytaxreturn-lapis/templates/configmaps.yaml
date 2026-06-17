@@ -23,6 +23,21 @@ data:
         fi
 
         echo "[bootstrap] PROJECT_CODE=${PROJECT_CODE:-<unset>}"
+
+        # Reconcile the migration ledger against the live schema BEFORE
+        # migrating. If lapis_migrations records a migration as applied
+        # but the relation it created is gone (DB restore drift, a
+        # migration once run against the wrong DB, a manual drop), Lapis
+        # would otherwise SKIP it and a later FK-dependent migration
+        # would die with `relation "X" does not exist` — crash-looping
+        # the pod (acc, 2026-05-14, 22h outage). reconcile() un-records
+        # such phantom entries so `lapis migrate` below re-applies them.
+        # Non-fatal: a failure here just leaves us where we were before.
+        echo "[bootstrap] Reconciling migration ledger against live schema..."
+        if ! lapis exec "require('scripts.reconcile-migrations').reconcile()"; then
+          echo "[bootstrap] Reconcile step errored (non-fatal) — proceeding to migrate." >&2
+        fi
+
         echo "[bootstrap] Running migrations..."
         # Retry migrations up to 5 times — Postgres may not be fully ready at postStart time.
         MIGRATE_RETRIES=5

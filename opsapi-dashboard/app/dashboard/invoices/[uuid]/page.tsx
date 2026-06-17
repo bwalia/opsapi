@@ -12,6 +12,8 @@ import {
   DollarSign,
   Edit2,
   X,
+  Download,
+  Eye,
 } from 'lucide-react';
 import { Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -25,6 +27,8 @@ import {
   type PaymentPayload,
   type InvoicePayload,
 } from '@/services/invoices.service';
+import { generateInvoicePdf, previewInvoicePdfUrl } from '@/lib/invoice-pdf';
+import { useNamespace } from '@/contexts/NamespaceContext';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -152,7 +156,7 @@ const AddLineItemModal: React.FC<AddLineItemModalProps> = ({ isOpen, onClose, on
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -265,7 +269,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
           <select
             value={formData.payment_method}
             onChange={(e) => setFormData((prev) => ({ ...prev, payment_method: e.target.value }))}
-            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+            className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
           >
             <option value="bank_transfer">Bank Transfer</option>
             <option value="credit_card">Credit Card</option>
@@ -302,7 +306,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -426,7 +430,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
             <select
               value={formData.currency}
               onChange={(e) => setFormData((prev) => ({ ...prev, currency: e.target.value }))}
-              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
             >
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
@@ -464,7 +468,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
           >
             Cancel
           </button>
@@ -484,6 +488,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
 function InvoiceDetailContent() {
   const params = useParams();
   const router = useRouter();
+  const { currentNamespace } = useNamespace();
   const uuid = params.uuid as string;
 
   // State
@@ -493,6 +498,7 @@ function InvoiceDetailContent() {
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // Fetch invoice data
   const fetchInvoice = useCallback(async () => {
@@ -515,6 +521,53 @@ function InvoiceDetailContent() {
   useEffect(() => {
     fetchInvoice();
   }, [fetchInvoice]);
+
+  // Download a polished, real-looking PDF of this invoice (client-side, no server).
+  const handleDownloadPdf = useCallback(() => {
+    if (!invoice) return;
+    try {
+      generateInvoicePdf(invoice, {
+        name: currentNamespace?.name || 'Your Company',
+      });
+    } catch (error) {
+      console.error('Failed to generate PDF:', error);
+      toast.error('Failed to generate PDF');
+    }
+  }, [invoice, currentNamespace]);
+
+  // Open an in-app preview of the same PDF (rendered to a blob URL for an iframe).
+  const handlePreviewPdf = useCallback(() => {
+    if (!invoice) return;
+    try {
+      const url = previewInvoicePdfUrl(invoice, {
+        name: currentNamespace?.name || 'Your Company',
+      });
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch (error) {
+      console.error('Failed to preview PDF:', error);
+      toast.error('Failed to preview PDF');
+    }
+  }, [invoice, currentNamespace]);
+
+  const closePreview = useCallback(() => {
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, []);
+
+  // Revoke any outstanding preview URL on unmount.
+  useEffect(() => {
+    return () => {
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    };
+  }, []);
 
   // Action handlers
   const handleSendInvoice = useCallback(async () => {
@@ -592,7 +645,7 @@ function InvoiceDetailContent() {
             <div className="w-32 h-4 bg-secondary-200 rounded animate-pulse" />
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-secondary-200 p-6">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-6">
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="w-full h-8 bg-secondary-100 rounded animate-pulse" />
@@ -645,10 +698,24 @@ function InvoiceDetailContent() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={handlePreviewPdf}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+          >
+            <Eye className="w-4 h-4" />
+            Preview
+          </button>
+          <button
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download PDF
+          </button>
           {canEdit && (
             <button
               onClick={() => setIsEditModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-white border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
             >
               <Edit2 className="w-4 h-4" />
               Edit
@@ -696,7 +763,7 @@ function InvoiceDetailContent() {
       {/* Invoice Details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Customer Info */}
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <h3 className="font-medium text-secondary-900 mb-3">Customer Information</h3>
           <div className="space-y-2 text-sm">
             <div>
@@ -713,7 +780,7 @@ function InvoiceDetailContent() {
         </div>
 
         {/* Invoice Info */}
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <h3 className="font-medium text-secondary-900 mb-3">Invoice Details</h3>
           <div className="space-y-2 text-sm">
             <div>
@@ -738,7 +805,7 @@ function InvoiceDetailContent() {
         </div>
 
         {/* Amount Summary */}
-        <div className="bg-white rounded-xl border border-secondary-200 p-5 shadow-sm">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-5 shadow-sm">
           <h3 className="font-medium text-secondary-900 mb-3">Amount Summary</h3>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
@@ -770,7 +837,7 @@ function InvoiceDetailContent() {
       </div>
 
       {/* Line Items */}
-      <div className="bg-white rounded-xl border border-secondary-200 shadow-sm">
+      <div className="bg-surface rounded-xl border border-secondary-200 shadow-sm">
         <div className="flex items-center justify-between p-5 border-b border-secondary-200">
           <h3 className="font-medium text-secondary-900">Line Items</h3>
           {canAddItems && (
@@ -846,7 +913,7 @@ function InvoiceDetailContent() {
       </div>
 
       {/* Payments */}
-      <div className="bg-white rounded-xl border border-secondary-200 shadow-sm">
+      <div className="bg-surface rounded-xl border border-secondary-200 shadow-sm">
         <div className="flex items-center justify-between p-5 border-b border-secondary-200">
           <h3 className="font-medium text-secondary-900">Payments</h3>
           {canRecordPayment && (
@@ -930,6 +997,37 @@ function InvoiceDetailContent() {
           invoice={invoice}
         />
       )}
+
+      {/* Invoice PDF Preview */}
+      <Modal
+        isOpen={!!previewUrl}
+        onClose={closePreview}
+        title={`Invoice ${invoice?.invoice_number || ''} — Preview`}
+        size="2xl"
+      >
+        <div className="space-y-3">
+          <div className="h-[70vh] w-full overflow-hidden rounded-lg border border-secondary-200 bg-secondary-50">
+            {previewUrl && (
+              <iframe src={previewUrl} title="Invoice preview" className="h-full w-full" />
+            )}
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={closePreview}
+              className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={handleDownloadPdf}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Download PDF
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

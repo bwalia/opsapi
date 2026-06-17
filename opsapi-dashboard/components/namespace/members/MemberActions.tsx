@@ -138,7 +138,7 @@ export const MemberActions = memo(function MemberActions({
 
       {isOpen && (
         <div
-          className="absolute right-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-secondary-200 py-1 z-50"
+          className="absolute right-0 mt-1 w-56 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-50"
           role="menu"
           aria-orientation="vertical"
         >

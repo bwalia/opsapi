@@ -210,7 +210,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-screen bg-white border-r border-secondary-200 transition-all duration-300 flex flex-col",
+          "fixed left-0 top-0 z-50 h-screen bg-surface border-r border-secondary-200 transition-all duration-300 flex flex-col",
           // Mobile: slide in/out
           "lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full",

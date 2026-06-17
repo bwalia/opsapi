@@ -55,6 +55,12 @@
 ]]
 
 local cjson = require("cjson")
+-- Encode empty Lua tables as JSON arrays ([]) rather than objects ({}); report
+-- payloads (balance sheet assets/liabilities/equity, trial balance, P&L, expense
+-- summary) carry list fields that may be empty, and the dashboard calls .map() on
+-- them. Without this an empty section serialises to {} and crashes the UI.
+cjson.encode_empty_table_as_object(false)
+local db = require("lapis.db")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local AccountingQueries = require("queries.AccountingQueries")
@@ -204,15 +210,26 @@ return function(app)
                 return api_response(400, nil, "account_type is required")
             end
 
+            -- Normal balance follows the account type (assets/expenses are debit-normal)
+            local normal_balance = data.normal_balance
+            if not normal_balance or normal_balance == "" then
+                if data.account_type == "asset" or data.account_type == "expense" then
+                    normal_balance = "debit"
+                else
+                    normal_balance = "credit"
+                end
+            end
+
             local account = AccountingQueries.createAccount({
                 namespace_id = self.namespace.id,
                 code = data.code,
                 name = data.name,
                 account_type = data.account_type,
+                sub_type = data.sub_type,
                 description = data.description,
-                parent_account_id = data.parent_account_id,
+                normal_balance = normal_balance,
+                parent_id = data.parent_id or data.parent_account_id,
                 is_active = data.is_active ~= false,
-                tax_rate = data.tax_rate,
                 currency = data.currency or "GBP"
             })
 
@@ -255,14 +272,21 @@ return function(app)
             local data = parse_json_body()
             local update_params = {}
             local allowed_fields = {
-                "code", "name", "account_type", "description",
-                "parent_account_id", "is_active", "tax_rate", "currency"
+                "code", "name", "account_type", "sub_type", "description",
+                "normal_balance", "is_active", "currency"
             }
 
             for _, field in ipairs(allowed_fields) do
                 if data[field] ~= nil then
                     update_params[field] = data[field]
                 end
+            end
+
+            -- Map parent_id (accept legacy parent_account_id alias)
+            if data.parent_id ~= nil then
+                update_params.parent_id = data.parent_id
+            elseif data.parent_account_id ~= nil then
+                update_params.parent_id = data.parent_account_id
             end
 
             if next(update_params) == nil then
@@ -517,7 +541,8 @@ return function(app)
             local data = parse_json_body()
             local update_params = {}
             local allowed_fields = {
-                "category", "description", "vat_rate", "vat_amount", "notes"
+                "category", "description", "vat_rate", "vat_amount",
+                "payee", "reference", "user_category"
             }
 
             for _, field in ipairs(allowed_fields) do
@@ -620,11 +645,12 @@ return function(app)
                 category = data.category,
                 vat_rate = data.vat_rate,
                 vat_amount = data.vat_amount,
-                supplier = data.supplier,
+                is_vat_reclaimable = data.is_vat_reclaimable,
+                vendor = data.vendor or data.supplier,
                 receipt_url = data.receipt_url,
                 notes = data.notes,
                 status = data.status or "pending",
-                submitted_by_user_uuid = self.current_user.uuid
+                submitted_by_uuid = self.current_user.uuid
             })
 
             if not expense then
@@ -667,13 +693,19 @@ return function(app)
             local update_params = {}
             local allowed_fields = {
                 "expense_date", "description", "amount", "category",
-                "vat_rate", "vat_amount", "supplier", "receipt_url", "notes"
+                "vat_rate", "vat_amount", "is_vat_reclaimable",
+                "vendor", "receipt_url", "notes"
             }
 
             for _, field in ipairs(allowed_fields) do
                 if data[field] ~= nil then
                     update_params[field] = data[field]
                 end
+            end
+
+            -- Accept legacy "supplier" alias from older clients
+            if data.supplier ~= nil and update_params.vendor == nil then
+                update_params.vendor = data.supplier
             end
 
             if next(update_params) == nil then
@@ -739,10 +771,6 @@ return function(app)
     app:post("/api/v2/accounting/expenses/:uuid/reject", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local data = parse_json_body()
-
-            if not data.reason or data.reason == "" then
-                return api_response(400, nil, "reason is required")
-            end
 
             local expense = AccountingQueries.getExpense(self.params.uuid)
             if not expense then
@@ -884,7 +912,8 @@ return function(app)
     ))
 
     -- GET /api/v2/accounting/reports/profit-loss - Profit & loss
-    app:get("/api/v2/accounting/reports/profit-loss", AuthMiddleware.requireAuth(
+    -- (also served at /reports/profit-and-loss to match the dashboard client)
+    local profit_loss_handler = AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local result = AccountingQueries.getProfitAndLoss(
                 self.namespace.id,
@@ -894,7 +923,9 @@ return function(app)
 
             return api_response(200, result)
         end)
-    ))
+    )
+    app:get("/api/v2/accounting/reports/profit-loss", profit_loss_handler)
+    app:get("/api/v2/accounting/reports/profit-and-loss", profit_loss_handler)
 
     -- GET /api/v2/accounting/reports/expense-summary - Expense summary
     app:get("/api/v2/accounting/reports/expense-summary", AuthMiddleware.requireAuth(
@@ -910,12 +941,15 @@ return function(app)
     ))
 
     -- GET /api/v2/accounting/dashboard/stats - Dashboard statistics
-    app:get("/api/v2/accounting/dashboard/stats", AuthMiddleware.requireAuth(
+    -- (also served at /reports/dashboard-stats to match the dashboard client)
+    local dashboard_stats_handler = AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local stats = AccountingQueries.getDashboardStats(self.namespace.id)
             return api_response(200, stats)
         end)
-    ))
+    )
+    app:get("/api/v2/accounting/dashboard/stats", dashboard_stats_handler)
+    app:get("/api/v2/accounting/reports/dashboard-stats", dashboard_stats_handler)
 
     ---------------------------------------------------------------------------
     -- AI Integration
@@ -956,7 +990,8 @@ return function(app)
     ))
 
     -- POST /api/v2/accounting/ai/vat-suggest - VAT suggestion
-    app:post("/api/v2/accounting/ai/vat-suggest", AuthMiddleware.requireAuth(
+    -- (also served at /ai/suggest-vat to match the dashboard client)
+    local vat_suggest_handler = AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local data = parse_json_body()
 
@@ -986,20 +1021,24 @@ return function(app)
 
             return api_response(200, result_or_err)
         end)
-    ))
+    )
+    app:post("/api/v2/accounting/ai/vat-suggest", vat_suggest_handler)
+    app:post("/api/v2/accounting/ai/suggest-vat", vat_suggest_handler)
 
     -- POST /api/v2/accounting/ai/query - Natural language query
     app:post("/api/v2/accounting/ai/query", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local data = parse_json_body()
 
-            if not data.question or data.question == "" then
+            local question = data.question or data.query
+
+            if not question or question == "" then
                 return api_response(400, nil, "question is required")
             end
 
             local ok, result_or_err = pcall(function()
                 return AccountingQueries.aiQuery(
-                    data.question,
+                    question,
                     self.namespace.id
                 )
             end)
@@ -1012,7 +1051,20 @@ return function(app)
                 return api_response(503, nil, "AI service unavailable")
             end
 
-            return api_response(200, result_or_err)
+            -- Reshape to the client AiQueryResponse contract { answer, data }
+            local payload = result_or_err
+            if type(payload) == "table" and payload.answer == nil then
+                payload = {
+                    answer = payload.interpretation or "",
+                    data = {
+                        query_type = payload.query_type,
+                        sql_hint = payload.sql_hint,
+                        parameters = payload.parameters
+                    }
+                }
+            end
+
+            return api_response(200, payload)
         end)
     ))
 

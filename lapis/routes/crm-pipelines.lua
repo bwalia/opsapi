@@ -86,7 +86,7 @@ return function(app)
     -- GET /api/v2/crm/pipelines/:uuid - Get pipeline
     app:get("/api/v2/crm/pipelines/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local pipeline = CrmQueries.getPipeline(self.params.uuid)
+            local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
             end
@@ -102,7 +102,7 @@ return function(app)
     -- PUT /api/v2/crm/pipelines/:uuid - Update pipeline
     app:put("/api/v2/crm/pipelines/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local pipeline = CrmQueries.getPipeline(self.params.uuid)
+            local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
             end
@@ -141,7 +141,7 @@ return function(app)
     -- DELETE /api/v2/crm/pipelines/:uuid - Soft delete pipeline
     app:delete("/api/v2/crm/pipelines/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local pipeline = CrmQueries.getPipeline(self.params.uuid)
+            local pipeline = CrmQueries.getPipeline(self.namespace.id, self.params.uuid)
             if not pipeline then
                 return api_response(404, nil, "Pipeline not found")
             end

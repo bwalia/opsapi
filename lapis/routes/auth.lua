@@ -6,11 +6,15 @@ local Global = require "helper.global"
 local JWTHelper = require "helper.jwt-helper"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
+local NamespaceAssignment = require "helper.namespace_assignment"
 local DeviceTokenQueries = require "queries.DeviceTokenQueries"
 local RateLimit = require("middleware.rate-limit")
 local Errors = require("lib.errors")
 local OTP = require("helper.otp")
 local RefreshToken = require("helper.refresh-token")
+local AuthCookies = require("helper.auth-cookies")
+local PasswordReset = require("helper.password-reset")
+local Mail = require("helper.mail")
 
 -- Rate limit configs
 local LOGIN_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:login" }     -- 10/min per IP
@@ -18,6 +22,52 @@ local REFRESH_LIMIT  = { rate = 30,  window = 60,  prefix = "auth:refresh" }   -
 local OAUTH_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:oauth" }     -- 10/min per IP
 local VALIDATE_LIMIT = { rate = 20,  window = 60,  prefix = "auth:validate" }  -- 20/min per IP
 local OTP_LIMIT      = { rate = 5,   window = 60,  prefix = "auth:2fa" }       -- 5/min per IP
+
+-- Password reset rate limits — strict, two layers
+--   FORGOT_LIMIT: per-IP, capped at 5/hour. Stops drive-by enumeration sweeps
+--   without inconveniencing a real user who might mistype their email a few times.
+--   RESET_LIMIT:  per-IP, capped at 10/min. The reset endpoint is cheap and
+--   self-rate-limited via single-use tokens, but stops a brute-force replay.
+local FORGOT_LIMIT = { rate = 5,   window = 3600, prefix = "auth:forgot" }
+local RESET_LIMIT  = { rate = 10,  window = 60,   prefix = "auth:reset"  }
+
+-- Frontend domains allowed to receive a reset link. The ``redirect_url``
+-- parameter on /auth/forgot-password is validated against this list
+-- before being interpolated into the email — anything else is silently
+-- replaced with the configured default. Prevents an attacker tricking
+-- a user into clicking a link to a phishing domain wrapped in a real
+-- email from us.
+--
+-- Set via env var ``PASSWORD_RESET_ALLOWED_ORIGINS`` (comma-separated).
+-- Falls back to the single ``FRONTEND_URL`` env var, then to localhost
+-- for local dev. SaaS deployments serving multiple frontends should
+-- list each here.
+local function get_allowed_reset_origins()
+    local raw = os.getenv("PASSWORD_RESET_ALLOWED_ORIGINS")
+    local origins = {}
+    if raw and raw ~= "" then
+        for origin in raw:gmatch("[^,]+") do
+            local trimmed = origin:match("^%s*(.-)%s*$")
+            if trimmed ~= "" then origins[trimmed] = true end
+        end
+    end
+    local fallback = os.getenv("FRONTEND_URL")
+    if fallback and fallback ~= "" then origins[fallback] = true end
+    if not next(origins) then
+        -- Local-dev safety net so engineers don't have to set env
+        -- vars to test the flow on their laptop.
+        origins["http://localhost:3000"] = true
+        origins["http://localhost:3847"] = true
+        origins["http://localhost"] = true
+    end
+    return origins
+end
+
+local function default_reset_origin()
+    local explicit = os.getenv("FRONTEND_URL")
+    if explicit and explicit ~= "" then return explicit end
+    return "http://localhost"
+end
 
 -- Helper function to parse JSON body
 local function parse_json_body()
@@ -38,11 +88,14 @@ end
 
 --- Build the full login response (user + token + namespaces + refresh_token).
 -- Shared by both login and 2FA verify to avoid duplication.
+-- @param self table Lapis request context (used by AuthCookies to
+--             resolve the cookie's Domain attribute from the
+--             calling tenant's Origin — see helper/auth-cookies.lua)
 -- @param userWithRoles table User record from UserQueries.show()
 -- @param user_id number Internal user ID
 -- @param device_info string|nil Optional device description for refresh token
 -- @return table JSON-ready response body
-local function build_login_response(userWithRoles, user_id, device_info)
+local function build_login_response(self, userWithRoles, user_id, device_info)
     local rolesArray = {}
     if userWithRoles.roles then
         for _, role in ipairs(userWithRoles.roles) do
@@ -123,11 +176,23 @@ local function build_login_response(userWithRoles, user_id, device_info)
     -- Issue an opaque refresh token (stored hashed in DB, revocable).
     -- Wrapped in pcall: if the refresh_tokens table doesn't exist yet (migration
     -- pending), login must still succeed — just without a refresh token.
+    --
+    -- The token is delivered to the client through TWO transports:
+    --   1. JSON body (``refresh_token`` field below) — for mobile/CLI
+    --      clients that don't speak cookies.
+    --   2. HttpOnly Secure cookie via AuthCookies.set — the canonical
+    --      web transport. JS-invisible so XSS can't read it; auto-sent
+    --      by the browser on every refresh request, no localStorage
+    --      handoff required. See helper/auth-cookies.lua for the full
+    --      security rationale.
+    -- Web clients should prefer the cookie and may treat the JSON
+    -- ``refresh_token`` as optional.
     local refresh_token_raw
     if user_id then
         local ok, rt_or_err, rt_err = pcall(RefreshToken.create, user_id, device_info)
         if ok and rt_or_err then
             refresh_token_raw = rt_or_err
+            pcall(AuthCookies.set, self, rt_or_err)
         else
             ngx.log(ngx.WARN, "[AUTH] Refresh token creation skipped: ",
                 tostring(ok and rt_err or rt_or_err))
@@ -283,7 +348,7 @@ return function(app)
 
         return {
             status = 200,
-            json = build_login_response(userWithRoles, user_id, device_info)
+            json = build_login_response(self, userWithRoles, user_id, device_info)
         }
     end))
 
@@ -330,6 +395,279 @@ return function(app)
         end
 
         return { status = 200, json = { message = "If the account exists, a new code has been sent" } }
+    end))
+
+    -- =====================================================================
+    -- Password Reset
+    -- =====================================================================
+    --
+    -- Two-step flow:
+    --   1. POST /auth/forgot-password { email, redirect_url? }
+    --      → always returns 200 (prevents email enumeration). If the
+    --        email exists, sends a one-time link to user's email.
+    --   2. POST /auth/reset-password  { token, new_password }
+    --      → validates the token, updates password, revokes all
+    --        refresh tokens (forces re-login on every device), returns
+    --        a generic success.
+    --
+    -- Security properties:
+    --   - Tokens are 256 bits of CSPRNG entropy, hashed with SHA-256
+    --     in the DB (plaintext only in the email link). See
+    --     helper/password-reset.lua.
+    --   - Single-use enforced atomically via UPDATE ... RETURNING.
+    --   - 30-minute TTL.
+    --   - Rate-limited per IP (5 forgot-requests/hour, 10 reset
+    --     attempts/min). The token itself is the strong gate; the
+    --     rate limit just stops resource abuse.
+    --   - Constant 200 on /forgot — no enumeration via timing or
+    --     status codes.
+    --   - On successful reset, ALL refresh tokens for the user are
+    --     revoked. An attacker holding a stolen session is kicked
+    --     out the moment the user resets.
+    --   - Email link points at the **namespace primary** — the first
+    --     entry in ``namespaces.allowed_redirect_origins``, set via the
+    --     admin UI. ``redirect_url`` from the client is ignored;
+    --     destination is admin-controlled, not caller-controlled.
+    -- =====================================================================
+    app:post("/auth/forgot-password", RateLimit.wrap(FORGOT_LIMIT, function(self)
+        local body = parse_json_body()
+        local email = body.email or self.params.email
+        -- ``redirect_url`` was previously honoured via an "echo back"
+        -- policy. We now always use the namespace primary so admins
+        -- control reset destinations from the UI without code changes;
+        -- any redirect_url supplied by the client is silently ignored.
+
+        -- Basic shape validation. Beyond this we deliberately give
+        -- back the same 200-OK response regardless of what the email
+        -- contains — see the enumeration note below.
+        if type(email) ~= "string" or #email < 3 or not email:find("@", 1, true) then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "email", reason = "invalid_format" },
+            })
+        end
+        email = email:lower():match("^%s*(.-)%s*$")
+
+        -- Generic success response — same shape whether the email
+        -- exists or not. Prevents an attacker from enumerating
+        -- registered emails by submitting a list and watching for
+        -- response differences.
+        local generic_ok = {
+            status = 200,
+            json = {
+                message = "If an account with that email exists, we've sent a reset link.",
+            },
+        }
+
+        -- Look up the user. Wrapped in pcall so a DB hiccup doesn't
+        -- leak through the enumeration mask via a 500 status.
+        local lookup_ok, user_or_err = pcall(UserQueries.findByEmail, email)
+        if not lookup_ok then
+            ngx.log(ngx.ERR, "[forgot-password] findByEmail failed: ",
+                tostring(user_or_err))
+            return generic_ok
+        end
+        local user = user_or_err
+        if not user or not user.id then
+            -- Email not registered. Return the same 200-OK as the
+            -- success path so the response is timing-stable.
+            return generic_ok
+        end
+
+        -- ────────────────────────────────────────────────────────────
+        -- Resolve which frontend origin to use in the email link.
+        --
+        -- Pick the origin to use in the email link.
+        --
+        -- Policy: **primary always wins.** The first entry in the
+        -- namespace allow-list (``namespaces.allowed_redirect_origins[1]``)
+        -- is the canonical destination for reset emails. Admins set it
+        -- via the admin UI — no code changes, no env-var updates, no
+        -- restart needed. Caller-supplied ``redirect_url`` is ignored;
+        -- destination is admin-controlled, not caller-controlled.
+        --
+        -- Fallback chain (only reached if the prior level is empty):
+        --   1. Namespace primary — first row of the namespace's
+        --      ``allowed_redirect_origins`` array.
+        --   2. Env-var primary — legacy ``FRONTEND_URL`` /
+        --      ``PASSWORD_RESET_ALLOWED_ORIGINS``. Inert once migration
+        --      489 has bootstrapped the namespace column.
+        --   3. ``default_reset_origin()`` — last-resort dev default
+        --      pointing at localhost. Only reachable when the namespace
+        --      column AND env vars are empty.
+        -- ────────────────────────────────────────────────────────────
+        local function canonicalise(url)
+            if type(url) ~= "string" or url == "" then return nil end
+            return url:match("^(https?://[^/]+)") or url
+        end
+
+        local origin
+        local user_ns = NamespaceQueries.getUserDefaultNamespace(user.id)
+        if user_ns and user_ns.id then
+            local ns_origins = NamespaceQueries.getAllowedRedirectOrigins(user_ns.id)
+            for _, o in ipairs(ns_origins or {}) do
+                local canon = canonicalise(o)
+                if canon then origin = canon; break end
+            end
+        end
+
+        if not origin then
+            for legacy_origin, _ in pairs(get_allowed_reset_origins()) do
+                origin = canonicalise(legacy_origin)
+                if origin then break end
+            end
+        end
+
+        if not origin then
+            origin = default_reset_origin()
+            ngx.log(ngx.WARN,
+                "[forgot-password] no allow-list configured for namespace; ",
+                "using env default. user_id=", user.id,
+                " namespace_id=", user_ns and user_ns.id or "nil",
+                " origin=", origin)
+        end
+
+        local ip = ngx.var.remote_addr
+        local raw_token, token_err = PasswordReset.create(user.id, ip)
+        if not raw_token then
+            ngx.log(ngx.ERR, "[forgot-password] token create failed for user=",
+                user.id, " err=", tostring(token_err))
+            -- Don't surface the error to the client — would let an
+            -- attacker probe for "user exists" via timing/error
+            -- differential. Log loud, return generic.
+            return generic_ok
+        end
+
+        -- Build the email and send via the existing async Mail helper.
+        -- The email template ``password_reset.etlua`` already exists —
+        -- we just need to provide the data.
+        local reset_url = origin .. "/reset-password?token=" .. raw_token
+        local app_name = os.getenv("APP_NAME") or "OpsAPI"
+
+        local send_ok, send_err = pcall(Mail.send, {
+            to = user.email,
+            subject = "Reset your " .. app_name .. " password",
+            template = "password_reset",
+            data = {
+                app_name = app_name,
+                email = user.email,
+                reset_url = reset_url,
+                expires_in = "30 minutes",
+            },
+            -- Non-prod debug context (stripped on prod by Mail.send).
+            triggered_by = {
+                user_uuid = user.uuid,
+                user_email = user.email,
+                source = "auth.forgot-password",
+            },
+        })
+        if not send_ok then
+            ngx.log(ngx.ERR, "[forgot-password] Mail.send failed for user=",
+                user.id, " err=", tostring(send_err))
+            -- Token is already stored; the user just won't get the
+            -- email. We still return generic 200 so we don't
+            -- distinguish "email infrastructure broken" from "email
+            -- not registered". An admin notice on Mail.send failures
+            -- is a separate concern.
+        end
+
+        return generic_ok
+    end))
+
+
+    app:post("/auth/reset-password", RateLimit.wrap(RESET_LIMIT, function(self)
+        local body = parse_json_body()
+        local token = body.token or self.params.token
+        local new_password = body.new_password or self.params.new_password
+            or body.password or self.params.password
+
+        if type(token) ~= "string" or #token < 16 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "token", reason = "invalid_format" },
+            })
+        end
+        if type(new_password) ~= "string" or #new_password < 8 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = {
+                    field = "new_password",
+                    reason = "too_short",
+                    min_length = 8,
+                },
+            })
+        end
+        if #new_password > 256 then
+            -- bcrypt silently truncates above 72 bytes; reject loudly
+            -- so users don't think their giant password is being
+            -- stored as typed.
+            return Errors.response(self, "VALIDATION_400", {
+                context = {
+                    field = "new_password",
+                    reason = "too_long",
+                    max_length = 256,
+                },
+            })
+        end
+
+        local user_id, err_code = PasswordReset.validateAndConsume(token)
+        if not user_id then
+            -- Map our internal error code to a clean envelope so the
+            -- frontend can show a precise message ("link expired" vs
+            -- "already used").
+            local reason = err_code or "invalid_token"
+            return Errors.response(self, "VALIDATION_400", {
+                status = 400,
+                context = {
+                    field = "token",
+                    reason = reason,
+                    action = "request_new_link",
+                    action_url = "/forgot-password",
+                },
+            })
+        end
+
+        -- Find the user the consumed token belongs to. Wrapped in
+        -- pcall so a missing user (race: account deleted between
+        -- token issue and consume) doesn't 500 the response.
+        local user_lookup_ok, user_row = pcall(function()
+            return db.query("SELECT id, uuid FROM users WHERE id = ? LIMIT 1",
+                user_id)
+        end)
+        if not user_lookup_ok or not user_row or #user_row == 0 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "token", reason = "user_not_found" },
+            })
+        end
+
+        -- Hash the new password and update. UserQueries.update takes
+        -- a uuid (not numeric id) per its contract — see queries
+        -- file. We hash here so a logging mishap can't accidentally
+        -- log the plaintext.
+        local hashed = Global.hashPassword(new_password)
+        local update_ok, update_err = pcall(UserQueries.update, user_row[1].uuid, {
+            password = hashed,
+        })
+        if not update_ok then
+            ngx.log(ngx.ERR, "[reset-password] password update failed for user=",
+                user_id, " err=", tostring(update_err))
+            return Errors.response(self, "SYSTEM_500")
+        end
+
+        -- Defence in depth — kick the user out of every device. If
+        -- the reset was triggered by an attacker stealing a session
+        -- (and the legitimate user noticed), we want their stolen
+        -- token revoked the moment the password changes.
+        pcall(RefreshToken.revokeAllForUser, user_id)
+
+        -- Also revoke any *other* outstanding reset tokens for this
+        -- user — defence in depth against an attacker holding a
+        -- second link from an earlier request.
+        pcall(PasswordReset.revokeAllForUser, user_id)
+
+        return {
+            status = 200,
+            json = {
+                message = "Your password has been reset. Please sign in.",
+            },
+        }
     end))
 
     -- Google OAuth Routes
@@ -487,6 +825,15 @@ return function(app)
                 oauth_id = google_user.id,
                 active = true
             })
+
+            -- Mirror the email/password sign-up flow: a brand-new user must
+            -- be added to the project namespace and given a default, or the
+            -- frontend's billing / settings pages 4xx with "Namespace not
+            -- found". Only runs on first-time sign-up — returning Google
+            -- users hit the early `if not user` branch and skip this.
+            if user then
+                NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
+            end
         end
 
         -- Get user with roles
@@ -548,6 +895,35 @@ return function(app)
             })
         end
 
+        -- Issue an opaque refresh token alongside the JWT, mirroring
+        -- /auth/login. Delivered ONLY via HttpOnly Secure cookie — never
+        -- in the redirect URL, because URL params leak through server
+        -- access logs, browser history, Referer headers, and browser
+        -- extensions. See helper/auth-cookies.lua for the full
+        -- rationale.
+        --
+        -- Without this, OAuth-signed-up users had no refresh_token at
+        -- all and the frontend fell through to the legacy JWT-only
+        -- refresh path, which 401s under certain proxy/JWT
+        -- configurations and forced an unnecessary re-login.
+        --
+        -- pcall mirrors /auth/login: if the refresh_tokens migration
+        -- hasn't run yet, OAuth login still succeeds — the user just
+        -- won't get refresh-on-401 until the migration lands.
+        local device_info = ngx.req.get_headers()["user-agent"]
+        if device_info and #device_info > 255 then
+            device_info = device_info:sub(1, 255)
+        end
+        if user.id then
+            local ok_rt, rt_or_err, rt_err = pcall(RefreshToken.create, user.id, device_info)
+            if ok_rt and rt_or_err then
+                pcall(AuthCookies.set, self, rt_or_err)
+            else
+                ngx.log(ngx.WARN, "[AUTH] OAuth refresh token creation skipped: ",
+                    tostring(ok_rt and rt_err or rt_or_err))
+            end
+        end
+
         -- Determine redirect URL based on client type
         -- If redirect_from contains 'desktop' or 'electron', use custom protocol
         -- Otherwise, use web frontend URL
@@ -556,7 +932,10 @@ return function(app)
         local final_url
 
         if is_desktop then
-            -- Desktop app: use custom protocol
+            -- Desktop app: use custom protocol. Desktop doesn't share
+            -- the browser's cookie jar so this leaves desktop OAuth
+            -- without a refresh token — the desktop client will need
+            -- a separate exchange step (out of scope for this fix).
             final_url = string.format("wsl-chat://auth/callback?token=%s", ngx.escape_uri(token))
         else
             -- Web app: use frontend_url from state (passed by frontend), fall back to env var
@@ -578,6 +957,13 @@ return function(app)
                 self.session[k] = nil
             end
         end
+
+        -- Clear the refresh-token cookie. Browser keeps the cookie
+        -- around indefinitely otherwise — even after the user logs
+        -- out — and would auto-include it on subsequent /auth/refresh
+        -- attempts, which would then succeed if the underlying DB
+        -- token wasn't also revoked. Belt-and-braces: zero out both.
+        pcall(AuthCookies.clear, self)
 
         -- Clear user's cart and deactivate device tokens
         local user_uuid = ngx.var.http_x_user_id
@@ -724,6 +1110,12 @@ return function(app)
                         json = { error = "Failed to create user" }
                     }
                 end
+
+                -- Mirror the email/password sign-up flow: a brand-new user
+                -- must be added to the project namespace and given a default,
+                -- or the frontend's billing / settings pages 4xx with
+                -- "Namespace not found". Only on first-time sign-up.
+                NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
             end
 
             -- Get user with roles
@@ -833,14 +1225,32 @@ return function(app)
 
     -- Token refresh endpoint with opaque refresh token + backward compat
     --
-    -- New flow:  POST /auth/refresh  { "refresh_token": "<opaque>" }
-    --            → validates opaque token, rotates it, issues new JWT + new refresh token
+    -- Token sources, in priority order:
+    --   1. JSON body / form ``refresh_token`` field (mobile, CLI, and
+    --      existing localStorage-based web sessions)
+    --   2. ``refresh_token`` HttpOnly cookie (modern web — set by
+    --      /auth/login + /auth/google/callback via AuthCookies)
+    --   3. ``Authorization: Bearer <jwt>`` legacy fallback
     --
-    -- Legacy:    POST /auth/refresh  (Authorization: Bearer <jwt>)
-    --            → re-signs the JWT (old behavior, for clients that haven't upgraded)
+    -- The cookie path is the canonical web transport because it's
+    -- XSS-safe (HttpOnly), CSRF-safe (SameSite=Strict), and never
+    -- traverses URL/log/history/Referer channels. See
+    -- helper/auth-cookies.lua for the full rationale.
     app:post("/auth/refresh", RateLimit.wrap(REFRESH_LIMIT, function(self)
         local params = parse_json_body()
         local refresh_token_raw = params.refresh_token or self.params.refresh_token
+
+        -- Cookie fallback when the body / form didn't carry one. We
+        -- check this BEFORE the legacy Authorization-header path so
+        -- modern web sessions (no localStorage refresh_token) hit the
+        -- well-tested opaque-rotation path instead of the brittle
+        -- JWT-resign fallback.
+        if (not refresh_token_raw or refresh_token_raw == "") then
+            local cookie_token = AuthCookies.read(self)
+            if cookie_token and cookie_token ~= "" then
+                refresh_token_raw = cookie_token
+            end
+        end
 
         -- ── New flow: opaque refresh token ──
         if refresh_token_raw and refresh_token_raw ~= "" then
@@ -923,6 +1333,15 @@ return function(app)
                 local ok_rotate, new_refresh = pcall(RefreshToken.rotate,
                     rt_data.id, rt_data.user_id, rt_data.family_id, device_info)
 
+                -- Persist the rotated token on the same two transports
+                -- as login: HttpOnly cookie for web, JSON body for
+                -- mobile/CLI. Browser auto-replaces the old cookie
+                -- (same name/path/domain) so the next refresh round
+                -- carries the new value with no client work required.
+                if ok_rotate and new_refresh then
+                    pcall(AuthCookies.set, self, new_refresh)
+                end
+
                 return {
                     status = 200,
                     json = {
@@ -975,9 +1394,20 @@ return function(app)
         local params = parse_json_body()
         local refresh_token_raw = params.refresh_token or self.params.refresh_token
 
+        -- Cookie-based clients send the refresh token via HttpOnly
+        -- cookie, not body. Read both so revocation works for every
+        -- transport. Always clear the cookie regardless — browsers
+        -- otherwise hold on to it forever and would silently
+        -- "re-login" the user on the next refresh.
+        if (not refresh_token_raw or refresh_token_raw == "") then
+            refresh_token_raw = AuthCookies.read(self)
+        end
+
         if refresh_token_raw and refresh_token_raw ~= "" then
             pcall(RefreshToken.revoke, refresh_token_raw)
         end
+
+        pcall(AuthCookies.clear, self)
 
         return {
             status = 200,

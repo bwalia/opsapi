@@ -40,6 +40,7 @@ show_help() {
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
+    echo "  -D, --dashboard-dev   Run the Next.js dashboard in dev mode (hot reload, no image build)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Preset Environments:${NC}"
@@ -102,6 +103,7 @@ TARGET_ENV=""
 CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
+DASHBOARD_DEV=false
 PROJECT_CODE=""
 APEX_DOMAIN=""
 ADMIN_EMAIL=""
@@ -155,6 +157,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -C|--ci)
             CI_MODE=true
+            shift
+            ;;
+        -D|--dashboard-dev)
+            DASHBOARD_DEV=true
             shift
             ;;
         -d|--domain)
@@ -337,10 +343,13 @@ validate_project_code() {
     local input="$1"
     local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business core_only"
 
-    # Split on commas and validate each individual code
-    local IFS=','
+    # Split on commas and validate each individual code.
+    # NOTE: scope IFS=',' to just the `read` so the whitespace-split loop below
+    # over $VALID_CODES still works. `local IFS=','` at function scope would
+    # make every later word-split in this function comma-delimited, which
+    # caused "all" to be rejected even though it is in the whitelist.
     local codes
-    read -ra codes <<< "$input"
+    IFS=',' read -ra codes <<< "$input"
     for code in "${codes[@]}"; do
         # Trim whitespace
         code=$(echo "$code" | xargs)
@@ -530,12 +539,35 @@ prompt_environment() {
     done
 }
 
+# Function to get Frontend URL based on environment
+# Pattern: local → http://localhost:3033, prod → https://domain, other → https://{env}.domain
+get_frontend_url() {
+    local env="$1"
+    local proto="$2"
+
+    case "$env" in
+        local)
+            echo "http://localhost:3033"
+            ;;
+        prod)
+            local prod_proto="${proto:-https}"
+            echo "${prod_proto}://${BASE_DOMAIN}"
+            ;;
+        *)
+            local remote_proto="${proto:-https}"
+            echo "${remote_proto}://${env}.${BASE_DOMAIN}"
+            ;;
+    esac
+}
+
 # Function to check and update .env file
 check_and_update_env() {
     local target_env="$1"
     local proto="$2"
     local api_url
     api_url=$(get_api_url "$target_env" "$proto")
+    local frontend_url
+    frontend_url=$(get_frontend_url "$target_env" "$proto")
 
     if [[ -z "$api_url" ]]; then
         echo -e "${RED}[!] Error: Invalid environment '$target_env'${NC}"
@@ -554,7 +586,7 @@ check_and_update_env() {
     fi
 
     # Variables to check and update
-    local vars_to_check=("NEXT_PUBLIC_API_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
+    local vars_to_check=("NEXT_PUBLIC_API_URL" "FRONTEND_URL" "GOOGLE_REDIRECT_URI" "KEYCLOAK_REDIRECT_URI")
     local needs_update=false
     local updates_made=()
 
@@ -576,6 +608,9 @@ check_and_update_env() {
         case "$var" in
             NEXT_PUBLIC_API_URL)
                 expected_value="$api_url"
+                ;;
+            FRONTEND_URL)
+                expected_value="$frontend_url"
                 ;;
             GOOGLE_REDIRECT_URI)
                 expected_value="${api_url}/auth/google/callback"
@@ -633,6 +668,13 @@ check_and_update_env() {
                 echo "NEXT_PUBLIC_API_URL=${api_url}" >> "$ENV_FILE"
             fi
 
+            # Update FRONTEND_URL
+            if grep -q "^FRONTEND_URL=" "$ENV_FILE"; then
+                sed -i.tmp "s|^FRONTEND_URL=.*|FRONTEND_URL=${frontend_url}|" "$ENV_FILE"
+            else
+                echo "FRONTEND_URL=${frontend_url}" >> "$ENV_FILE"
+            fi
+
             # Update GOOGLE_REDIRECT_URI
             if grep -q "^GOOGLE_REDIRECT_URI=" "$ENV_FILE"; then
                 sed -i.tmp "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback|" "$ENV_FILE"
@@ -656,6 +698,7 @@ check_and_update_env() {
             # Show updated values
             echo -e "${CYAN}Updated values:${NC}"
             echo -e "  NEXT_PUBLIC_API_URL=${api_url}"
+            echo -e "  FRONTEND_URL=${frontend_url}"
             echo -e "  GOOGLE_REDIRECT_URI=${api_url}/auth/google/callback"
             echo -e "  KEYCLOAK_REDIRECT_URI=${api_url}/auth/callback"
             echo ""
@@ -664,6 +707,46 @@ check_and_update_env() {
         fi
     else
         echo -e "${GREEN}[+] All environment URLs are correctly configured!${NC}"
+    fi
+
+    # ── Ensure OTP_SUPPRESS_FOR_EMAIL_REGEX covers required sinks ─────
+    # Lapis attempts real SMTP delivery for any recipient that doesn't
+    # match this regex. Three known non-deliverable destinations on
+    # non-prod envs generate Mail Delivery Subsystem bounces back to
+    # SMTP_FROM_EMAIL and flood that inbox:
+    #   - legacy `diytaxreturnmail+e2e-…@gmail.com` E2E pattern
+    #   - `*@e2e.invalid` E2E sink (RFC 6761 reserved TLD)
+    #   - `*@admin.com` test-admin user (MX times out to 127.0.0.1)
+    # helper/mail.lua gates the suppression on is_production_env, so
+    # injecting a default in prod would be a no-op; we still skip it
+    # on prod to avoid surprising SREs who may want suppression off.
+    #
+    # If the line exists but is missing one of the required patterns
+    # (e.g. an older deploy left `@e2e\.invalid$`-only), extend it
+    # in place rather than overwrite — preserves any custom additions.
+    if [[ "$target_env" != "prod" ]]; then
+        local default_regex='^diytaxreturnmail\+e2e-.*@gmail\.com$|@e2e\.invalid$|@admin\.com$'
+        local required_patterns=('@e2e\.invalid$' '@admin\.com$')
+        local current_line current_value new_value pat
+        current_line=$(grep "^OTP_SUPPRESS_FOR_EMAIL_REGEX=" "$ENV_FILE" | head -1)
+        if [[ -z "$current_line" ]]; then
+            echo -e "${YELLOW}[!] OTP_SUPPRESS_FOR_EMAIL_REGEX missing — appending default sink regex${NC}"
+            echo "OTP_SUPPRESS_FOR_EMAIL_REGEX=$default_regex" >> "$ENV_FILE"
+        else
+            current_value="${current_line#OTP_SUPPRESS_FOR_EMAIL_REGEX=}"
+            new_value="$current_value"
+            for pat in "${required_patterns[@]}"; do
+                if [[ "$new_value" != *"$pat"* ]]; then
+                    new_value="$new_value|$pat"
+                fi
+            done
+            if [[ "$new_value" != "$current_value" ]]; then
+                echo -e "${YELLOW}[!] OTP_SUPPRESS_FOR_EMAIL_REGEX missing required patterns — extending${NC}"
+                grep -v "^OTP_SUPPRESS_FOR_EMAIL_REGEX=" "$ENV_FILE" > "${ENV_FILE}.tmp"
+                mv "${ENV_FILE}.tmp" "$ENV_FILE"
+                echo "OTP_SUPPRESS_FOR_EMAIL_REGEX=$new_value" >> "$ENV_FILE"
+            fi
+        fi
     fi
 
     return 0
@@ -959,11 +1042,16 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
-# Build docker compose command based on CI mode
-# CI mode uses a separate compose file without dev volume mounts
+# Build docker compose command based on CI / dashboard-dev mode
+# CI mode uses a separate compose file without dev volume mounts.
+# Dashboard-dev mode layers an override that runs Next.js via `next dev`
+# (hot reload, source bind-mounted) instead of building the production image.
 if $CI_MODE; then
     echo -e "${BLUE}[i] CI/CD mode enabled - using docker-compose.ci.yml (no dev volume mounts)${NC}"
     COMPOSE_CMD="docker compose -f docker-compose.ci.yml"
+elif $DASHBOARD_DEV; then
+    echo -e "${BLUE}[i] Dashboard dev mode enabled - Next.js runs via 'next dev' with hot reload (no image build)${NC}"
+    COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.dashboard-dev.yml"
 else
     COMPOSE_CMD="docker compose"
 fi
@@ -1100,9 +1188,23 @@ else
     })"
 fi
 
-if ! run_lapis_exec "$SETUP_LUA_CMD"; then
+# The setup script is idempotent. `lapis exec` occasionally hits an
+# intermittent OpenResty worker crash (SIGSEGV) on a cold/just-reloaded worker;
+# nginx respawns the worker, so a retry reliably succeeds. Retry a few times
+# before giving up rather than failing the whole start on a transient blip.
+SETUP_OK=false
+for attempt in 1 2 3; do
+    if run_lapis_exec "$SETUP_LUA_CMD"; then
+        SETUP_OK=true
+        break
+    fi
+    echo -e "${YELLOW}[!] Namespace setup attempt ${attempt}/3 failed (transient worker crash); retrying...${NC}"
+    sleep 2
+done
+
+if ! $SETUP_OK; then
     echo ""
-    echo -e "${RED}[!] Namespace setup failed. Inspect container logs:${NC}"
+    echo -e "${RED}[!] Namespace setup failed after 3 attempts. Inspect container logs:${NC}"
     echo -e "${YELLOW}    docker logs ${CONTAINER_NAME}${NC}"
     exit 1
 fi
@@ -1115,32 +1217,72 @@ sleep 5
 HOSTNAME="opsapi-dev.local"
 K3S_LB_IP=127.0.0.1
 HOSTS_FILE="/etc/hosts"
+DESIRED_ENTRY="$K3S_LB_IP $HOSTNAME"
 
-echo "[+] Removing lines matching '$HOSTNAME' from $HOSTS_FILE"
+# ------------------------------------------------------------------
+# Map opsapi-dev.local -> 127.0.0.1 in /etc/hosts.
+#
+# This is purely a convenience: the stack is always reachable at
+# http://127.0.0.1:<port> regardless. So editing /etc/hosts must NEVER block
+# startup and must NEVER prompt for a sudo password. We write only when we can do
+# so without prompting; otherwise we print a friendly "add this line yourself"
+# hint and carry on.
+# ------------------------------------------------------------------
 
-# Backup before change
-sudo cp "$HOSTS_FILE" "$HOSTS_FILE.bak"
+# Escape dots so the grep below matches literally (127.0.0.1, opsapi-dev.local).
+_HOST_RE="${HOSTNAME//./\\.}"
+_IP_RE="${K3S_LB_IP//./\\.}"
 
-# Delete lines containing the host entry (cross-platform sed -i)
-if [[ "$(uname)" == "Darwin" ]]; then
-    sudo sed -i '' "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
+if grep -qE "^[[:space:]]*${_IP_RE}[[:space:]]+${_HOST_RE}([[:space:]]|\$)" "$HOSTS_FILE" 2>/dev/null; then
+    # Already correct — nothing to do, and crucially no sudo needed. This is the
+    # common case on every run after the first.
+    echo -e "${GREEN}[+] /etc/hosts already maps ${HOSTNAME} -> ${K3S_LB_IP}; nothing to do${NC}"
 else
-    sudo sed -i "/${HOSTNAME//./\\.}/d" "$HOSTS_FILE"
-fi
-
-echo "[+] House keeping Done. Backup saved as $HOSTS_FILE.bak"
-
-# Check if the entry already exists
-if grep -q "$HOSTNAME" $HOSTS_FILE; then
-    echo "[+] Updating existing entry for $HOSTNAME"
-    if [[ "$(uname)" == "Darwin" ]]; then
-        sudo sed -i '' "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+    # Work out how (or whether) we can write to /etc/hosts WITHOUT ever prompting.
+    # start.sh must never block on a sudo password prompt, so we only use sudo
+    # when it is non-interactive: passwordless sudo, or credentials the user has
+    # already cached this session (e.g. by running `sudo -v` first). Anything
+    # that would prompt is treated as "can't edit" and we fall back to the hint.
+    HOSTS_SUDO=""
+    CAN_EDIT_HOSTS=true
+    if [ "$(id -u)" -eq 0 ] || [ -w "$HOSTS_FILE" ]; then
+        HOSTS_SUDO=""
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        HOSTS_SUDO="sudo -n"   # non-interactive sudo only — never prompts
     else
-        sudo sed -i "s/^.*$HOSTNAME\$/$K3S_LB_IP $HOSTNAME/" $HOSTS_FILE
+        CAN_EDIT_HOSTS=false
     fi
-else
-    echo "[+] Adding new entry: $K3S_LB_IP $HOSTNAME"
-    echo "$K3S_LB_IP $HOSTNAME" | sudo tee -a $HOSTS_FILE > /dev/null
+
+    if [ "$CAN_EDIT_HOSTS" = true ]; then
+        echo "[+] Configuring ${HOSTNAME} -> ${K3S_LB_IP} in $HOSTS_FILE"
+
+        # Best-effort backup; not fatal if it fails.
+        $HOSTS_SUDO cp "$HOSTS_FILE" "$HOSTS_FILE.bak" 2>/dev/null || true
+
+        # Drop any stale entry for the host (cross-platform sed -i), then append
+        # the fresh mapping. If any step fails (e.g. not actually a sudoer), fall
+        # through to the manual hint instead of leaving a half-applied change.
+        if [[ "$(uname)" == "Darwin" ]]; then
+            $HOSTS_SUDO sed -i '' "/${_HOST_RE}/d" "$HOSTS_FILE" 2>/dev/null || CAN_EDIT_HOSTS=false
+        else
+            $HOSTS_SUDO sed -i "/${_HOST_RE}/d" "$HOSTS_FILE" 2>/dev/null || CAN_EDIT_HOSTS=false
+        fi
+
+        if [ "$CAN_EDIT_HOSTS" = true ] && echo "$DESIRED_ENTRY" | $HOSTS_SUDO tee -a "$HOSTS_FILE" >/dev/null 2>&1; then
+            echo -e "${GREEN}[+] Added '${DESIRED_ENTRY}' to ${HOSTS_FILE} (backup: ${HOSTS_FILE}.bak)${NC}"
+        else
+            CAN_EDIT_HOSTS=false
+        fi
+    fi
+
+    if [ "$CAN_EDIT_HOSTS" != true ]; then
+        echo -e "${YELLOW}[!] Skipping the /etc/hosts update — would need a sudo password (not prompting).${NC}"
+        echo -e "${YELLOW}    This step is optional: everything still works at http://127.0.0.1:<port>.${NC}"
+        echo -e "${YELLOW}    To also use http://${HOSTNAME}, add this line to ${HOSTS_FILE} yourself:${NC}"
+        echo -e "${CYAN}        ${DESIRED_ENTRY}${NC}"
+        echo -e "${YELLOW}    e.g.  echo '${DESIRED_ENTRY}' | sudo tee -a ${HOSTS_FILE}${NC}"
+        echo -e "${YELLOW}    Tip: run 'sudo -v' once before start.sh and it'll be applied automatically.${NC}"
+    fi
 fi
 
 sleep 5

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import ThemeStyles from './ThemeStyles';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
 import { NamespaceProvider } from '@/contexts/NamespaceContext';
@@ -123,6 +124,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
   return (
     <NamespaceProvider>
       <PermissionsProvider>
+        <ThemeStyles />
         <div className="min-h-screen bg-secondary-50">
           {/* Sidebar */}
           <Sidebar

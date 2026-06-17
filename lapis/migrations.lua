@@ -42,8 +42,10 @@ local function skip_migration(name, feature)
 end
 
 -- Helper function to conditionally load migration modules
+-- `feature` may be a single feature string or a list of feature strings;
+-- the module loads if the active PROJECT_CODE enables ANY of them.
 local function load_if_enabled(feature, module_name)
-    if ProjectConfig.isFeatureEnabled(feature) then
+    if ProjectConfig.isAnyFeatureEnabled(feature) then
         local ok, module = pcall(require, module_name)
         if ok then
             return module
@@ -64,8 +66,13 @@ local ecommerce_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "
 local production_schema_upgrade = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "production-schema-upgrade") or {}
 local order_management_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE,
     "migrations.order-management-enhancement") or {}
-local payment_tracking_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.payment-tracking") or
-    {}
+-- payment-tracking holds the standalone `payments` table (steps 1-2) AND
+-- order-coupled steps (3-10 alter the ecommerce `orders` table). Load the
+-- module under ecommerce OR tax_copilot so tax_copilot can get the shared
+-- `payments` table; the order-coupled keys below stay gated on ECOMMERCE only.
+local payment_tracking_migrations = load_if_enabled(
+    { ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT },
+    "migrations.payment-tracking") or {}
 local stripe_integration_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.stripe-integration") or
     {}
 local multi_currency_migrations = load_if_enabled(ProjectConfig.FEATURES.ECOMMERCE, "migrations.multi-currency-support") or
@@ -85,6 +92,15 @@ local fix_delivery_request_constraint = load_if_enabled(ProjectConfig.FEATURES.D
 local hospital_crm_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-crm") or {}
 local hospital_care_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-care-management") or {}
 local hospital_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.HOSPITAL, "migrations.hospital-menu-items") or {}
+
+-- Tax Copilot menu items
+local tax_copilot_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-copilot-menu-items") or {}
+
+-- Tax Copilot categories management (namespace_id column + Categories menu item)
+local tax_categories_mgmt_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-categories-management") or {}
+
+-- Tax Profile Guidance: opsApi-owned per-profile HMRC guidance (form, persona, rules)
+local tax_profile_guidance_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.tax-profile-guidance") or {}
 
 -- Notifications
 local notification_migrations = load_if_enabled(ProjectConfig.FEATURES.NOTIFICATIONS, "migrations.notifications") or {}
@@ -132,14 +148,23 @@ local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- My Income (tax_copilot feature) — manually-entered income source-of-truth
 local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
 
+-- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
+-- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
+-- once multiple project codes need it. See migrations/billing-system.lua.
+local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.billing-system") or {}
+
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
+local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
+local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
+local timesheet_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-menu-items") or {}
 
 -- Invoicing
 local invoicing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-system") or {}
+local invoicing_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.invoicing-menu-items") or {}
 
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
@@ -147,6 +172,10 @@ local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVO
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
 local accounting_hmrc_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-hmrc-categories") or {}
+local accounting_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-menu-items") or {}
+
+-- Theme system (platform-level; enabled for every preset)
+local theme_system_migrations = load_if_enabled(ProjectConfig.FEATURES.THEMES, "migrations.theme-system") or {}
 
 -- Kafka/Audit (always loaded - infrastructure)
 local kafka_audit_migrations = require("migrations.kafka-audit-system")
@@ -155,27 +184,43 @@ local kafka_audit_migrations = require("migrations.kafka-audit-system")
 -- HELPER FUNCTIONS FOR CONDITIONAL MIGRATIONS
 -- =============================================================================
 
--- Returns the migration function or a skip function (with tracking)
+-- Human-readable label for a feature spec (string or list of strings),
+-- used for migration tracking / skip logs. {"ecommerce","tax_copilot"} → "ecommerce+tax_copilot"
+local function feature_label(feature)
+    if type(feature) == "table" then
+        return table.concat(feature, "+")
+    end
+    return feature
+end
+
+-- Returns the migration function or a skip function (with tracking).
+-- `feature` is a single feature string OR a list of feature strings; the
+-- migration runs if the active PROJECT_CODE enables ANY of them. This lets a
+-- single table be shared across project codes, e.g.
+--   conditional({ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT}, fn)
 local function conditional(feature, migration_func)
-    if ProjectConfig.isFeatureEnabled(feature) and migration_func then
+    local label = feature_label(feature)
+    if ProjectConfig.isAnyFeatureEnabled(feature) and migration_func then
         return function(...)
-            MigrationTracker.recordRan(feature, feature)
+            MigrationTracker.recordRan(label, label)
             return migration_func(...)
         end
     end
-    return skip_migration(feature, feature)
+    return skip_migration(label, label)
 end
 
--- Returns the migration from an array or a skip function (with tracking)
+-- Returns the migration from an array or a skip function (with tracking).
+-- `feature` may be a single feature string or a list (OR semantics) — see conditional().
 local function conditional_array(feature, migrations_array, index)
-    local name = feature .. "[" .. tostring(index) .. "]"
-    if ProjectConfig.isFeatureEnabled(feature) and migrations_array and migrations_array[index] then
+    local label = feature_label(feature)
+    local name = label .. "[" .. tostring(index) .. "]"
+    if ProjectConfig.isAnyFeatureEnabled(feature) and migrations_array and migrations_array[index] then
         return function(...)
-            MigrationTracker.recordRan(name, feature)
+            MigrationTracker.recordRan(name, label)
             return migrations_array[index](...)
         end
     end
-    return skip_migration(name, feature)
+    return skip_migration(name, label)
 end
 
 -- Dry-run: preview what would run/skip without touching the DB.
@@ -639,9 +684,18 @@ local _migrations = {
         6),
     ['53_create_patient_documents_table'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_crm_migrations, 7),
 
-    -- Payment Tracking (conditional on ecommerce)
-    ['54_create_payments_table'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 1),
-    ['55_add_payment_indexes'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 2),
+    -- Payment Tracking.
+    -- The `payments` table + its indexes are SHARED across ecommerce and
+    -- tax_copilot: the table is standalone (order_id/user_id are plain nullable
+    -- integers with no FK constraint), so it creates cleanly under tax_copilot
+    -- where the ecommerce `orders` table does not exist. A tax-service payment
+    -- is simply a row with user_id set and order_id NULL.
+    ['54_create_payments_table'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT }, payment_tracking_migrations, 1),
+    ['55_add_payment_indexes'] = conditional_array({ ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT }, payment_tracking_migrations, 2),
+    -- Steps 56-63 stay ECOMMERCE-only: they alter/extend the `orders` table
+    -- (add payment_id, status constraints, tracking) and create order-centric
+    -- tables (order_status_history, refunds). Under pure tax_copilot `orders`
+    -- doesn't exist, so widening these would fail at key 56.
     ['56_add_payment_id_to_orders'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 3),
     ['57_update_order_status_enum'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations, 4),
     ['58_create_order_status_history'] = conditional_array(ProjectConfig.FEATURES.ECOMMERCE, payment_tracking_migrations,
@@ -970,6 +1024,15 @@ local _migrations = {
         kanban_project_migrations, 39),
     ['249_create_kanban_comment_reply_trigger'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_project_migrations, 40),
+    -- Deferred FK-default repairs. Keyed in the 76x range so they run after every
+    -- table/column above has been created (migrations run in sorted-key order).
+    -- [41] drops the bogus DEFAULT 0 on kanban_tasks.parent_task_id / sprint_id
+    -- (a 0 violates the self/sprint FK on tasks created without a parent/sprint).
+    ['760_kanban_drop_fk_defaults'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 41),
+    -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
+    -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
+    ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
     ['250_create_kanban_time_entries_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_enhancement_migrations, 1),
     ['251_add_kanban_time_entries_indexes'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
@@ -1204,6 +1267,7 @@ local _migrations = {
     ['437_profile_seed_new_conditional_rules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 34),
     ['438_tax_namespace_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 42),
     ['439_profile_client_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 35),
+    ['440_profile_question_business_profiles'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 36),
     ['441_create_classification_training_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 43),
     ['458_tax_seed_accountant_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 44),
     ['459_tax_merge_overlapping_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 45),
@@ -1211,16 +1275,243 @@ local _migrations = {
     ['461_tax_seed_accountant_reference_data'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 47),
     ['462_tax_add_profile_profession'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 48),
     ['463_tax_add_classification_fields'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 49),
+
+    -- Error catalog + i18n notification system (from main)
     ['464_create_error_catalog_schema'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 50),
     ['465_seed_error_catalog_english'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 51),
     ['466_seed_notification_catalog_codes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 52),
     ['467_seed_classify_partial_code'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 53),
 
+    -- Tax Copilot menu items (468-471, from main)
+    ['468_seed_tax_menu_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 1),
+    ['469_seed_tax_modules'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 2),
+    ['470_grant_tax_permissions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 3),
+    ['471_enable_tax_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 4),
+    ['472_tax_training_data_profile_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 54),
+
+    -- HMRC MTD API field bridging + calculations (from hmrc-mtd-preview-calc branch).
+    -- Renumbered from 464-469 → 473-478 during merge to sit after main's migrations.
+    -- The corresponding tax_copilot_migrations step indices shifted from 50-55 → 55-60.
+    ['473_tax_add_mtd_field_name_column']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 55),
+    ['474_tax_backfill_mtd_field_name']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 56),
+    ['475_tax_add_new_mtd_categories']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 57),
+    ['476_tax_add_mtd_check_constraint']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 58),
+    ['477_tax_normalise_categories_type']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 59),
+    ['478_tax_create_hmrc_calculations']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 60),
+
+    -- Reference data + classification profiles (from main, post-MTD merge).
+    -- Renumbered from 473-474 → 479-480 to sit after the MTD migrations.
+    -- The corresponding tax_copilot_migrations step indices shifted from 55-56 → 61-62.
+    ['479_tax_seed_health_safety_reference']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 61),
+    ['480_tax_create_classification_profiles']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 62),
+
     -- =========================================================================
-    -- MY INCOME (468-469) — manually-entered income source-of-truth
+    -- Issue #308 — User-created custom categories + audit trail (April 2026)
     -- =========================================================================
-    ['468_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
-    ['469_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
+    -- Schema (tax_copilot_migrations[63]-[66]):
+    --   481  → tax_app_settings table + seed allow_user_category_editing /
+    --          allow_user_custom_categories flags (both default false)
+    --   482  → tax_user_custom_categories table (user-scoped customs with
+    --          status enum + mapping/promotion FK columns)
+    --   483  → tax_transaction_audit table (append-only history)
+    --   484  → modified_by_*, custom_category_uuid columns on tax_transactions
+    --
+    -- Permissions (tax_copilot_menu_items_migrations[5]):
+    --   485  → register tax_app_settings + tax_custom_categories modules and
+    --          grant access to admin/owner/accountant roles
+    ['481_tax_create_app_settings']                  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 63),
+    ['482_tax_create_user_custom_categories']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 64),
+    ['483_tax_create_transaction_audit']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 65),
+    ['484_tax_add_transaction_audit_columns']        = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 66),
+    ['485_tax_grant_custom_categories_permissions']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_menu_items_migrations, 5),
+    ['486_tax_seed_max_custom_categories_setting']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 67),
+    ['487_tax_categories_management']                = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_categories_mgmt_migrations, 1),
+    ['488_tax_seed_auth_email_taken_code']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 68),
+
+    -- 490: hmrc_filings — audit-grade record of every HMRC MTD ITSA
+    --      filing event (final-declaration, confirm-amendment).
+    --      Separate from tax_returns so the domain row stays clean
+    --      and the audit table can be partitioned later.
+    -- 491: tax_returns partial unique index — one FILED row per user/year.
+    --      Mirrors HMRC's "one final-declaration per NINO/year" rule
+    --      and stops accidental re-filing at the DB layer.
+    -- 492: hmrc_calculations.correlation_id — capture HMRC's
+    --      X-Correlation-Id response header for support tickets.
+    ['490_tax_create_hmrc_filings']                  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 69),
+    ['491_tax_unique_filed_tax_return_per_year']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 70),
+    ['492_tax_hmrc_calculations_correlation_id']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 71),
+    ['493_tax_rescope_hmrc_calc_id_index']           = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 72),
+    ['494_tax_hmrc_calculations_request_payload']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 73),
+    ['495_tax_rescope_hmrc_filings_unique']          = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 74),
+    ['496_tax_user_profile_default_profile_key']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 75),
+    ['497_tax_widen_error_occurrence_tenant_ns']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 76),
+    ['498_tax_backfill_orphan_category_hmrc_links']  = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 77),
+
+    -- 499–503: Apple in-app subscription tables (iOS StoreKit, ASSN V2).
+    --   499  → tax_subscription_plans (product catalogue, multi-platform-ready)
+    --   500  → seed the single launch plan: DIYTaxReturnStandard £5.99/mo
+    --   501  → tax_user_subscriptions (per-user entitlement, FastAPI writes)
+    --   502  → indexes for user_uuid / expires_at / app_account_token
+    --   503  → tax_processed_apple_notifications (webhook dedup + orphan store)
+    -- Numeric prefixes 500–503 coexist with the CRM block's 500_/501_ keys
+    -- below — Lapis tracks applied migrations by the full string key, not
+    -- the numeric portion, and dup numerics already appear across feature
+    -- blocks elsewhere in this table.
+    ['499_tax_create_subscription_plans']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 78),
+    ['500_tax_seed_subscription_plan_standard']      = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 79),
+    ['501_tax_create_user_subscriptions']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 80),
+    ['502_tax_add_user_subscriptions_indexes']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 81),
+    ['503_tax_create_processed_apple_notifications'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 82),
+    -- Wizard tree depends on classification_profiles (created at 480), the
+    -- existing rules-pack seed rows (re-parented here), and
+    -- tax_user_profiles.default_profile_key (added at 496, source for the
+    -- one-time backfill into the join table). Registering after 503 puts
+    -- it safely past every direct dependency without splitting the
+    -- numbering convention used by the rest of the tax_copilot block.
+    ['504_profile_business_wizard_tree']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 37),
+
+    -- =========================================================================
+    -- CORE AUTH: Password reset tokens
+    -- =========================================================================
+    -- Used by POST /auth/forgot-password (insert) and POST /auth/reset-password
+    -- (validate + consume). Core SaaS auth — not feature-gated, every
+    -- deployment of opsapi gets it.
+    --
+    -- Design notes:
+    --   - ``token_hash`` stores the SHA-256 hex of the random token. The
+    --     plaintext token only ever lives in the email link sent to the
+    --     user — a DB leak alone cannot be used to reset passwords.
+    --   - ``user_id`` FK with ON DELETE CASCADE so deleting a user
+    --     automatically cleans up their pending tokens.
+    --   - ``used_at`` enforces single-use. Validation requires
+    --     ``used_at IS NULL`` AND ``expires_at > NOW()``.
+    --   - ``ip_address`` recorded for audit + future per-IP rate
+    --     refinements. Plain varchar so IPv4/IPv6 fit cleanly.
+    --   - Unique index on ``token_hash`` because a hash collision would
+    --     be catastrophic — guard at the schema level too.
+    -- =========================================================================
+    ['487_create_password_reset_tokens'] = function()
+        local exists = db.query([[
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'password_reset_tokens'
+        ]])
+        if #exists == 0 then
+            -- Note: lapis ``types.varchar`` and ``types.time`` default
+            -- to NOT NULL. Use ``{ null = true }`` for the columns
+            -- that must be nullable (used_at represents "not yet
+            -- used", ip_address may be absent for command-line/admin
+            -- triggered resets).
+            schema.create_table("password_reset_tokens", {
+                { "id",         types.serial },
+                { "user_id",    types.integer },
+                { "token_hash", types.varchar },
+                { "expires_at", types.time },
+                { "used_at",    types.time({ null = true }) },
+                { "ip_address", types.varchar({ null = true }) },
+                { "created_at", types.time },
+                "PRIMARY KEY (id)",
+                "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            })
+            schema.create_index("password_reset_tokens", "token_hash",
+                { unique = true })
+            schema.create_index("password_reset_tokens", "user_id")
+            print("Created password_reset_tokens table")
+        end
+    end,
+
+    -- =========================================================================
+    -- CORE AUTH: Per-namespace allow-list of frontend origins for password
+    -- reset emails (and any future "redirect to a frontend" flow).
+    -- =========================================================================
+    --
+    -- Why this column exists
+    --   opsapi is multi-tenant SaaS — different consumers (tax-copilot,
+    --   future products) run their own frontends at their own domains.
+    --   When a user clicks "forgot password", the email link must point
+    --   at THE FRONTEND THAT ISSUED THE REQUEST, not a hardcoded one.
+    --
+    --   The /auth/forgot-password endpoint receives ``redirect_url`` in
+    --   the body — but that's user-supplied, so we can't trust it
+    --   blindly (an attacker could phish via legitimate-looking emails
+    --   pointing at attacker.com). The defence is a per-namespace
+    --   allow-list: the user's namespace declares which origins are
+    --   legitimate, the request's origin is validated against it.
+    --
+    -- Why per-namespace, not per-app or env var
+    --   Per-namespace is the right granularity for SaaS:
+    --     - Tenant onboarding adds a row to namespaces — adds the
+    --       allowed origins in the same step. No env-var update, no
+    --       opsapi restart per new tenant.
+    --     - One tenant can have multiple frontends (staging/prod),
+    --       both legitimate, both in the list.
+    --     - One tenant compromised? Remove their origins from the
+    --       list and they can't be phished anymore.
+    --   The pattern matches Auth0 "Allowed Callback URLs" per app,
+    --   Okta "Trusted Origins", Supabase "Site URL + redirect URLs".
+    --
+    -- Bootstrap from env vars
+    --   To avoid breaking existing deployments (int, acc) that rely on
+    --   FRONTEND_URL / PASSWORD_RESET_ALLOWED_ORIGINS env vars set by
+    --   start.sh, this migration ALSO populates the allow-list for any
+    --   namespace whose column is currently NULL/empty. Idempotent —
+    --   re-running won't overwrite admin edits.
+    --
+    --   Once every namespace has its column populated, the env-var
+    --   fallback in routes/auth.lua becomes a defence-in-depth path,
+    --   not the primary lookup. Future PR can remove the fallback
+    --   when telemetry confirms zero hits on it.
+    -- =========================================================================
+    ['489_add_namespace_allowed_redirect_origins'] = function()
+        -- 1. Add the column. ``IF NOT EXISTS`` makes the migration
+        --    idempotent — safe to re-run, safe across rolling deploys.
+        db.query([[
+            ALTER TABLE namespaces
+            ADD COLUMN IF NOT EXISTS allowed_redirect_origins TEXT[]
+        ]])
+
+        -- 2. Bootstrap. For namespaces with NULL/empty column, fill
+        --    from env vars so deployments that already had FRONTEND_URL
+        --    + PASSWORD_RESET_ALLOWED_ORIGINS configured continue
+        --    working with no manual SQL after this migration runs.
+        local frontend_url = os.getenv("FRONTEND_URL")
+        local extra_csv = os.getenv("PASSWORD_RESET_ALLOWED_ORIGINS")
+
+        local origins = {}
+        local seen = {}
+        local function add_origin(o)
+            if not o or o == "" then return end
+            local trimmed = o:match("^%s*(.-)%s*$")
+            -- Canonicalise: strip path/query/fragment, keep scheme + host.
+            local canon = trimmed:match("^(https?://[^/]+)") or trimmed
+            if canon == "" or seen[canon] then return end
+            seen[canon] = true
+            table.insert(origins, canon)
+        end
+        add_origin(frontend_url)
+        if extra_csv and extra_csv ~= "" then
+            for o in extra_csv:gmatch("[^,]+") do add_origin(o) end
+        end
+
+        if #origins == 0 then
+            print("[Auth] Namespace allow-list column added; no env vars set, " ..
+                  "skipping bootstrap. Populate via SQL or admin UI.")
+            return
+        end
+
+        -- Update only NULL/empty rows. Already-populated namespaces
+        -- (e.g. someone hand-edited via SQL or a future admin UI)
+        -- aren't disturbed.
+        db.query([[
+            UPDATE namespaces
+            SET allowed_redirect_origins = ?,
+                updated_at = NOW()
+            WHERE allowed_redirect_origins IS NULL
+               OR cardinality(allowed_redirect_origins) = 0
+        ]], db.array(origins))
+
+        print(("[Auth] Namespace allow-list bootstrapped from env vars: %s"):format(
+            table.concat(origins, ", ")))
+    end,
 
     -- =========================================================================
     -- CRM SYSTEM (500-509)
@@ -1231,12 +1522,30 @@ local _migrations = {
     ['503_crm_create_deals'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 4),
     ['504_crm_create_activities'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 5),
 
+    -- CRM Leads (510-511)
+    ['510_crm_create_leads'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 1),
+    ['511_crm_leads_enquiry_link'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 2),
+
+    -- CRM menu items (720-723): surface CRM in the backend-driven sidebar
+    ['720_seed_crm_menu_items'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 1),
+    ['721_seed_crm_modules'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 2),
+    ['722_grant_crm_permissions'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 3),
+    ['723_enable_crm_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 4),
+
     -- =========================================================================
     -- TIMESHEET SYSTEM (520-529)
     -- =========================================================================
     ['520_ts_create_timesheets'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 1),
     ['521_ts_create_entries'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 2),
     ['522_ts_create_approvals'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 3),
+    ['523_ts_enrich_client_fields'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 4),
+    ['524_ts_link_customer_task'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 5),
+
+    -- Timesheet menu items (730-733): surface Timesheets in the sidebar
+    ['730_seed_timesheet_menu_items'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 1),
+    ['731_seed_timesheet_modules'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 2),
+    ['732_grant_timesheet_permissions'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 3),
+    ['733_enable_timesheet_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 4),
 
     -- =========================================================================
     -- INVOICING SYSTEM (540-549)
@@ -1246,6 +1555,13 @@ local _migrations = {
     ['542_inv_create_payments'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 3),
     ['543_inv_create_tax_rates'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 4),
     ['544_inv_create_sequences'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 5),
+    ['545_inv_widen_tax_rate'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_system_migrations, 6),
+
+    -- Invoicing menu items (740-743): surface Invoices in the sidebar
+    ['740_seed_invoicing_menu_items'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 1),
+    ['741_seed_invoicing_modules'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 2),
+    ['742_grant_invoicing_permissions'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 3),
+    ['743_enable_invoicing_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.INVOICING, invoicing_menu_items_migrations, 4),
 
     -- =========================================================================
     -- KAFKA / AUDIT SYSTEM (560-561)
@@ -1282,6 +1598,26 @@ local _migrations = {
     ['608_acct_bank_txn_tags_columns'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 2),
     ['609_acct_seed_hmrc_categories'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 3),
     ['610_acct_seed_dummy_transactions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_hmrc_migrations, 4),
+
+    -- Accounting menu items (750-753): surface Bookkeeping in the sidebar
+    ['750_seed_accounting_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 1),
+    ['751_seed_accounting_modules'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 2),
+    ['752_grant_accounting_permissions'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 3),
+    ['753_enable_accounting_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.ACCOUNTING, accounting_menu_items_migrations, 4),
+
+    -- =========================================================================
+    -- Theme System (Phase 1) — tables for multi-tenant theming
+    -- 611 is reserved by phase 0 (drop legacy scaffold).
+    -- 621-627 create the new schema; preset seeding runs as zzw_ so it
+    -- re-applies on every deploy and picks up newly-added presets.
+    -- =========================================================================
+    ['621_create_themes_table']             = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 1),
+    ['622_create_theme_tokens_table']       = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 2),
+    ['623_create_theme_revisions_table']    = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 3),
+    ['624_create_namespace_active_themes']  = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 4),
+    ['625_create_theme_installations']      = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 5),
+    ['626_create_theme_assets']             = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 6),
+    ['627_create_theme_triggers']           = conditional_array(ProjectConfig.FEATURES.THEMES, theme_system_migrations, 7),
 
     -- =========================================================================
     -- Refresh tokens table (opaque, rotatable, revocable)
@@ -1423,23 +1759,86 @@ local _migrations = {
             CREATE INDEX IF NOT EXISTS idx_project_migrations_code
             ON project_migrations(project_code)
         ]])
+    end,
 
-        -- Create tenant themes table for per-project per-tenant theme overrides
+    -- =========================================================================
+    -- =========================================================================
+    -- BILLING SYSTEM (single-merchant Stripe: subscriptions + one-time) — gated
+    -- on tax_copilot. Tables: plans, subscriptions, payments, refunds, webhook
+    -- events, usage meters. Key 700 is a retired no-op (the old per-tenant
+    -- Connect payment-accounts table, removed when billing went single-merchant).
+    -- Keys are numeric so they run before the zz* finalizers. See
+    -- migrations/billing-system.lua.
+    -- =========================================================================
+    ['700_billing_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 1),
+    ['701_billing_plans'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 2),
+    ['702_billing_subscriptions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 3),
+    ['703_billing_payments'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 4),
+    ['704_billing_refunds'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 5),
+    ['705_billing_webhook_events'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 6),
+    ['706_billing_usage_meters'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 7),
+    ['707_billing_audit_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 8),
+    ['708_billing_drop_payment_accounts'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 9),
+    ['709_billing_payments_invoice_unique'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, billing_system_migrations, 10),
+    ['710_tax_profile_guidance'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_profile_guidance_migrations, 1),
+    ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
+    ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
+    ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
+
+    -- MY INCOME — manually-entered income source-of-truth
+    -- =========================================================================
+    ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
+    ['716_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
+
+    -- Theme system foundation (Phase 0): drop obsolete scaffold.
+    -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
+    -- =========================================================================
+    ['611_drop_legacy_project_tenant_themes'] = function()
+        MigrationTracker.recordRan("611_drop_legacy_project_tenant_themes", "themes")
+        db.query("DROP TABLE IF EXISTS project_tenant_themes CASCADE")
+    end,
+
+    -- =========================================================================
+    -- Re-seed platform theme presets on every deploy (zzw_ runs before zzx_).
+    -- Idempotent upsert; safe to re-apply. Uses the same auto-delete trigger
+    -- pattern as zzx/zzz so new presets added to helper.theme-presets pick up
+    -- without migration bumps.
+    -- =========================================================================
+    ['zzw_reseed_theme_presets'] = function()
+        MigrationTracker.recordRan("zzw_reseed_theme_presets", ProjectConfig.FEATURES.THEMES)
+        if not ProjectConfig.isThemesEnabled() then
+            return
+        end
+
+        local seed_fn = theme_system_migrations and theme_system_migrations[8]
+        if seed_fn then
+            local ok, err = pcall(seed_fn)
+            if not ok then
+                print("[theme-system] preset seed failed: " .. tostring(err))
+            end
+        end
+
         db.query([[
-            CREATE TABLE IF NOT EXISTS project_tenant_themes (
-                id SERIAL PRIMARY KEY,
-                project_code VARCHAR(100) NOT NULL,
-                namespace_id INTEGER,
-                theme_overrides JSONB DEFAULT '{}',
-                custom_css TEXT,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                UNIQUE(project_code, namespace_id)
-            )
+            CREATE OR REPLACE FUNCTION delete_zzw_reseed_theme_presets()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.name = 'zzw_reseed_theme_presets' THEN
+                    DELETE FROM lapis_migrations WHERE name = 'zzw_reseed_theme_presets';
+                    RETURN NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
         ]])
         db.query([[
-            CREATE INDEX IF NOT EXISTS idx_project_tenant_themes_code
-            ON project_tenant_themes(project_code)
+            DROP TRIGGER IF EXISTS trg_delete_zzw_reseed_theme_presets ON lapis_migrations
+        ]])
+        db.query([[
+            CREATE TRIGGER trg_delete_zzw_reseed_theme_presets
+            AFTER INSERT ON lapis_migrations
+            FOR EACH ROW
+            WHEN (NEW.name = 'zzw_reseed_theme_presets')
+            EXECUTE FUNCTION delete_zzw_reseed_theme_presets()
         ]])
     end,
 

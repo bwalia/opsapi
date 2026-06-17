@@ -216,7 +216,7 @@ const EditRolePermissionsModal: React.FC<EditRolePermissionsModalProps> = memo(
           {/* Role Header */}
           <div className="flex items-center justify-between bg-secondary-50 rounded-lg p-4 border border-secondary-200">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center shadow-sm">
+              <div className="w-12 h-12 bg-surface rounded-lg flex items-center justify-center shadow-sm">
                 <Shield className="w-6 h-6 text-primary-600" />
               </div>
               <div>

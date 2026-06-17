@@ -123,15 +123,77 @@ export interface PaymentPayload {
   notes?: string;
 }
 
-// Create from timesheet payload
+// Create from timesheet payload. Only the timesheet is required — the backend
+// derives the customer, line items, and rate (per-entry → timesheet → hourly_rate).
 export interface TimesheetInvoicePayload {
   timesheet_uuid: string;
-  customer_name: string;
-  customer_email?: string;
-  hourly_rate: number;
-  due_date: string;
+  hourly_rate?: number;
+  due_date?: string;
   currency?: string;
-  notes?: string;
+}
+
+// One un-invoiced billable entry in a customer-billing preview.
+export interface CustomerBillableEntry {
+  entry_id: number;
+  timesheet_uuid: string;
+  entry_date: string;
+  description?: string;
+  task_reference?: string;
+  project_reference?: string;
+  hours: number;
+  rate: number;
+  amount: number;
+  has_rate: boolean;
+}
+
+// Preview of a customer's un-invoiced work over a period (read-only).
+export interface CustomerBillablePreview {
+  customer: { uuid: string; name?: string | null; email?: string | null };
+  period: { from?: string | null; to?: string | null };
+  currency: string;
+  entries: CustomerBillableEntry[];
+  totals: { count: number; total_hours: number; total_amount: number; missing_rate: boolean };
+}
+
+// Payload to generate one invoice from a customer's approved timesheets.
+export interface CustomerInvoicePayload {
+  customer_uuid: string;
+  period_start?: string;
+  period_end?: string;
+  hourly_rate?: number;
+  due_date?: string;
+  currency?: string;
+}
+
+// Map a backend invoice (total_amount / tax_amount / line_items[].line_total) onto
+// the frontend Invoice shape (total / tax_total / items[].total) the pages expect.
+function normalizeInvoice(raw: Record<string, unknown> | null | undefined): Invoice {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const num = (v: unknown) => Number(v ?? 0) || 0;
+  const rawItems = Array.isArray(r.line_items)
+    ? (r.line_items as Record<string, unknown>[])
+    : Array.isArray(r.items)
+      ? (r.items as Record<string, unknown>[])
+      : [];
+  return {
+    ...(r as unknown as Invoice),
+    uuid: (r.uuid ?? r.id) as string,
+    subtotal: num(r.subtotal),
+    tax_total: num(r.tax_amount ?? r.tax_total),
+    total: num(r.total_amount ?? r.total),
+    amount_paid: num(r.amount_paid),
+    balance_due: num(r.balance_due),
+    items: rawItems.map((li) => ({
+      ...(li as unknown as InvoiceLineItem),
+      uuid: (li.uuid ?? li.id) as string,
+      quantity: num(li.quantity),
+      unit_price: num(li.unit_price),
+      tax_rate: num(li.tax_rate),
+      tax_amount: num(li.tax_amount),
+      total: num(li.line_total ?? li.total),
+    })),
+    payments: Array.isArray(r.payments) ? (r.payments as InvoicePayment[]) : [],
+  };
 }
 
 export const invoicesService = {
@@ -157,16 +219,22 @@ export const invoicesService = {
 
     const response = await apiClient.get('/api/v2/invoices', { params: queryParams });
 
-    const data = Array.isArray(response.data?.data) ? response.data.data : [];
+    // Backend shape: { success, data: [...], meta: { total, page, perPage, totalPages } }
+    // Pagination lives in `meta`, not at the top level.
+    const body = response.data ?? {};
+    const list = Array.isArray(body.data) ? body.data : [];
+    const meta = body.meta ?? {};
+    const page = meta.page ?? params.page ?? 1;
+    const totalPages = meta.totalPages ?? 0;
 
     return {
-      data,
-      total: response.data?.total || 0,
-      page: response.data?.page || params.page || 1,
-      per_page: response.data?.per_page || params.perPage || 10,
-      total_pages: response.data?.total_pages || 0,
-      has_next: response.data?.has_next || false,
-      has_prev: response.data?.has_prev || false,
+      data: list.map(normalizeInvoice),
+      total: meta.total ?? list.length,
+      page,
+      per_page: meta.perPage ?? params.perPage ?? 10,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_prev: page > 1,
     };
   },
 
@@ -175,7 +243,7 @@ export const invoicesService = {
    */
   async getInvoice(uuid: string): Promise<Invoice> {
     const response = await apiClient.get(`/api/v2/invoices/${uuid}`);
-    return response.data;
+    return normalizeInvoice(response.data?.data ?? response.data);
   },
 
   /**
@@ -183,7 +251,7 @@ export const invoicesService = {
    */
   async createInvoice(data: InvoicePayload): Promise<Invoice> {
     const response = await apiClient.post('/api/v2/invoices', toFormData(data as unknown as Record<string, unknown>));
-    return response.data;
+    return normalizeInvoice(response.data?.data ?? response.data);
   },
 
   /**
@@ -191,7 +259,7 @@ export const invoicesService = {
    */
   async updateInvoice(uuid: string, data: Partial<InvoicePayload>): Promise<Invoice> {
     const response = await apiClient.put(`/api/v2/invoices/${uuid}`, toFormData(data as unknown as Record<string, unknown>));
-    return response.data;
+    return normalizeInvoice(response.data?.data ?? response.data);
   },
 
   /**
@@ -270,7 +338,48 @@ export const invoicesService = {
    */
   async getDashboardStats(): Promise<InvoiceDashboardStats> {
     const response = await apiClient.get('/api/v2/invoices/dashboard/stats');
-    return response.data;
+    const r = (response.data?.data ?? response.data ?? {}) as Record<string, unknown>;
+    const num = (v: unknown) => Number(v ?? 0) || 0;
+    const byStatus = Array.isArray(r.by_status) ? (r.by_status as Record<string, unknown>[]) : [];
+    const count = (s: string) => byStatus.filter((b) => b.status === s).reduce((a, b) => a + num(b.count), 0);
+    return {
+      total_invoiced: num(r.total_invoiced),
+      total_paid: num(r.total_paid),
+      total_outstanding: num(r.total_outstanding),
+      total_overdue: num(r.total_overdue),
+      invoice_count: byStatus.reduce((a, b) => a + num(b.count), 0),
+      paid_count: count('paid'),
+      outstanding_count: count('sent'),
+      overdue_count: num(r.overdue_count),
+    };
+  },
+
+  /**
+   * Preview a customer's un-invoiced billable work over a period (read-only).
+   */
+  async getCustomerBillable(
+    customerUuid: string,
+    from?: string,
+    to?: string,
+    hourlyRate?: number
+  ): Promise<CustomerBillablePreview> {
+    const params: Record<string, string | number> = { customer_uuid: customerUuid };
+    if (from) params.from = from;
+    if (to) params.to = to;
+    if (hourlyRate != null) params.hourly_rate = hourlyRate;
+    const response = await apiClient.get('/api/v2/invoices/customer-billable', { params });
+    return response.data?.data ?? response.data;
+  },
+
+  /**
+   * Generate one invoice from a customer's approved timesheets over a period.
+   */
+  async createFromCustomer(data: CustomerInvoicePayload): Promise<Invoice> {
+    const response = await apiClient.post(
+      '/api/v2/invoices/from-customer',
+      toFormData(data as unknown as Record<string, unknown>)
+    );
+    return normalizeInvoice(response.data?.data ?? response.data);
   },
 
   /**
@@ -289,7 +398,7 @@ export const invoicesService = {
       '/api/v2/invoices/from-timesheet',
       toFormData(data as unknown as Record<string, unknown>)
     );
-    return response.data;
+    return normalizeInvoice(response.data?.data ?? response.data);
   },
 };
 

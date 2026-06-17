@@ -456,7 +456,10 @@ return {
             { "uuid", types.varchar({ unique = true }) },
             { "board_id", types.integer },
             { "column_id", types.integer },
-            { "parent_task_id", types.integer({ null = true }) },
+            -- Nullable self-FK: use a raw type so it has NO `DEFAULT 0`.
+            -- types.integer({ null = true }) still emits DEFAULT 0, which violates
+            -- kanban_tasks_parent_fk (no task with id=0) on every top-level task insert.
+            { "parent_task_id", "integer" },
             { "task_number", types.integer },
             { "title", types.varchar },
             { "description", types.text({ null = true }) },
@@ -1203,7 +1206,9 @@ return {
     [29] = function()
         if column_exists("kanban_tasks", "sprint_id") then return end
 
-        schema.add_column("kanban_tasks", "sprint_id", types.integer({ null = true }))
+        -- Raw "integer" (no `DEFAULT 0`): a default of 0 would violate
+        -- kanban_tasks_sprint_fk (no sprint with id=0) on tasks without a sprint.
+        schema.add_column("kanban_tasks", "sprint_id", "integer")
 
         pcall(function()
             db.query([[
@@ -2078,6 +2083,28 @@ return {
                 FOR EACH ROW
                 EXECUTE FUNCTION update_kanban_comment_reply_count()
             ]])
+        end)
+    end,
+
+    -- ========================================
+    -- [41] Fix nullable FK columns that carried a `DEFAULT 0` from
+    --      types.integer({ null = true }). A 0 default violates the
+    --      self/sprint FK constraints on every task created without a
+    --      parent or sprint (the 500 on POST .../boards/:uuid/tasks).
+    -- ========================================
+    [41] = function()
+        pcall(function()
+            db.query("ALTER TABLE kanban_tasks ALTER COLUMN parent_task_id DROP DEFAULT")
+        end)
+        pcall(function()
+            db.query("ALTER TABLE kanban_tasks ALTER COLUMN sprint_id DROP DEFAULT")
+        end)
+        -- Repair any rows that already stored the bad 0 sentinel.
+        pcall(function()
+            db.query("UPDATE kanban_tasks SET parent_task_id = NULL WHERE parent_task_id = 0")
+        end)
+        pcall(function()
+            db.query("UPDATE kanban_tasks SET sprint_id = NULL WHERE sprint_id = 0")
         end)
     end
 }

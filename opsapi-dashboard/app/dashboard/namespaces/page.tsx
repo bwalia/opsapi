@@ -149,7 +149,7 @@ const NamespaceActionsMenu = memo(function NamespaceActionsMenu({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 z-50 mt-1 w-48 bg-white border border-secondary-200 rounded-lg shadow-lg py-1">
+        <div className="absolute right-0 z-50 mt-1 w-48 bg-surface border border-secondary-200 rounded-lg shadow-lg py-1">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -213,7 +213,7 @@ const StatusFilter = memo(function StatusFilter({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="px-3 py-2.5 rounded-lg border border-secondary-300 text-sm bg-white text-secondary-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+      className="px-3 py-2.5 rounded-lg border border-secondary-300 text-sm bg-surface text-secondary-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
     >
       {options.map((option) => (
         <option key={option.value} value={option.value}>

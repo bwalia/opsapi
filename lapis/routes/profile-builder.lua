@@ -310,15 +310,131 @@ local function getUserTags(user_id)
     return {}
 end
 
+-- ─── Business-profile linkage helpers ──────────────────────────────────────
+-- A question can be tagged with one or more business profile keys
+-- (amazon_seller, landlord, sole_trader, …) — see migration step 36
+-- (table profile_question_business_profiles, PK on (question_id, profile_key)).
+--
+-- Semantics: empty link set => question applies to ALL profiles. Non-empty =>
+-- gates user-facing visibility to users whose tax_user_profiles.default_profile_key
+-- is in the set.
+
+-- Load the keys for ONE question. Returns an empty array on failure or no
+-- linkage so callers can always treat the result as "applies to all".
+local function loadQuestionBusinessProfiles(question_id)
+    if not question_id then return {} end
+    local ok, rows = pcall(db.query, [[
+        SELECT profile_key FROM profile_question_business_profiles
+        WHERE question_id = ? ORDER BY profile_key ASC
+    ]], question_id)
+    if not ok or not rows then return {} end
+    local out = {}
+    for i = 1, #rows do out[i] = rows[i].profile_key end
+    return out
+end
+
+-- Bulk-load for the list endpoint — avoids the N+1 query pattern when
+-- attaching business_profiles to dozens of questions in one response.
+-- Returns a table indexed by question_id where each value is the array of
+-- profile_keys for that question (always an array, never nil).
+local function bulkLoadQuestionBusinessProfiles(question_ids)
+    local out = {}
+    if not question_ids or #question_ids == 0 then return out end
+    -- Build the ANY($1::int[]) placeholder once, regardless of count.
+    local placeholders = {}
+    for i = 1, #question_ids do placeholders[i] = "?" end
+    local sql = [[
+        SELECT question_id, profile_key
+        FROM profile_question_business_profiles
+        WHERE question_id IN (]] .. table.concat(placeholders, ",") .. [[)
+        ORDER BY question_id, profile_key
+    ]]
+    local ok, rows = pcall(db.query, sql, unpack(question_ids))
+    if not ok or not rows then return out end
+    for _, row in ipairs(rows) do
+        local qid = row.question_id
+        if not out[qid] then out[qid] = {} end
+        out[qid][#out[qid] + 1] = row.profile_key
+    end
+    return out
+end
+
+-- Atomic write: replace the entire link set for one question. Caller passes
+-- an array of profile_keys (or nil/empty to clear all links). De-duplicates,
+-- trims, and shape-validates keys so the table never accumulates garbage.
+--
+-- Validation:
+--   - Must be a string.
+--   - After trimming, must match lower_snake_case (^[a-z][a-z0-9_]*$),
+--     mirroring the convention used by register.lua's default_profile_key
+--     and by FastAPI's profile_loader. Anything else is silently dropped
+--     and logged at WARN — the admin UI's multi-select is catalogue-driven
+--     so this only fires for direct API abuse.
+--   - Length bounded to 100 chars (matches the schema VARCHAR limit).
+--
+-- Existence in the catalogue (DB classification_profiles + filesystem
+-- profiles) is NOT validated here — Lua has no access to the FastAPI
+-- registry. The admin UI enforces that contract.
+local function replaceQuestionBusinessProfiles(question_id, keys)
+    if not question_id then return end
+    -- Always remove first so an empty input correctly clears the link set.
+    db.query("DELETE FROM profile_question_business_profiles WHERE question_id = ?", question_id)
+    if not keys or type(keys) ~= "table" or #keys == 0 then return end
+
+    local seen = {}
+    for _, raw in ipairs(keys) do
+        if type(raw) == "string" then
+            local key = raw:match("^%s*(.-)%s*$") -- trim
+            if not key or key == "" or #key > 100 then
+                if key and key ~= "" then
+                    ngx.log(ngx.WARN, "[ProfileBuilder] dropping over-long business_profile key (len=", #key, ")")
+                end
+            elseif not key:match("^[a-z][a-z0-9_]*$") then
+                ngx.log(ngx.WARN, "[ProfileBuilder] dropping malformed business_profile key: ", key)
+            elseif not seen[key] then
+                seen[key] = true
+                local ok_ins = pcall(db.query, [[
+                    INSERT INTO profile_question_business_profiles (question_id, profile_key, created_at)
+                    VALUES (?, ?, NOW())
+                    ON CONFLICT (question_id, profile_key) DO NOTHING
+                ]], question_id, key)
+                if not ok_ins then
+                    ngx.log(ngx.WARN, "[ProfileBuilder] failed to insert business_profile link q=", question_id, " key=", key)
+                end
+            end
+        end
+    end
+end
+
 -- Evaluate visibility rules for a question against current answers
 local function evaluateVisibility(question_id, answer_map)
+    -- Use ``priority`` for the within-group ordering — that's the
+    -- actual column on profile_question_rules. The original code used
+    -- ``display_order``, which doesn't exist on this table, so the
+    -- pcall would silently swallow the SQL error and the function
+    -- would fall through to the early-return at "no rules" and treat
+    -- the question as always-visible. Net effect: server-side
+    -- visibility rules were a no-op for every conditional question,
+    -- which surfaced as frontend-says-100-backend-says-96 mismatches
+    -- in the completion gate.
     local ok, rules = pcall(db.query, [[
         SELECT rule_type, operator, expected_value, source_question_id, logic_group
         FROM profile_question_rules
         WHERE question_id = ? AND is_active = true AND rule_type = 'visibility'
-        ORDER BY logic_group ASC, display_order ASC
+        ORDER BY logic_group ASC, priority ASC
     ]], question_id)
-    if not ok or not rules or #rules == 0 then
+    if not ok then
+        -- Query failure must be visible — silently defaulting to
+        -- "visible" lies to the completion endpoint and the gate, and
+        -- that's exactly how the display_order typo escaped review.
+        -- Log loudly; default to visible so the user isn't locked out
+        -- of unanswerable questions, but downstream now has a paper
+        -- trail for the next time something rhymes with this.
+        ngx.log(ngx.ERR, "[ProfileBuilder] evaluateVisibility query failed for question_id=",
+            tostring(question_id), ": ", tostring(rules))
+        return true
+    end
+    if not rules or #rules == 0 then
         return true -- No rules = always visible
     end
 
@@ -334,6 +450,27 @@ local function evaluateVisibility(question_id, answer_map)
     local and_result = true
     local or_result = false
     local has_or = false
+
+    -- Boolean-aware equality. Rules authored against Yes/No questions
+    -- store expected_value = "yes" / "no" (admin UI default), but the
+    -- stored answer comes through as a boolean -> tostring("true").
+    -- Naive ``actual == expected`` would never match "true" against
+    -- "yes", so this helper normalises common yes/no/true/false/1/0
+    -- spellings to a canonical bool on both sides before comparing.
+    -- Falls back to lowercase string compare for non-boolean rules.
+    local function parseBoolish(s)
+        if s == nil then return nil end
+        local lower = tostring(s):lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if lower == "true" or lower == "yes" or lower == "1" or lower == "y" then return true end
+        if lower == "false" or lower == "no" or lower == "0" or lower == "n" then return false end
+        return nil
+    end
+    local function looseEquals(a, b)
+        local ab, bb = parseBoolish(a), parseBoolish(b)
+        if ab ~= nil and bb ~= nil then return ab == bb end
+        return tostring(a or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+            == tostring(b or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    end
 
     for group_name, group_rules in pairs(groups) do
         for _, rule in ipairs(group_rules) do
@@ -355,9 +492,9 @@ local function evaluateVisibility(question_id, answer_map)
             local num_expected = tonumber(expected) or 0
 
             if rule.operator == "equals" then
-                match = actual == expected
+                match = looseEquals(actual, expected)
             elseif rule.operator == "not_equals" then
-                match = actual ~= expected
+                match = not looseEquals(actual, expected)
             elseif rule.operator == "greater_than" then
                 match = num_actual > num_expected
             elseif rule.operator == "less_than" then
@@ -373,12 +510,12 @@ local function evaluateVisibility(question_id, answer_map)
                 if #parts >= 2 then match = num_actual >= parts[1] and num_actual <= parts[2] end
             elseif rule.operator == "in_list" then
                 for item in expected:gmatch("[^,]+") do
-                    if actual == item:match("^%s*(.-)%s*$") then match = true; break end
+                    if looseEquals(actual, item:match("^%s*(.-)%s*$")) then match = true; break end
                 end
             elseif rule.operator == "not_in_list" then
                 match = true
                 for item in expected:gmatch("[^,]+") do
-                    if actual == item:match("^%s*(.-)%s*$") then match = false; break end
+                    if looseEquals(actual, item:match("^%s*(.-)%s*$")) then match = false; break end
                 end
             elseif rule.operator == "contains" then
                 match = actual:lower():find(expected:lower(), 1, true) ~= nil
@@ -476,13 +613,69 @@ return function(app)
             end
         end
 
+        -- Resolve the user's business profile (e.g. amazon_seller, landlord).
+        -- Used below to gate which questions appear in the schema: a question
+        -- whose business_profiles link set is non-empty only shows up if the
+        -- user's default_profile_key is in that set. Questions with NO links
+        -- apply to everyone. Falls through gracefully when the user has no
+        -- tax_user_profiles row yet (treated as "no profile chosen" → only
+        -- universal questions visible).
+        local user_profile_key = nil
+        if user_id then
+            local ok_up, up_rows = pcall(db.query, [[
+                SELECT default_profile_key FROM tax_user_profiles
+                WHERE user_id = ? LIMIT 1
+            ]], user_id)
+            if ok_up and up_rows and #up_rows > 0 then
+                local k = up_rows[1].default_profile_key
+                if k and k ~= "" and k ~= cjson.null then
+                    user_profile_key = k
+                end
+            end
+        end
+
         local result = {}
         for _, cat in ipairs(categories or {}) do
-            local ok_q, questions = pcall(db.query, [[
-                SELECT * FROM profile_questions
-                WHERE category_id = ? AND is_active = true AND is_archived = false
-                ORDER BY display_order ASC, label ASC
-            ]], cat.id)
+            -- Filter clause shape changes depending on whether the user has
+            -- a profile_key. The link table is small (n_questions × few keys)
+            -- and indexed on profile_key, so the NOT EXISTS / EXISTS combo
+            -- is fast enough to inline per-category.
+            local ok_q, questions
+            if user_profile_key then
+                ok_q, questions = pcall(db.query, [[
+                    SELECT * FROM profile_questions pq
+                    WHERE pq.category_id = ?
+                      AND pq.is_active = true
+                      AND pq.is_archived = false
+                      AND (
+                        NOT EXISTS (
+                          SELECT 1 FROM profile_question_business_profiles
+                          WHERE question_id = pq.id
+                        )
+                        OR EXISTS (
+                          SELECT 1 FROM profile_question_business_profiles
+                          WHERE question_id = pq.id AND profile_key = ?
+                        )
+                      )
+                    ORDER BY pq.display_order ASC, pq.label ASC
+                ]], cat.id, user_profile_key)
+            else
+                -- No profile chosen yet: only show questions that apply to
+                -- everyone. Once the user picks a profile in /profile or
+                -- /settings, profile-specific questions reveal themselves
+                -- on the next schema fetch.
+                ok_q, questions = pcall(db.query, [[
+                    SELECT * FROM profile_questions pq
+                    WHERE pq.category_id = ?
+                      AND pq.is_active = true
+                      AND pq.is_archived = false
+                      AND NOT EXISTS (
+                        SELECT 1 FROM profile_question_business_profiles
+                        WHERE question_id = pq.id
+                      )
+                    ORDER BY pq.display_order ASC, pq.label ASC
+                ]], cat.id)
+            end
             if not ok_q then
                 ngx.log(ngx.ERR, "[ProfileBuilder] schema questions query failed: ", tostring(questions))
                 questions = {}
@@ -645,6 +838,355 @@ return function(app)
     end)
 
     -- =====================================================================
+    -- 1b. GET /completion-status — Lightweight authoritative completion check
+    --
+    -- Single source of truth for "has this user finished the profile?".
+    -- The /schema endpoint is heavy (full question tree, options, rules,
+    -- per-category state) and was the wrong shape for "is this user
+    -- done?" calls fired from the gate / Go-to-dashboard button.
+    --
+    -- This endpoint:
+    --   1. Reads the user's answers + every active question in their
+    --      namespace (global + per-tenant).
+    --   2. Evaluates visibility per question using the same rules engine
+    --      that the schema endpoint uses (after the boolean-aware
+    --      ``looseEquals`` fix). Conditionally-hidden questions don't
+    --      count in numerator OR denominator.
+    --   3. Counts answered (non-null answer column) over visible total.
+    --   4. Sets the ``profile_complete=true`` cookie (or clears it) so
+    --      the Next.js middleware can hard-gate routes WITHOUT calling
+    --      back into opsapi on every request.
+    --   5. Returns ``{ is_complete, overall_percent, total, answered }``
+    --      so the frontend can show a coherent state to the user.
+    --
+    -- Cookie is set with ``Path=/; SameSite=Lax`` and NO ``HttpOnly`` —
+    -- the cookie is UX (a gating hint), not credentials. The actual
+    -- authority remains this endpoint plus the same server-side
+    -- per-route checks any feature-flag would have. Cookie expiry is
+    -- session-only so a logout flushes the verdict naturally.
+    -- =====================================================================
+    app:get(PREFIX .. "/completion-status", function(self)
+        local user = requireAuth(self)
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+        local user_uuid = user.uuid or user.id
+        local user_id = getUserIdByUuid(user_uuid)
+        if not user_id then
+            return { status = 401, json = { error = "User not found" } }
+        end
+        local namespace_id = getNamespaceId(self)
+
+        -- Build the same namespace filter the schema endpoint uses so
+        -- visibility is computed against EXACTLY the questions the user
+        -- can see. Empty filter = the lapis global default scope.
+        local ns_filter = ""
+        if namespace_id and namespace_id > 0 then
+            ns_filter = " AND (pq.namespace_id = " .. db.escape_literal(namespace_id) .. " OR pq.namespace_id = 0)"
+        end
+
+        -- Single answer_map used for BOTH visibility rule evaluation
+        -- AND the answered count. Drafts are treated as real answers
+        -- here on purpose: the frontend's isAnswered only checks for a
+        -- non-empty value (not is_draft), and the user's perception is
+        -- "I typed something in that box, it's answered". The is_draft
+        -- flag is orthogonal — it tracks "the text field's value may
+        -- still change as the user keeps typing", not "this isn't a
+        -- real answer". The existing recalculateCompletion() helper
+        -- filters drafts for a different signal ("officially committed
+        -- answers used by tag rules"), but the gate cookie must match
+        -- what the user sees on the /profile UI — otherwise text-only
+        -- categories sit at 0% on the server while showing 100% to
+        -- the user, exactly the trap we just hit.
+        local answer_map = {}
+        local ok_ans, ans_rows = pcall(db.query, [[
+            SELECT question_id, answer_text, answer_number, answer_boolean,
+                   answer_date, answer_json
+            FROM user_profile_answers
+            WHERE user_id = ?
+        ]], user_id)
+        if ok_ans and ans_rows then
+            for _, a in ipairs(ans_rows) do
+                answer_map[a.question_id] = a
+            end
+        end
+
+        -- Resolve the user's business profile (e.g. amazon_seller,
+        -- landlord). The schema endpoint uses this exact pattern to
+        -- gate which questions ever surface in the UI:
+        --
+        --   * a question with NO business-profile tags applies to everyone
+        --   * a question with tags only appears if the user's
+        --     default_profile_key is in that set
+        --
+        -- Without applying the same filter here, completion-status
+        -- inflates ``total`` with questions the user can never see —
+        -- e.g. amazon_seller users were being counted on
+        -- ``is_construction_worker`` (tagged construction_company)
+        -- and the gate said 26/27 = 96% even though the frontend
+        -- showed 100% (because frontend honours the tag filter via
+        -- the schema response).
+        --
+        -- This mirrors lines 615-635 / 645-675 of the schema endpoint
+        -- below; keep them in lock-step. ``default_profile_key`` is
+        -- the singular wizard-primary pick (the wizard mirrors
+        -- is_primary→default_profile_key on save, so this stays the
+        -- right key to consult for non-multi-pick gating).
+        local user_profile_key = nil
+        local ok_up, up_rows = pcall(db.query, [[
+            SELECT default_profile_key FROM tax_user_profiles
+            WHERE user_id = ? LIMIT 1
+        ]], user_id)
+        if ok_up and up_rows and #up_rows > 0 then
+            local k = up_rows[1].default_profile_key
+            if k and k ~= "" and k ~= cjson.null then
+                user_profile_key = k
+            end
+        end
+
+        -- Active, non-archived questions in the user's scope, with the
+        -- business-profile tag filter applied. Include question_key +
+        -- label so ?debug=true can name them; cheap columns, no
+        -- measurable perf impact.
+        local bp_filter
+        local query_params = {}
+        if user_profile_key then
+            bp_filter = [[
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM profile_question_business_profiles
+                  WHERE question_id = pq.id
+                )
+                OR EXISTS (
+                  SELECT 1 FROM profile_question_business_profiles
+                  WHERE question_id = pq.id AND profile_key = ?
+                )
+              )]]
+            table.insert(query_params, user_profile_key)
+        else
+            -- No business profile chosen yet: only universal questions
+            -- (with no tag link set) surface. Strictest filter; matches
+            -- schema endpoint's same-branch behaviour.
+            bp_filter = [[
+              AND NOT EXISTS (
+                SELECT 1 FROM profile_question_business_profiles
+                WHERE question_id = pq.id
+              )]]
+        end
+
+        local ok_qs, questions = pcall(db.query, [[
+            SELECT pq.id, pq.question_key, pq.label, pq.is_required
+            FROM profile_questions pq
+            JOIN profile_categories pc ON pc.id = pq.category_id
+            WHERE pq.is_active = true AND pq.is_archived = false
+              AND pc.is_active = true AND pc.is_archived = false
+            ]] .. ns_filter .. bp_filter, unpack(query_params))
+        if not ok_qs then
+            ngx.log(ngx.ERR, "[ProfileBuilder] completion-status questions query failed: ", tostring(questions))
+            return { status = 500, json = { error = "Failed to compute completion" } }
+        end
+
+        -- ?debug=true returns a per-question breakdown alongside the
+        -- summary so the next-vs-backend gap can be pinpointed without
+        -- adding instrumentation each time something rhymes with this.
+        -- Cheap to emit; not gated by admin role because the user only
+        -- ever sees their OWN answers.
+        local debug_mode = self.params.debug == "true" or self.params.debug == "1"
+        local debug_rows = debug_mode and {} or nil
+
+        local total_visible = 0
+        local answered = 0
+        for _, q in ipairs(questions or {}) do
+            local is_visible = evaluateVisibility(q.id, answer_map)
+            local a = answer_map[q.id]   -- drafts INCLUDED — see note above answer_map
+            local has_answer = false
+            if a then
+                has_answer = (a.answer_text ~= nil and a.answer_text ~= "")
+                    or a.answer_number ~= nil
+                    or a.answer_boolean ~= nil
+                    or a.answer_date ~= nil
+                    or (a.answer_json ~= nil and a.answer_json ~= "" and a.answer_json ~= "null" and a.answer_json ~= "[]")
+            end
+            if is_visible then
+                total_visible = total_visible + 1
+                if has_answer then
+                    answered = answered + 1
+                end
+            end
+            if debug_mode then
+                -- Stringify each answer column so the response is
+                -- safe to JSON-encode regardless of underlying type
+                -- (booleans / numbers / pgmoon's NULL sentinel).
+                local function show(v)
+                    if v == nil then return nil end
+                    if type(v) == "boolean" then return tostring(v) end
+                    if type(v) == "number" then return v end
+                    return tostring(v)
+                end
+                table.insert(debug_rows, {
+                    question_id = q.id,
+                    question_key = q.question_key,
+                    label = q.label,
+                    is_required = q.is_required,
+                    is_visible = is_visible,
+                    has_answer = has_answer,
+                    counted_in_total = is_visible,
+                    counted_in_answered = is_visible and has_answer,
+                    answer = a and {
+                        answer_text = show(a.answer_text),
+                        answer_number = show(a.answer_number),
+                        answer_boolean = show(a.answer_boolean),
+                        answer_date = show(a.answer_date),
+                        answer_json = show(a.answer_json),
+                    } or nil,
+                })
+            end
+        end
+
+        local pct
+        if total_visible == 0 then
+            pct = 100 -- vacuously complete: nothing to fill in
+        else
+            pct = math.floor((answered / total_visible) * 100)
+        end
+        local is_complete = pct >= 100
+
+        -- Two cookies — both onboarding-state gates the Next.js
+        -- middleware reads verbatim:
+        --   * profile_complete       — all visible/required questions answered
+        --   * business_profile_set   — user picked at least one business type
+        --                              (default_profile_key set on tax_user_profiles)
+        --
+        -- Set together in one response so the middleware never sees a
+        -- half-state. Clearing uses Max-Age=0 so the browser drops the
+        -- cookie immediately rather than waiting for session end.
+        --
+        -- Domain resolution — three sources of truth, first match wins:
+        --   1. AUTH_COOKIE_DOMAIN              (explicit override)
+        --   2. AUTH_COOKIE_TRUSTED_DOMAINS     (Origin allowlist —
+        --                                       matches auth-cookies.lua)
+        --   3. FRONTEND_URL                    (derived parent domain;
+        --                                       a no-extra-config
+        --                                       fallback so envs that
+        --                                       only set FRONTEND_URL —
+        --                                       like int — still emit
+        --                                       a cross-subdomain
+        --                                       cookie that the
+        --                                       frontend middleware
+        --                                       can actually read)
+        -- No source → omit Domain (host-scoped — correct for local dev
+        -- where api + app share the same host:port).
+        --
+        -- Why the FRONTEND_URL fallback exists: ops on int forgot to
+        -- set AUTH_COOKIE_TRUSTED_DOMAINS but FRONTEND_URL was always
+        -- there. Without a Domain attribute the cookie scoped to
+        -- int-api.X only — the middleware on int.X never saw it →
+        -- every navigation bounced back to /profile. The 3rd source
+        -- closes that gap without adding a new env var to operators'
+        -- runbooks.
+        --
+        -- Secure default-on; AUTH_COOKIE_INSECURE=true opts out for
+        -- localhost HTTP. Same flag the refresh-token cookie honours.
+        local has_business_profile = user_profile_key ~= nil
+
+        local cookie_domain
+        do
+            -- Source 1: explicit override
+            local override = os.getenv("AUTH_COOKIE_DOMAIN")
+            if override and override ~= "" then
+                cookie_domain = override
+            end
+
+            -- Source 2: trusted-domains allowlist matched against Origin
+            if not cookie_domain then
+                local raw = os.getenv("AUTH_COOKIE_TRUSTED_DOMAINS") or ""
+                local allowed_list = {}
+                for item in raw:gmatch("[^,%s]+") do table.insert(allowed_list, item:lower()) end
+                local origin = (self.req and self.req.headers and
+                    (self.req.headers["Origin"] or self.req.headers["origin"])) or nil
+                if origin and #allowed_list > 0 then
+                    local host = origin:gsub("^https?://", ""):gsub(":%d+$", ""):gsub("/.*$", ""):lower()
+                    local best
+                    for _, allowed in ipairs(allowed_list) do
+                        local matches = host == allowed
+                            or host:sub(-(#allowed + 1)) == "." .. allowed
+                        if matches and (not best or #allowed > #best) then best = allowed end
+                    end
+                    if best then cookie_domain = "." .. best end
+                end
+            end
+
+            -- Source 3: derive parent domain from FRONTEND_URL.
+            -- Strip the first subdomain label so the cookie is visible
+            -- on both the API subdomain and the app subdomain (assumed
+            -- same parent, which is the standard same-origin-with-api
+            -- pattern). E.g. https://int.diytaxreturn.co.uk → strip
+            -- "int" → ".diytaxreturn.co.uk".
+            -- Skip the strip when the host is already at parent
+            -- (≤2 labels — example.com, etc.) because Domain=.com is
+            -- rejected by browsers as a public suffix.
+            if not cookie_domain then
+                local frontend_url = os.getenv("FRONTEND_URL")
+                if frontend_url and frontend_url ~= "" then
+                    local host = frontend_url
+                        :gsub("^https?://", "")
+                        :gsub(":%d+$", "")
+                        :gsub("/.*$", "")
+                        :lower()
+                    if host ~= "" then
+                        local labels = {}
+                        for label in host:gmatch("[^%.]+") do
+                            table.insert(labels, label)
+                        end
+                        -- 3+ labels (foo.example.co.uk) → strip first
+                        -- 2 labels (example.com) → leave as host-scoped
+                        if #labels >= 3 then
+                            local apex = table.concat(labels, ".", 2)
+                            cookie_domain = "." .. apex
+                        end
+                    end
+                end
+            end
+        end
+
+        local secure_attr = os.getenv("AUTH_COOKIE_INSECURE") ~= "true"
+
+        -- Build a single Set-Cookie header value for the given name.
+        -- ``is_set=true`` sets the cookie to "true"; ``is_set=false``
+        -- clears it via Max-Age=0. Domain/Secure attributes are shared
+        -- with the refresh-token cookie (see helper/auth-cookies.lua).
+        local function build_cookie(name, is_set)
+            local parts = is_set
+                and { name .. "=true", "Path=/", "SameSite=Lax" }
+                or  { name .. "=",     "Path=/", "Max-Age=0", "SameSite=Lax" }
+            if cookie_domain then table.insert(parts, "Domain=" .. cookie_domain) end
+            if secure_attr then table.insert(parts, "Secure") end
+            return table.concat(parts, "; ")
+        end
+
+        -- OpenResty allows ngx.header["Set-Cookie"] to be a table —
+        -- each element becomes its own Set-Cookie response header,
+        -- which is the correct way to emit multiple cookies in one
+        -- response (a single comma-joined value gets misparsed by
+        -- some browsers because Set-Cookie values can themselves
+        -- contain commas in Expires=...).
+        ngx.header["Set-Cookie"] = {
+            build_cookie("profile_complete", is_complete),
+            build_cookie("business_profile_set", has_business_profile),
+        }
+
+        local body = {
+            is_complete = is_complete,
+            overall_percent = pct,
+            total = total_visible,
+            answered = answered,
+            has_business_profile = has_business_profile,
+        }
+        if debug_mode then body.questions = debug_rows end
+        return { status = 200, json = body }
+    end)
+
+    -- =====================================================================
     -- 2. GET /schema/preview — Admin: preview schema as a specific user
     -- =====================================================================
     app:get(PREFIX .. "/schema/preview", function(self)
@@ -766,6 +1308,114 @@ return function(app)
     end)
 
     -- =====================================================================
+    -- 2b. GET /business-wizard — tree of pickable business profiles
+    --
+    -- User-facing endpoint that powers the post-signup business-profile
+    -- picker. Returns a nested tree of all classification_profiles rows
+    -- that have ``wizard_label`` set, grouped by parent_profile_key:
+    --
+    --   tree: [
+    --     { profile_key: "sole_trader", is_leaf: false,
+    --       wizard_question: "What kind of work do you do?",
+    --       wizard_label: "I work for myself as a sole trader",
+    --       children: [
+    --         { profile_key: "sole_trader_tradesperson", is_leaf: false,
+    --           children: [
+    --             { profile_key: "electrician", is_leaf: true, children: [] },
+    --             …
+    --           ] },
+    --         …
+    --       ] },
+    --     { profile_key: "ltd_director", is_leaf: true, children: [] },
+    --     { profile_key: "landlord",     is_leaf: true, children: [] },
+    --     …
+    --   ]
+    --
+    -- The FE walks this once and renders a 3-step wizard (root multi-select
+    -- → drill into ticked branches → confirm). Leaves with children = [] are
+    -- terminal picks; branches require a follow-up question.
+    --
+    -- ``wizard_label`` is the discriminator that lets us exclude DB rows
+    -- that are catalog-only (rules-pack carriers) rather than wizard-visible.
+    -- After migration 450_profile_business_wizard_tree, every active row
+    -- has a wizard_label set, so the filter is currently a no-op — but
+    -- it keeps the contract future-proof when admins add rule-only rows
+    -- via the admin UI without exposing them in onboarding.
+    --
+    -- Returns the GLOBAL catalogue (namespace_id = 0). Per-tenant overrides
+    -- are a future extension once a customer actually needs custom packs.
+    -- =====================================================================
+    app:get(PREFIX .. "/business-wizard", function(self)
+        local user = requireAuth(self)
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        -- COALESCE parent_profile_key to '' so we don't have to fight
+        -- pgmoon's NULL representation in Lua (ngx.null vs nil vs cjson.null
+        -- depending on driver build) — empty-string is unambiguous.
+        local ok, rows = pcall(db.query, [[
+            SELECT profile_key,
+                   display_name,
+                   industry,
+                   user_profile_type,
+                   COALESCE(parent_profile_key, '') AS parent_profile_key,
+                   wizard_question,
+                   wizard_label,
+                   display_order,
+                   is_leaf
+            FROM classification_profiles
+            WHERE is_active = true
+              AND wizard_label IS NOT NULL
+              AND wizard_label <> ''
+            ORDER BY display_order ASC, profile_key ASC
+        ]])
+        if not ok then
+            ngx.log(ngx.ERR, "[ProfileBuilder] business-wizard query failed: ", tostring(rows))
+            return { status = 500, json = { error = "Failed to load business profile wizard" } }
+        end
+
+        -- Single-pass build: map profile_key -> node, then a second pass to
+        -- attach children to parents. O(n) and order-independent.
+        local nodes_by_key = {}
+        for _, r in ipairs(rows or {}) do
+            nodes_by_key[r.profile_key] = {
+                profile_key       = r.profile_key,
+                display_name      = r.display_name,
+                industry          = r.industry or "",
+                user_profile_type = r.user_profile_type or "",
+                wizard_question   = r.wizard_question,   -- may be nil for leaves
+                wizard_label      = r.wizard_label,
+                is_leaf           = (r.is_leaf == true) or (r.is_leaf == "t"),
+                display_order     = tonumber(r.display_order) or 0,
+                children          = {},
+            }
+        end
+
+        local roots = {}
+        for _, r in ipairs(rows or {}) do
+            local node = nodes_by_key[r.profile_key]
+            local parent_key = r.parent_profile_key
+            if not parent_key or parent_key == "" then
+                table.insert(roots, node)
+            elseif nodes_by_key[parent_key] then
+                table.insert(nodes_by_key[parent_key].children, node)
+            else
+                -- Parent referenced but parent row not in the visible set
+                -- (e.g. parent has wizard_label NULL or is_active false).
+                -- Surface as a root so the data isn't lost; log so the
+                -- admin notices the inconsistency.
+                ngx.log(ngx.WARN, "[ProfileBuilder] orphan wizard node: ",
+                        r.profile_key, " (parent ", parent_key,
+                        " not in visible set)")
+                table.insert(roots, node)
+            end
+        end
+
+        return { status = 200, json = { tree = roots } }
+    end)
+
+    -- =====================================================================
     -- 3. CATEGORIES CRUD
     -- =====================================================================
 
@@ -799,12 +1449,32 @@ return function(app)
             end
         end
 
+        -- Server-side typeahead. Mirrors the questions endpoint so the
+        -- SearchableSelect on the questions modal Category picker can scale
+        -- past a small table.
+        local search = self.params.search
+        if search and search ~= "" then
+            local like = "%" .. search .. "%"
+            table.insert(where_parts, "(name ILIKE ? OR slug ILIKE ?)")
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+        end
+
         local where_clause = ""
         if #where_parts > 0 then
             where_clause = " WHERE " .. table.concat(where_parts, " AND ")
         end
 
-        local sql = "SELECT * FROM profile_categories" .. where_clause .. " ORDER BY display_order ASC, name ASC"
+        -- Paging — same shape and defaults as /questions.
+        local limit = tonumber(self.params.limit) or 100
+        if limit < 1 then limit = 1 end
+        if limit > 500 then limit = 500 end
+        local offset = tonumber(self.params.offset) or 0
+        if offset < 0 then offset = 0 end
+
+        local sql = "SELECT * FROM profile_categories"
+            .. where_clause
+            .. " ORDER BY display_order ASC, name ASC LIMIT " .. limit .. " OFFSET " .. offset
         local ok, rows = pcall(db.query, sql, unpack(where_vals))
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] categories list failed: ", tostring(rows))
@@ -1096,7 +1766,57 @@ return function(app)
             table.insert(where_vals, self.params.touchpoint)
         end
 
-        local sql = "SELECT pq.*, pc.uuid as category_uuid, pc.name as category_name FROM profile_questions pq LEFT JOIN profile_categories pc ON pc.id = pq.category_id WHERE " .. table.concat(where_parts, " AND ") .. " ORDER BY pq.display_order ASC, pq.label ASC"
+        -- Business-profile filter. Semantics:
+        --   "applies to this profile" === question has no link rows at all
+        --   (= applies to all), OR has a link row whose profile_key matches.
+        -- That keeps the default-all behaviour intact while letting an admin
+        -- ask "show me the questions that target landlord".
+        if self.params.business_profile and self.params.business_profile ~= "" then
+            table.insert(where_parts, [[
+                (NOT EXISTS (
+                    SELECT 1 FROM profile_question_business_profiles
+                    WHERE question_id = pq.id
+                ) OR EXISTS (
+                    SELECT 1 FROM profile_question_business_profiles
+                    WHERE question_id = pq.id AND profile_key = ?
+                ))
+            ]])
+            table.insert(where_vals, self.params.business_profile)
+        end
+
+        -- Server-side typeahead. `search` matches case-insensitive substring
+        -- against question label, key, description, AND the joined category
+        -- name — so the admin can type either the question wording or the
+        -- group it lives in to narrow it down. Used by the SearchableSelect
+        -- on /admin/profile-builder/rules so we don't ship the whole table
+        -- to the browser on every page open.
+        local search = self.params.search
+        if search and search ~= "" then
+            local like = "%" .. search .. "%"
+            table.insert(where_parts, [[
+                (pq.label ILIKE ?
+                 OR pq.question_key ILIKE ?
+                 OR pq.description ILIKE ?
+                 OR pc.name ILIKE ?)
+            ]])
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+            table.insert(where_vals, like)
+        end
+
+        -- Paging. Default to a reasonable upper bound so a caller that
+        -- forgets to set limit can't accidentally pull the whole table; the
+        -- typeahead UI never needs more than a few dozen rows per request.
+        local limit = tonumber(self.params.limit) or 100
+        if limit < 1 then limit = 1 end
+        if limit > 500 then limit = 500 end
+        local offset = tonumber(self.params.offset) or 0
+        if offset < 0 then offset = 0 end
+
+        local sql = "SELECT pq.*, pc.uuid as category_uuid, pc.name as category_name FROM profile_questions pq LEFT JOIN profile_categories pc ON pc.id = pq.category_id WHERE "
+            .. table.concat(where_parts, " AND ")
+            .. " ORDER BY pq.display_order ASC, pq.label ASC LIMIT " .. limit .. " OFFSET " .. offset
         local ok, rows = pcall(db.query, sql, unpack(where_vals))
         if not ok then
             ngx.log(ngx.ERR, "[ProfileBuilder] questions list failed: ", tostring(rows))
@@ -1118,6 +1838,15 @@ return function(app)
                     q.rules = (ok_rules and rules) or {}
                 end
             end
+        end
+
+        -- Attach business_profiles (string[]) to each row. Bulk-loaded so
+        -- the list endpoint never goes N+1, regardless of page size.
+        local q_ids = {}
+        for _, q in ipairs(rows or {}) do q_ids[#q_ids + 1] = q.id end
+        local bp_by_q = bulkLoadQuestionBusinessProfiles(q_ids)
+        for _, q in ipairs(rows or {}) do
+            q.business_profiles = bp_by_q[q.id] or {}
         end
 
         return { status = 200, json = { questions = rows or {}, total = #(rows or {}) } }
@@ -1147,6 +1876,8 @@ return function(app)
             SELECT * FROM profile_question_rules WHERE question_id = ? AND is_active = true ORDER BY priority ASC
         ]], question.id)
         question.rules = (ok_rules and rules) or {}
+
+        question.business_profiles = loadQuestionBusinessProfiles(question.id)
 
         return { status = 200, json = { question = question } }
     end)
@@ -1226,6 +1957,12 @@ return function(app)
 
         local question = ins_result and ins_result[1] or nil
         if question then
+            -- Persist business-profile links from the request body. Empty /
+            -- missing array clears any existing links (which would only
+            -- happen on a re-POST to an existing uuid — defensive).
+            replaceQuestionBusinessProfiles(question.id, params.business_profiles)
+            question.business_profiles = loadQuestionBusinessProfiles(question.id)
+
             auditLog({
                 namespace_id = namespace_id,
                 user_id = admin_uuid,
@@ -1259,6 +1996,10 @@ return function(app)
             return { status = 404, json = { error = "Question not found" } }
         end
         local old_q = find_rows[1]
+        -- Snapshot the OLD business-profile link set BEFORE any mutation so
+        -- the audit log's old_data_json gives a real diff (the LHS would
+        -- otherwise lose that field after the replace).
+        old_q.business_profiles = loadQuestionBusinessProfiles(old_q.id)
 
         local set_parts = {}
         local set_vals = {}
@@ -1290,26 +2031,46 @@ return function(app)
             end
         end
 
-        if #set_parts == 0 then
+        -- A `business_profiles` array in the body counts as an update too —
+        -- the admin may want to re-tag a question without changing any other
+        -- field. We treat `nil` as "leave existing links alone" and an array
+        -- (even an empty one) as "replace the link set with this".
+        local bp_provided = params.business_profiles ~= nil
+            and type(params.business_profiles) == "table"
+
+        if #set_parts == 0 and not bp_provided then
             return { status = 400, json = { error = "No fields to update" } }
         end
 
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
-        table.insert(set_parts, "updated_by = ?")
-        table.insert(set_vals, admin_int_id)
-        table.insert(set_parts, "updated_at = NOW()")
-        table.insert(set_vals, q_uuid)
 
-        local sql = "UPDATE profile_questions SET " .. table.concat(set_parts, ", ") .. " WHERE uuid = ? RETURNING *"
-        local ok_upd, upd_result = pcall(db.query, sql, unpack(set_vals))
-        if not ok_upd then
-            ngx.log(ngx.ERR, "[ProfileBuilder] update question failed: ", tostring(upd_result))
-            return { status = 500, json = { error = "Failed to update question" } }
+        local updated = old_q
+        if #set_parts > 0 then
+            table.insert(set_parts, "updated_by = ?")
+            table.insert(set_vals, admin_int_id)
+            table.insert(set_parts, "updated_at = NOW()")
+            table.insert(set_vals, q_uuid)
+
+            local sql = "UPDATE profile_questions SET " .. table.concat(set_parts, ", ") .. " WHERE uuid = ? RETURNING *"
+            local ok_upd, upd_result = pcall(db.query, sql, unpack(set_vals))
+            if not ok_upd then
+                ngx.log(ngx.ERR, "[ProfileBuilder] update question failed: ", tostring(upd_result))
+                return { status = 500, json = { error = "Failed to update question" } }
+            end
+            updated = upd_result and upd_result[1] or old_q
         end
 
-        local updated = upd_result and upd_result[1] or nil
-        if updated then
+        if bp_provided then
+            replaceQuestionBusinessProfiles(updated.id, params.business_profiles)
+        end
+        updated.business_profiles = loadQuestionBusinessProfiles(updated.id)
+
+        -- Audit fires for ANY successful change — column updates OR
+        -- business-profile re-tagging. Skipping the latter would hide
+        -- ops-relevant scope changes from the trail. old_q + updated both
+        -- carry business_profiles so the diff is meaningful either way.
+        if updated and (#set_parts > 0 or bp_provided) then
             auditLog({
                 namespace_id = old_q.namespace_id,
                 user_id = admin_uuid,

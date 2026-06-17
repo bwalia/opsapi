@@ -26,22 +26,29 @@ const Modal: React.FC<ModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = title ? `modal-title-${title.replace(/\s+/g, '-').toLowerCase()}` : undefined;
 
+  // Lock scroll and focus the modal ONLY when it transitions open.
+  // This must NOT depend on `onClose`: callers pass an inline arrow function,
+  // so its identity changes on every parent re-render (e.g. each keystroke in
+  // a form field). If this effect re-ran on that change, modalRef.focus() would
+  // yank focus out of the input being typed into. Keyed on `isOpen` only.
   useEffect(() => {
+    if (!isOpen) return;
+    document.body.style.overflow = 'hidden';
+    modalRef.current?.focus();
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  // Escape-to-close. Separate effect so re-subscribing when `onClose` changes
+  // is harmless (no focus side effect here).
+  useEffect(() => {
+    if (!isOpen) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'hidden';
-      // Focus the modal when it opens
-      modalRef.current?.focus();
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleEscape);
-      document.body.style.overflow = '';
-    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -73,7 +80,7 @@ const Modal: React.FC<ModalProps> = ({
         ref={modalRef}
         tabIndex={-1}
         className={cn(
-          'relative w-full bg-white rounded-2xl shadow-2xl my-8 max-h-[90vh] flex flex-col',
+          'relative w-full bg-surface-elevated rounded-2xl shadow-2xl my-8 max-h-[90vh] flex flex-col',
           sizes[size]
         )}
       >

@@ -28,7 +28,7 @@ export function SearchBox({ domains }: { domains: ParsedDomain[] }) {
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2 rounded-md border border-secondary-200 bg-white px-2 py-1.5">
+      <div className="flex items-center gap-2 rounded-md border border-secondary-200 bg-surface px-2 py-1.5">
         <Search className="h-4 w-4 text-secondary-400" />
         <input
           value={q}
@@ -44,7 +44,7 @@ export function SearchBox({ domains }: { domains: ParsedDomain[] }) {
         />
       </div>
       {open && results.length > 0 && (
-        <div className="absolute right-0 top-11 z-50 max-h-96 w-80 overflow-auto rounded-md border border-secondary-200 bg-white shadow-lg">
+        <div className="absolute right-0 top-11 z-50 max-h-96 w-80 overflow-auto rounded-md border border-secondary-200 bg-surface shadow-lg">
           {results.map((e) => (
             <button
               key={e.id}

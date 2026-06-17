@@ -11,6 +11,7 @@
 ]]
 
 local cjson = require("cjson")
+local db = require("lapis.db")
 local TaxUserProfileQueries = require("queries.TaxUserProfileQueries")
 local HMRCBusinessQueries = require("queries.HMRCBusinessQueries")
 local HMRCObligationQueries = require("queries.HMRCObligationQueries")
@@ -106,6 +107,7 @@ return function(app)
                 hmrc_token_expires_at = hmrc_token and hmrc_token.expires_at or nil,
                 default_business_id = profile.default_business_id,
                 default_tax_year = profile.default_tax_year,
+                default_profile_key = profile.default_profile_key,
                 businesses = business_list,
                 open_obligations_count = open_count,
                 created_at = profile.created_at,
@@ -254,10 +256,42 @@ return function(app)
             end
         end
 
+        if params.default_profile_key then
+            -- Validate against the active profiles in tax_profile_guidance.
+            local valid = db.select(
+                "profile_key FROM tax_profile_guidance WHERE profile_key = ? AND is_active = true LIMIT 1",
+                params.default_profile_key)
+            if not (valid and valid[1]) then
+                return { status = 400, json = { error = "Unknown business profile" } }
+            end
+            local ok_pk, pk_err = pcall(TaxUserProfileQueries.setDefaultProfileKey, user_uuid, params.default_profile_key)
+            if not ok_pk then
+                ngx.log(ngx.ERR, "[Tax Profile] setDefaultProfileKey error: ", tostring(pk_err))
+                return { status = 500, json = { error = "Failed to update business profile" } }
+            end
+        end
+
         return {
             status = 200,
             json = { message = "Preferences updated" }
         }
+    end)
+
+    -- =========================================================================
+    -- GET /api/v2/tax/profiles
+    -- List the available business profiles (for the classification profile picker).
+    -- =========================================================================
+    app:get("/api/v2/tax/profiles", function(self)
+        if not self.current_user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+        local ok, rows = pcall(db.select,
+            "profile_key, display_name, sa_form, filing_supported "
+            .. "FROM tax_profile_guidance WHERE is_active = true ORDER BY display_name")
+        if not ok then
+            return { status = 500, json = { error = "Failed to load profiles" } }
+        end
+        return { status = 200, json = { data = rows or {} } }
     end)
 
     -- =========================================================================

@@ -229,7 +229,7 @@ export const UserSearchInput = memo(function UserSearchInput({
       {isOpen && results.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 w-full mt-1 bg-white border border-secondary-200 rounded-lg shadow-lg max-h-64 overflow-auto"
+          className="absolute z-50 w-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg max-h-64 overflow-auto"
           role="listbox"
         >
           {results.map((user, index) => (
@@ -268,7 +268,7 @@ export const UserSearchInput = memo(function UserSearchInput({
       {isOpen && query.length >= 2 && results.length === 0 && !isLoading && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 w-full mt-1 bg-white border border-secondary-200 rounded-lg shadow-lg p-4 text-center"
+          className="absolute z-50 w-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg p-4 text-center"
         >
           <p className="text-secondary-500">No users found matching "{query}"</p>
           <p className="text-sm text-secondary-400 mt-1">

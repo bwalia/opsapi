@@ -7,19 +7,24 @@
 
 local db = require("lapis.db")
 local cjson = require("cjson")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 local HMRCBusinessQueries = {}
 
 -- Upsert a business (insert or update on user_uuid + business_id conflict)
 function HMRCBusinessQueries.upsert(data)
+    -- hmrc_businesses.namespace_id is NOT NULL with no DB default —
+    -- resolve from the user's namespace settings so the row is correctly
+    -- tenant-scoped. Returns 0 (legacy default) for users with no settings.
+    local namespace_id = NamespaceResolver.getByUuid(data.user_uuid)
     db.query([[
         INSERT INTO hmrc_businesses (
-            uuid, user_uuid, business_id, type_of_business,
+            uuid, user_uuid, namespace_id, business_id, type_of_business,
             trading_name, accounting_type,
             first_accounting_period_start, first_accounting_period_end,
             raw_response, fetched_at, created_at, updated_at
         ) VALUES (
-            gen_random_uuid()::text, ?, ?, ?,
+            gen_random_uuid()::text, ?, ?, ?, ?,
             ?, ?,
             ?, ?,
             ?, NOW(), NOW(), NOW()
@@ -35,6 +40,7 @@ function HMRCBusinessQueries.upsert(data)
             updated_at = NOW()
     ]],
         data.user_uuid,
+        namespace_id,
         data.business_id,
         data.type_of_business or "self-employment",
         data.trading_name,

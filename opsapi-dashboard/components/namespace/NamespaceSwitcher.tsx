@@ -256,7 +256,7 @@ export const NamespaceSwitcher: React.FC<NamespaceSwitcherProps> = memo(
               />
               <div
                 className={cn(
-                  'absolute z-50 bg-white rounded-xl shadow-xl border border-secondary-200 py-2',
+                  'absolute z-50 bg-surface rounded-xl shadow-xl border border-secondary-200 py-2',
                   isCompact
                     ? 'left-full top-0 ml-2 w-64'
                     : 'top-full left-0 mt-2 w-72'
@@ -404,7 +404,7 @@ const CreateNamespaceModal = memo(function CreateNamespaceModal({
         className="absolute inset-0 bg-secondary-900/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+      <div className="relative bg-surface rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
         <h2 className="text-xl font-semibold text-secondary-900 mb-4">
           Create New Namespace
         </h2>

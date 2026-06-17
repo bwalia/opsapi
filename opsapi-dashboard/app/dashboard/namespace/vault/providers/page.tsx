@@ -242,10 +242,10 @@ export default function VaultProvidersPage() {
       {/* Provider Cards */}
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[1, 2].map(i => <div key={i} className="bg-white border rounded-xl p-6 animate-pulse h-40" />)}
+          {[1, 2].map(i => <div key={i} className="bg-surface border rounded-xl p-6 animate-pulse h-40" />)}
         </div>
       ) : providers.length === 0 ? (
-        <div className="text-center py-16 bg-white border rounded-xl">
+        <div className="text-center py-16 bg-surface border rounded-xl">
           <Shield size={48} className="mx-auto text-gray-300 mb-4" />
           <h3 className="text-lg font-semibold text-gray-600 mb-2">No providers connected</h3>
           <p className="text-gray-400 mb-4">Connect to external secret managers to sync your secrets</p>
@@ -258,7 +258,7 @@ export default function VaultProvidersPage() {
           {providers.map(provider => {
             const Icon = PROVIDER_ICONS[provider.provider_type] || Shield;
             return (
-              <div key={provider.uuid} className="bg-white border rounded-xl p-6 hover:shadow-md transition-shadow">
+              <div key={provider.uuid} className="bg-surface border rounded-xl p-6 hover:shadow-md transition-shadow">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-primary-50 rounded-lg flex items-center justify-center">
@@ -332,7 +332,7 @@ export default function VaultProvidersPage() {
       {/* Create Provider Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-surface rounded-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-lg font-semibold">Connect External Provider</h2>
             </div>
@@ -422,7 +422,7 @@ export default function VaultProvidersPage() {
       {/* Import .env Modal */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg">
+          <div className="bg-surface rounded-xl w-full max-w-lg">
             <div className="p-6 border-b">
               <h2 className="text-lg font-semibold">Import from .env</h2>
             </div>

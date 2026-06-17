@@ -1,6 +1,24 @@
 env: prod
 app: diytaxreturn-lapis
-projectCode: all
+# Scope migrations + namespace setup to the tax app only. With "all",
+# this deployment would run (and own) migrations for every platform
+# project — ecommerce, hospital, crm, kanban, … — none of which the
+# DIY Tax Return app uses. A CRM migration drift took acc opsapi down
+# for 22h on 2026-05-14; "tax_copilot" makes that class of failure
+# impossible since non-tax migration modules are never loaded.
+projectCode: tax_copilot
+
+# ─── Password reset email link target ─────────────────────────────────
+# Canonical frontend origin for production. Migration 489 uses this
+# to bootstrap ``namespaces.allowed_redirect_origins`` on first run;
+# runtime path also falls back to it if any namespace's column is
+# empty. See README.md → Password Reset Flow.
+#
+# TODO: confirm the production hostname before first deploy. Likely
+# values: https://app.diytaxreturn.co.uk, https://www.diytaxreturn.co.uk,
+# or https://diytaxreturn.co.uk. Update before going live.
+frontendUrl: "https://app.diytaxreturn.co.uk"
+# passwordResetAllowedOrigins: ""
 
 image:
   repository: bwalia/opsapi

@@ -360,8 +360,8 @@ function RoleModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto">
       <div className="absolute inset-0 bg-secondary-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 my-8 max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white px-6 py-4 border-b border-secondary-200">
+      <div className="relative bg-surface rounded-xl shadow-2xl w-full max-w-2xl mx-4 my-8 max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-surface px-6 py-4 border-b border-secondary-200">
           <h2 className="text-xl font-semibold text-secondary-900">
             {isEdit ? 'Edit Role' : 'Create New Role'}
           </h2>

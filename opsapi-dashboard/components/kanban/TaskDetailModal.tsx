@@ -65,7 +65,7 @@ const PriorityIcon = ({ priority }: { priority: KanbanTaskPriority }) => {
     case 'low':
       return <ArrowDown size={14} className="text-blue-500" />;
     default:
-      return <Circle size={14} className="text-gray-400" />;
+      return <Circle size={14} className="text-secondary-400" />;
   }
 };
 
@@ -96,7 +96,7 @@ const PrioritySelector = memo(function PrioritySelector({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+          <div className="absolute left-0 mt-1 w-40 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
             {PRIORITIES.map((priority) => (
               <button
                 key={priority}
@@ -105,8 +105,8 @@ const PrioritySelector = memo(function PrioritySelector({
                   setIsOpen(false);
                 }}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50',
-                  value === priority && 'bg-gray-50'
+                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50',
+                  value === priority && 'bg-secondary-50'
                 )}
               >
                 <PriorityIcon priority={priority} />
@@ -152,7 +152,7 @@ const StatusSelector = memo(function StatusSelector({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+          <div className="absolute left-0 mt-1 w-40 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
             {STATUSES.map((status) => (
               <button
                 key={status}
@@ -161,19 +161,19 @@ const StatusSelector = memo(function StatusSelector({
                   setIsOpen(false);
                 }}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50',
-                  value === status && 'bg-gray-50'
+                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50',
+                  value === status && 'bg-secondary-50'
                 )}
               >
                 <span
                   className={cn(
                     'w-2 h-2 rounded-full',
-                    status === 'open' && 'bg-gray-400',
+                    status === 'open' && 'bg-secondary-400',
                     status === 'in_progress' && 'bg-blue-500',
                     status === 'blocked' && 'bg-red-500',
                     status === 'review' && 'bg-purple-500',
                     status === 'completed' && 'bg-green-500',
-                    status === 'cancelled' && 'bg-gray-400'
+                    status === 'cancelled' && 'bg-secondary-400'
                   )}
                 />
                 {formatTaskStatus(status)}
@@ -210,7 +210,7 @@ const AssigneesSection = memo(function AssigneesSection({
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+      <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
         <Users size={14} />
         <span>Assignees</span>
       </div>
@@ -218,7 +218,7 @@ const AssigneesSection = memo(function AssigneesSection({
         {assignees?.map((assignee) => (
           <div
             key={assignee.uuid}
-            className="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded-full"
+            className="flex items-center gap-2 bg-secondary-100 px-2 py-1 rounded-full"
           >
             <div className="w-6 h-6 rounded-full bg-primary-100 text-primary-700 text-xs font-medium flex items-center justify-center">
               {assignee.user?.first_name?.[0]}
@@ -229,7 +229,7 @@ const AssigneesSection = memo(function AssigneesSection({
             </span>
             <button
               onClick={() => onRemove(assignee.user_uuid)}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-secondary-400 hover:text-secondary-600"
             >
               <X size={14} />
             </button>
@@ -239,7 +239,7 @@ const AssigneesSection = memo(function AssigneesSection({
         <div className="relative">
           <button
             onClick={() => setShowPicker(!showPicker)}
-            className="flex items-center gap-1 px-2 py-1 text-sm text-gray-500 hover:text-gray-700 border border-dashed border-gray-300 rounded-full hover:border-gray-400"
+            className="flex items-center gap-1 px-2 py-1 text-sm text-secondary-500 hover:text-secondary-700 border border-dashed border-secondary-300 rounded-full hover:border-secondary-400"
           >
             <Plus size={14} />
             Add
@@ -248,7 +248,7 @@ const AssigneesSection = memo(function AssigneesSection({
           {showPicker && availableMembers.length > 0 && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowPicker(false)} />
-              <div className="absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20 max-h-48 overflow-y-auto">
+              <div className="absolute left-0 mt-1 w-56 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20 max-h-48 overflow-y-auto">
                 {availableMembers.map((member) => (
                   <button
                     key={member.uuid}
@@ -256,7 +256,7 @@ const AssigneesSection = memo(function AssigneesSection({
                       onAdd(member.user_uuid);
                       setShowPicker(false);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50"
                   >
                     <div className="w-6 h-6 rounded-full bg-primary-100 text-primary-700 text-xs font-medium flex items-center justify-center">
                       {member.user?.first_name?.[0]}
@@ -300,7 +300,7 @@ const LabelsSection = memo(function LabelsSection({
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+      <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
         <Tag size={14} />
         <span>Labels</span>
       </div>
@@ -327,7 +327,7 @@ const LabelsSection = memo(function LabelsSection({
         <div className="relative">
           <button
             onClick={() => setShowPicker(!showPicker)}
-            className="flex items-center gap-1 px-2 py-1 text-sm text-gray-500 hover:text-gray-700 border border-dashed border-gray-300 rounded-full hover:border-gray-400"
+            className="flex items-center gap-1 px-2 py-1 text-sm text-secondary-500 hover:text-secondary-700 border border-dashed border-secondary-300 rounded-full hover:border-secondary-400"
           >
             <Plus size={14} />
             Add
@@ -336,7 +336,7 @@ const LabelsSection = memo(function LabelsSection({
           {showPicker && availableLabels.length > 0 && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowPicker(false)} />
-              <div className="absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20 max-h-48 overflow-y-auto">
+              <div className="absolute left-0 mt-1 w-48 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20 max-h-48 overflow-y-auto">
                 {availableLabels.map((label) => (
                   <button
                     key={label.uuid}
@@ -344,7 +344,7 @@ const LabelsSection = memo(function LabelsSection({
                       onAdd(label.id);
                       setShowPicker(false);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50"
                   >
                     <div
                       className="w-3 h-3 rounded-full"
@@ -391,7 +391,7 @@ const CommentsSection = memo(function CommentsSection({
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
+      <div className="flex items-center gap-2 text-sm text-secondary-500 mb-3">
         <MessageSquare size={14} />
         <span>Comments ({comments?.length || 0})</span>
       </div>
@@ -409,14 +409,14 @@ const CommentsSection = memo(function CommentsSection({
                 <span className="text-sm font-medium">
                   {comment.user?.first_name} {comment.user?.last_name}
                 </span>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-secondary-400">
                   {new Date(comment.created_at).toLocaleDateString()}
                 </span>
                 {comment.is_edited && (
-                  <span className="text-xs text-gray-400">(edited)</span>
+                  <span className="text-xs text-secondary-400">(edited)</span>
                 )}
               </div>
-              <p className="text-sm text-gray-700 mt-1">{comment.content}</p>
+              <p className="text-sm text-secondary-700 mt-1">{comment.content}</p>
             </div>
           </div>
         ))}
@@ -429,7 +429,7 @@ const CommentsSection = memo(function CommentsSection({
           value={newComment}
           onChange={(e) => setNewComment(e.target.value)}
           placeholder="Write a comment..."
-          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="flex-1 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           disabled={isAddingComment}
         />
         <Button
@@ -487,7 +487,7 @@ const ChecklistSection = memo(function ChecklistSection({
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-secondary-500">
           <CheckSquare size={14} />
           <span>Checklists</span>
         </div>
@@ -507,7 +507,7 @@ const ChecklistSection = memo(function ChecklistSection({
             value={newChecklistName}
             onChange={(e) => setNewChecklistName(e.target.value)}
             placeholder="Checklist name..."
-            className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="flex-1 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             autoFocus
           />
           <Button type="submit" size="sm" disabled={!newChecklistName.trim()}>
@@ -535,13 +535,13 @@ const ChecklistSection = memo(function ChecklistSection({
             <div key={checklist.uuid}>
               <div className="flex items-center justify-between mb-2">
                 <span className="font-medium text-sm">{checklist.name}</span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-secondary-500">
                   {checklist.completed_item_count}/{checklist.item_count}
                 </span>
               </div>
 
               {/* Progress Bar */}
-              <div className="h-1.5 bg-gray-200 rounded-full mb-2">
+              <div className="h-1.5 bg-secondary-200 rounded-full mb-2">
                 <div
                   className="h-full bg-green-500 rounded-full transition-all"
                   style={{ width: `${progress}%` }}
@@ -553,7 +553,7 @@ const ChecklistSection = memo(function ChecklistSection({
                 {checklist.items?.map((item) => (
                   <div
                     key={item.uuid}
-                    className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded"
+                    className="flex items-center gap-2 p-1 hover:bg-secondary-50 rounded"
                   >
                     <button
                       onClick={() => onToggleItem(item.uuid)}
@@ -561,7 +561,7 @@ const ChecklistSection = memo(function ChecklistSection({
                         'w-4 h-4 rounded border flex items-center justify-center',
                         item.is_completed
                           ? 'bg-green-500 border-green-500 text-white'
-                          : 'border-gray-300'
+                          : 'border-secondary-300'
                       )}
                     >
                       {item.is_completed && <Check size={12} />}
@@ -569,7 +569,7 @@ const ChecklistSection = memo(function ChecklistSection({
                     <span
                       className={cn(
                         'text-sm',
-                        item.is_completed && 'line-through text-gray-400'
+                        item.is_completed && 'line-through text-secondary-400'
                       )}
                     >
                       {item.content}
@@ -585,7 +585,7 @@ const ChecklistSection = memo(function ChecklistSection({
                       value={newItemContent}
                       onChange={(e) => setNewItemContent(e.target.value)}
                       placeholder="Add an item..."
-                      className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      className="flex-1 px-2 py-1 text-sm border border-secondary-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') handleAddItem(checklist.uuid);
@@ -599,7 +599,7 @@ const ChecklistSection = memo(function ChecklistSection({
                 ) : (
                   <button
                     onClick={() => setAddingItemTo(checklist.uuid)}
-                    className="text-sm text-gray-500 hover:text-gray-700 mt-1"
+                    className="text-sm text-secondary-500 hover:text-secondary-700 mt-1"
                   >
                     + Add item
                   </button>
@@ -709,7 +709,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
           {/* Header */}
           <div className="mb-4">
             <div className="flex items-start gap-2">
-              <span className="text-sm text-gray-400 font-mono mt-1">
+              <span className="text-sm text-secondary-400 font-mono mt-1">
                 #{task.task_number}
               </span>
               {isEditing ? (
@@ -718,12 +718,12 @@ const TaskDetailModal = memo(function TaskDetailModal({
                     type="text"
                     value={editedTitle}
                     onChange={(e) => setEditedTitle(e.target.value)}
-                    className="w-full text-xl font-bold px-2 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full text-xl font-bold px-2 py-1 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                     autoFocus
                   />
                 </div>
               ) : (
-                <h2 className="text-xl font-bold text-gray-900 flex-1">
+                <h2 className="text-xl font-bold text-secondary-900 flex-1">
                   {task.title}
                 </h2>
               )}
@@ -732,20 +732,20 @@ const TaskDetailModal = memo(function TaskDetailModal({
               <div className="relative">
                 <button
                   onClick={() => setShowMenu(!showMenu)}
-                  className="p-1 rounded hover:bg-gray-100"
+                  className="p-1 rounded hover:bg-secondary-100"
                 >
                   <MoreHorizontal size={20} />
                 </button>
                 {showMenu && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                    <div className="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+                    <div className="absolute right-0 mt-1 w-40 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
                       <button
                         onClick={() => {
                           setIsEditing(true);
                           setShowMenu(false);
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50"
                       >
                         <Edit2 size={14} />
                         Edit
@@ -755,7 +755,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
                           navigator.clipboard.writeText(task.uuid);
                           setShowMenu(false);
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50"
                       >
                         <Copy size={14} />
                         Copy ID
@@ -785,17 +785,17 @@ const TaskDetailModal = memo(function TaskDetailModal({
 
           {/* Description */}
           <div className="mb-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Description</h3>
+            <h3 className="text-sm font-medium text-secondary-700 mb-2">Description</h3>
             {isEditing ? (
               <textarea
                 value={editedDescription}
                 onChange={(e) => setEditedDescription(e.target.value)}
                 placeholder="Add a description..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-3 py-2 border border-secondary-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"
                 rows={4}
               />
             ) : (
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">
+              <p className="text-sm text-secondary-600 whitespace-pre-wrap">
                 {task.description || 'No description'}
               </p>
             )}
@@ -840,7 +840,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
         </div>
 
         {/* Sidebar */}
-        <div className="w-full lg:w-72 space-y-6 border-t lg:border-t-0 lg:border-l border-gray-200 pt-4 lg:pt-0 lg:pl-6">
+        <div className="w-full lg:w-72 space-y-6 border-t lg:border-t-0 lg:border-l border-secondary-200 pt-4 lg:pt-0 lg:pl-6">
           {/* Assignees */}
           <AssigneesSection
             assignees={task.assignees}
@@ -859,7 +859,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
 
           {/* Due Date */}
           <div>
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+            <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
               <Calendar size={14} />
               <span>Due date</span>
             </div>
@@ -869,24 +869,24 @@ const TaskDetailModal = memo(function TaskDetailModal({
               onChange={(e) =>
                 onUpdate(task.uuid, { due_date: e.target.value || undefined })
               }
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           {/* Time Tracking */}
           <div>
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+            <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
               <Clock size={14} />
               <span>Time tracking</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-600">
+              <span className="text-secondary-600">
                 Spent: {formatTimeMinutes(task.time_spent_minutes || 0)}
               </span>
               {task.time_estimate_minutes && (
                 <>
-                  <span className="text-gray-400">/</span>
-                  <span className="text-gray-600">
+                  <span className="text-secondary-400">/</span>
+                  <span className="text-secondary-600">
                     Est: {formatTimeMinutes(task.time_estimate_minutes)}
                   </span>
                 </>
@@ -896,7 +896,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
 
           {/* Story Points */}
           <div>
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+            <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
               <span>Story points</span>
             </div>
             <input
@@ -909,17 +909,17 @@ const TaskDetailModal = memo(function TaskDetailModal({
                 })
               }
               placeholder="0"
-              className="w-20 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-20 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           {/* Activity */}
           <div>
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+            <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
               <Activity size={14} />
               <span>Activity</span>
             </div>
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-secondary-400">
               <p>Created {new Date(task.created_at).toLocaleDateString()}</p>
               <p>Updated {new Date(task.updated_at).toLocaleDateString()}</p>
             </div>

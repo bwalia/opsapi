@@ -134,7 +134,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                   setShowMenu(false);
                 }}
               />
-              <div className="absolute right-0 top-full mt-1 bg-white border border-secondary-200 rounded-lg shadow-lg z-20 py-1 min-w-[140px]">
+              <div className="absolute right-0 top-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg z-20 py-1 min-w-[140px]">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

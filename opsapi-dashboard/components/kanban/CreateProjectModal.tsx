@@ -161,7 +161,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Project Name */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             Project Name <span className="text-red-500">*</span>
           </label>
           <Input
@@ -179,7 +179,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
 
         {/* Description */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             Description
           </label>
           <textarea
@@ -188,7 +188,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
             onChange={handleChange}
             placeholder="Describe your project..."
             className={`w-full px-4 py-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-              errors.description ? 'border-red-500' : 'border-gray-300'
+              errors.description ? 'border-red-500' : 'border-secondary-300'
             }`}
             rows={3}
             disabled={isLoading}
@@ -200,7 +200,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
 
         {/* Color */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-secondary-700 mb-2">
             Project Color
           </label>
           <ColorPicker
@@ -211,14 +211,14 @@ const CreateProjectModal = memo(function CreateProjectModal({
 
         {/* Visibility */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">
             Visibility
           </label>
           <select
             name="visibility"
             value={formData.visibility}
             onChange={handleChange}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             disabled={isLoading}
           >
             <option value="private">Private - Only members can access</option>
@@ -238,11 +238,11 @@ const CreateProjectModal = memo(function CreateProjectModal({
 
         {/* Advanced Options */}
         {showAdvanced && (
-          <div className="space-y-4 pt-4 border-t border-gray-200">
+          <div className="space-y-4 pt-4 border-t border-secondary-200">
             {/* Budget */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">
                   Budget
                 </label>
                 <div className="flex">
@@ -250,7 +250,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
                     name="budget_currency"
                     value={formData.budget_currency}
                     onChange={handleChange}
-                    className="px-3 py-2 border border-r-0 border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="px-3 py-2 border border-r-0 border-secondary-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                     disabled={isLoading}
                   >
                     {CURRENCIES.map((c) => (
@@ -267,7 +267,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
                     placeholder="0.00"
                     min="0"
                     step="0.01"
-                    className={`flex-1 px-4 py-2 border border-gray-300 rounded-r-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                    className={`flex-1 px-4 py-2 border border-secondary-300 rounded-r-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                       errors.budget ? 'border-red-500' : ''
                     }`}
                     disabled={isLoading}
@@ -279,7 +279,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">
                   Hourly Rate
                 </label>
                 <input
@@ -290,7 +290,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
                   placeholder="0.00"
                   min="0"
                   step="0.01"
-                  className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                  className={`w-full px-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                     errors.hourly_rate ? 'border-red-500' : ''
                   }`}
                   disabled={isLoading}
@@ -304,7 +304,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
             {/* Dates */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">
                   Start Date
                 </label>
                 <input
@@ -312,13 +312,13 @@ const CreateProjectModal = memo(function CreateProjectModal({
                   name="start_date"
                   value={formData.start_date || ''}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   disabled={isLoading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">
                   Due Date
                 </label>
                 <input
@@ -326,7 +326,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
                   name="due_date"
                   value={formData.due_date || ''}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   disabled={isLoading}
                 />
               </div>
@@ -335,7 +335,7 @@ const CreateProjectModal = memo(function CreateProjectModal({
         )}
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+        <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
           <Button
             type="button"
             variant="outline"

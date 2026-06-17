@@ -1,0 +1,557 @@
+# ============================================================================
+# Weekly Acceptance Release — OpsAPI
+# ============================================================================
+# Enterprise CI/CD pipeline that promotes the latest `main` into the
+# acceptance (acc) environment every Friday morning and runs the Cypress E2E
+# suite against it — with NO pull request involved.
+#
+# Flow (each stage gates the next — a failure stops the pipeline):
+#   1. build-validate  — checkout main; build/validate the Lapis (OpenResty)
+#                        API image AND the Next.js dashboard; smoke-test the
+#                        API container; push the API image to the registry
+#   2. deploy-acc      — Helm deploy diytaxreturn-lapis to the `acc` namespace
+#                        + health gate (auto Helm rollback on failure)
+#   3. e2e-acc         — Cypress: registration, login, journey, submission,
+#                        and validation/error-handling scenarios
+#   4. notify          — Slack + Microsoft Teams notifications (always runs)
+#
+# E2E ONLY runs if deploy-acc succeeded AND the acc environment passed the
+# health gate (rollout complete, pods Ready, API endpoint reachable).
+# ============================================================================
+
+name: Weekly Acceptance Release
+
+on:
+  # --------------------------------------------------------------------------
+  # Scheduled trigger — every Friday at 06:00 UK local time.
+  #
+  # GitHub Actions cron is UTC-only. The UK observes GMT (UTC+0) in winter and
+  # BST (UTC+1) in summer, so "06:00 UK" is 06:00 UTC in winter / 05:00 UTC in
+  # summer. We register BOTH cron times and gate execution with a runtime
+  # Europe/London wall-clock check — exactly one cron matches 06:00 London on
+  # any given Friday; the DST sibling is short-circuited by the guard job.
+  #
+  #   0 5 * * 5   → 05:00 UTC Fri = 06:00 London during BST (summer)
+  #   0 6 * * 5   → 06:00 UTC Fri = 06:00 London during GMT (winter)
+  # --------------------------------------------------------------------------
+  schedule:
+    - cron: "0 5 * * 5"
+    - cron: "0 6 * * 5"
+
+  workflow_dispatch:
+    inputs:
+      skip_e2e:
+        description: "Deploy only, skip the Cypress E2E suite"
+        type: boolean
+        default: false
+      force_run:
+        description: "Bypass the UK schedule-window guard (for manual runs)"
+        type: boolean
+        default: true
+      project_code:
+        description: "Override project code(s) for DB migrations (single or comma-separated). Leave BLANK to use values-acc.yaml (tax_copilot)."
+        type: string
+        default: ""
+
+# Only one acceptance release at a time. An in-flight deploy is allowed to
+# finish so we never leave a half-applied Helm release behind.
+concurrency:
+  group: weekly-acc-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  TARGET_ENV: acc
+  NAMESPACE: acc
+  RELEASE_NAME: diytaxreturn-lapis
+  HELM_CHART_PATH: ./devops/helm-charts/diytaxreturn-lapis
+  IMAGE: bwalia/opsapi
+  DASHBOARD_DIR: opsapi-dashboard
+  # OpsAPI is served through the shared acc API ingress (the diy-tax-return
+  # FastAPI chart routes /opsapi → diytaxreturn-lapis). The Lapis chart's own
+  # ingress is disabled in values-acc.yaml.
+  API_BASE: https://acc-api.diytaxreturn.co.uk
+
+jobs:
+  # ==========================================================================
+  # GUARD — only proceed if this is the correct 06:00 UK window (or manual).
+  # ==========================================================================
+  schedule-guard:
+    name: Verify UK schedule window
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.guard.outputs.proceed }}
+    steps:
+      - name: Verify UK schedule window
+        id: guard
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_run }}" = "true" ]; then
+            echo "Manual run with force_run=true — skipping UK window guard."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          UK_HOUR=$(TZ="Europe/London" date +%H)
+          UK_DOW=$(TZ="Europe/London" date +%u)
+          echo "London time now: $(TZ='Europe/London' date '+%Y-%m-%d %H:%M %Z')"
+          if [ "$UK_DOW" = "5" ] && [ "$UK_HOUR" = "06" ]; then
+            echo "::notice::Inside the Friday 06:00 UK release window — proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Outside the Friday 06:00 UK window (DST sibling cron) — skipping."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ==========================================================================
+  # STEP 1 — Build & validate both components, smoke-test + push the API image.
+  # ==========================================================================
+  build-validate:
+    name: Build & Validate (${{ matrix.component }})
+    needs: schedule-guard
+    if: needs.schedule-guard.outputs.proceed == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 25
+    strategy:
+      fail-fast: true
+      matrix:
+        component: [api, dashboard]
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      # ----- Dashboard validation: Node deps cache + lint + type-check + build
+      - name: Set up Node (dashboard)
+        if: matrix.component == 'dashboard'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ${{ env.DASHBOARD_DIR }}/package-lock.json
+
+      - name: Install, lint, type-check & build (dashboard)
+        if: matrix.component == 'dashboard'
+        working-directory: ${{ env.DASHBOARD_DIR }}
+        run: |
+          npm ci
+          npm run lint
+          npm run type-check
+          npm run build
+
+      # ----- API validation: build the OpenResty image, then smoke-test it ---
+      - name: Log in to Docker Hub
+        if: matrix.component == 'api'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Set up Docker Buildx
+        if: matrix.component == 'api'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API image
+        if: matrix.component == 'api'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lapis
+          file: ./lapis/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: TAG=latest
+          cache-from: type=gha,scope=opsapi-api
+          cache-to: type=gha,mode=max,scope=opsapi-api
+
+      - name: Smoke-test the API container
+        if: matrix.component == 'api'
+        run: |
+          docker rm -f opsapi-smoke || true
+          docker run -d --name opsapi-smoke -p 34080:80 ${{ env.IMAGE }}:${{ github.sha }}
+          echo "Waiting for OpenResty to answer /health..."
+          for i in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:34080/health 2>/dev/null || echo "000")
+            echo "  attempt $i: HTTP $CODE"
+            # 200 = fully healthy; 503 = OpenResty up but no DB — acceptable for a smoke test.
+            if [ "$CODE" = "200" ] || [ "$CODE" = "503" ]; then
+              echo "Smoke test passed (HTTP $CODE)."
+              docker rm -f opsapi-smoke || true
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Smoke test failed — container not responding"
+          docker logs opsapi-smoke || true
+          docker rm -f opsapi-smoke || true
+          exit 1
+
+  # ==========================================================================
+  # STEP 2 — Authenticate to K3s, Helm deploy to acc, health gate, rollback.
+  # ==========================================================================
+  deploy-acc:
+    name: Deploy to Acceptance + Health Gate
+    needs: build-validate
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    environment:
+      name: acceptance
+      url: https://acc-api.diytaxreturn.co.uk/opsapi/health
+    outputs:
+      result: ${{ steps.healthgate.outcome }}
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      # ----- Authenticate to the Kubernetes cluster -------------------------
+      - name: Authenticate to K3s
+        run: |
+          if [ -z "${{ secrets.MY_K3S_CONFIG }}" ]; then
+            echo "::error::Secret MY_K3S_CONFIG is empty or missing."
+            exit 1
+          fi
+          echo "${{ secrets.MY_K3S_CONFIG }}" | base64 -d > ./kubeconfig
+          sed -i 's|server: https://.*:6443|server: https://k3s0.diytaxreturn.co.uk:6443|g' ./kubeconfig
+          kubectl config set-cluster default --insecure-skip-tls-verify=true --kubeconfig=./kubeconfig
+          chmod 600 ./kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Verify cluster connectivity
+        run: |
+          nc -zv -w 5 k3s0.diytaxreturn.co.uk 6443
+          kubectl cluster-info
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Snapshot current Helm revision (rollback point)
+        id: snapshot
+        run: |
+          REV=$(helm history ${{ env.RELEASE_NAME }} -n ${{ env.NAMESPACE }} -o json 2>/dev/null \
+            | python3 -c "import sys,json; h=json.load(sys.stdin); print([r for r in h if r['status']=='deployed'][-1]['revision'])" 2>/dev/null || echo "0")
+          echo "rev=$REV" >> "$GITHUB_OUTPUT"
+          echo "Rollback point — revision: $REV"
+
+      - name: Ensure namespace
+        run: kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      # ----- Helm deploy to the acc namespace -------------------------------
+      # `--atomic` auto-rolls-back THIS release if it fails to go healthy;
+      # `--wait` blocks until resources are Ready.
+      - name: Helm deploy — OpsAPI
+        run: |
+          # Only override projectCode when one is explicitly provided. On the
+          # scheduled run (no inputs) this is blank, so values-acc.yaml decides
+          # (tax_copilot). Previously the `|| 'all'` fallback forced every
+          # feature's migrations on each weekly release.
+          PROJECT_CODE_ARG=""
+          if [ -n "${{ inputs.project_code }}" ]; then
+            PROJECT_CODE_ARG="--set projectCode=${{ inputs.project_code }}"
+          fi
+          helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
+            -f ${{ env.HELM_CHART_PATH }}/values-acc.yaml \
+            --namespace ${{ env.NAMESPACE }} --create-namespace \
+            --set image.repository=${{ env.IMAGE }} \
+            --set image.tag=latest \
+            --set env=${{ env.TARGET_ENV }} \
+            $PROJECT_CODE_ARG \
+            --atomic --wait --timeout 5m
+
+      # ----- Health gate — the E2E pre-condition ----------------------------
+      - name: Health gate — verify acc is fully ready
+        id: healthgate
+        run: |
+          set -e
+          NS=${{ env.NAMESPACE }}
+
+          echo "::group::Rollout status"
+          kubectl rollout status deployment/${{ env.RELEASE_NAME }} -n "$NS" --timeout=180s
+          echo "::endgroup::"
+
+          echo "::group::Pod health"
+          NOT_READY=$(kubectl get pods -n "$NS" -l app=${{ env.RELEASE_NAME }} \
+            -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
+            | grep -vc "True" || true)
+          if [ "$NOT_READY" -gt 0 ]; then
+            echo "::error::${{ env.RELEASE_NAME }} has $NOT_READY pod(s) not Ready"
+            kubectl get pods -n "$NS" -l app=${{ env.RELEASE_NAME }} -o wide
+            kubectl describe pods -n "$NS" -l app=${{ env.RELEASE_NAME }} | tail -40
+            exit 1
+          fi
+          RESTARTS=$(kubectl get pods -n "$NS" -l app=${{ env.RELEASE_NAME }} \
+            -o jsonpath='{range .items[*]}{.status.containerStatuses[*].restartCount}{"\n"}{end}' \
+            | awk '{s+=$1} END {print s+0}')
+          echo "  All pods Ready; total container restarts: $RESTARTS"
+          if [ "$RESTARTS" -gt 2 ]; then
+            echo "::error::Pods restarting ($RESTARTS) — liveness/readiness probes flapping"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "::group::API endpoint reachability"
+          # The Lapis chart's own ingress is disabled in acc; OpsAPI is exposed
+          # via the shared acc API host at /opsapi. Retry to absorb ingress lag.
+          STATUS="000"
+          for i in $(seq 1 6); do
+            STATUS=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 "${{ env.API_BASE }}/opsapi/health" || echo "000")
+            echo "  attempt $i: HTTP $STATUS"
+            [ "$STATUS" = "200" ] && break
+            sleep 10
+          done
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::OpsAPI health endpoint not reachable (HTTP $STATUS)"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "::notice::Acceptance environment is fully healthy — E2E may proceed."
+
+      # ----- Rollback — runs ONLY if the deploy or health gate failed -------
+      - name: Rollback Helm release on failure
+        if: failure()
+        run: |
+          NS=${{ env.NAMESPACE }}
+          echo "::error::Deploy/health gate failed — rolling back ${{ env.RELEASE_NAME }} on $NS"
+          if [ "${{ steps.snapshot.outputs.rev }}" != "0" ]; then
+            helm rollback ${{ env.RELEASE_NAME }} ${{ steps.snapshot.outputs.rev }} -n "$NS" --wait --timeout 5m \
+              || echo "::warning::Rollback command failed — manual intervention required"
+          else
+            echo "::warning::No previous successful revision to roll back to (first deploy)."
+          fi
+          echo "::error::Acceptance deploy rolled back. E2E suite will NOT run."
+
+      - name: Cleanup kubeconfig
+        if: always()
+        run: rm -f ./kubeconfig
+
+  # ==========================================================================
+  # STEP 3 — Cypress E2E against the acc environment.
+  # `needs: deploy-acc` + the `if` guard guarantee this ONLY runs when the
+  # deploy succeeded AND the health gate passed. The dashboard is built and
+  # served locally on the runner; Cypress drives it against the freshly
+  # deployed acc OpsAPI backend.
+  # ==========================================================================
+  e2e-acc:
+    name: E2E — Cypress (acceptance)
+    needs: deploy-acc
+    if: needs.deploy-acc.result == 'success' && !inputs.skip_e2e
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome]
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ${{ env.DASHBOARD_DIR }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ env.DASHBOARD_DIR }}
+        run: npm ci
+
+      - name: Build dashboard
+        working-directory: ${{ env.DASHBOARD_DIR }}
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: ${{ env.API_BASE }}
+
+      # Runs the FULL Cypress suite under cypress/e2e/** so newly-added specs
+      # (registration, journey, submission, validation/error scenarios) are
+      # picked up automatically. Covers: User Registration, User Login,
+      # Complete Tax Return Journey, Submission, Validation/Error Handling.
+      - name: Run Cypress E2E suite
+        id: cypress
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: ${{ env.DASHBOARD_DIR }}
+          start: npm run start
+          wait-on: "http://127.0.0.1:8039"
+          wait-on-timeout: 120
+          browser: ${{ matrix.browser }}
+          config: video=true,screenshotOnRunFailure=true
+        env:
+          CYPRESS_BASE_URL: http://127.0.0.1:8039
+          CYPRESS_API_URL: ${{ env.API_BASE }}
+          CYPRESS_TEST_USERNAME: ${{ secrets.CYPRESS_TEST_USERNAME }}
+          CYPRESS_TEST_PASSWORD: ${{ secrets.CYPRESS_TEST_PASSWORD }}
+          CYPRESS_SKIP_INTEGRATION: "false"
+
+      # ----- Artifacts: screenshots + videos uploaded on success AND failure -
+      - name: Upload Cypress screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-screenshots-${{ matrix.browser }}
+          path: ${{ env.DASHBOARD_DIR }}/cypress/screenshots
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload Cypress videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-videos-${{ matrix.browser }}
+          path: ${{ env.DASHBOARD_DIR }}/cypress/videos
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Generate E2E test summary
+        if: always()
+        run: |
+          {
+            echo "## Cypress E2E — Acceptance"
+            echo ""
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Browser | ${{ matrix.browser }} |"
+            echo "| Target API | ${{ env.API_BASE }} |"
+            echo "| Result | ${{ steps.cypress.outcome }} |"
+            SHOTS=$(find ${{ env.DASHBOARD_DIR }}/cypress/screenshots -name '*.png' 2>/dev/null | wc -l | tr -d ' ')
+            VIDS=$(find ${{ env.DASHBOARD_DIR }}/cypress/videos -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ')
+            echo "| Screenshots | $SHOTS |"
+            echo "| Videos | $VIDS |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mark job failed if Cypress failed
+        if: steps.cypress.outcome == 'failure'
+        run: |
+          echo "::error::Cypress E2E suite failed against acceptance"
+          exit 1
+
+  # ==========================================================================
+  # Notifications — Slack + Microsoft Teams. Always runs.
+  # ==========================================================================
+  notify:
+    name: Notify Slack & Teams
+    needs: [schedule-guard, build-validate, deploy-acc, e2e-acc]
+    if: always() && needs.schedule-guard.outputs.proceed == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Compose result
+        id: result
+        run: |
+          BUILD="${{ needs.build-validate.result }}"
+          DEPLOY="${{ needs.deploy-acc.result }}"
+          E2E="${{ needs.e2e-acc.result }}"
+
+          if [ "$DEPLOY" != "success" ]; then
+            STATUS="failure"; HEADLINE="Acceptance deploy FAILED — Helm release rolled back"; EMOJI="🔴"
+          elif [ "$E2E" = "failure" ]; then
+            STATUS="failure"; HEADLINE="Acceptance deployed OK, but Cypress E2E FAILED"; EMOJI="🟠"
+          elif [ "$E2E" = "skipped" ]; then
+            STATUS="success"; HEADLINE="Acceptance deployed OK (E2E skipped)"; EMOJI="🟢"
+          else
+            STATUS="success"; HEADLINE="Acceptance release SUCCESSFUL — deploy + E2E green"; EMOJI="🟢"
+          fi
+          {
+            echo "status=$STATUS"
+            echo "headline=$EMOJI $HEADLINE"
+            echo "build=$BUILD"
+            echo "deploy=$DEPLOY"
+            echo "e2e=$E2E"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Slack notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          HEADLINE: ${{ steps.result.outputs.headline }}
+          STATUS: ${{ steps.result.outputs.status }}
+          BUILD: ${{ steps.result.outputs.build }}
+          DEPLOY: ${{ steps.result.outputs.deploy }}
+          E2E: ${{ steps.result.outputs.e2e }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          if [ -z "$SLACK_WEBHOOK" ]; then echo "SLACK_WEBHOOK not set — skipping."; exit 0; fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+          color = '#2eb886' if os.environ['STATUS'] == 'success' else '#cc0000'
+          blocks = [
+            {"type":"header","text":{"type":"plain_text","text":os.environ['HEADLINE'],"emoji":True}},
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Environment:*\nacceptance"},
+              {"type":"mrkdwn","text":f"*Build:*\n{os.environ['BUILD']}"},
+              {"type":"mrkdwn","text":f"*Deploy + Health Gate:*\n{os.environ['DEPLOY']}"},
+              {"type":"mrkdwn","text":f"*Cypress E2E:*\n{os.environ['E2E']}"},
+            ]},
+            {"type":"actions","elements":[
+              {"type":"button","text":{"type":"plain_text","text":"View workflow run"},"url":os.environ['RUN_URL']}
+            ]},
+          ]
+          payload = {"attachments":[{"color":color,"blocks":blocks}]}
+          req = urllib.request.Request(os.environ['SLACK_WEBHOOK'],
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type":"application/json"}, method="POST")
+          try:
+            urllib.request.urlopen(req); print("Slack notification sent.")
+          except Exception as e:
+            print(f"Slack notification failed: {e}")
+          PY
+
+      - name: Microsoft Teams notification
+        env:
+          TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
+          HEADLINE: ${{ steps.result.outputs.headline }}
+          STATUS: ${{ steps.result.outputs.status }}
+          BUILD: ${{ steps.result.outputs.build }}
+          DEPLOY: ${{ steps.result.outputs.deploy }}
+          E2E: ${{ steps.result.outputs.e2e }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          if [ -z "$TEAMS_WEBHOOK" ]; then echo "TEAMS_WEBHOOK not set — skipping."; exit 0; fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+          color = "2eb886" if os.environ['STATUS'] == 'success' else "cc0000"
+          card = {
+            "@type":"MessageCard","@context":"http://schema.org/extensions",
+            "themeColor":color,"summary":os.environ['HEADLINE'],
+            "sections":[{
+              "activityTitle":os.environ['HEADLINE'],
+              "activitySubtitle":"OpsAPI — Weekly Acceptance Release",
+              "facts":[
+                {"name":"Environment","value":"acceptance"},
+                {"name":"Build","value":os.environ['BUILD']},
+                {"name":"Deploy + Health Gate","value":os.environ['DEPLOY']},
+                {"name":"Cypress E2E","value":os.environ['E2E']},
+              ],
+              "markdown":True,
+            }],
+            "potentialAction":[{
+              "@type":"OpenUri","name":"View workflow run",
+              "targets":[{"os":"default","uri":os.environ['RUN_URL']}],
+            }],
+          }
+          req = urllib.request.Request(os.environ['TEAMS_WEBHOOK'],
+            data=json.dumps(card).encode(),
+            headers={"Content-Type":"application/json"}, method="POST")
+          try:
+            urllib.request.urlopen(req); print("Teams notification sent.")
+          except Exception as e:
+            print(f"Teams notification failed: {e}")
+          PY
+
+      - name: Fail job if release was not successful
+        if: steps.result.outputs.status != 'success'
+        run: |
+          echo "::error::${{ steps.result.outputs.headline }}"
+          exit 1

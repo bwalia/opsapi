@@ -256,6 +256,38 @@ function Extraction.extract_from_pdf(file_path)
     return Extraction.extract_from_text(text)
 end
 
+-- Detect the character offsets of the Debit / Credit / Balance amount columns
+-- from a statement's header row. pdftotext -layout keeps columns aligned, so an
+-- amount's position on the line tells us whether it's money out, money in, or the
+-- running balance — far more reliable than guessing from the description.
+local function detect_amount_columns(lines)
+    for _, line in ipairs(lines) do
+        local low = line:lower()
+        local debit = low:find("money out", 1, true) or low:find("paid out", 1, true)
+            or low:find("withdrawal", 1, true) or low:find("debit", 1, true)
+        local credit = low:find("money in", 1, true) or low:find("paid in", 1, true)
+            or low:find("deposit", 1, true) or low:find("credit", 1, true)
+        if debit and credit then
+            return { debit = debit, credit = credit, balance = low:find("balance", 1, true) }
+        end
+    end
+    return nil
+end
+
+-- Assign an amount (by its start offset) to the nearest column anchor. Numbers
+-- sitting in the description column are far from any anchor and get ignored.
+local function column_for_offset(offset, cols)
+    local best, best_dist
+    for name, anchor in pairs(cols) do
+        local dist = math.abs(offset - anchor)
+        if not best_dist or dist < best_dist then
+            best_dist, best = dist, name
+        end
+    end
+    if best_dist and best_dist <= 14 then return best end
+    return nil
+end
+
 --- Extract transactions from raw text (pdftotext output)
 function Extraction.extract_from_text(text)
     if not text then return nil, "empty text" end
@@ -273,61 +305,93 @@ function Extraction.extract_from_text(text)
     elseif text_lower:match("monzo") then bank = "monzo"
     end
 
-    -- Parse line by line, looking for date-prefixed transaction rows
+    -- Collect raw lines (preserve column spacing produced by pdftotext -layout).
+    local lines = {}
     for line in text:gmatch("[^\r\n]+") do
-        local trimmed = line:match("^%s*(.-)%s*$")
-        if trimmed and #trimmed > 0 then
-            -- Pattern: DD/MM/YYYY or DD Mon YYYY followed by description and amounts
-            local date_str, rest
+        lines[#lines + 1] = line
+    end
 
-            -- DD/MM/YYYY format
-            date_str, rest = trimmed:match("^(%d%d[/%-]%d%d[/%-]%d%d%d?%d?)%s+(.+)")
-            if not date_str then
-                -- DD Mon YYYY format
-                date_str, rest = trimmed:match("^(%d%d?%s+%a+%s+%d%d%d%d)%s+(.+)")
+    -- Locate the Debit/Credit/Balance columns once, from the header row.
+    local cols = detect_amount_columns(lines)
+
+    -- Parse line by line, looking for date-prefixed transaction rows
+    for _, line in ipairs(lines) do
+        -- Match a leading date (DD/MM/YYYY or DD Mon YYYY) and note where it ends.
+        local date_str, date_end
+        local _, e, cap = line:find("^%s*(%d%d?[/%-]%d%d?[/%-]%d%d%d?%d?)%s")
+        if cap then date_str, date_end = cap, e end
+        if not date_str then
+            _, e, cap = line:find("^%s*(%d%d?%s+%a+%s+%d%d%d%d)%s")
+            if cap then date_str, date_end = cap, e end
+        end
+
+        local parsed_date = date_str and parse_date_uk(date_str) or nil
+        if parsed_date then
+            -- Find every amount on the line together with its byte offset, so we
+            -- can map it back to a column. The optional currency byte is skipped;
+            -- a few bytes of drift from multi-byte £/€ is absorbed by the tolerance.
+            local amts = {}
+            local init = 1
+            while true do
+                local as, ae, acap = line:find("([%d,]+%.%d%d)", init)
+                if not as then break end
+                local val = clean_amount(acap)
+                if val then amts[#amts + 1] = { val = val, pos = as } end
+                init = ae + 1
             end
 
-            if date_str and rest then
-                local parsed_date = parse_date_uk(date_str)
-                if parsed_date then
-                    -- Extract amounts from the end of the line
-                    -- Look for patterns like: description    1,234.56    5,678.90
-                    local amounts = {}
-                    for amt in rest:gmatch("[£]?[%d,]+%.%d%d") do
-                        table.insert(amounts, clean_amount(amt))
+            if #amts > 0 then
+                -- Description = the text between the date and the first amount.
+                -- Strip multi-byte currency symbols so it stays valid UTF-8.
+                local description = line:sub((date_end or 0) + 1, amts[1].pos - 1)
+                description = description:gsub("\194\163", ""):gsub("\226\130\172", "")
+                description = description:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+
+                -- Classify amounts into debit / credit / balance by column position.
+                local debit_v, credit_v, balance_v
+                if cols then
+                    for _, a in ipairs(amts) do
+                        local which = column_for_offset(a.pos, cols)
+                        if which == "debit" then debit_v = a.val
+                        elseif which == "credit" then credit_v = a.val
+                        elseif which == "balance" then balance_v = a.val end
                     end
+                end
 
-                    -- Remove amounts from description
-                    local description = rest:gsub("[£]?[%d,]+%.%d%d", ""):match("^%s*(.-)%s*$") or ""
-                    -- Clean up extra spaces
-                    description = description:gsub("%s+", " ")
+                local amount, txn_type
+                if credit_v and credit_v ~= 0 then
+                    amount, txn_type = math.abs(credit_v), "CREDIT"
+                elseif debit_v and debit_v ~= 0 then
+                    amount, txn_type = math.abs(debit_v), "DEBIT"
+                end
 
-                    if #amounts > 0 then
-                        local amount = amounts[1]
-                        local balance = amounts[#amounts]
-                        if #amounts > 1 then
-                            amount = amounts[1]
-                            balance = amounts[#amounts]
-                        end
-
-                        -- Determine type from keywords or amount sign
-                        local txn_type = "DEBIT"
-                        local desc_lower = description:lower()
-                        if desc_lower:match("credit") or desc_lower:match("received") or
-                           desc_lower:match("transfer in") or desc_lower:match("paid in") or
-                           desc_lower:match("bacs credit") or desc_lower:match("faster payment received") then
-                            txn_type = "CREDIT"
-                        end
-
-                        table.insert(transactions, {
-                            date = parsed_date,
-                            description = description,
-                            amount = math.abs(amount or 0),
-                            transaction_type = txn_type,
-                            balance = (#amounts > 1) and balance or nil,
-                            source_bank = bank,
-                        })
+                -- Fallback for layouts without separate Debit/Credit columns:
+                -- first amount is the value, last is the running balance; infer
+                -- direction from description keywords.
+                if not amount then
+                    amount = math.abs(amts[1].val or 0)
+                    if #amts > 1 then balance_v = balance_v or amts[#amts].val end
+                    local dl = description:lower()
+                    if dl:match("credit") or dl:match("received") or dl:match("refund")
+                        or dl:match("transfer in") or dl:match("paid in")
+                        or dl:match("bacs credit") or dl:match("faster payment received")
+                        or dl:match("salary") or dl:match("wages") or dl:match("interest")
+                        or dl:match("dividend") then
+                        txn_type = "CREDIT"
+                    else
+                        txn_type = "DEBIT"
                     end
+                end
+
+                if amount and amount > 0 then
+                    table.insert(transactions, {
+                        date = parsed_date,
+                        description = description,
+                        amount = amount,
+                        transaction_type = txn_type,
+                        balance = balance_v,
+                        source_bank = bank,
+                    })
                 end
             end
         end

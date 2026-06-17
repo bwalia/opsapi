@@ -1,4 +1,5 @@
 import axios, { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import { hmrcFraudHeaders } from './hmrc-fraud';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
 
@@ -55,6 +56,31 @@ function getAuthToken(): string | null {
 }
 
 /**
+ * Best-effort read of the logged-in user's id (for HMRC Gov-Client-User-IDs).
+ * Checks the direct auth_user key, then the Zustand persisted auth state.
+ */
+function getAuthUserId(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const pick = (u: unknown): string | undefined => {
+    const user = u as { uuid?: string; id?: string | number; email?: string } | undefined;
+    const v = user?.uuid ?? user?.id ?? user?.email;
+    return v !== undefined && v !== null ? String(v) : undefined;
+  };
+  try {
+    const direct = localStorage.getItem(AUTH_USER_KEY);
+    if (direct) {
+      const id = pick(JSON.parse(direct));
+      if (id) return id;
+    }
+    const zustand = localStorage.getItem(ZUSTAND_AUTH_KEY);
+    if (zustand) return pick(JSON.parse(zustand)?.state?.user);
+  } catch {
+    // Ignore parse errors
+  }
+  return undefined;
+}
+
+/**
  * Clear all auth-related storage including menu and namespace cache
  */
 export function clearAllAuthStorage(): void {
@@ -89,6 +115,15 @@ apiClient.interceptors.request.use(
           }
         } catch {
           // Ignore parse errors
+        }
+      }
+
+      // On HMRC-bound requests, forward the browser-collected anti-fraud signals so the
+      // backend can build HMRC's mandatory Gov-Client-* fraud-prevention headers.
+      if (config.headers && (config.url || '').includes('hmrc')) {
+        const fraud = hmrcFraudHeaders(getAuthUserId());
+        for (const [k, v] of Object.entries(fraud)) {
+          config.headers[k] = v;
         }
       }
     }

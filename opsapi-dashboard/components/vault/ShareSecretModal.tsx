@@ -318,7 +318,7 @@ const ShareSecretModal: React.FC<ShareSecretModalProps> = ({
                 {showDropdown && (
                   <div
                     ref={dropdownRef}
-                    className="absolute z-50 w-full mt-1 bg-white border border-secondary-200 rounded-lg shadow-lg max-h-64 overflow-y-auto"
+                    className="absolute z-50 w-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg max-h-64 overflow-y-auto"
                   >
                     {isSearching && searchResults.length === 0 ? (
                       <div className="p-4 text-center text-secondary-500">

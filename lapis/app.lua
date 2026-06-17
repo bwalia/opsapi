@@ -235,6 +235,7 @@ app:before_filter(function(self)
         ["/auth/refresh"] = true,         -- Handles its own token validation
         ["/auth/2fa/verify"] = true,      -- 2FA OTP verification (pre-auth)
         ["/auth/2fa/resend"] = true,      -- 2FA resend OTP (pre-auth)
+        ["/auth/e2e/peek-otp"] = true,    -- TEST-ONLY: secret-gated in routes/e2e-otp.lua (no JWT; route only registered when E2E_OTP_PEEK_ENABLED=true)
         ["/auth/google"] = true,          -- Google OAuth initiation
         ["/auth/google/callback"] = true, -- Google OAuth callback
         ["/auth/oauth/validate"] = true,  -- OAuth token validation
@@ -249,7 +250,7 @@ app:before_filter(function(self)
         uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
         uri:match("^/api/v2/projects$") or
-        uri:match("^/api/v2/projects/[^/]+/theme") or
+        uri:match("^/api/v2/themes/active/styles%.css$") or
         uri:match("^/api/v2/[^/]+/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
         uri:match("^/api/v2/test%-notification") then
@@ -316,6 +317,14 @@ ngx.log(ngx.NOTICE, "Loading routes (PROJECT_CODE=", ProjectConfig.getProjectCod
 -- CORE ROUTES (always loaded — core tables exist for all projects)
 -- ============================================
 safe_load_routes("routes.auth")
+-- TEST-ONLY: E2E OTP peek endpoint (POST /auth/e2e/peek-otp). Registered ONLY
+-- when E2E_OTP_PEEK_ENABLED=true (acc), so the route is physically absent in
+-- real production. The handler additionally enforces a shared secret, a valid
+-- 2FA session, a test-email allow-list, and a hard prod refuse. See
+-- routes/e2e-otp.lua. NEVER set E2E_OTP_PEEK_ENABLED on prod.
+if os.getenv("E2E_OTP_PEEK_ENABLED") == "true" then
+    safe_load_routes("routes.e2e-otp")
+end
 safe_load_routes("routes.pin")
 safe_load_routes("routes.users")
 safe_load_routes("routes.groups")
@@ -332,12 +341,16 @@ safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
 safe_load_routes("routes.email")
 safe_load_routes("routes.project-dashboard")
-safe_load_routes("routes.project-themes")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
 -- ============================================
 load_if("menu", "routes.menu")
+
+-- ============================================
+-- THEME SYSTEM (multi-tenant theming)
+-- ============================================
+load_if("themes", "routes.themes")
 
 -- ============================================
 -- ECOMMERCE (stores, products, orders, payments)
@@ -454,21 +467,34 @@ load_if("tax_copilot", "routes.tax-classify")
 load_if("tax_copilot", "routes.tax-reconcile")
 load_if("tax_copilot", "routes.tax-calculate")
 load_if("tax_copilot", "routes.tax-file")
+load_if("tax_copilot", "routes.tax-hmrc-filing")
 load_if("tax_copilot", "routes.tax-hmrc-data")
 load_if("tax_copilot", "routes.tax-training-data")
 load_if("tax_copilot", "routes.tax-admin")
 load_if("tax_copilot", "routes.tax-admin-categories")
+load_if("tax_copilot", "routes.tax-admin-profiles")
+load_if("tax_copilot", "routes.tax-app-settings")
+load_if("tax_copilot", "routes.tax-admin-custom-categories")
+load_if("tax_copilot", "routes.tax-custom-categories")
+load_if("tax_copilot", "routes.tax-categories")
 load_if("tax_copilot", "routes.tax-support")
 load_if("tax_copilot", "routes.my-incomes")
+-- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
+load_if("tax_copilot", "routes.billing-plans")
+load_if("tax_copilot", "routes.billing-checkout")
+load_if("tax_copilot", "routes.billing-webhook")
+load_if("tax_copilot", "routes.billing-account")
 
 -- ============================================
--- CRM (Accounts, Contacts, Deals, Pipelines)
+-- CRM (Accounts, Contacts, Deals, Pipelines, Leads)
 -- ============================================
 load_if("crm", "routes.crm-pipelines")
 load_if("crm", "routes.crm-accounts")
 load_if("crm", "routes.crm-contacts")
 load_if("crm", "routes.crm-deals")
 load_if("crm", "routes.crm-activities")
+load_if("crm", "routes.crm-leads")
+load_if("crm", "routes.crm-leads-public")
 
 -- ============================================
 -- TIMESHEETS (Time tracking and approval)

@@ -1,18 +1,31 @@
 name: Build and Deploy OpsAPI to K3s
 
 on:
+  # Auto-deploy rules:
+  #   push to `main`     → fans out to `dev` + `int` in parallel (low tiers)
+  #   push to `release`  → deploys to `acc` (single-tier promotion)
+  #   manual dispatch    → single env chosen via TARGET_ENV input
+  #
+  # `acc` is INTENTIONALLY excluded from main pushes — every commit
+  # landing on main used to redeploy acc and risk breaking it. The
+  # weekly-acc-release workflow still promotes main → acc on Fridays
+  # as a scheduled safety net; this workflow's on-demand acc path is
+  # now the `release` branch (cut from main when you want to promote).
+  # `prod` is never auto-deployed — manual dispatch only.
   push:
     branches:
       - main
+      - release
   workflow_dispatch:
     inputs:
       TARGET_ENV:
-        description: "Environment to deploy (dev, acc, prod)"
+        description: "Environment to deploy (dev, int, acc, prod)"
         required: true
         default: "acc"
         type: choice
         options:
           - dev
+          - int
           - acc
           - prod
       SKIP_BUILD:
@@ -24,9 +37,9 @@ on:
         type: boolean
         default: false
       PROJECT_CODE:
-        description: "Project code(s) for migrations. Single (tax_copilot) or comma-separated (ecommerce,collaboration)"
-        required: true
-        default: "all"
+        description: "Override migration project code(s) — single (tax_copilot) or comma-separated (ecommerce,collaboration). Leave BLANK to use the env's values file (e.g. values-acc.yaml → tax_copilot)."
+        required: false
+        default: ""
         type: string
       ADMIN_EMAIL:
         description: "Super admin email for namespace setup"
@@ -142,16 +155,57 @@ jobs:
         run: docker rm -f opsapi-smoke-test || true
 
   # =========================================================================
-  # 3. DEPLOY TO K3S
+  # 3. PLAN — derive which env(s) this run targets, based on the trigger
   # =========================================================================
-  deploy-to-k3s:
-    name: Deploy OpsAPI to K3s
+  # Why a separate job rather than computing inside deploy-to-k3s: matrix
+  # strategies must be defined at job-level and YAML can't conditionally
+  # expand them, so we compute a JSON array here and feed it into the
+  # next job's matrix via `fromJson(needs.plan.outputs.envs)`.
+  plan:
+    name: Plan target environment(s)
     needs: [smoke-test]
     if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure')
     runs-on: [self-hosted, Linux, X64]
+    outputs:
+      envs: ${{ steps.plan.outputs.envs }}
+    steps:
+      - id: plan
+        name: Resolve envs from trigger
+        run: |
+          # Manual dispatch always wins — single env from the input.
+          if [ -n "${{ github.event.inputs.TARGET_ENV }}" ]; then
+            ENVS_JSON='["${{ github.event.inputs.TARGET_ENV }}"]'
+          elif [ "${{ github.ref }}" = "refs/heads/release" ]; then
+            ENVS_JSON='["acc"]'
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            # Low tiers — fan out so dev and int receive every main commit.
+            ENVS_JSON='["dev","int"]'
+          else
+            echo "::error::Unsupported trigger: ${{ github.ref }} / ${{ github.event_name }}"
+            exit 1
+          fi
+          echo "envs=$ENVS_JSON" >> "$GITHUB_OUTPUT"
+          echo "Planned envs: $ENVS_JSON"
+
+  # =========================================================================
+  # 4. DEPLOY TO K3S — one parallel job per planned env
+  # =========================================================================
+  deploy-to-k3s:
+    name: Deploy OpsAPI to K3s (${{ matrix.target_env }})
+    needs: [smoke-test, plan]
+    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure') && needs.plan.result == 'success'
+    runs-on: [self-hosted, Linux, X64]
+    # fail-fast off: a broken dev shouldn't cancel an in-flight int deploy.
+    strategy:
+      fail-fast: false
+      matrix:
+        target_env: ${{ fromJson(needs.plan.outputs.envs) }}
+    # Backstop: never let a hung kubectl step hold the (single) self-hosted
+    # runner for GitHub's 6h default — fail fast and free it for the next run.
+    timeout-minutes: 15
     steps:
       - name: Identify Runner
-        run: echo "Running on $(hostname)"
+        run: echo "Running on $(hostname) — target=${{ matrix.target_env }}"
 
       - name: Clean up Workspace
         run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
@@ -163,7 +217,7 @@ jobs:
       - name: Resolve target environment
         id: env
         run: |
-          TARGET_ENV="${{ github.event.inputs.TARGET_ENV || 'acc' }}"
+          TARGET_ENV="${{ matrix.target_env }}"
           echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
 
           # Select the right values file
@@ -210,8 +264,8 @@ jobs:
           kubectl create namespace ${{ steps.env.outputs.TARGET_ENV }} --dry-run=client -o yaml | kubectl apply -f -
 
       # For dev: Vault ExternalSecrets are disabled, so create secrets manually.
-      # For acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
-      - name: Create Secrets (dev only — acc/prod use Vault)
+      # For int/acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
+      - name: Create Secrets (dev only — int/acc/prod use Vault)
         if: steps.env.outputs.TARGET_ENV == 'dev'
         env:
           ENV_CONTENT: ${{ secrets.OPSAPI_ENV_FILE }}
@@ -232,6 +286,15 @@ jobs:
       - name: Deploy OpsAPI
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
+          # Only override projectCode when an explicit value is passed on
+          # workflow_dispatch. When blank (a push to main, or a dispatch that
+          # leaves it empty) the env's values file decides — values-acc.yaml
+          # sets projectCode: tax_copilot. Previously this forced 'all', which
+          # re-enabled every feature's migrations regardless of the values file.
+          PROJECT_CODE_ARG=""
+          if [ -n "${{ github.event.inputs.PROJECT_CODE }}" ]; then
+            PROJECT_CODE_ARG="--set projectCode=${{ github.event.inputs.PROJECT_CODE }}"
+          fi
           helm upgrade --install diytaxreturn-lapis ${{ env.HELM_CHART_PATH }} \
             -f ${{ steps.env.outputs.VALUES_FILE }} \
             --namespace ${{ steps.env.outputs.TARGET_ENV }} \
@@ -239,18 +302,27 @@ jobs:
             --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=latest \
             --set env=${{ steps.env.outputs.TARGET_ENV }} \
-            --set projectCode=${{ github.event.inputs.PROJECT_CODE || 'all' }} \
             --set setup.adminEmail=${{ github.event.inputs.ADMIN_EMAIL || '' }} \
             --set setup.adminPassword=${{ github.event.inputs.ADMIN_PASSWORD || '' }} \
-            --set setup.namespaceSlug=${{ github.event.inputs.NAMESPACE_SLUG || '' }}
+            --set setup.namespaceSlug=${{ github.event.inputs.NAMESPACE_SLUG || '' }} \
+            $PROJECT_CODE_ARG
 
       - name: Force Refresh Pods
         run: |
           export KUBECONFIG=$(pwd)/kubeconfig
           NS=${{ steps.env.outputs.TARGET_ENV }}
-          # Remove failed pods so K3s recreates them with new config
-          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed || true
-          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis || true
+          # Remove failed pods so K3s recreates them with new config.
+          # --wait=false is REQUIRED: kubectl delete otherwise blocks until
+          # the pods fully terminate, and a pod stuck in Terminating (a
+          # finalizer, a container ignoring SIGTERM, or an unresponsive
+          # kubelet) hangs the whole job for hours — this exact step hung
+          # the acc deploy for 2h+ on 2026-06-11. We only want to *issue*
+          # the deletes; the Deployment recreates pods and the next step
+          # waits on the rollout. --grace-period=30 bounds termination.
+          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed \
+            --wait=false --grace-period=30 || true
+          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis \
+            --wait=false --grace-period=30 || true
 
       - name: Wait for rollout
         run: |
@@ -258,6 +330,64 @@ jobs:
           NS=${{ steps.env.outputs.TARGET_ENV }}
           echo "Waiting for diytaxreturn-lapis rollout..."
           kubectl rollout status deployment/diytaxreturn-lapis -n "$NS" --timeout=180s || true
+
+      # Why this gate exists:
+      # `kubectl rollout status` only proves the Pod is Ready. It does NOT
+      # prove the public URL actually returns 200 — and on 2026-06-15 we
+      # had a 4-day intermittent outage of int-api where the Pod was healthy
+      # but a stale Ingress in a different namespace was sharing the host
+      # claim, so the wslproxy ingress controller flapped between a working
+      # backend and an orphaned one. Symptom: 9/10 requests succeeded; 1/10
+      # returned the wslproxy ingress controller's stock 404 page. Both
+      # `kubectl get pods` and the rollout step happily reported success.
+      #
+      # The gate below requires 5 CONSECUTIVE fast 200s within 2 minutes
+      # before the deploy is declared green. The consecutive bar is the
+      # important part — it catches the "sometimes works" regression mode
+      # that a single-shot probe would have missed today.
+      - name: Public-URL health gate
+        run: |
+          # Map env -> public URL. dev/int/acc follow the `<env>-api.*`
+          # convention; prod's public URL is bare `api.*`. New envs need
+          # to be added here explicitly rather than left to a default,
+          # so a typo in an env name fails CI instead of silently passing.
+          case "${{ matrix.target_env }}" in
+            prod) URL="https://api.diytaxreturn.co.uk/health" ;;
+            dev|int|acc) URL="https://${{ matrix.target_env }}-api.diytaxreturn.co.uk/health" ;;
+            *)
+              echo "::error::Unknown env '${{ matrix.target_env }}' — extend the case above with its public URL"
+              exit 1
+              ;;
+          esac
+          echo "Health-gating against $URL — need 5 consecutive fast 200s within 2 min"
+          ok_run=0
+          last_code=""
+          last_time=""
+          # ~30 attempts * 4s sleep = ~2 min ceiling. The 8s connect timeout
+          # is intentional: any single probe taking longer than the slow-path
+          # threshold (3s) breaks the streak — that's how we catch the
+          # Ingress-conflict pattern where one backend works and another
+          # times out at ~5s.
+          for i in $(seq 1 30); do
+            t=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" -m 8 "$URL" 2>&1 || true)
+            last_code=$(echo "$t" | awk '{print $1}')
+            last_time=$(echo "$t" | awk '{print $2}')
+            slow=$(echo "$last_time" | awk '{print ($1 >= 3.0) ? 1 : 0}')
+            if [ "$last_code" = "200" ] && [ "$slow" = "0" ]; then
+              ok_run=$((ok_run+1))
+              echo "  attempt $i: code=$last_code time=${last_time}s — streak=$ok_run/5"
+              if [ "$ok_run" -ge 5 ]; then
+                echo "::notice::$URL healthy — 5 consecutive fast 200s"
+                exit 0
+              fi
+            else
+              ok_run=0
+              echo "  attempt $i: code=$last_code time=${last_time}s — streak reset"
+            fi
+            sleep 4
+          done
+          echo "::error::Public health gate failed — $URL did not produce 5 consecutive fast 200s in ~2 min (last: code=$last_code time=${last_time}s)"
+          exit 1
 
       - name: Cleanup Kubeconfig
         if: always()

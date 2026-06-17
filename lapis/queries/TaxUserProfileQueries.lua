@@ -9,6 +9,7 @@
 local db = require("lapis.db")
 local bcrypt = require("bcrypt")
 local Global = require("helper.global")
+local NamespaceResolver = require("helper.namespace-resolver")
 
 local TaxUserProfileQueries = {}
 
@@ -33,12 +34,16 @@ function TaxUserProfileQueries.getOrCreate(user_uuid, user_id)
         user_id = user_record[1].id
     end
 
-    -- Create empty profile
+    -- Create empty profile. tax_user_profiles.namespace_id is NOT NULL
+    -- with no DB default — must be set on the INSERT. NOT NULL is checked
+    -- BEFORE the ON CONFLICT path fires, so it can't be skipped just
+    -- because a row already exists.
+    local namespace_id = NamespaceResolver.getByUuid(user_uuid)
     db.query([[
-        INSERT INTO tax_user_profiles (uuid, user_id, user_uuid, created_at, updated_at)
-        VALUES (gen_random_uuid()::text, ?, ?, NOW(), NOW())
+        INSERT INTO tax_user_profiles (uuid, user_id, user_uuid, namespace_id, created_at, updated_at)
+        VALUES (gen_random_uuid()::text, ?, ?, ?, NOW(), NOW())
         ON CONFLICT (user_uuid) DO NOTHING
-    ]], user_id, user_uuid)
+    ]], user_id, user_uuid, namespace_id)
 
     -- Re-fetch to get generated fields
     rows = db.query(
@@ -150,6 +155,16 @@ function TaxUserProfileQueries.setDefaultTaxYear(user_uuid, tax_year)
         SET default_tax_year = ?, updated_at = NOW()
         WHERE user_uuid = ?
     ]], tax_year, user_uuid)
+    return { success = true }
+end
+
+-- Update the user's default business profile key (e.g. "sole_trader", "amazon_seller").
+function TaxUserProfileQueries.setDefaultProfileKey(user_uuid, profile_key)
+    db.query([[
+        UPDATE tax_user_profiles
+        SET default_profile_key = ?, updated_at = NOW()
+        WHERE user_uuid = ?
+    ]], profile_key, user_uuid)
     return { success = true }
 end
 

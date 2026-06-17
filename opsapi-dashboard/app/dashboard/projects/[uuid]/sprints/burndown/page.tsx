@@ -139,7 +139,7 @@ const BurndownChart = React.memo(function BurndownChart({
 
   if (burndownData.length === 0 && totalPoints === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+      <div className="flex flex-col items-center justify-center h-64 text-secondary-400">
         <BarChart3 size={32} className="mb-2" />
         <p className="text-sm">No burndown data available yet</p>
         <p className="text-xs mt-1">Data will appear after the sprint starts</p>
@@ -176,7 +176,7 @@ const BurndownChart = React.memo(function BurndownChart({
               x={chartPadding.left - 8}
               y={yScale(val) + 4}
               textAnchor="end"
-              className="text-xs fill-gray-500"
+              className="text-xs fill-secondary-500"
               fontSize="11"
             >
               {val}
@@ -199,7 +199,7 @@ const BurndownChart = React.memo(function BurndownChart({
               x={xScale(day)}
               y={chartHeight - chartPadding.bottom + 18}
               textAnchor="middle"
-              className="text-xs fill-gray-500"
+              className="text-xs fill-secondary-500"
               fontSize="10"
             >
               {getDateLabel(day)}
@@ -213,7 +213,7 @@ const BurndownChart = React.memo(function BurndownChart({
           y={chartHeight / 2}
           textAnchor="middle"
           transform={`rotate(-90, ${chartPadding.left - 40}, ${chartHeight / 2})`}
-          className="text-xs fill-gray-500"
+          className="text-xs fill-secondary-500"
           fontSize="11"
         >
           Remaining Points
@@ -222,7 +222,7 @@ const BurndownChart = React.memo(function BurndownChart({
           x={chartWidth / 2}
           y={chartHeight - 5}
           textAnchor="middle"
-          className="text-xs fill-gray-500"
+          className="text-xs fill-secondary-500"
           fontSize="11"
         >
           Sprint Days
@@ -297,7 +297,7 @@ const BurndownChart = React.memo(function BurndownChart({
               y={Math.max(yScale(burndownData[hoveredPoint].remaining_points) - 45, chartPadding.top + 15)}
               textAnchor="middle"
               fontSize="11"
-              className="fill-gray-900 font-medium"
+              className="fill-secondary-900 font-medium"
             >
               {getDateLabel(hoveredPoint)}
             </text>
@@ -306,7 +306,7 @@ const BurndownChart = React.memo(function BurndownChart({
               y={Math.max(yScale(burndownData[hoveredPoint].remaining_points) - 28, chartPadding.top + 32)}
               textAnchor="middle"
               fontSize="11"
-              className="fill-gray-600"
+              className="fill-secondary-600"
             >
               Remaining: {burndownData[hoveredPoint].remaining_points} pts
             </text>
@@ -327,9 +327,9 @@ const BurndownChart = React.memo(function BurndownChart({
         {/* Legend */}
         <g transform={`translate(${chartPadding.left + 10}, ${chartPadding.top - 15})`}>
           <line x1="0" y1="0" x2="20" y2="0" stroke="#9ca3af" strokeWidth="2" strokeDasharray="6,4" />
-          <text x="26" y="4" fontSize="10" className="fill-gray-500">Ideal</text>
+          <text x="26" y="4" fontSize="10" className="fill-secondary-500">Ideal</text>
           <line x1="70" y1="0" x2="90" y2="0" stroke="#3b82f6" strokeWidth="2.5" />
-          <text x="96" y="4" fontSize="10" className="fill-gray-500">Actual</text>
+          <text x="96" y="4" fontSize="10" className="fill-secondary-500">Actual</text>
         </g>
       </svg>
     </div>
@@ -349,7 +349,7 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
 
   if (!velocityData || velocityData.sprints.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+      <div className="flex flex-col items-center justify-center h-64 text-secondary-400">
         <TrendingUp size={32} className="mb-2" />
         <p className="text-sm">No velocity data available yet</p>
         <p className="text-xs mt-1">Complete sprints to see velocity history</p>
@@ -407,7 +407,7 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
               y={yScale(val) + 4}
               textAnchor="end"
               fontSize="11"
-              className="fill-gray-500"
+              className="fill-secondary-500"
             >
               {val}
             </text>
@@ -478,7 +478,7 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
                 y={chartHeight - chartPadding.bottom + 18}
                 textAnchor="middle"
                 fontSize="10"
-                className="fill-gray-500"
+                className="fill-secondary-500"
                 transform={sprints.length > 6 ? `rotate(-30, ${xCenter(i)}, ${chartHeight - chartPadding.bottom + 18})` : ''}
               >
                 {sprint.name.length > 12 ? sprint.name.slice(0, 12) + '...' : sprint.name}
@@ -517,7 +517,7 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
               y={Math.max(yScale(sprints[hoveredBar].total_points) - 50, 22)}
               textAnchor="middle"
               fontSize="11"
-              className="fill-gray-900 font-medium"
+              className="fill-secondary-900 font-medium"
             >
               {sprints[hoveredBar].name}
             </text>
@@ -535,7 +535,7 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
               y={Math.max(yScale(sprints[hoveredBar].total_points) - 18, 54)}
               textAnchor="middle"
               fontSize="10"
-              className="fill-gray-500"
+              className="fill-secondary-500"
             >
               Tasks: {sprints[hoveredBar].completed_task_count ?? '?'} / {sprints[hoveredBar].task_count}
             </text>
@@ -545,11 +545,11 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
         {/* Legend */}
         <g transform={`translate(${chartPadding.left + 10}, ${chartPadding.top - 15})`}>
           <rect x="0" y="-5" width="10" height="10" rx="2" fill="#3b82f6" />
-          <text x="14" y="4" fontSize="10" className="fill-gray-500">Completed</text>
+          <text x="14" y="4" fontSize="10" className="fill-secondary-500">Completed</text>
           <rect x="80" y="-5" width="10" height="10" rx="2" fill="#e5e7eb" />
-          <text x="94" y="4" fontSize="10" className="fill-gray-500">Planned</text>
+          <text x="94" y="4" fontSize="10" className="fill-secondary-500">Planned</text>
           <line x1="145" y1="0" x2="165" y2="0" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="6,4" />
-          <text x="170" y="4" fontSize="10" className="fill-gray-500">Avg Velocity</text>
+          <text x="170" y="4" fontSize="10" className="fill-secondary-500">Avg Velocity</text>
         </g>
 
         {/* Y axis label */}
@@ -559,7 +559,7 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
           textAnchor="middle"
           transform={`rotate(-90, ${chartPadding.left - 35}, ${chartHeight / 2})`}
           fontSize="11"
-          className="fill-gray-500"
+          className="fill-secondary-500"
         >
           Story Points
         </text>
@@ -590,7 +590,7 @@ const SprintSelector = React.memo(function SprintSelector({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+        className="flex items-center gap-2 px-3 py-2 bg-surface border border-secondary-200 rounded-lg hover:bg-secondary-50 transition-colors"
       >
         <Target size={16} />
         <span className="font-medium text-sm">
@@ -602,7 +602,7 @@ const SprintSelector = React.memo(function SprintSelector({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20 max-h-72 overflow-y-auto">
+          <div className="absolute left-0 mt-1 w-64 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20 max-h-72 overflow-y-auto">
             {sprints.map((sprint) => (
               <button
                 key={sprint.uuid}
@@ -611,8 +611,8 @@ const SprintSelector = React.memo(function SprintSelector({
                   setIsOpen(false);
                 }}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50',
-                  sprint.uuid === currentSprintUuid && 'bg-gray-50 font-medium'
+                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50',
+                  sprint.uuid === currentSprintUuid && 'bg-secondary-50 font-medium'
                 )}
               >
                 <Target size={14} />
@@ -813,7 +813,7 @@ export default function SprintBurndownPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 bg-white">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-secondary-200 bg-surface">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -823,10 +823,10 @@ export default function SprintBurndownPage() {
             <ArrowLeft size={18} />
           </Button>
           <div>
-            <h1 className="text-lg font-bold text-gray-900">
+            <h1 className="text-lg font-bold text-secondary-900">
               {currentProject?.name || 'Loading...'} - Sprint Analytics
             </h1>
-            <p className="text-xs text-gray-500">Burndown &amp; Velocity Charts</p>
+            <p className="text-xs text-secondary-500">Burndown &amp; Velocity Charts</p>
           </div>
         </div>
 
@@ -853,13 +853,13 @@ export default function SprintBurndownPage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
-            <Loader2 size={32} className="animate-spin text-gray-400" />
+            <Loader2 size={32} className="animate-spin text-secondary-400" />
           </div>
         ) : sprints.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
-            <BarChart3 size={48} className="text-gray-300 mb-4" />
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">No Sprints Yet</h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <BarChart3 size={48} className="text-secondary-300 mb-4" />
+            <h2 className="text-lg font-semibold text-secondary-900 mb-2">No Sprints Yet</h2>
+            <p className="text-sm text-secondary-500 mb-4">
               Create sprints from the Sprint Board to see analytics here.
             </p>
             <Button
@@ -877,16 +877,16 @@ export default function SprintBurndownPage() {
               <Card padding="sm">
                 <div className="flex items-center gap-2 mb-1">
                   <Target size={14} className="text-blue-500" />
-                  <span className="text-xs text-gray-500">Total Points</span>
+                  <span className="text-xs text-secondary-500">Total Points</span>
                 </div>
-                <div className="text-xl font-bold text-gray-900">
+                <div className="text-xl font-bold text-secondary-900">
                   {statsLoading ? '-' : sprintStats?.total_points ?? 0}
                 </div>
               </Card>
               <Card padding="sm">
                 <div className="flex items-center gap-2 mb-1">
                   <CheckCircle2 size={14} className="text-green-500" />
-                  <span className="text-xs text-gray-500">Completed</span>
+                  <span className="text-xs text-secondary-500">Completed</span>
                 </div>
                 <div className="text-xl font-bold text-green-600">
                   {statsLoading ? '-' : sprintStats?.completed_points ?? 0}
@@ -895,7 +895,7 @@ export default function SprintBurndownPage() {
               <Card padding="sm">
                 <div className="flex items-center gap-2 mb-1">
                   <AlertTriangle size={14} className="text-orange-500" />
-                  <span className="text-xs text-gray-500">Remaining</span>
+                  <span className="text-xs text-secondary-500">Remaining</span>
                 </div>
                 <div className="text-xl font-bold text-orange-600">
                   {statsLoading ? '-' : sprintStats?.remaining_points ?? 0}
@@ -904,25 +904,25 @@ export default function SprintBurndownPage() {
               <Card padding="sm">
                 <div className="flex items-center gap-2 mb-1">
                   <CheckCircle2 size={14} className="text-blue-500" />
-                  <span className="text-xs text-gray-500">Tasks Done</span>
+                  <span className="text-xs text-secondary-500">Tasks Done</span>
                 </div>
-                <div className="text-xl font-bold text-gray-900">
+                <div className="text-xl font-bold text-secondary-900">
                   {statsLoading ? '-' : `${sprintStats?.completed_tasks ?? 0}/${sprintStats?.total_tasks ?? 0}`}
                 </div>
               </Card>
               <Card padding="sm">
                 <div className="flex items-center gap-2 mb-1">
                   <Clock size={14} className="text-purple-500" />
-                  <span className="text-xs text-gray-500">Days Left</span>
+                  <span className="text-xs text-secondary-500">Days Left</span>
                 </div>
-                <div className="text-xl font-bold text-gray-900">{daysRemaining}</div>
+                <div className="text-xl font-bold text-secondary-900">{daysRemaining}</div>
               </Card>
               <Card padding="sm">
                 <div className="flex items-center gap-2 mb-1">
                   <TrendingUp size={14} className="text-amber-500" />
-                  <span className="text-xs text-gray-500">Avg Velocity</span>
+                  <span className="text-xs text-secondary-500">Avg Velocity</span>
                 </div>
-                <div className="text-xl font-bold text-gray-900">
+                <div className="text-xl font-bold text-secondary-900">
                   {velocityLoading ? '-' : velocityData?.average_velocity ?? 0}
                 </div>
               </Card>
@@ -933,24 +933,24 @@ export default function SprintBurndownPage() {
               <Card padding="sm">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-gray-900">{currentSprint.name}</h3>
+                    <h3 className="text-sm font-semibold text-secondary-900">{currentSprint.name}</h3>
                     <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', getSprintStatusColor(currentSprint.status))}>
                       {getSprintStatusLabel(currentSprint.status)}
                     </span>
                   </div>
                   {currentSprint.start_date && currentSprint.end_date && (
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-secondary-500">
                       {formatSprintDateRange(currentSprint.start_date, currentSprint.end_date)}
                     </span>
                   )}
                 </div>
-                <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-2 bg-secondary-200 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-primary-500 rounded-full transition-all"
                     style={{ width: `${calculateSprintProgress(sprintStats.completed_points, sprintStats.total_points)}%` }}
                   />
                 </div>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <div className="flex justify-between text-xs text-secondary-500 mt-1">
                   <span>{sprintStats.completion_rate}% complete</span>
                   <span>{sprintStats.completed_points} / {sprintStats.total_points} story points</span>
                 </div>
@@ -960,17 +960,17 @@ export default function SprintBurndownPage() {
             {/* Burndown Chart */}
             <Card>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <h2 className="text-base font-bold text-secondary-900 flex items-center gap-2">
                   <BarChart3 size={18} className="text-blue-500" />
                   Sprint Burndown
                 </h2>
                 {currentSprint && (
-                  <span className="text-xs text-gray-500">{currentSprint.name}</span>
+                  <span className="text-xs text-secondary-500">{currentSprint.name}</span>
                 )}
               </div>
               {burndownLoading ? (
                 <div className="flex items-center justify-center h-64">
-                  <Loader2 size={24} className="animate-spin text-gray-400" />
+                  <Loader2 size={24} className="animate-spin text-secondary-400" />
                 </div>
               ) : currentSprint ? (
                 <BurndownChart
@@ -979,7 +979,7 @@ export default function SprintBurndownPage() {
                   totalPoints={sprintStats?.total_points || currentSprint.total_points}
                 />
               ) : (
-                <div className="flex items-center justify-center h-64 text-sm text-gray-400">
+                <div className="flex items-center justify-center h-64 text-sm text-secondary-400">
                   Select a sprint to view burndown chart
                 </div>
               )}
@@ -988,19 +988,19 @@ export default function SprintBurndownPage() {
             {/* Velocity Chart */}
             <Card>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <h2 className="text-base font-bold text-secondary-900 flex items-center gap-2">
                   <TrendingUp size={18} className="text-amber-500" />
                   Velocity History
                 </h2>
                 {velocityData && (
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-secondary-500">
                     Last {velocityData.sprint_count} sprints
                   </span>
                 )}
               </div>
               {velocityLoading ? (
                 <div className="flex items-center justify-center h-64">
-                  <Loader2 size={24} className="animate-spin text-gray-400" />
+                  <Loader2 size={24} className="animate-spin text-secondary-400" />
                 </div>
               ) : (
                 <VelocityChart velocityData={velocityData} />
@@ -1010,33 +1010,33 @@ export default function SprintBurndownPage() {
             {/* Sprint history table */}
             {velocityData && velocityData.sprints.length > 0 && (
               <Card>
-                <h2 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <Calendar size={18} className="text-gray-500" />
+                <h2 className="text-base font-bold text-secondary-900 mb-4 flex items-center gap-2">
+                  <Calendar size={18} className="text-secondary-500" />
                   Sprint History
                 </h2>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Sprint</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Planned</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Completed</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tasks</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Velocity</th>
+                      <tr className="border-b border-secondary-200">
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Sprint</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Status</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Dates</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Planned</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Completed</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Tasks</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-secondary-500 uppercase tracking-wider">Velocity</th>
                       </tr>
                     </thead>
                     <tbody>
                       {velocityData.sprints.map((sprint) => (
-                        <tr key={sprint.uuid} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-2 px-3 font-medium text-gray-900">{sprint.name}</td>
+                        <tr key={sprint.uuid} className="border-b border-secondary-100 hover:bg-secondary-50">
+                          <td className="py-2 px-3 font-medium text-secondary-900">{sprint.name}</td>
                           <td className="py-2 px-3 text-center">
                             <span className={cn('text-xs px-2 py-0.5 rounded-full', getSprintStatusColor(sprint.status))}>
                               {getSprintStatusLabel(sprint.status)}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-center text-xs text-gray-500">
+                          <td className="py-2 px-3 text-center text-xs text-secondary-500">
                             {sprint.start_date && sprint.end_date
                               ? formatSprintDateRange(sprint.start_date, sprint.end_date)
                               : '-'}

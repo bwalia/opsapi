@@ -54,7 +54,7 @@ const BoardSelector = React.memo(function BoardSelector({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+        className="flex items-center gap-2 px-3 py-2 bg-surface border border-secondary-200 rounded-lg hover:bg-secondary-50 transition-colors"
       >
         <LayoutGrid size={16} />
         <span className="font-medium">{currentBoard?.name || 'Select Board'}</span>
@@ -64,7 +64,7 @@ const BoardSelector = React.memo(function BoardSelector({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+          <div className="absolute left-0 mt-1 w-56 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
             {boards.map((board) => (
               <button
                 key={board.uuid}
@@ -73,14 +73,14 @@ const BoardSelector = React.memo(function BoardSelector({
                   setIsOpen(false);
                 }}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50',
-                  board.uuid === currentBoardUuid && 'bg-gray-50 font-medium'
+                  'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50',
+                  board.uuid === currentBoardUuid && 'bg-secondary-50 font-medium'
                 )}
               >
                 <LayoutGrid size={14} />
                 {board.name}
                 {board.is_default && (
-                  <span className="ml-auto text-xs text-gray-400">Default</span>
+                  <span className="ml-auto text-xs text-secondary-400">Default</span>
                 )}
               </button>
             ))}
@@ -90,7 +90,7 @@ const BoardSelector = React.memo(function BoardSelector({
                 onCreateBoard();
                 setIsOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-primary-600 hover:bg-gray-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-primary-600 hover:bg-secondary-50"
             >
               <Plus size={14} />
               Create new board
@@ -110,10 +110,10 @@ const LoadingSkeleton = () => (
   <div className="flex gap-4 p-6 animate-pulse">
     {[1, 2, 3, 4].map((i) => (
       <div key={i} className="w-72 flex-shrink-0">
-        <div className="h-10 bg-gray-200 rounded-lg mb-4" />
+        <div className="h-10 bg-secondary-200 rounded-lg mb-4" />
         <div className="space-y-3">
           {[1, 2, 3].map((j) => (
-            <div key={j} className="h-24 bg-gray-200 rounded-lg" />
+            <div key={j} className="h-24 bg-secondary-200 rounded-lg" />
           ))}
         </div>
       </div>
@@ -452,7 +452,7 @@ export default function ProjectDetailPage() {
   return (
     <div className="h-full flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-secondary-200 bg-surface">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
@@ -463,11 +463,11 @@ export default function ProjectDetailPage() {
             </Button>
 
             <div>
-              <h1 className="text-xl font-bold text-gray-900">
+              <h1 className="text-xl font-bold text-secondary-900">
                 {currentProject?.name || 'Loading...'}
               </h1>
               {currentProject?.description && (
-                <p className="text-sm text-gray-500 line-clamp-1">
+                <p className="text-sm text-secondary-500 line-clamp-1">
                   {currentProject.description}
                 </p>
               )}

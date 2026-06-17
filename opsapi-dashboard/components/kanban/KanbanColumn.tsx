@@ -52,7 +52,7 @@ const ColumnHeader = memo(function ColumnHeader({
   const isOverWipLimit = column.wip_limit && taskCount > column.wip_limit;
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-t-lg border-b border-gray-200">
+    <div className="flex items-center justify-between px-3 py-2 bg-secondary-50 rounded-t-lg border-b border-secondary-200">
       <div className="flex items-center gap-2 min-w-0">
         {/* Column Color Indicator */}
         {column.color && (
@@ -63,7 +63,7 @@ const ColumnHeader = memo(function ColumnHeader({
         )}
 
         {/* Column Name */}
-        <h3 className="font-semibold text-gray-700 text-sm truncate">
+        <h3 className="font-semibold text-secondary-700 text-sm truncate">
           {column.name}
         </h3>
 
@@ -73,7 +73,7 @@ const ColumnHeader = memo(function ColumnHeader({
             'flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full',
             isOverWipLimit
               ? 'bg-red-100 text-red-700'
-              : 'bg-gray-200 text-gray-600'
+              : 'bg-secondary-200 text-secondary-600'
           )}
         >
           {taskCount}
@@ -97,7 +97,7 @@ const ColumnHeader = memo(function ColumnHeader({
         {/* Add Task Button */}
         <button
           onClick={onAddTask}
-          className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
+          className="p-1 rounded hover:bg-secondary-200 text-secondary-500 hover:text-secondary-700 transition-colors"
           title="Add task"
         >
           <Plus size={16} />
@@ -107,7 +107,7 @@ const ColumnHeader = memo(function ColumnHeader({
         <div className="relative">
           <button
             onClick={handleMenuToggle}
-            className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
+            className="p-1 rounded hover:bg-secondary-200 text-secondary-500 hover:text-secondary-700 transition-colors"
           >
             <MoreHorizontal size={16} />
           </button>
@@ -119,10 +119,10 @@ const ColumnHeader = memo(function ColumnHeader({
                 className="fixed inset-0 z-10"
                 onClick={() => setShowMenu(false)}
               />
-              <div className="absolute right-0 mt-1 w-36 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+              <div className="absolute right-0 mt-1 w-36 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
                 <button
                   onClick={handleEdit}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary-700 hover:bg-secondary-50"
                 >
                   <Edit2 size={14} />
                   Edit column
@@ -193,7 +193,7 @@ const KanbanColumn = memo(function KanbanColumn({
   return (
     <div
       className={cn(
-        'flex flex-col bg-gray-100 rounded-lg shrink-0',
+        'flex flex-col bg-secondary-100 rounded-lg shrink-0',
         'w-[85vw] max-w-[22rem] snap-center',
         'md:w-72 md:min-w-72 md:max-w-none',
         'max-h-full transition-all duration-200',
@@ -235,12 +235,12 @@ const KanbanColumn = memo(function KanbanColumn({
         {sortedTasks.length === 0 && (
           <div
             className={cn(
-              'text-center py-8 text-gray-400 text-sm border-2 border-dashed rounded-lg transition-all duration-200',
+              'text-center py-8 text-secondary-400 text-sm border-2 border-dashed rounded-lg transition-all duration-200',
               isOver
                 ? 'border-primary-400 bg-primary-100 text-primary-600 scale-[1.02]'
                 : isDragging
                 ? 'border-primary-200 bg-primary-50/50 text-primary-400'
-                : 'border-gray-200'
+                : 'border-secondary-200'
             )}
           >
             {isOver ? (
@@ -263,7 +263,7 @@ const KanbanColumn = memo(function KanbanColumn({
       <button
         onClick={handleAddTaskClick}
         className={cn(
-          'flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-b-lg transition-colors',
+          'flex items-center gap-2 px-3 py-2 text-sm text-secondary-500 hover:text-secondary-700 hover:bg-secondary-200 rounded-b-lg transition-colors',
           isDragging && 'pointer-events-none opacity-50'
         )}
       >

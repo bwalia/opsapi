@@ -43,11 +43,11 @@ const CustomTooltip = memo(function CustomTooltip({
 // Loading state component
 const ChartLoading = memo(function ChartLoading() {
   return (
-    <Card padding="none" className="h-[400px]">
-      <div className="px-6 py-4 border-b border-secondary-200">
+    <Card padding="none" className="h-full min-h-[400px] flex flex-col shadow-sm">
+      <div className="px-6 py-4 border-b border-secondary-200 flex-shrink-0">
         <h3 className="text-lg font-semibold text-secondary-900">Revenue Overview</h3>
       </div>
-      <div className="flex items-center justify-center h-[320px]">
+      <div className="flex items-center justify-center flex-1 min-h-0">
         <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
       </div>
     </Card>
@@ -78,10 +78,10 @@ const OrdersChart: React.FC<OrdersChartProps> = memo(function OrdersChart({
   }
 
   return (
-    <Card padding="none" className="h-[400px]">
-      <div className="px-6 py-4 border-b border-secondary-200 flex items-center justify-between">
+    <Card padding="none" className="h-full min-h-[400px] flex flex-col shadow-sm">
+      <div className="px-6 py-4 border-b border-secondary-200 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 gradient-primary rounded-lg flex items-center justify-center shadow-md shadow-primary-500/25">
+          <div className="w-10 h-10 gradient-primary rounded-lg flex items-center justify-center shadow-md shadow-primary-500/25 ring-1 ring-white/20">
             <BarChart3 className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -91,7 +91,7 @@ const OrdersChart: React.FC<OrdersChartProps> = memo(function OrdersChart({
         </div>
       </div>
 
-      <div className="p-6 h-[320px]">
+      <div className="p-6 flex-1 min-h-0">
         {data.length === 0 ? (
           <ChartEmpty />
         ) : (

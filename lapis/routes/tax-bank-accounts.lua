@@ -51,13 +51,21 @@ local function validate_bank_account_params(params, is_create)
         params.account_number = trimmed
     end
 
-    -- sort_code: optional, must be XX-XX-XX format
+    -- sort_code: optional. UK sort codes are exactly 6 digits, commonly
+    -- written XX-XX-XX on statements. Accept what users naturally paste —
+    -- "123456", "12-34-56", "12 34 56" — and canonicalise to XX-XX-XX.
+    -- Mirrors `normalize_sort_code` in backend/app/models/bank_account.py
+    -- so the Python and Lua write paths can't drift.
     if params.sort_code and params.sort_code ~= "" then
         local trimmed = params.sort_code:match("^%s*(.-)%s*$")
-        if not trimmed:match("^%d%d%-%d%d%-%d%d$") then
-            return false, "sort_code must be in XX-XX-XX format (e.g. 20-00-00)"
+        if trimmed:match("[^%d%s%-]") then
+            return false, "sort_code can only contain digits, spaces or hyphens"
         end
-        params.sort_code = trimmed
+        local digits = (trimmed:gsub("[%s%-]", ""))
+        if #digits ~= 6 then
+            return false, "sort_code must be 6 digits (e.g. 20-00-00 or 200000)"
+        end
+        params.sort_code = digits:sub(1, 2) .. "-" .. digits:sub(3, 4) .. "-" .. digits:sub(5, 6)
     end
 
     -- account_type: must be a valid type
@@ -79,6 +87,29 @@ local function validate_bank_account_params(params, is_create)
     return true
 end
 
+-- See tax-transactions.lua for the rationale; bodies that exceed
+-- nginx's ``client_body_buffer_size`` get spilled to disk and
+-- ``get_body_data()`` returns nil for them, silently zeroing out
+-- the request payload. ``read_request_body`` recovers the file path
+-- via ``get_body_file()``.
+local function read_request_body()
+    local body = ngx.req.get_body_data()
+    if body and body ~= "" then
+        return body
+    end
+    local body_file = ngx.req.get_body_file()
+    if body_file then
+        local f, err = io.open(body_file, "rb")
+        if f then
+            local data = f:read("*all")
+            f:close()
+            return data
+        end
+        ngx.log(ngx.ERR, "Failed to open buffered body file ", body_file, ": ", err)
+    end
+    return nil
+end
+
 -- Parse request body (supports both JSON and form-urlencoded)
 local function parse_request_body()
     ngx.req.read_body()
@@ -88,14 +119,11 @@ local function parse_request_body()
 
     -- If JSON content type, parse as JSON
     if content_type:find("application/json", 1, true) then
-        local ok, result = pcall(function()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then
-                return {}
-            end
-            return cjson.decode(body)
-        end)
-
+        local body = read_request_body()
+        if not body or body == "" then
+            return {}
+        end
+        local ok, result = pcall(cjson.decode, body)
         if ok and type(result) == "table" then
             return result
         end

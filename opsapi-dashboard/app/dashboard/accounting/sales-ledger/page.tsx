@@ -141,7 +141,7 @@ export default function SalesLedgerPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Total Invoiced</p>
@@ -155,7 +155,7 @@ export default function SalesLedgerPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Outstanding</p>
@@ -169,7 +169,7 @@ export default function SalesLedgerPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Overdue</p>
@@ -183,7 +183,7 @@ export default function SalesLedgerPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-secondary-200 p-4 sm:p-5">
+        <div className="bg-surface rounded-xl border border-secondary-200 p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm font-medium text-secondary-500">Received This Month</p>
@@ -199,7 +199,7 @@ export default function SalesLedgerPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-secondary-200 p-4">
+      <div className="bg-surface rounded-xl border border-secondary-200 p-4">
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <label htmlFor="sales-ledger-search" className="sr-only">Search invoices</label>
@@ -216,7 +216,7 @@ export default function SalesLedgerPage() {
           <select
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="px-4 py-2.5 rounded-lg border border-secondary-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            className="px-4 py-2.5 rounded-lg border border-secondary-300 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
             aria-label="Filter by status"
           >
             <option value="">All Statuses</option>
@@ -231,7 +231,7 @@ export default function SalesLedgerPage() {
       </div>
 
       {/* Invoice Table */}
-      <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden">
+      <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -346,7 +346,7 @@ function AgingSummary({ invoices }: { invoices: Invoice[] }) {
   if (total === 0) return null;
 
   return (
-    <div className="bg-white rounded-xl border border-secondary-200 p-6">
+    <div className="bg-surface rounded-xl border border-secondary-200 p-6">
       <h3 className="text-sm font-semibold text-secondary-700 mb-4">Aging Analysis</h3>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         {Object.entries(buckets).map(([label, amount]) => (

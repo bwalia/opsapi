@@ -47,6 +47,14 @@ export const useAuthStore = create<AuthStore>()(
             error: null,
           });
         } catch (error) {
+          // 2FA-required is NOT a login failure — it's the normal next step.
+          // Don't surface it as an error (which would flash the error banner
+          // before the form redirects to /verify-otp). Just stop loading and
+          // propagate so LoginForm can stash the session token and redirect.
+          if ((error as { requires_2fa?: boolean })?.requires_2fa) {
+            set({ isLoading: false, error: null });
+            throw error;
+          }
           const message = error instanceof Error ? error.message : 'Login failed';
           // Clear all auth storage on failed login attempt
           clearAllAuthStorage();

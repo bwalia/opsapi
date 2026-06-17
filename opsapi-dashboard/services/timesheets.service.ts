@@ -23,15 +23,55 @@ export interface TimesheetSummaryParams {
 }
 
 export interface CreateTimesheetData {
-  period_start: string;
-  period_end: string;
+  // Either a single work date (preferred) or an explicit period range.
+  work_date?: string;
+  period_start?: string;
+  period_end?: string;
+  // Customer this work was for (ecommerce customers.uuid). Resolved server-side
+  // to customer_id + client_name snapshot.
+  customer_uuid?: string;
+  client_name?: string;
+  // Task the work belongs to (kanban task.uuid). Resolved server-side to the
+  // task title + parent project.
+  task_uuid?: string;
+  task?: string;
+  // Single-session timing — hours are computed server-side from these.
+  start_time?: string;
+  end_time?: string;
+  // Billing.
+  is_billable?: boolean;
+  hourly_rate?: number;
   notes?: string;
 }
 
 export interface UpdateTimesheetData {
+  work_date?: string;
   period_start?: string;
   period_end?: string;
+  customer_uuid?: string;
+  client_name?: string;
+  task_uuid?: string;
+  task?: string;
+  start_time?: string;
+  end_time?: string;
+  is_billable?: boolean;
+  hourly_rate?: number;
   notes?: string;
+}
+
+// Lookup option shapes for the searchable dropdowns (namespace-scoped).
+export interface CustomerOption {
+  uuid: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+}
+
+export interface TaskOption {
+  task_uuid: string;
+  title: string;
+  project_uuid?: string;
+  project_name?: string;
 }
 
 export interface CreateEntryData {
@@ -79,6 +119,19 @@ export interface Timesheet {
   status: TimesheetStatus;
   total_hours: number;
   billable_hours: number;
+  // Client-work fields (enriched timesheet model)
+  customer_id?: number | null;
+  customer_uuid?: string | null;
+  client_name?: string | null;
+  task?: string | null;
+  task_uuid?: string | null;
+  project_uuid?: string | null;
+  project_name?: string | null;
+  work_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  hourly_rate?: number | string | null;
+  is_billable?: boolean;
   notes?: string;
   submitted_at?: string;
   approved_at?: string;
@@ -132,17 +185,48 @@ export const timesheetsService = {
     const queryString = buildQueryString(queryParams);
     const response = await apiClient.get(`/api/v2/timesheets${queryString}`);
 
-    const data = Array.isArray(response.data?.data) ? response.data.data : [];
+    // Backend shape: { success, data: { data: [...], meta: { total, page, per_page, total_pages } } }
+    // Unwrap the {success,data} envelope, then read the inner list + meta.
+    const body = response.data?.data ?? response.data;
+    const data: Timesheet[] = Array.isArray(body?.data)
+      ? body.data
+      : Array.isArray(body)
+        ? body
+        : [];
+    const meta = body?.meta ?? {};
+    const page = meta.page ?? params.page ?? 1;
+    const perPage = meta.per_page ?? params.per_page ?? 10;
+    const totalPages = meta.total_pages ?? 0;
 
     return {
       data,
-      total: response.data?.total || 0,
-      page: response.data?.page || params.page || 1,
-      per_page: response.data?.per_page || params.per_page || 10,
-      total_pages: response.data?.total_pages || 0,
-      has_next: response.data?.has_next || false,
-      has_prev: response.data?.has_prev || false,
+      total: meta.total ?? data.length,
+      page,
+      per_page: perPage,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_prev: page > 1,
     };
+  },
+
+  /**
+   * Namespace-scoped customer lookup for the create/edit dropdown.
+   */
+  async lookupCustomers(q?: string): Promise<CustomerOption[]> {
+    const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+    const response = await apiClient.get(`/api/v2/timesheets/lookups/customers${qs}`);
+    const data = response.data?.data ?? response.data;
+    return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * Namespace-scoped task lookup (kanban tasks + their project).
+   */
+  async lookupTasks(q?: string): Promise<TaskOption[]> {
+    const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+    const response = await apiClient.get(`/api/v2/timesheets/lookups/tasks${qs}`);
+    const data = response.data?.data ?? response.data;
+    return Array.isArray(data) ? data : [];
   },
 
   /**
@@ -235,16 +319,28 @@ export const timesheetsService = {
     const queryString = buildQueryString(queryParams);
     const response = await apiClient.get(`/api/v2/timesheets/approval-queue${queryString}`);
 
-    const data = Array.isArray(response.data?.data) ? response.data.data : [];
+    // Backend shape: { success, data: { data: [...], meta: { total, page, per_page, total_pages } } }
+    // Unwrap the {success,data} envelope, then read the inner list + meta — the
+    // meta lives one level deeper than a naive response.data.total read assumes.
+    const body = response.data?.data ?? response.data;
+    const data: Timesheet[] = Array.isArray(body?.data)
+      ? body.data
+      : Array.isArray(body)
+        ? body
+        : [];
+    const meta = body?.meta ?? {};
+    const page = meta.page ?? params.page ?? 1;
+    const perPage = meta.per_page ?? params.per_page ?? 10;
+    const totalPages = meta.total_pages ?? 0;
 
     return {
       data,
-      total: response.data?.total || 0,
-      page: response.data?.page || params.page || 1,
-      per_page: response.data?.per_page || params.per_page || 10,
-      total_pages: response.data?.total_pages || 0,
-      has_next: response.data?.has_next || false,
-      has_prev: response.data?.has_prev || false,
+      total: meta.total ?? data.length,
+      page,
+      per_page: perPage,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_prev: page > 1,
     };
   },
 
@@ -283,7 +379,26 @@ export const timesheetsService = {
   async getSummary(params: TimesheetSummaryParams = {}): Promise<TimesheetSummaryResponse> {
     const queryString = buildQueryString(params as Record<string, unknown>);
     const response = await apiClient.get(`/api/v2/timesheets/summary${queryString}`);
-    return response.data?.data || response.data;
+    // Backend shape: { summary: { total_hours, billable_hours, submitted_count, approved_count, ... },
+    //                  by_project: [{ project_reference, total_hours, billable_hours }],
+    //                  by_category: [{ category, total_hours, billable_hours }] }
+    // Flatten it into the flat TimesheetSummaryResponse the UI expects.
+    const raw = response.data?.data || response.data || {};
+    const s = raw.summary || raw || {};
+    return {
+      total_hours: Number(s.total_hours) || 0,
+      billable_hours: Number(s.billable_hours) || 0,
+      pending_count: Number(s.submitted_count ?? s.pending_count) || 0,
+      approved_count: Number(s.approved_count) || 0,
+      by_project: (raw.by_project || []).map((p: { project_reference?: string; total_hours?: number; hours?: number }) => ({
+        project_reference: p.project_reference || 'No Project',
+        hours: Number(p.total_hours ?? p.hours) || 0,
+      })),
+      by_category: (raw.by_category || []).map((c: { category?: string; total_hours?: number; hours?: number }) => ({
+        category: c.category || 'Uncategorized',
+        hours: Number(c.total_hours ?? c.hours) || 0,
+      })),
+    };
   },
 };
 

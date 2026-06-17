@@ -35,10 +35,10 @@ return function(app)
         return { status = status, json = { success = true, data = data } }
     end
 
-    -- POST /api/v2/crm/activities/:uuid/complete - Mark activity as completed
+    -- POST/PUT /api/v2/crm/activities/:uuid/complete - Mark activity as completed
     -- NOTE: This route must be defined before /api/v2/crm/activities/:uuid to avoid
-    -- route conflicts.
-    app:post("/api/v2/crm/activities/:uuid/complete", AuthMiddleware.requireAuth(
+    -- route conflicts. The frontend calls this with PUT; POST kept for compatibility.
+    local complete_handler = AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local activity = CrmQueries.getActivity(self.params.uuid)
             if not activity then
@@ -56,7 +56,9 @@ return function(app)
 
             return api_response(200, completed)
         end)
-    ))
+    )
+    app:post("/api/v2/crm/activities/:uuid/complete", complete_handler)
+    app:put("/api/v2/crm/activities/:uuid/complete", complete_handler)
 
     -- GET /api/v2/crm/activities - List activities
     app:get("/api/v2/crm/activities", AuthMiddleware.requireAuth(
@@ -91,7 +93,9 @@ return function(app)
                 return api_response(400, nil, "subject is required")
             end
 
-            if not data.activity_type or data.activity_type == "" then
+            -- Frontend sends `type`; backend column is `activity_type`. Accept both.
+            local activity_type = data.activity_type or data.type
+            if not activity_type or activity_type == "" then
                 return api_response(400, nil, "activity_type is required")
             end
 
@@ -100,16 +104,37 @@ return function(app)
                 metadata = cjson.encode(metadata)
             end
 
+            -- Frontend sends `due_date`; backend column is `activity_date`. Accept both.
+            local activity_date = data.activity_date or data.due_date
+
+            -- Frontend links via related_type/related_uuid; resolve to the
+            -- matching FK (account_id/contact_id/deal_id) by looking up the UUID.
+            local account_id = data.account_id
+            local contact_id = data.contact_id
+            local deal_id = data.deal_id
+            if data.related_type and data.related_uuid and data.related_uuid ~= "" then
+                if data.related_type == "account" then
+                    local a = CrmQueries.getAccount(self.namespace.id, data.related_uuid)
+                    if a then account_id = a.id end
+                elseif data.related_type == "contact" then
+                    local c = CrmQueries.getContact(self.namespace.id, data.related_uuid)
+                    if c then contact_id = c.id end
+                elseif data.related_type == "deal" then
+                    local d = CrmQueries.getDeal(self.namespace.id, data.related_uuid)
+                    if d then deal_id = d.id end
+                end
+            end
+
             local activity = CrmQueries.createActivity({
                 namespace_id = self.namespace.id,
-                activity_type = data.activity_type,
+                activity_type = activity_type,
                 subject = data.subject,
                 description = data.description,
-                account_id = data.account_id,
-                contact_id = data.contact_id,
-                deal_id = data.deal_id,
+                account_id = account_id,
+                contact_id = contact_id,
+                deal_id = deal_id,
                 owner_user_uuid = data.owner_user_uuid or self.current_user.uuid,
-                activity_date = data.activity_date,
+                activity_date = activity_date,
                 duration_minutes = data.duration_minutes,
                 status = data.status or "planned",
                 metadata = metadata or "{}"
