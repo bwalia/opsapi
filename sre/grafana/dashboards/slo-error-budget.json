@@ -1,0 +1,52 @@
+{
+  "uid": "opsapi-slo",
+  "title": "OpsAPI · SLO & Error Budget",
+  "tags": ["opsapi", "sre", "slo"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat", "title": "Availability SLO (target 99.95%)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 4, "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.999 }, { "color": "green", "value": 0.9995 } ] } } },
+      "targets": [ { "expr": "1 - (sum(rate(nginx_http_requests_total{job=\"opsapi\",status=~\"5..\"}[30d])) / clamp_min(sum(rate(nginx_http_requests_total{job=\"opsapi\"}[30d])), 1))" } ]
+    },
+    {
+      "type": "gauge", "title": "Error budget remaining (30d)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.5 } ] } } },
+      "targets": [ { "expr": "clamp_min(opsapi:error_budget_remaining:ratio, 0)" } ]
+    },
+    {
+      "type": "stat", "title": "Latency SLO (target 99% < 200ms)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 4, "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.98 }, { "color": "green", "value": 0.99 } ] } } },
+      "targets": [ { "expr": "sum(rate(nginx_http_request_duration_seconds_bucket{job=\"opsapi\",le=\"0.2\"}[30d])) / clamp_min(sum(rate(nginx_http_request_duration_seconds_count{job=\"opsapi\"}[30d])), 1)" } ]
+    },
+    {
+      "type": "timeseries", "title": "Error budget remaining over time",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [ { "expr": "clamp_min(opsapi:error_budget_remaining:ratio, 0)", "legendFormat": "budget remaining" } ]
+    },
+    {
+      "type": "timeseries", "title": "Burn rate (multiplier of budget)",
+      "description": "Page at 14.4x (1h), 6x (6h); ticket at 3x (1d). Lines above the threshold = budget burning faster than allowed.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "thresholdsStyle": { "mode": "line+area" } }, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 6 }, { "color": "red", "value": 14.4 } ] } } },
+      "targets": [
+        { "expr": "opsapi:sli_error:ratio_rate1h / 0.0005", "legendFormat": "1h burn" },
+        { "expr": "opsapi:sli_error:ratio_rate6h / 0.0005", "legendFormat": "6h burn" },
+        { "expr": "opsapi:sli_error:ratio_rate1d / 0.0005", "legendFormat": "1d burn" }
+      ]
+    }
+  ]
+}

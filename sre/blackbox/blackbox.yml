@@ -1,0 +1,26 @@
+# Blackbox exporter — external/synthetic probing for the availability SLI.
+# Probes OpsAPI from outside the process, so "the box is up but users get
+# errors" is still caught. Prometheus passes targets via the blackbox-http job.
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200]
+      method: GET
+      preferred_ip_protocol: ip4
+      fail_if_not_ssl: false
+
+  http_health:
+    prober: http
+    timeout: 5s
+    http:
+      valid_status_codes: [200]
+      method: GET
+      fail_if_body_not_matches_regexp:
+        - '"status"\s*:\s*"?healthy"?'
+
+  tcp_connect:
+    prober: tcp
+    timeout: 5s

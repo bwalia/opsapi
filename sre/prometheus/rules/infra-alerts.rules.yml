@@ -1,0 +1,138 @@
+# Infrastructure, security & business alerts.
+# Ports the existing devops/alert_rules.yml (DDoS / perf / business) and adds
+# dependency-down alerts (Postgres, Redis) plus runbook_url + P-level labels so
+# everything routes through Alertmanager consistently.
+groups:
+  - name: dependency_availability
+    interval: 30s
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: page
+          priority: P1
+          category: availability
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "pg_up == 0 for >1m. The API cannot serve any data-backed request."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/postgres-saturation.md"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: page
+          priority: P2
+          category: availability
+        annotations:
+          summary: "Redis is down"
+          description: "redis_up == 0 for >1m. Sessions/cache degraded."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/redis-saturation.md"
+
+      - alert: BlackboxProbeFailed
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: page
+          priority: P1
+          category: availability
+        annotations:
+          summary: "External probe failing: {{ $labels.instance }}"
+          description: "Blackbox HTTP probe to {{ $labels.instance }} has failed for >2m."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/service-down.md"
+
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1) > 0.85
+        for: 5m
+        labels:
+          severity: ticket
+          priority: P3
+          category: saturation
+        annotations:
+          summary: "Redis memory > 85% of maxmemory"
+          description: "Redis at {{ $value | humanizePercentage }} of maxmemory — eviction/OOM risk."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/redis-saturation.md"
+
+  - name: security_ddos
+    interval: 30s
+    rules:
+      - alert: PossibleDDoSAttack
+        expr: rate(nginx_http_requests_by_ip_total[1m]) > 1000
+        for: 2m
+        labels:
+          severity: page
+          priority: P1
+          category: security
+        annotations:
+          summary: "Possible DDoS from IP {{ $labels.ip }}"
+          description: "{{ $labels.ip }} is making {{ $value }} req/s on {{ $labels.host }}."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/ddos-attack.md"
+
+      - alert: DistributedDDoSAttack
+        expr: sum(rate(nginx_http_requests_total[1m])) > 10000
+        for: 5m
+        labels:
+          severity: page
+          priority: P1
+          category: security
+        annotations:
+          summary: "Possible distributed DDoS detected"
+          description: "Total request rate: {{ $value }} req/s."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/ddos-attack.md"
+
+      - alert: CredentialStuffingAttack
+        expr: rate(api_auth_failures_total{reason="invalid_credentials"}[5m]) > 50
+        for: 2m
+        labels:
+          severity: page
+          priority: P2
+          category: security
+        annotations:
+          summary: "Possible credential stuffing"
+          description: "{{ $value }} invalid-credential auth failures/sec."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/ddos-attack.md"
+
+      - alert: HighAuthFailureRate
+        expr: |
+          sum(rate(api_auth_attempts_total{result="failure"}[10m]))
+          / clamp_min(sum(rate(api_auth_attempts_total[10m])), 1) > 0.3
+        for: 10m
+        labels:
+          severity: ticket
+          priority: P3
+          category: security
+        annotations:
+          summary: "High authentication failure rate"
+          description: "{{ $value | humanizePercentage }} of auth attempts are failing."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/ddos-attack.md"
+
+  - name: business_kpis
+    interval: 1m
+    rules:
+      - alert: HighPaymentFailureRate
+        expr: |
+          sum(rate(ecommerce_payment_operations_total{status!="success"}[10m]))
+          / clamp_min(sum(rate(ecommerce_payment_operations_total[10m])), 1) > 0.1
+        for: 5m
+        labels:
+          severity: page
+          priority: P1
+          category: business
+        annotations:
+          summary: "Payment failure rate above 10%"
+          description: "Current failure rate: {{ $value | humanizePercentage }} — revenue impact."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/payment-failures.md"
+
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95, rate(api_database_query_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: ticket
+          priority: P3
+          category: database
+        annotations:
+          summary: "DB query P95 > 1s"
+          description: "P95 query latency: {{ $value | humanizeDuration }}."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/postgres-saturation.md"
