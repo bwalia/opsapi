@@ -70,6 +70,14 @@ spec:
             # deployments get no banner.
             - name: OPSAPI_DEPLOY_ENV
               value: {{ .Values.env | quote }}
+            # The k3s Zalando Postgres enforces TLS (pg_hba: `hostnossl all
+            # all all reject`); config.lua reads POSTGRES_SSL to turn on
+            # pgmoon SSL (ssl_verify=false for the self-signed cert). This
+            # chart only ever deploys to k8s/Zalando environments, so SSL is
+            # always required here. Without it every DB call is rejected with
+            # "no encryption" and the whole API 500s.
+            - name: POSTGRES_SSL
+              value: {{ .Values.postgresSsl | default "true" | quote }}
             # PCRE pattern (matched via ngx.re.match) of recipients
             # whose SMTP delivery must be silently skipped. Used by
             # helper/mail.lua + helper/otp.lua; gated internally on

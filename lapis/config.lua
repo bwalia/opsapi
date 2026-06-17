@@ -26,7 +26,14 @@ config("development", {
     host = os.getenv("POSTGRES_HOST") or "172.72.0.10",
     user = os.getenv("POSTGRES_USER") or "pguser",
     password = os.getenv("POSTGRES_PASSWORD") or "pgpassword",
-    database = os.getenv("POSTGRES_DB") or "opsapi-diytaxreturn"
+    database = os.getenv("POSTGRES_DB") or "opsapi-diytaxreturn",
+    -- Enable TLS when POSTGRES_SSL=true. The k3s Zalando Postgres enforces
+    -- SSL via pg_hba (`hostnossl all all all reject`), so a plaintext
+    -- connection is rejected with "no encryption" and every DB call fails.
+    -- ssl_verify=false because Zalando serves a self-signed cert. Docker /
+    -- test Postgres leaves POSTGRES_SSL unset and keeps connecting plaintext.
+    ssl = os.getenv("POSTGRES_SSL") == "true" or nil,
+    ssl_verify = false
   }
 })
 
@@ -42,7 +49,9 @@ config("production", {
     user = os.getenv("POSTGRES_USER") or "pguser",
     password = os.getenv("POSTGRES_PASSWORD") or "pgpassword",
     database = os.getenv("POSTGRES_DB") or "opsapi",
-    port = tonumber(os.getenv("POSTGRES_PORT") or "5432")
+    port = tonumber(os.getenv("POSTGRES_PORT") or "5432"),
+    ssl = os.getenv("POSTGRES_SSL") == "true" or nil,
+    ssl_verify = false
   }
 })
 
@@ -88,7 +97,9 @@ for _, env_name in ipairs(non_prod_envs) do
       user = os.getenv("POSTGRES_USER") or "pguser",
       password = os.getenv("POSTGRES_PASSWORD") or "pgpassword",
       database = os.getenv("POSTGRES_DB") or "opsapi-diytaxreturn",
-      port = tonumber(os.getenv("POSTGRES_PORT") or "5432")
+      port = tonumber(os.getenv("POSTGRES_PORT") or "5432"),
+      ssl = os.getenv("POSTGRES_SSL") == "true" or nil,
+      ssl_verify = false
     }
   })
 end
