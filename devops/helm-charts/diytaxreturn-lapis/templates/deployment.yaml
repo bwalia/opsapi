@@ -4,6 +4,13 @@ metadata:
   name: {{ .Release.Name }}
   labels:
     app: {{ .Release.Name }}
+  annotations:
+    # Stakater Reloader watches the data hash of every Secret / ConfigMap
+    # this Deployment references via envFrom or secretKeyRef. When the
+    # hash changes — e.g. ExternalSecrets syncs a Vault update — Reloader
+    # triggers a rolling restart so workers pick up the new values. Without
+    # this annotation, ESO-driven Secret updates never reach running pods.
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
