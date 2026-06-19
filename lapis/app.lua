@@ -513,6 +513,11 @@ load_if("invoicing", "routes.document-templates")
 load_if("accounting", "routes.accounting")
 
 -- ============================================
+-- ACADEMY (LMS: courses, lessons, rich content)
+-- ============================================
+load_if("academy", "routes.academy")
+
+-- ============================================
 -- PROJECT MODULE ROUTES (auto-loaded from /projects/)
 -- ============================================
 local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")

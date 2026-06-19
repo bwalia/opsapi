@@ -135,6 +135,9 @@ local services_module_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVIC
 local bank_transaction_migrations = load_if_enabled(ProjectConfig.FEATURES.BANK_TRANSACTIONS,
     "migrations.bank-transactions") or {}
 
+-- Academy (LMS: courses + lessons, namespace-scoped)
+local academy_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-system") or {}
+
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
@@ -1789,6 +1792,15 @@ local _migrations = {
     -- =========================================================================
     ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
     ['716_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
+
+    -- =========================================================================
+    -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
+    -- these only run when PROJECT_CODE enables `academy`.
+    -- =========================================================================
+    ['800_create_academy_courses'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 1),
+    ['801_academy_courses_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 2),
+    ['802_create_academy_lessons'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 3),
+    ['803_academy_lessons_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

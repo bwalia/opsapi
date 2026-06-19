@@ -39,6 +39,7 @@ ProjectConfig.FEATURES = {
     TIMESHEETS = "timesheets",         -- Timesheet tracking and approval
     INVOICING = "invoicing",           -- Invoice generation and payments
     ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
+    ACADEMY = "academy",               -- LMS: courses, lessons, rich (WYSIWYG) content
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -65,6 +66,8 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
+        -- ACADEMY intentionally NOT in `all` — it only activates under
+        -- PROJECT_CODE=academy so it stays fully isolated from other projects.
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -74,6 +77,15 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.TAX_COPILOT,
         ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
+    -- Academy - standalone LMS (courses + lessons + rich content).
+    -- Separate from tax_copilot; run opsapi with PROJECT_CODE=academy.
+    academy = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
     },
@@ -250,6 +262,10 @@ end
 
 function ProjectConfig.isKanbanEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.KANBAN)
+end
+
+function ProjectConfig.isAcademyEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.ACADEMY)
 end
 
 function ProjectConfig.isHospitalEnabled()
