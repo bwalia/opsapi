@@ -224,4 +224,42 @@ return {
             ]])
         end)
     end,
+
+    -- ========================================
+    -- [6] Attribute individual timesheet entries to a kanban task, and mark
+    --     where the entry came from. This powers the REVERSE rollup: a task's
+    --     "time spent" now includes time logged via the Timesheets module, not
+    --     just the kanban timer. `source` distinguishes manually logged entries
+    --     from entries the forward bridge mirrors out of kanban_time_entries, so
+    --     the rollup never double-counts the same minutes. Idempotent.
+    -- ========================================
+    [6] = function()
+        if not table_exists("timesheet_entries") then return end
+
+        db.query([[
+            ALTER TABLE timesheet_entries
+                ADD COLUMN IF NOT EXISTS task_uuid TEXT,
+                ADD COLUMN IF NOT EXISTS source    TEXT NOT NULL DEFAULT 'manual'
+        ]])
+
+        pcall(function()
+            db.query([[
+                CREATE INDEX IF NOT EXISTS timesheet_entries_task_uuid_idx
+                ON timesheet_entries (namespace_id, task_uuid)
+            ]])
+        end)
+
+        -- Backfill: attribute existing entries to the task linked at the parent
+        -- timesheet level, so timesheets created before this column still roll up.
+        pcall(function()
+            db.query([[
+                UPDATE timesheet_entries e
+                SET task_uuid = t.task_uuid
+                FROM timesheets t
+                WHERE e.timesheet_id = t.id
+                  AND e.task_uuid IS NULL
+                  AND t.task_uuid IS NOT NULL
+            ]])
+        end)
+    end,
 }

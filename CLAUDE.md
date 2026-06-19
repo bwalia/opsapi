@@ -21,7 +21,7 @@ cp lapis/.sample.env lapis/.env           # first time only
 ./start.sh -e local -n -j all -r          # -r resets the DB (drops volumes)
 ./start.sh -e local -n -j all -A admin@me.com -W MyPass123   # custom admin creds
 ```
-Key flags: `-e <env>` (local|dev|test|acc|prod), `-j <PROJECT_CODE>`, `-n` (skip git), `-r` (reset DB), `-C` (CI mode, no dev volume mounts), `-c` (only update `.env`). Run `./start.sh -h` for the full list. Default admin: `admin@opsapi.com` / `Admin@123`.
+Key flags: `-e <env>` (local|dev|test|acc|prod), `-j <PROJECT_CODE>`, `-n` (skip git), `-r` (reset DB), `-C` (CI mode, no dev volume mounts), `-c` (only update `.env`), `-B` (no rebuild — start from the existing image; avoids Docker Hub base-image pulls / 429 rate limits). Run `./start.sh -h` for the full list. Default admin: `admin@opsapi.com` / `Admin@123`. Note: the normal (build) path now auto-falls back to the existing image if a build fails while one is present (e.g. Docker Hub 429).
 
 Local URLs: API `http://127.0.0.1:4010` (Swagger at `/swagger`, health at `/health`), Dashboard `http://127.0.0.1:8039`, Adminer `:7779`, MinIO console `:9001`, Grafana `:3011`, Prometheus `:9090`, Gatus `:8888`.
 

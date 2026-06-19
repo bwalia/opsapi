@@ -1033,6 +1033,9 @@ local _migrations = {
     -- (a 0 violates the self/sprint FK on tasks created without a parent/sprint).
     ['760_kanban_drop_fk_defaults'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_project_migrations, 41),
+    -- [42] CRM billing link: adds customer_id/customer_uuid (soft ref) to kanban_projects.
+    ['762_kanban_projects_customer_link'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 42),
     -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
     -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
     ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
@@ -1543,6 +1546,7 @@ local _migrations = {
     ['522_ts_create_approvals'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 3),
     ['523_ts_enrich_client_fields'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 4),
     ['524_ts_link_customer_task'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 5),
+    ['525_ts_entry_task_and_source'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 6),
 
     -- Timesheet menu items (730-733): surface Timesheets in the sidebar
     ['730_seed_timesheet_menu_items'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 1),
