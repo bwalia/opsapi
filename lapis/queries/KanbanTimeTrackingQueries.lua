@@ -18,6 +18,66 @@ local cjson = require("cjson.safe")
 local KanbanTimeTrackingQueries = {}
 
 --------------------------------------------------------------------------------
+-- Billing bridge
+--------------------------------------------------------------------------------
+
+--- Mirror a finalized kanban time entry into the Timesheets billing pipeline:
+--- one DRAFT timesheet per user per day per the task's customer. Best-effort and
+--- fully isolated — any failure (timesheets/customers tables absent on a
+--- kanban-only deployment, etc.) is swallowed so board time tracking never breaks.
+-- @param entry table A logged kanban_time_entries row (needs task_id, user_uuid,
+--                    duration_minutes, is_billable, hourly_rate, description)
+local function mirror_to_timesheet(entry)
+    if not entry or not entry.task_id then return end
+    local minutes = tonumber(entry.duration_minutes)
+    if not minutes or minutes <= 0 then return end
+
+    local ok, err = pcall(function()
+        local TimesheetQueries = require "queries.TimesheetQueries"
+        local ctx = db.query([[
+            SELECT t.uuid AS task_uuid, t.title AS task_title,
+                   p.namespace_id, p.uuid AS project_uuid, p.name AS project_name,
+                   p.customer_uuid,
+                   NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), '') AS customer_name
+            FROM kanban_tasks t
+            JOIN kanban_boards b ON b.id = t.board_id
+            JOIN kanban_projects p ON p.id = b.project_id
+            LEFT JOIN customers c ON c.uuid = p.customer_uuid AND c.namespace_id = p.namespace_id
+            WHERE t.id = ?
+            LIMIT 1
+        ]], entry.task_id)
+        if not ctx or not ctx[1] then
+            ngx.log(ngx.WARN, "[TimeBridge] no task context for task_id=", entry.task_id)
+            return
+        end
+        local row = ctx[1]
+
+        local res, append_err = TimesheetQueries.appendDailyEntry({
+            namespace_id  = row.namespace_id,
+            user_uuid     = entry.user_uuid,
+            hours         = minutes / 60.0,
+            customer_uuid = row.customer_uuid,
+            customer_name = row.customer_name,
+            task_uuid     = row.task_uuid,
+            task_title    = row.task_title,
+            project_uuid  = row.project_uuid,
+            project_name  = row.project_name,
+            is_billable   = entry.is_billable,
+            hourly_rate   = entry.hourly_rate,
+            description   = entry.description,
+        })
+        if not res then
+            ngx.log(ngx.WARN, "[TimeBridge] appendDailyEntry failed: ", tostring(append_err))
+        else
+            ngx.log(ngx.INFO, "[TimeBridge] created timesheet=", res.timesheet_uuid, " entry=", res.entry_uuid)
+        end
+    end)
+    if not ok then
+        ngx.log(ngx.ERR, "[TimeBridge] mirror error: ", tostring(err))
+    end
+end
+
+--------------------------------------------------------------------------------
 -- Timer Operations
 --------------------------------------------------------------------------------
 
@@ -114,7 +174,8 @@ function KanbanTimeTrackingQueries.stopTimer(user_uuid, description, accumulated
         local duration_result = db.query([[
             SELECT EXTRACT(EPOCH FROM (NOW() - ?::timestamp))::integer as seconds
         ]], entry.started_at)
-        duration_seconds = duration_result[1].seconds or 0
+        duration_seconds = (duration_result and duration_result[1] and duration_result[1].seconds) or 0
+        if duration_seconds < 0 then duration_seconds = 0 end
         duration_minutes = math.floor((duration_seconds + 30) / 60)
         if duration_minutes == 0 and duration_seconds > 0 then
             duration_minutes = 1
@@ -153,6 +214,9 @@ function KanbanTimeTrackingQueries.stopTimer(user_uuid, description, accumulated
 
     -- Refresh entry to get updated values
     entry:refresh()
+
+    -- Mirror this finalized session into the Timesheets billing pipeline.
+    mirror_to_timesheet(entry)
 
     return entry
 end
@@ -281,7 +345,12 @@ function KanbanTimeTrackingQueries.create(params)
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
 
-    return KanbanTimeEntryModel:create(params, { returning = "*" })
+    local created = KanbanTimeEntryModel:create(params, { returning = "*" })
+
+    -- Mirror this manual entry into the Timesheets billing pipeline.
+    mirror_to_timesheet(created)
+
+    return created
 end
 
 --- Update a time entry
@@ -556,10 +625,11 @@ function KanbanTimeTrackingQueries.getByUser(user_uuid, params)
     ]], where_sql)
 
     local summary_result = db.query(summary_sql, table.unpack(count_values))
+    local s = (summary_result and summary_result[1]) or {}
     local summary = {
-        total_minutes = tonumber(summary_result[1].total_minutes) or 0,
-        billable_minutes = tonumber(summary_result[1].billable_minutes) or 0,
-        total_billed = tonumber(summary_result[1].total_billed) or 0
+        total_minutes = tonumber(s.total_minutes) or 0,
+        billable_minutes = tonumber(s.billable_minutes) or 0,
+        total_billed = tonumber(s.total_billed) or 0
     }
 
     return {
@@ -659,11 +729,12 @@ function KanbanTimeTrackingQueries.getByProject(project_id, params)
     ]], where_sql)
 
     local summary_result = db.query(summary_sql, table.unpack(count_values))
+    local s = (summary_result and summary_result[1]) or {}
     local summary = {
-        total_minutes = tonumber(summary_result[1].total_minutes) or 0,
-        billable_minutes = tonumber(summary_result[1].billable_minutes) or 0,
-        total_billed = tonumber(summary_result[1].total_billed) or 0,
-        unique_users = tonumber(summary_result[1].unique_users) or 0
+        total_minutes = tonumber(s.total_minutes) or 0,
+        billable_minutes = tonumber(s.billable_minutes) or 0,
+        total_billed = tonumber(s.total_billed) or 0,
+        unique_users = tonumber(s.unique_users) or 0
     }
 
     return {
@@ -703,6 +774,115 @@ function KanbanTimeTrackingQueries.getUserReport(project_id, start_date, end_dat
     ]]
 
     return db.query(sql, project_id, start_date, end_date)
+end
+
+--------------------------------------------------------------------------------
+-- Combined per-task time summary
+--------------------------------------------------------------------------------
+
+--- Total time spent on a task across BOTH tracking surfaces, per contributor:
+---   * kanban_time_entries   — logged via the board timer / manual entry
+---   * timesheet_entries     — logged via the Timesheets module (source != 'kanban')
+--- The forward bridge mirrors kanban entries into timesheet_entries tagged
+--- source='kanban'; those are excluded here so the same minutes are never counted
+--- twice. The timesheet half is wrapped in pcall so kanban-only deployments
+--- (no timesheet_entries table) still return the kanban totals.
+-- @param task_id   number  internal kanban_tasks.id
+-- @param task_uuid string  kanban_tasks.uuid (how timesheet entries reference it)
+-- @return table { total_minutes, kanban_minutes, timesheet_minutes,
+--                 billable_minutes, by_user = { { user_uuid, name, email,
+--                 kanban_minutes, timesheet_minutes, total_minutes } } }
+function KanbanTimeTrackingQueries.getTaskTimeSummary(task_id, task_uuid)
+    -- Kanban board time, grouped by contributor.
+    local kanban_rows = db.query([[
+        SELECT te.user_uuid,
+               COALESCE(u.first_name, '') AS first_name,
+               COALESCE(u.last_name, '')  AS last_name,
+               u.email,
+               COALESCE(SUM(te.duration_minutes), 0)::int AS minutes,
+               COALESCE(SUM(CASE WHEN te.is_billable
+                                 THEN te.duration_minutes ELSE 0 END), 0)::int AS billable_minutes
+        FROM kanban_time_entries te
+        LEFT JOIN users u ON u.uuid = te.user_uuid
+        WHERE te.task_id = ? AND te.deleted_at IS NULL
+        GROUP BY te.user_uuid, u.first_name, u.last_name, u.email
+    ]], task_id) or {}
+
+    -- Timesheet time attributed to this task, excluding kanban mirrors.
+    local ts_rows = {}
+    if task_uuid then
+        local ok, rows = pcall(function()
+            return db.query([[
+                SELECT e.user_uuid,
+                       COALESCE(u.first_name, '') AS first_name,
+                       COALESCE(u.last_name, '')  AS last_name,
+                       u.email,
+                       COALESCE(SUM(e.hours) * 60, 0)::int AS minutes,
+                       COALESCE(SUM(CASE WHEN e.is_billable
+                                         THEN e.hours ELSE 0 END) * 60, 0)::int AS billable_minutes
+                FROM timesheet_entries e
+                LEFT JOIN users u ON u.uuid = e.user_uuid
+                WHERE e.task_uuid = ?
+                  AND e.deleted_at IS NULL
+                  AND COALESCE(e.source, 'manual') <> 'kanban'
+                GROUP BY e.user_uuid, u.first_name, u.last_name, u.email
+            ]], task_uuid)
+        end)
+        if ok and rows then ts_rows = rows end
+    end
+
+    -- Merge the two sources per user.
+    local by_user = {}
+    local function bucket(r)
+        local b = by_user[r.user_uuid]
+        if not b then
+            local name = (tostring(r.first_name or "") .. " " .. tostring(r.last_name or "")):gsub("^%s*(.-)%s*$", "%1")
+            b = {
+                user_uuid = r.user_uuid,
+                name = (name ~= "" and name) or r.email or "Unknown",
+                email = r.email,
+                kanban_minutes = 0,
+                timesheet_minutes = 0,
+                total_minutes = 0,
+                billable_minutes = 0,
+            }
+            by_user[r.user_uuid] = b
+        end
+        return b
+    end
+
+    local total, kanban_total, ts_total, billable_total = 0, 0, 0, 0
+    for _, r in ipairs(kanban_rows) do
+        local b = bucket(r)
+        b.kanban_minutes = b.kanban_minutes + (r.minutes or 0)
+        b.total_minutes = b.total_minutes + (r.minutes or 0)
+        b.billable_minutes = b.billable_minutes + (r.billable_minutes or 0)
+        kanban_total = kanban_total + (r.minutes or 0)
+        total = total + (r.minutes or 0)
+        billable_total = billable_total + (r.billable_minutes or 0)
+    end
+    for _, r in ipairs(ts_rows) do
+        local b = bucket(r)
+        b.timesheet_minutes = b.timesheet_minutes + (r.minutes or 0)
+        b.total_minutes = b.total_minutes + (r.minutes or 0)
+        b.billable_minutes = b.billable_minutes + (r.billable_minutes or 0)
+        ts_total = ts_total + (r.minutes or 0)
+        total = total + (r.minutes or 0)
+        billable_total = billable_total + (r.billable_minutes or 0)
+    end
+
+    -- Stable array ordered by most time first.
+    local users = {}
+    for _, b in pairs(by_user) do users[#users + 1] = b end
+    table.sort(users, function(a, c) return a.total_minutes > c.total_minutes end)
+
+    return {
+        total_minutes = total,
+        kanban_minutes = kanban_total,
+        timesheet_minutes = ts_total,
+        billable_minutes = billable_total,
+        by_user = users,
+    }
 end
 
 return KanbanTimeTrackingQueries

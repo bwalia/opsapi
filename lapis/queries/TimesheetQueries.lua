@@ -219,10 +219,13 @@ function TimesheetQueries.lookupTasks(namespace_id, q)
         table.insert(args, 100)
         return db.query([[
             SELECT t.uuid AS task_uuid, t.title,
-                   p.uuid AS project_uuid, p.name AS project_name
+                   p.uuid AS project_uuid, p.name AS project_name,
+                   p.customer_uuid AS customer_uuid,
+                   NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), '') AS customer_name
             FROM kanban_tasks t
             JOIN kanban_boards b ON b.id = t.board_id
             JOIN kanban_projects p ON p.id = b.project_id
+            LEFT JOIN customers c ON c.uuid = p.customer_uuid AND c.namespace_id = p.namespace_id
             WHERE ]] .. where .. [[
             ORDER BY t.updated_at DESC
             LIMIT ?
@@ -930,6 +933,16 @@ function TimesheetQueries.createEntry(params)
     if not params.uuid then
         params.uuid = Global.generateUUID()
     end
+
+    -- Attribute this entry to a kanban task so it rolls up into the task's
+    -- "time spent". Prefer an explicit task_uuid; otherwise inherit the parent
+    -- timesheet's task link (set when the timesheet was created for a task).
+    if not nilify(params.task_uuid) then
+        params.task_uuid = timesheet.task_uuid
+    else
+        params.task_uuid = nilify(params.task_uuid)
+    end
+
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
 
@@ -1074,6 +1087,91 @@ function TimesheetQueries.getEntriesByDate(namespace_id, user_uuid, date)
     ]], namespace_id, user_uuid, date)
 
     return entries or {}
+end
+
+--- Append a billable entry to the user's daily DRAFT timesheet for a customer,
+--- creating that timesheet if it doesn't exist yet. This is the bridge used to
+--- mirror kanban board time-tracking into the billing pipeline ("one draft per
+--- user per day per customer"). Idempotency is the caller's responsibility — each
+--- call adds one entry, so callers should invoke it once per finalized session.
+-- @param p table { namespace_id, user_uuid, work_date (YYYY-MM-DD), hours,
+--                  customer_uuid, customer_name, task_uuid, task_title,
+--                  project_uuid, project_name, is_billable, hourly_rate, description }
+-- @return table|nil { timesheet_uuid, entry_uuid }
+-- @return string|nil error
+function TimesheetQueries.appendDailyEntry(p)
+    if not p.namespace_id or not p.user_uuid or p.user_uuid == "" then
+        return nil, "namespace_id and user_uuid are required"
+    end
+    local hours = tonumber(p.hours)
+    if not hours or hours <= 0 then
+        return nil, "hours must be a positive number"
+    end
+    if hours > 24 then hours = 24 end
+
+    local work_date = nilify(p.work_date)
+    if not work_date then
+        local d = db.query("SELECT TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD') AS d")
+        work_date = d and d[1] and d[1].d or nil
+    end
+    local customer_uuid = nilify(p.customer_uuid)
+
+    -- Reuse an existing draft for this user / day / customer.
+    local rows = db.query([[
+        SELECT id, uuid FROM timesheets
+        WHERE namespace_id = ? AND user_uuid = ? AND status = 'draft'
+          AND deleted_at IS NULL
+          AND COALESCE(work_date::text, '') = COALESCE(?, '')
+          AND COALESCE(customer_uuid, '') = COALESCE(?, '')
+        ORDER BY id DESC
+        LIMIT 1
+    ]], p.namespace_id, p.user_uuid, work_date, customer_uuid)
+
+    local ts_internal_id, ts_uuid
+    if rows and rows[1] then
+        ts_internal_id = rows[1].id
+        ts_uuid = rows[1].uuid
+    else
+        -- Create the daily draft WITHOUT seed hours, so we append exactly one
+        -- entry below (passing hours to create() would seed a duplicate entry).
+        local created = TimesheetQueries.create({
+            namespace_id  = p.namespace_id,
+            user_uuid     = p.user_uuid,
+            work_date     = work_date,
+            customer_uuid = customer_uuid,
+            task_uuid     = nilify(p.task_uuid),
+            hourly_rate   = nilify(p.hourly_rate),
+            is_billable   = p.is_billable,
+            notes         = "Auto-created from kanban time tracking",
+        })
+        if not created then
+            return nil, "could not create daily timesheet"
+        end
+        ts_internal_id = created.internal_id
+        ts_uuid = created.id
+    end
+
+    local entry, entry_err = TimesheetQueries.createEntry({
+        timesheet_id      = ts_internal_id,
+        namespace_id      = p.namespace_id,
+        user_uuid         = p.user_uuid,
+        entry_date        = work_date or db.raw("CURRENT_DATE"),
+        hours             = hours,
+        is_billable       = p.is_billable,
+        description       = nilify(p.description) or nilify(p.task_title) or "Time tracked",
+        project_reference = nilify(p.project_name),
+        task_reference    = nilify(p.task_title) or nilify(p.task_uuid),
+        task_uuid         = nilify(p.task_uuid),
+        -- Mirror of a kanban_time_entries row: tag it so the reverse task rollup
+        -- counts the kanban entry, not this duplicate, and never double-counts.
+        source            = "kanban",
+        hourly_rate       = nilify(p.hourly_rate),
+    })
+    if not entry then
+        return nil, entry_err or "could not add timesheet entry"
+    end
+
+    return { timesheet_uuid = ts_uuid, entry_uuid = entry.id }
 end
 
 return TimesheetQueries

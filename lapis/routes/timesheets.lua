@@ -48,6 +48,24 @@ return function(app)
         }
     end
 
+    -- Inline permission check (requireNamespace already populated these on self).
+    -- Namespace owners / platform admins implicitly pass, mirroring requirePermission.
+    local function has_perm(self, module, action)
+        if self.is_platform_admin or self.is_namespace_owner then return true end
+        local perms = (self.namespace_permissions or {})[module]
+        if not perms then return false end
+        for _, p in ipairs(perms) do
+            if p == action or p == "manage" then return true end
+        end
+        return false
+    end
+
+    -- May the caller see OTHER users' timesheets (org-wide / approver view)?
+    local function can_view_others(self)
+        return has_perm(self, "timesheet_approvals", "read")
+            or has_perm(self, "timesheets", "manage")
+    end
+
     -- ============================================================
     -- APPROVAL QUEUE (must be before :uuid routes)
     -- ============================================================
@@ -70,9 +88,17 @@ return function(app)
     app:get("/api/v2/timesheets/summary", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local params = self.params or {}
+            -- Viewing another user's summary requires approver/manage rights.
+            local target_uuid = self.current_user.uuid
+            if params.user_uuid and params.user_uuid ~= "" and params.user_uuid ~= self.current_user.uuid then
+                if not can_view_others(self) then
+                    return error_response(403, "Not allowed to view another user's timesheet summary")
+                end
+                target_uuid = params.user_uuid
+            end
             local result = TimesheetQueries.getSummary(
                 self.namespace.id,
-                params.user_uuid or self.current_user.uuid,
+                target_uuid,
                 params.start_date,
                 params.end_date
             )
@@ -90,7 +116,10 @@ return function(app)
             local params = self.params or {}
 
             if params.all == "true" then
-                -- Admin view: list all timesheets in namespace
+                -- Admin view: list all timesheets in namespace — requires approver/manage rights.
+                if not can_view_others(self) then
+                    return error_response(403, "Not allowed to view all timesheets")
+                end
                 local result = TimesheetQueries.list(self.namespace.id, {
                     page = params.page,
                     per_page = params.per_page,

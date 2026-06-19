@@ -38,8 +38,10 @@ import { ConfirmDialog } from '@/components/ui/Modal';
 import { useKanbanStore } from '@/store/kanban.store';
 import { kanbanService } from '@/services/kanban.service';
 import usersService from '@/services/users.service';
+import { customersService } from '@/services/customers.service';
 import type {
   User,
+  Customer,
   KanbanProject,
   KanbanProjectMember,
   KanbanProjectStatus,
@@ -740,6 +742,14 @@ const BudgetTab = ({ project, formData, setFormData, onSave, isSaving }: BudgetT
   const currencySymbol = CURRENCIES.find((c) => c.value === (formData.budget_currency || 'USD'))?.symbol || '$';
   const budgetProgress = project.budget > 0 ? Math.min((project.budget_spent / project.budget) * 100, 100) : 0;
 
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  useEffect(() => {
+    customersService
+      .getCustomers({ perPage: 200 })
+      .then((res) => setCustomers(res.data || []))
+      .catch(() => setCustomers([]));
+  }, []);
+
   return (
     <Card>
       <div className="p-6 border-b border-secondary-200">
@@ -769,6 +779,26 @@ const BudgetTab = ({ project, formData, setFormData, onSave, isSaving }: BudgetT
             <p className="text-xs text-secondary-500 mt-2">{budgetProgress.toFixed(1)}% of budget used</p>
           </div>
         )}
+
+        {/* Customer (billing link) */}
+        <div>
+          <label className="block text-sm font-medium text-secondary-700 mb-1">Customer (for billing)</label>
+          <select
+            value={formData.customer_uuid || ''}
+            onChange={(e) => setFormData((prev) => ({ ...prev, customer_uuid: e.target.value || undefined }))}
+            className="w-full px-4 py-2.5 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-colors"
+          >
+            <option value="">No customer / internal project</option>
+            {customers.map((c) => (
+              <option key={c.uuid} value={c.uuid}>
+                {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Unnamed'}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-secondary-500">
+            Timesheets logged against this project&apos;s tasks auto-fill this customer for invoicing.
+          </p>
+        </div>
 
         {/* Budget Form */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -968,6 +998,7 @@ export default function ProjectSettingsPage() {
           hourly_rate: projectData.hourly_rate,
           start_date: projectData.start_date,
           due_date: projectData.due_date,
+          customer_uuid: projectData.customer_uuid,
         });
       } catch (error) {
         console.error('Failed to load project:', error);

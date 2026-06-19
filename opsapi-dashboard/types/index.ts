@@ -967,6 +967,9 @@ export interface KanbanProject {
   // Ownership
   owner_user_uuid: string;
   chat_channel_uuid?: string;
+  // CRM billing link
+  customer_id?: number;
+  customer_uuid?: string;
   // Settings
   settings?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -1141,6 +1144,26 @@ export interface KanbanTaskAssignee {
   };
 }
 
+/** Per-contributor breakdown of time spent on a task (kanban + timesheets). */
+export interface KanbanTaskTimeUser {
+  user_uuid: string;
+  name: string;
+  email?: string;
+  kanban_minutes: number;
+  timesheet_minutes: number;
+  total_minutes: number;
+  billable_minutes: number;
+}
+
+/** Combined time spent on a task across the board timer and the Timesheets module. */
+export interface KanbanTaskTimeSummary {
+  total_minutes: number;
+  kanban_minutes: number;
+  timesheet_minutes: number;
+  billable_minutes: number;
+  by_user: KanbanTaskTimeUser[];
+}
+
 export interface KanbanLabel {
   id: number;
   uuid: string;
@@ -1297,6 +1320,9 @@ export interface CreateKanbanProjectDto {
   hourly_rate?: number;
   start_date?: string;
   due_date?: string;
+  // CRM billing link: the customer this project's work is billed to.
+  customer_uuid?: string;
+  customer_id?: number;
   settings?: Record<string, unknown>;
 }
 

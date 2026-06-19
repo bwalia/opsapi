@@ -167,6 +167,26 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
     [tasks]
   );
 
+  // Selecting a task auto-fills the customer from the task's project (the
+  // authoritative billing entity), so logged time always reaches the right
+  // invoice. We inject the linked customer into the options list if it isn't
+  // already loaded, so it renders in the dropdown.
+  const handleTaskChange = useCallback(
+    (value: string) => {
+      setTaskUuid(value);
+      const task = tasks.find((t) => t.task_uuid === value);
+      if (task?.customer_uuid) {
+        setCustomers((prev) =>
+          prev.some((c) => c.uuid === task.customer_uuid)
+            ? prev
+            : [{ uuid: task.customer_uuid!, first_name: task.customer_name || undefined }, ...prev]
+        );
+        setCustomerUuid(task.customer_uuid);
+      }
+    },
+    [tasks]
+  );
+
   // Project derived from the selected task (resolved server-side too, but shown
   // here so the user sees which project this timesheet will be pinned to).
   const derivedProjectName = useMemo(
@@ -256,7 +276,7 @@ const CreateTimesheetModal: React.FC<CreateTimesheetModalProps> = ({ isOpen, onC
           <SearchableSelect
             options={taskOptions}
             value={taskUuid}
-            onChange={setTaskUuid}
+            onChange={handleTaskChange}
             onSearch={handleTaskSearch}
             placeholder="Select a task…"
             searchPlaceholder="Search tasks…"

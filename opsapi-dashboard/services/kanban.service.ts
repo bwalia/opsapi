@@ -14,6 +14,7 @@ import type {
   KanbanProjectStats,
   KanbanProjectsResponse,
   KanbanBoardFullResponse,
+  KanbanTaskTimeSummary,
   KanbanMyTasksResponse,
   CreateKanbanProjectDto,
   UpdateKanbanProjectDto,
@@ -565,6 +566,31 @@ export const kanbanService = {
    */
   async removeTaskAssignee(taskUuid: string, userUuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/kanban/tasks/${taskUuid}/assignees/${userUuid}`);
+  },
+
+  // ============================================
+  // Time Tracking
+  // ============================================
+
+  /**
+   * Combined time spent on a task (kanban board timer + Timesheets module),
+   * with a per-contributor breakdown. Excludes timesheet entries that are
+   * mirrors of kanban time, so the same minutes are never double-counted.
+   */
+  async getTaskTimeSummary(taskUuid: string): Promise<KanbanTaskTimeSummary> {
+    const response = await apiClient.get<ApiDataResponse<KanbanTaskTimeSummary>>(
+      `/api/v2/kanban/tasks/${taskUuid}/time-summary`
+    );
+    const d = response.data?.data;
+    // Normalize to a fully-shaped object so the UI never reads undefined fields
+    // (e.g. a 200 with an unexpected/empty payload).
+    return {
+      total_minutes: d?.total_minutes ?? 0,
+      kanban_minutes: d?.kanban_minutes ?? 0,
+      timesheet_minutes: d?.timesheet_minutes ?? 0,
+      billable_minutes: d?.billable_minutes ?? 0,
+      by_user: Array.isArray(d?.by_user) ? d!.by_user : [],
+    };
   },
 
   // ============================================

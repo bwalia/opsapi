@@ -195,8 +195,10 @@ end
 --- Get a single invoice with line items and payments
 -- @param uuid string
 -- @return table|nil invoice with line_items and payments arrays
-function InvoiceQueries.get(uuid)
-    local invoice = InvoiceModel:find({ uuid = uuid })
+function InvoiceQueries.get(uuid, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local invoice = InvoiceModel:find(clause)
     if not invoice then
         return nil
     end
@@ -259,8 +261,10 @@ end
 -- @param params table
 -- @return table|nil updated invoice
 -- @return string|nil error message
-function InvoiceQueries.update(uuid, params)
-    local invoice = InvoiceModel:find({ uuid = uuid })
+function InvoiceQueries.update(uuid, params, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local invoice = InvoiceModel:find(clause)
     if not invoice then
         return nil, "Invoice not found"
     end
@@ -296,8 +300,10 @@ end
 -- @param uuid string
 -- @return boolean success
 -- @return string|nil error message
-function InvoiceQueries.delete(uuid)
-    local invoice = InvoiceModel:find({ uuid = uuid })
+function InvoiceQueries.delete(uuid, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local invoice = InvoiceModel:find(clause)
     if not invoice then
         return false, "Invoice not found"
     end
@@ -318,8 +324,10 @@ end
 -- @param uuid string
 -- @return table|nil updated invoice
 -- @return string|nil error message
-function InvoiceQueries.send(uuid)
-    local invoice = InvoiceModel:find({ uuid = uuid })
+function InvoiceQueries.send(uuid, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local invoice = InvoiceModel:find(clause)
     if not invoice then
         return nil, "Invoice not found"
     end
@@ -350,8 +358,8 @@ function InvoiceQueries.markPaid(uuid)
         return nil, "Invoice not found"
     end
 
-    if tonumber(invoice.balance_due) > 0 then
-        return nil, "Invoice still has an outstanding balance of " .. invoice.balance_due
+    if (tonumber(invoice.balance_due) or 0) > 0 then
+        return nil, "Invoice still has an outstanding balance of " .. tostring(invoice.balance_due)
     end
 
     invoice:update({
@@ -370,8 +378,10 @@ end
 -- @param uuid string
 -- @return table|nil updated invoice
 -- @return string|nil error message
-function InvoiceQueries.void(uuid)
-    local invoice = InvoiceModel:find({ uuid = uuid })
+function InvoiceQueries.void(uuid, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local invoice = InvoiceModel:find(clause)
     if not invoice then
         return nil, "Invoice not found"
     end
@@ -808,10 +818,18 @@ end
 -- @param params table
 -- @return table|nil updated item
 -- @return string|nil error message
-function InvoiceQueries.updateLineItem(uuid, params)
+function InvoiceQueries.updateLineItem(uuid, params, namespace_id)
     local item = InvoiceLineItemModel:find({ uuid = uuid })
     if not item then
         return nil, "Line item not found"
+    end
+
+    -- invoice_line_items has no namespace_id column; scope via parent invoice.
+    if namespace_id then
+        local parent = InvoiceModel:find({ id = item.invoice_id, namespace_id = namespace_id })
+        if not parent then
+            return nil, "Line item not found"
+        end
     end
 
     local quantity = tonumber(params.quantity) or tonumber(item.quantity) or 1
@@ -848,10 +866,18 @@ end
 -- @param uuid string
 -- @return boolean success
 -- @return string|nil error message
-function InvoiceQueries.deleteLineItem(uuid)
+function InvoiceQueries.deleteLineItem(uuid, namespace_id)
     local item = InvoiceLineItemModel:find({ uuid = uuid })
     if not item then
         return false, "Line item not found"
+    end
+
+    -- invoice_line_items has no namespace_id column; scope via parent invoice.
+    if namespace_id then
+        local parent = InvoiceModel:find({ id = item.invoice_id, namespace_id = namespace_id })
+        if not parent then
+            return false, "Line item not found"
+        end
     end
 
     local invoice_id = item.invoice_id
@@ -898,16 +924,20 @@ end
 -- @param params table { invoice_id, amount, payment_method, payment_reference, payment_date, notes }
 -- @return table payment
 -- @return string|nil error message
-function InvoiceQueries.recordPayment(params)
+function InvoiceQueries.recordPayment(params, namespace_id)
     -- Resolve the invoice by whichever identifier was supplied. Never call
     -- find({ id = nil }) — Lapis turns an all-nil clause into an empty WHERE and
     -- throws "db.encode_clause: passed an empty table".
     local invoice
     if params.invoice_id then
-        invoice = InvoiceModel:find({ id = params.invoice_id })
+        local clause = { id = params.invoice_id }
+        if namespace_id then clause.namespace_id = namespace_id end
+        invoice = InvoiceModel:find(clause)
     end
     if not invoice and params.invoice_uuid then
-        invoice = InvoiceModel:find({ uuid = params.invoice_uuid })
+        local clause = { uuid = params.invoice_uuid }
+        if namespace_id then clause.namespace_id = namespace_id end
+        invoice = InvoiceModel:find(clause)
     end
     if not invoice then
         return nil, "Invoice not found"
@@ -945,7 +975,7 @@ function InvoiceQueries.recordPayment(params)
 
     -- Reload invoice to check balance
     invoice = InvoiceModel:find({ id = invoice.id })
-    if tonumber(invoice.balance_due) <= 0 then
+    if (tonumber(invoice.balance_due) or 0) <= 0 then
         invoice:update({
             status = "paid",
             paid_at = db.raw("NOW()"),
@@ -986,8 +1016,10 @@ end
 -- @param uuid string
 -- @return boolean success
 -- @return string|nil error message
-function InvoiceQueries.deletePayment(uuid)
-    local payment = InvoicePaymentModel:find({ uuid = uuid })
+function InvoiceQueries.deletePayment(uuid, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local payment = InvoicePaymentModel:find(clause)
     if not payment then
         return false, "Payment not found"
     end
@@ -1000,7 +1032,7 @@ function InvoiceQueries.deletePayment(uuid)
 
     -- Check if invoice status needs to revert from paid
     local invoice = InvoiceModel:find({ id = invoice_id })
-    if invoice and invoice.status == "paid" and tonumber(invoice.balance_due) > 0 then
+    if invoice and invoice.status == "paid" and (tonumber(invoice.balance_due) or 0) > 0 then
         invoice:update({
             status = "sent",
             paid_at = db.NULL,
@@ -1067,8 +1099,10 @@ end
 -- @param params table
 -- @return table|nil updated tax rate
 -- @return string|nil error message
-function InvoiceQueries.updateTaxRate(uuid, params)
-    local rate = InvoiceTaxRateModel:find({ uuid = uuid })
+function InvoiceQueries.updateTaxRate(uuid, params, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local rate = InvoiceTaxRateModel:find(clause)
     if not rate then
         return nil, "Tax rate not found"
     end
@@ -1092,8 +1126,10 @@ end
 -- @param uuid string
 -- @return boolean success
 -- @return string|nil error message
-function InvoiceQueries.deleteTaxRate(uuid)
-    local rate = InvoiceTaxRateModel:find({ uuid = uuid })
+function InvoiceQueries.deleteTaxRate(uuid, namespace_id)
+    local clause = { uuid = uuid }
+    if namespace_id then clause.namespace_id = namespace_id end
+    local rate = InvoiceTaxRateModel:find(clause)
     if not rate then
         return false, "Tax rate not found"
     end
