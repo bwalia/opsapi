@@ -145,6 +145,9 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- My Income (tax_copilot feature) — manually-entered income source-of-truth
+local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1362,6 +1365,13 @@ local _migrations = {
     ['501_tax_create_user_subscriptions']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 80),
     ['502_tax_add_user_subscriptions_indexes']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 81),
     ['503_tax_create_processed_apple_notifications'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 82),
+    -- Wizard tree depends on classification_profiles (created at 480), the
+    -- existing rules-pack seed rows (re-parented here), and
+    -- tax_user_profiles.default_profile_key (added at 496, source for the
+    -- one-time backfill into the join table). Registering after 503 puts
+    -- it safely past every direct dependency without splitting the
+    -- numbering convention used by the rest of the tax_copilot block.
+    ['504_profile_business_wizard_tree']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 37),
 
     -- =========================================================================
     -- CORE AUTH: Password reset tokens
@@ -1778,6 +1788,11 @@ local _migrations = {
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
+
+    -- MY INCOME — manually-entered income source-of-truth
+    -- =========================================================================
+    ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
+    ['716_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

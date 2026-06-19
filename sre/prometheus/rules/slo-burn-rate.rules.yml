@@ -1,0 +1,158 @@
+# SLO burn-rate alerting (Layers 1 & 4)
+# Multi-window, multi-burn-rate alerts per Google SRE Workbook ch. 5.
+# Recording rules pre-compute the error ratio over each window; alerts fire when
+# BOTH the long and short windows exceed the burn-rate threshold (the short
+# window makes alerts resolve quickly once the incident ends).
+#
+# Availability SLO target = 99.95%  →  error budget = 0.0005 (0.05%).
+# burn_rate = observed_error_ratio / error_budget.
+groups:
+  # ── Availability SLI: error ratio over multiple windows ────────────────────
+  - name: slo_availability_sli
+    interval: 30s
+    rules:
+      - record: opsapi:sli_error:ratio_rate5m
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[5m]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[5m])), 1)
+      - record: opsapi:sli_error:ratio_rate30m
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[30m]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[30m])), 1)
+      - record: opsapi:sli_error:ratio_rate1h
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[1h]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[1h])), 1)
+      - record: opsapi:sli_error:ratio_rate2h
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[2h]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[2h])), 1)
+      - record: opsapi:sli_error:ratio_rate6h
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[6h]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[6h])), 1)
+      - record: opsapi:sli_error:ratio_rate1d
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[1d]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[1d])), 1)
+      - record: opsapi:sli_error:ratio_rate3d
+        expr: |
+          sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[3d]))
+          / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[3d])), 1)
+
+      # Error budget remaining (0..1) over the 30d window — drives the dashboard.
+      - record: opsapi:error_budget_remaining:ratio
+        expr: |
+          1 - (
+            (sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[30d]))
+             / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[30d])), 1))
+            / 0.0005
+          )
+
+  # ── Burn-rate alerts: SLO target 99.95% (budget = 0.0005) ──────────────────
+  - name: slo_availability_burn_rate
+    interval: 30s
+    rules:
+      # Page: 14.4x burn (2% of budget in 1h). Long=1h, short=5m.
+      - alert: ErrorBudgetBurnFast
+        expr: |
+          opsapi:sli_error:ratio_rate1h  > (14.4 * 0.0005)
+          and
+          opsapi:sli_error:ratio_rate5m  > (14.4 * 0.0005)
+        labels:
+          severity: page
+          priority: P1
+          slo: availability
+        annotations:
+          summary: "Availability error budget burning FAST (14.4x)"
+          description: "1h+5m error ratio > 14.4x budget. ~2% of the 30d budget will burn in 1h."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+
+      # Page: 6x burn (5% of budget in 6h). Long=6h, short=30m.
+      - alert: ErrorBudgetBurnMedium
+        expr: |
+          opsapi:sli_error:ratio_rate6h  > (6 * 0.0005)
+          and
+          opsapi:sli_error:ratio_rate30m > (6 * 0.0005)
+        labels:
+          severity: page
+          priority: P2
+          slo: availability
+        annotations:
+          summary: "Availability error budget burning (6x)"
+          description: "6h+30m error ratio > 6x budget. Sustained burn — investigate now."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+
+      # Ticket: 3x burn (10% of budget in 24h). Long=1d, short=2h.
+      - alert: ErrorBudgetBurnSlow
+        expr: |
+          opsapi:sli_error:ratio_rate1d > (3 * 0.0005)
+          and
+          opsapi:sli_error:ratio_rate2h > (3 * 0.0005)
+        labels:
+          severity: ticket
+          priority: P3
+          slo: availability
+        annotations:
+          summary: "Availability error budget burning slowly (3x)"
+          description: "1d+2h error ratio > 3x budget. Fix this sprint before budget erodes."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+
+      # Ticket: chronic 1x burn over 3 days.
+      - alert: ErrorBudgetBurnChronic
+        expr: |
+          opsapi:sli_error:ratio_rate3d > (1 * 0.0005)
+          and
+          opsapi:sli_error:ratio_rate6h > (1 * 0.0005)
+        labels:
+          severity: ticket
+          priority: P4
+          slo: availability
+        annotations:
+          summary: "Chronic availability budget erosion (1x)"
+          description: "3d+6h error ratio > 1x budget. Reliability debt accumulating."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+
+      # The budget is gone — triggers the release-freeze conversation.
+      - alert: ErrorBudgetExhausted
+        expr: opsapi:error_budget_remaining:ratio <= 0
+        for: 5m
+        labels:
+          severity: page
+          priority: P2
+          slo: availability
+        annotations:
+          summary: "30-day availability error budget EXHAUSTED"
+          description: "Remaining budget {{ $value | humanizePercentage }}. Enact release freeze (see runbook)."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+
+  # ── Latency SLO: 99% of requests < 200ms ───────────────────────────────────
+  - name: slo_latency
+    interval: 30s
+    rules:
+      - record: opsapi:latency_sli_bad:ratio_rate1h
+        expr: |
+          1 - (
+            sum(rate(nginx_http_request_duration_seconds_bucket{job="opsapi",le="0.2"}[1h]))
+            / clamp_min(sum(rate(nginx_http_request_duration_seconds_count{job="opsapi"}[1h])), 1)
+          )
+      - record: opsapi:latency_sli_bad:ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(nginx_http_request_duration_seconds_bucket{job="opsapi",le="0.2"}[5m]))
+            / clamp_min(sum(rate(nginx_http_request_duration_seconds_count{job="opsapi"}[5m])), 1)
+          )
+      # Latency budget = 1% (target 99%). Page at 14.4x burn.
+      - alert: LatencyBudgetBurnFast
+        expr: |
+          opsapi:latency_sli_bad:ratio_rate1h > (14.4 * 0.01)
+          and
+          opsapi:latency_sli_bad:ratio_rate5m > (14.4 * 0.01)
+        labels:
+          severity: page
+          priority: P2
+          slo: latency
+        annotations:
+          summary: "Latency SLO burning fast (>200ms requests)"
+          description: "Share of slow (>200ms) requests is burning the latency budget at 14.4x."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/high-latency.md"

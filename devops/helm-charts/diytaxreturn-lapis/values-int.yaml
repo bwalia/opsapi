@@ -27,6 +27,25 @@ service:
   type: ClusterIP
   port: 80
 
+# INTENTIONALLY DISABLED — do not flip to `true` without reading this.
+#
+# `int-api.diytaxreturn.co.uk` is already owned by the `diytaxreturn-fastapi`
+# Helm chart (in the sibling diy-tax-return-uk repo). That chart's Ingress
+# does path-based routing on this host: `/fastapi/*` → fastapi service,
+# `/` `/auth` `/opsapi` → THIS chart's lapis Service.
+#
+# Enabling the block below creates a SECOND Ingress claiming the same host,
+# which puts the wslproxy ingress controller in an ambiguous state: it picks
+# one Ingress per request, so traffic flaps between the right backend and
+# whatever the other Ingress points at. On 2026-06-15 a stale duplicate in
+# the `test` namespace caused exactly this — ~10% of int-api requests
+# returned the controller's stock 404 page, the rest worked, and `kubectl
+# get pods` reported everything healthy. Took 4 days to track down because
+# the failure mode is intermittent.
+#
+# If you ever need this chart to own the host directly, first delete the
+# fastapi chart's Ingress (or migrate its path rules into this chart's
+# template) — never run both simultaneously.
 ingress:
   enabled: false
   className: wslproxy

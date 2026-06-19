@@ -120,37 +120,90 @@ local function auditLog(params)
     end
 end
 
+-- Per-category cache refresh — written on each save so /schema can
+-- render the per-category strip on first paint without re-running the
+-- rule engine. Mirrors /completion-status's loop (same visibility +
+-- dynamic-requirement evaluators) so the cache never disagrees with
+-- the gate. If the two ever drift it shows up as the user staring at
+-- "100% complete" on the category strip while the gate still says
+-- "answer this required question" — exactly the rhyme we just fixed
+-- in /completion-status.
+--
+-- Note: the cache row is intentionally NOT filtered by business profile
+-- tags or namespace. Those filters belong to the live gate (which has
+-- request context — Origin header, JWT namespace claim, etc.). The
+-- per-category cache is a coarse "this category is done as far as the
+-- raw question set goes" signal. The frontend's liveSchema and the
+-- /completion-status endpoint do the request-time filtering.
+--
+-- Forward-declare the rule evaluators so this function's closure
+-- captures them as upvalues even though their bodies appear later in
+-- the file. Without this, ``evaluateVisibility``/``evaluateRequirement``
+-- here would compile to global lookups against an empty _ENV and the
+-- save handler would silently no-op the cache refresh at runtime.
+local evaluateVisibility, evaluateRequirement
+
 local function recalculateCompletion(user_id, user_uuid, category_id)
     local ok, err = pcall(function()
-        local total_rows = db.query([[
-            SELECT COUNT(*) AS cnt FROM profile_questions
+        local ok_qs, questions = pcall(db.query, [[
+            SELECT id, is_required
+            FROM profile_questions
             WHERE category_id = ? AND is_active = true AND is_archived = false
         ]], category_id)
-        local total = total_rows and total_rows[1] and tonumber(total_rows[1].cnt) or 0
+        if not ok_qs or not questions then
+            ngx.log(ngx.ERR, "[ProfileBuilder] recalculateCompletion questions query failed: ", tostring(questions))
+            return
+        end
 
-        local required_rows = db.query([[
-            SELECT COUNT(*) AS cnt FROM profile_questions
-            WHERE category_id = ? AND is_active = true AND is_archived = false AND is_required = true
-        ]], category_id)
-        local required = required_rows and required_rows[1] and tonumber(required_rows[1].cnt) or 0
+        -- Pre-load the user's answers once; ipairs(questions) iterates
+        -- over the SAME data the evaluators need.
+        local answer_map = {}
+        local ok_ans, ans_rows = pcall(db.query, [[
+            SELECT question_id, answer_text, answer_number, answer_boolean,
+                   answer_date, answer_json, is_draft
+            FROM user_profile_answers
+            WHERE user_id = ?
+        ]], user_id)
+        if ok_ans and ans_rows then
+            for _, a in ipairs(ans_rows) do
+                answer_map[a.question_id] = a
+            end
+        end
 
-        local answered_rows = db.query([[
-            SELECT COUNT(DISTINCT upa.question_id) AS cnt
-            FROM user_profile_answers upa
-            JOIN profile_questions pq ON pq.id = upa.question_id
-            WHERE upa.user_id = ? AND pq.category_id = ? AND pq.is_active = true AND pq.is_archived = false
-              AND upa.is_draft = false
-        ]], user_id, category_id)
-        local answered = answered_rows and answered_rows[1] and tonumber(answered_rows[1].cnt) or 0
+        local total, answered, required, req_answered = 0, 0, 0, 0
+        for _, q in ipairs(questions) do
+            local is_visible = evaluateVisibility(q.id, answer_map)
+            if is_visible then
+                local a = answer_map[q.id]
+                -- Same is_draft = false convention as the legacy
+                -- cache here — recalculateCompletion exists for the
+                -- "committed answer count" downstream uses, distinct
+                -- from /completion-status which treats drafts as
+                -- answered for the gate cookie.
+                local has_committed_answer = false
+                if a and not a.is_draft then
+                    has_committed_answer =
+                        (a.answer_text ~= nil and a.answer_text ~= "")
+                        or a.answer_number ~= nil
+                        or a.answer_boolean ~= nil
+                        or a.answer_date ~= nil
+                        or (a.answer_json ~= nil and a.answer_json ~= "" and a.answer_json ~= "null" and a.answer_json ~= "[]")
+                end
+                local effectively_required = q.is_required
+                    or evaluateRequirement(q.id, answer_map)
 
-        local req_answered_rows = db.query([[
-            SELECT COUNT(DISTINCT upa.question_id) AS cnt
-            FROM user_profile_answers upa
-            JOIN profile_questions pq ON pq.id = upa.question_id
-            WHERE upa.user_id = ? AND pq.category_id = ? AND pq.is_active = true AND pq.is_archived = false
-              AND pq.is_required = true AND upa.is_draft = false
-        ]], user_id, category_id)
-        local req_answered = req_answered_rows and req_answered_rows[1] and tonumber(req_answered_rows[1].cnt) or 0
+                total = total + 1
+                if has_committed_answer then
+                    answered = answered + 1
+                end
+                if effectively_required then
+                    required = required + 1
+                    if has_committed_answer then
+                        req_answered = req_answered + 1
+                    end
+                end
+            end
+        end
 
         local pct = 0
         if total > 0 then
@@ -406,16 +459,50 @@ local function replaceQuestionBusinessProfiles(question_id, keys)
     end
 end
 
--- Evaluate visibility rules for a question against current answers
-local function evaluateVisibility(question_id, answer_map)
+-- Evaluate a set of rules of a given type against the user's answer map.
+--
+-- This is the single source of truth for AND/OR / operator semantics —
+-- both the visibility gate (rule_type='visibility') and the dynamic
+-- requirement gate (rule_type='requirement') share it. Adding a future
+-- rule_type (e.g. 'validation') plugs in by passing the new type string
+-- without touching the operator table below.
+--
+-- Defaults must reflect rule SEMANTICS, not just absence:
+--   * For visibility, "no rules" = visible (open by default).
+--   * For requirement, "no rules" = NOT dynamically required (the
+--     static is_required column handles the baseline).
+-- Callers pass ``default_on_empty`` to control this.
+--
+-- Failure mode (query errored): we log loudly and return ``fail_safe``,
+-- which the caller chooses to fit its own safety stance. Visibility
+-- defaults fail-safe = true so users aren't locked out of questions
+-- they can't see. Requirement defaults fail-safe = false so a transient
+-- DB hiccup never inflates the gate denominator.
+local function evaluateRuleSet(question_id, answer_map, rule_type,
+                               default_on_empty, fail_safe)
+    -- Use ``priority`` for the within-group ordering — that's the
+    -- actual column on profile_question_rules. The original code used
+    -- ``display_order``, which doesn't exist on this table, so the
+    -- pcall would silently swallow the SQL error and the function
+    -- would fall through to the early-return at "no rules" and treat
+    -- the question as always-visible. Net effect: server-side
+    -- visibility rules were a no-op for every conditional question,
+    -- which surfaced as frontend-says-100-backend-says-96 mismatches
+    -- in the completion gate.
     local ok, rules = pcall(db.query, [[
         SELECT rule_type, operator, expected_value, source_question_id, logic_group
         FROM profile_question_rules
-        WHERE question_id = ? AND is_active = true AND rule_type = 'visibility'
-        ORDER BY logic_group ASC, display_order ASC
-    ]], question_id)
-    if not ok or not rules or #rules == 0 then
-        return true -- No rules = always visible
+        WHERE question_id = ? AND is_active = true AND rule_type = ?
+        ORDER BY logic_group ASC, priority ASC
+    ]], question_id, rule_type)
+    if not ok then
+        ngx.log(ngx.ERR, "[ProfileBuilder] evaluateRuleSet(",
+            tostring(rule_type), ") query failed for question_id=",
+            tostring(question_id), ": ", tostring(rules))
+        return fail_safe
+    end
+    if not rules or #rules == 0 then
+        return default_on_empty
     end
 
     -- Group rules by logic_group
@@ -430,6 +517,27 @@ local function evaluateVisibility(question_id, answer_map)
     local and_result = true
     local or_result = false
     local has_or = false
+
+    -- Boolean-aware equality. Rules authored against Yes/No questions
+    -- store expected_value = "yes" / "no" (admin UI default), but the
+    -- stored answer comes through as a boolean -> tostring("true").
+    -- Naive ``actual == expected`` would never match "true" against
+    -- "yes", so this helper normalises common yes/no/true/false/1/0
+    -- spellings to a canonical bool on both sides before comparing.
+    -- Falls back to lowercase string compare for non-boolean rules.
+    local function parseBoolish(s)
+        if s == nil then return nil end
+        local lower = tostring(s):lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if lower == "true" or lower == "yes" or lower == "1" or lower == "y" then return true end
+        if lower == "false" or lower == "no" or lower == "0" or lower == "n" then return false end
+        return nil
+    end
+    local function looseEquals(a, b)
+        local ab, bb = parseBoolish(a), parseBoolish(b)
+        if ab ~= nil and bb ~= nil then return ab == bb end
+        return tostring(a or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+            == tostring(b or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    end
 
     for group_name, group_rules in pairs(groups) do
         for _, rule in ipairs(group_rules) do
@@ -451,9 +559,9 @@ local function evaluateVisibility(question_id, answer_map)
             local num_expected = tonumber(expected) or 0
 
             if rule.operator == "equals" then
-                match = actual == expected
+                match = looseEquals(actual, expected)
             elseif rule.operator == "not_equals" then
-                match = actual ~= expected
+                match = not looseEquals(actual, expected)
             elseif rule.operator == "greater_than" then
                 match = num_actual > num_expected
             elseif rule.operator == "less_than" then
@@ -469,12 +577,12 @@ local function evaluateVisibility(question_id, answer_map)
                 if #parts >= 2 then match = num_actual >= parts[1] and num_actual <= parts[2] end
             elseif rule.operator == "in_list" then
                 for item in expected:gmatch("[^,]+") do
-                    if actual == item:match("^%s*(.-)%s*$") then match = true; break end
+                    if looseEquals(actual, item:match("^%s*(.-)%s*$")) then match = true; break end
                 end
             elseif rule.operator == "not_in_list" then
                 match = true
                 for item in expected:gmatch("[^,]+") do
-                    if actual == item:match("^%s*(.-)%s*$") then match = false; break end
+                    if looseEquals(actual, item:match("^%s*(.-)%s*$")) then match = false; break end
                 end
             elseif rule.operator == "contains" then
                 match = actual:lower():find(expected:lower(), 1, true) ~= nil
@@ -506,6 +614,28 @@ local function evaluateVisibility(question_id, answer_map)
         return and_result and or_result
     end
     return and_result
+end
+
+-- Thin wrappers — keep the call sites readable + lock in the semantic
+-- defaults for each rule_type. New rule types should add a wrapper here
+-- (not call evaluateRuleSet directly) so the defaults stay near the
+-- definition.
+--
+-- These are ASSIGNED to the forward-declared locals at the top of the
+-- file (not ``local function`` declarations) so any function defined
+-- earlier in the chunk (e.g. recalculateCompletion) can capture them
+-- as upvalues.
+evaluateVisibility = function(question_id, answer_map)
+    -- No rules → visible. Query failure → visible (don't lock out).
+    return evaluateRuleSet(question_id, answer_map, "visibility", true, true)
+end
+
+evaluateRequirement = function(question_id, answer_map)
+    -- No rules → NOT dynamically required (static is_required is the
+    -- baseline). Query failure → not required (don't inflate the gate
+    -- denominator on a transient DB hiccup; the user is the one who'd
+    -- pay for that with a stuck cookie).
+    return evaluateRuleSet(question_id, answer_map, "requirement", false, false)
 end
 
 local function getUserIdByUuid(user_uuid)
@@ -797,6 +927,420 @@ return function(app)
     end)
 
     -- =====================================================================
+    -- 1b. GET /completion-status — Lightweight authoritative completion check
+    --
+    -- Single source of truth for "has this user finished the profile?".
+    -- The /schema endpoint is heavy (full question tree, options, rules,
+    -- per-category state) and was the wrong shape for "is this user
+    -- done?" calls fired from the gate / Go-to-dashboard button.
+    --
+    -- This endpoint:
+    --   1. Reads the user's answers + every active question in their
+    --      namespace (global + per-tenant).
+    --   2. Evaluates visibility per question using the same rules engine
+    --      that the schema endpoint uses (after the boolean-aware
+    --      ``looseEquals`` fix). Conditionally-hidden questions don't
+    --      count in numerator OR denominator.
+    --   3. Counts answered (non-null answer column) over visible total.
+    --   4. Sets the ``profile_complete=true`` cookie (or clears it) so
+    --      the Next.js middleware can hard-gate routes WITHOUT calling
+    --      back into opsapi on every request.
+    --   5. Returns ``{ is_complete, overall_percent, total, answered }``
+    --      so the frontend can show a coherent state to the user.
+    --
+    -- Cookie is set with ``Path=/; SameSite=Lax`` and NO ``HttpOnly`` —
+    -- the cookie is UX (a gating hint), not credentials. The actual
+    -- authority remains this endpoint plus the same server-side
+    -- per-route checks any feature-flag would have. Cookie expiry is
+    -- session-only so a logout flushes the verdict naturally.
+    -- =====================================================================
+    app:get(PREFIX .. "/completion-status", function(self)
+        local user = requireAuth(self)
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+        local user_uuid = user.uuid or user.id
+        local user_id = getUserIdByUuid(user_uuid)
+        if not user_id then
+            return { status = 401, json = { error = "User not found" } }
+        end
+        local namespace_id = getNamespaceId(self)
+
+        -- Build the same namespace filter the schema endpoint uses so
+        -- visibility is computed against EXACTLY the questions the user
+        -- can see. Empty filter = the lapis global default scope.
+        local ns_filter = ""
+        if namespace_id and namespace_id > 0 then
+            ns_filter = " AND (pq.namespace_id = " .. db.escape_literal(namespace_id) .. " OR pq.namespace_id = 0)"
+        end
+
+        -- Single answer_map used for BOTH visibility rule evaluation
+        -- AND the answered count. Drafts are treated as real answers
+        -- here on purpose: the frontend's isAnswered only checks for a
+        -- non-empty value (not is_draft), and the user's perception is
+        -- "I typed something in that box, it's answered". The is_draft
+        -- flag is orthogonal — it tracks "the text field's value may
+        -- still change as the user keeps typing", not "this isn't a
+        -- real answer". The existing recalculateCompletion() helper
+        -- filters drafts for a different signal ("officially committed
+        -- answers used by tag rules"), but the gate cookie must match
+        -- what the user sees on the /profile UI — otherwise text-only
+        -- categories sit at 0% on the server while showing 100% to
+        -- the user, exactly the trap we just hit.
+        local answer_map = {}
+        local ok_ans, ans_rows = pcall(db.query, [[
+            SELECT question_id, answer_text, answer_number, answer_boolean,
+                   answer_date, answer_json
+            FROM user_profile_answers
+            WHERE user_id = ?
+        ]], user_id)
+        if ok_ans and ans_rows then
+            for _, a in ipairs(ans_rows) do
+                answer_map[a.question_id] = a
+            end
+        end
+
+        -- Resolve the user's business profile (e.g. amazon_seller,
+        -- landlord). The schema endpoint uses this exact pattern to
+        -- gate which questions ever surface in the UI:
+        --
+        --   * a question with NO business-profile tags applies to everyone
+        --   * a question with tags only appears if the user's
+        --     default_profile_key is in that set
+        --
+        -- Without applying the same filter here, completion-status
+        -- inflates ``total`` with questions the user can never see —
+        -- e.g. amazon_seller users were being counted on
+        -- ``is_construction_worker`` (tagged construction_company)
+        -- and the gate said 26/27 = 96% even though the frontend
+        -- showed 100% (because frontend honours the tag filter via
+        -- the schema response).
+        --
+        -- This mirrors lines 615-635 / 645-675 of the schema endpoint
+        -- below; keep them in lock-step. ``default_profile_key`` is
+        -- the singular wizard-primary pick (the wizard mirrors
+        -- is_primary→default_profile_key on save, so this stays the
+        -- right key to consult for non-multi-pick gating).
+        local user_profile_key = nil
+        local ok_up, up_rows = pcall(db.query, [[
+            SELECT default_profile_key FROM tax_user_profiles
+            WHERE user_id = ? LIMIT 1
+        ]], user_id)
+        if ok_up and up_rows and #up_rows > 0 then
+            local k = up_rows[1].default_profile_key
+            if k and k ~= "" and k ~= cjson.null then
+                user_profile_key = k
+            end
+        end
+
+        -- Active, non-archived questions in the user's scope, with the
+        -- business-profile tag filter applied. Include question_key +
+        -- label so ?debug=true can name them; cheap columns, no
+        -- measurable perf impact.
+        local bp_filter
+        local query_params = {}
+        if user_profile_key then
+            bp_filter = [[
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM profile_question_business_profiles
+                  WHERE question_id = pq.id
+                )
+                OR EXISTS (
+                  SELECT 1 FROM profile_question_business_profiles
+                  WHERE question_id = pq.id AND profile_key = ?
+                )
+              )]]
+            table.insert(query_params, user_profile_key)
+        else
+            -- No business profile chosen yet: only universal questions
+            -- (with no tag link set) surface. Strictest filter; matches
+            -- schema endpoint's same-branch behaviour.
+            bp_filter = [[
+              AND NOT EXISTS (
+                SELECT 1 FROM profile_question_business_profiles
+                WHERE question_id = pq.id
+              )]]
+        end
+
+        local ok_qs, questions = pcall(db.query, [[
+            SELECT pq.id, pq.question_key, pq.label, pq.is_required
+            FROM profile_questions pq
+            JOIN profile_categories pc ON pc.id = pq.category_id
+            WHERE pq.is_active = true AND pq.is_archived = false
+              AND pc.is_active = true AND pc.is_archived = false
+            ]] .. ns_filter .. bp_filter, unpack(query_params))
+        if not ok_qs then
+            ngx.log(ngx.ERR, "[ProfileBuilder] completion-status questions query failed: ", tostring(questions))
+            return { status = 500, json = { error = "Failed to compute completion" } }
+        end
+
+        -- ?debug=true returns a per-question breakdown alongside the
+        -- summary so the next-vs-backend gap can be pinpointed without
+        -- adding instrumentation each time something rhymes with this.
+        -- Cheap to emit; not gated by admin role because the user only
+        -- ever sees their OWN answers.
+        local debug_mode = self.params.debug == "true" or self.params.debug == "1"
+        local debug_rows = debug_mode and {} or nil
+
+        -- Two parallel counters because the system has two distinct
+        -- questions:
+        --
+        --   "Are all required questions answered?"     → gate
+        --   "How far through the whole form is the user?" → display
+        --
+        -- The denominator differs but the loop is one pass over the same
+        -- visible-question set. Optional questions count toward
+        -- ``total/answered`` (so the user's progress bar is honest about
+        -- what's left) but do NOT count toward ``required_*`` (so they
+        -- don't block dashboard access).
+        --
+        -- ``effectively_required`` combines static + dynamic:
+        --   * Static — profile_questions.is_required (admin set this)
+        --   * Dynamic — any active requirement rule on this question
+        --              fires given the user's current answers
+        -- The dynamic side is what catches cases like "Did you have
+        -- rental income? → Yes → rental_property_count is now required."
+        local total_visible = 0
+        local answered = 0
+        local required_visible = 0
+        local required_answered = 0
+        for _, q in ipairs(questions or {}) do
+            local is_visible = evaluateVisibility(q.id, answer_map)
+            local a = answer_map[q.id]   -- drafts INCLUDED — see note above answer_map
+            local has_answer = false
+            if a then
+                has_answer = (a.answer_text ~= nil and a.answer_text ~= "")
+                    or a.answer_number ~= nil
+                    or a.answer_boolean ~= nil
+                    or a.answer_date ~= nil
+                    or (a.answer_json ~= nil and a.answer_json ~= "" and a.answer_json ~= "null" and a.answer_json ~= "[]")
+            end
+            local effectively_required = false
+            if is_visible then
+                total_visible = total_visible + 1
+                if has_answer then
+                    answered = answered + 1
+                end
+                -- Skip the requirement-rule query when the static flag
+                -- already settles it true — fewer DB hits per request
+                -- on the typical schema where most required questions
+                -- have no dynamic rule.
+                effectively_required = q.is_required
+                    or evaluateRequirement(q.id, answer_map)
+                if effectively_required then
+                    required_visible = required_visible + 1
+                    if has_answer then
+                        required_answered = required_answered + 1
+                    end
+                end
+            end
+            if debug_mode then
+                -- Stringify each answer column so the response is
+                -- safe to JSON-encode regardless of underlying type
+                -- (booleans / numbers / pgmoon's NULL sentinel).
+                local function show(v)
+                    if v == nil then return nil end
+                    if type(v) == "boolean" then return tostring(v) end
+                    if type(v) == "number" then return v end
+                    return tostring(v)
+                end
+                table.insert(debug_rows, {
+                    question_id = q.id,
+                    question_key = q.question_key,
+                    label = q.label,
+                    is_required = q.is_required,
+                    effectively_required = effectively_required,
+                    is_visible = is_visible,
+                    has_answer = has_answer,
+                    counted_in_total = is_visible,
+                    counted_in_answered = is_visible and has_answer,
+                    counted_in_required = is_visible and effectively_required,
+                    counted_in_required_answered = is_visible and effectively_required and has_answer,
+                    answer = a and {
+                        answer_text = show(a.answer_text),
+                        answer_number = show(a.answer_number),
+                        answer_boolean = show(a.answer_boolean),
+                        answer_date = show(a.answer_date),
+                        answer_json = show(a.answer_json),
+                    } or nil,
+                })
+            end
+        end
+
+        -- Display percent — across ALL visible questions, so the
+        -- progress bar honestly tells the user how much of the form
+        -- has been filled in.
+        local pct
+        if total_visible == 0 then
+            pct = 100
+        else
+            pct = math.floor((answered / total_visible) * 100)
+        end
+
+        -- Gate percent — only required-visible questions count.
+        -- Vacuously 100 when there are no required questions in the
+        -- user's scope (could happen for users with a business profile
+        -- that only has optional questions, or for a freshly seeded
+        -- schema with everything optional).
+        local required_pct
+        if required_visible == 0 then
+            required_pct = 100
+        else
+            required_pct = math.floor((required_answered / required_visible) * 100)
+        end
+
+        -- The cookie + downstream "is_complete" gate is REQUIRED-ONLY.
+        -- The display percent is independent and may stay below 100
+        -- when the user has skipped optionals — that's a deliberate
+        -- UX signal ("you've finished what's mandatory; here's what
+        -- else you could add"), not a bug.
+        local is_complete = required_visible == 0
+                         or required_answered >= required_visible
+
+        -- Two cookies — both onboarding-state gates the Next.js
+        -- middleware reads verbatim:
+        --   * profile_complete       — all visible/required questions answered
+        --   * business_profile_set   — user picked at least one business type
+        --                              (default_profile_key set on tax_user_profiles)
+        --
+        -- Set together in one response so the middleware never sees a
+        -- half-state. Clearing uses Max-Age=0 so the browser drops the
+        -- cookie immediately rather than waiting for session end.
+        --
+        -- Domain resolution — three sources of truth, first match wins:
+        --   1. AUTH_COOKIE_DOMAIN              (explicit override)
+        --   2. AUTH_COOKIE_TRUSTED_DOMAINS     (Origin allowlist —
+        --                                       matches auth-cookies.lua)
+        --   3. FRONTEND_URL                    (derived parent domain;
+        --                                       a no-extra-config
+        --                                       fallback so envs that
+        --                                       only set FRONTEND_URL —
+        --                                       like int — still emit
+        --                                       a cross-subdomain
+        --                                       cookie that the
+        --                                       frontend middleware
+        --                                       can actually read)
+        -- No source → omit Domain (host-scoped — correct for local dev
+        -- where api + app share the same host:port).
+        --
+        -- Why the FRONTEND_URL fallback exists: ops on int forgot to
+        -- set AUTH_COOKIE_TRUSTED_DOMAINS but FRONTEND_URL was always
+        -- there. Without a Domain attribute the cookie scoped to
+        -- int-api.X only — the middleware on int.X never saw it →
+        -- every navigation bounced back to /profile. The 3rd source
+        -- closes that gap without adding a new env var to operators'
+        -- runbooks.
+        --
+        -- Secure default-on; AUTH_COOKIE_INSECURE=true opts out for
+        -- localhost HTTP. Same flag the refresh-token cookie honours.
+        local has_business_profile = user_profile_key ~= nil
+
+        local cookie_domain
+        do
+            -- Source 1: explicit override
+            local override = os.getenv("AUTH_COOKIE_DOMAIN")
+            if override and override ~= "" then
+                cookie_domain = override
+            end
+
+            -- Source 2: trusted-domains allowlist matched against Origin
+            if not cookie_domain then
+                local raw = os.getenv("AUTH_COOKIE_TRUSTED_DOMAINS") or ""
+                local allowed_list = {}
+                for item in raw:gmatch("[^,%s]+") do table.insert(allowed_list, item:lower()) end
+                local origin = (self.req and self.req.headers and
+                    (self.req.headers["Origin"] or self.req.headers["origin"])) or nil
+                if origin and #allowed_list > 0 then
+                    local host = origin:gsub("^https?://", ""):gsub(":%d+$", ""):gsub("/.*$", ""):lower()
+                    local best
+                    for _, allowed in ipairs(allowed_list) do
+                        local matches = host == allowed
+                            or host:sub(-(#allowed + 1)) == "." .. allowed
+                        if matches and (not best or #allowed > #best) then best = allowed end
+                    end
+                    if best then cookie_domain = "." .. best end
+                end
+            end
+
+            -- Source 3: derive parent domain from FRONTEND_URL.
+            -- Strip the first subdomain label so the cookie is visible
+            -- on both the API subdomain and the app subdomain (assumed
+            -- same parent, which is the standard same-origin-with-api
+            -- pattern). E.g. https://int.diytaxreturn.co.uk → strip
+            -- "int" → ".diytaxreturn.co.uk".
+            -- Skip the strip when the host is already at parent
+            -- (≤2 labels — example.com, etc.) because Domain=.com is
+            -- rejected by browsers as a public suffix.
+            if not cookie_domain then
+                local frontend_url = os.getenv("FRONTEND_URL")
+                if frontend_url and frontend_url ~= "" then
+                    local host = frontend_url
+                        :gsub("^https?://", "")
+                        :gsub(":%d+$", "")
+                        :gsub("/.*$", "")
+                        :lower()
+                    if host ~= "" then
+                        local labels = {}
+                        for label in host:gmatch("[^%.]+") do
+                            table.insert(labels, label)
+                        end
+                        -- 3+ labels (foo.example.co.uk) → strip first
+                        -- 2 labels (example.com) → leave as host-scoped
+                        if #labels >= 3 then
+                            local apex = table.concat(labels, ".", 2)
+                            cookie_domain = "." .. apex
+                        end
+                    end
+                end
+            end
+        end
+
+        local secure_attr = os.getenv("AUTH_COOKIE_INSECURE") ~= "true"
+
+        -- Build a single Set-Cookie header value for the given name.
+        -- ``is_set=true`` sets the cookie to "true"; ``is_set=false``
+        -- clears it via Max-Age=0. Domain/Secure attributes are shared
+        -- with the refresh-token cookie (see helper/auth-cookies.lua).
+        local function build_cookie(name, is_set)
+            local parts = is_set
+                and { name .. "=true", "Path=/", "SameSite=Lax" }
+                or  { name .. "=",     "Path=/", "Max-Age=0", "SameSite=Lax" }
+            if cookie_domain then table.insert(parts, "Domain=" .. cookie_domain) end
+            if secure_attr then table.insert(parts, "Secure") end
+            return table.concat(parts, "; ")
+        end
+
+        -- OpenResty allows ngx.header["Set-Cookie"] to be a table —
+        -- each element becomes its own Set-Cookie response header,
+        -- which is the correct way to emit multiple cookies in one
+        -- response (a single comma-joined value gets misparsed by
+        -- some browsers because Set-Cookie values can themselves
+        -- contain commas in Expires=...).
+        ngx.header["Set-Cookie"] = {
+            build_cookie("profile_complete", is_complete),
+            build_cookie("business_profile_set", has_business_profile),
+        }
+
+        -- Response carries both metrics. Old fields stay so any
+        -- existing consumer keeps working; new ``required_*`` fields
+        -- are additive. ``is_complete`` is now the required-only
+        -- gate (see comment above the cookie block).
+        local body = {
+            is_complete = is_complete,
+            overall_percent = pct,
+            total = total_visible,
+            answered = answered,
+            required_percent = required_pct,
+            required_total = required_visible,
+            required_answered = required_answered,
+            has_business_profile = has_business_profile,
+        }
+        if debug_mode then body.questions = debug_rows end
+        return { status = 200, json = body }
+    end)
+
+    -- =====================================================================
     -- 2. GET /schema/preview — Admin: preview schema as a specific user
     -- =====================================================================
     app:get(PREFIX .. "/schema/preview", function(self)
@@ -915,6 +1459,114 @@ return function(app)
         end
 
         return { status = 200, json = { schema = result, preview_user_uuid = target_uuid } }
+    end)
+
+    -- =====================================================================
+    -- 2b. GET /business-wizard — tree of pickable business profiles
+    --
+    -- User-facing endpoint that powers the post-signup business-profile
+    -- picker. Returns a nested tree of all classification_profiles rows
+    -- that have ``wizard_label`` set, grouped by parent_profile_key:
+    --
+    --   tree: [
+    --     { profile_key: "sole_trader", is_leaf: false,
+    --       wizard_question: "What kind of work do you do?",
+    --       wizard_label: "I work for myself as a sole trader",
+    --       children: [
+    --         { profile_key: "sole_trader_tradesperson", is_leaf: false,
+    --           children: [
+    --             { profile_key: "electrician", is_leaf: true, children: [] },
+    --             …
+    --           ] },
+    --         …
+    --       ] },
+    --     { profile_key: "ltd_director", is_leaf: true, children: [] },
+    --     { profile_key: "landlord",     is_leaf: true, children: [] },
+    --     …
+    --   ]
+    --
+    -- The FE walks this once and renders a 3-step wizard (root multi-select
+    -- → drill into ticked branches → confirm). Leaves with children = [] are
+    -- terminal picks; branches require a follow-up question.
+    --
+    -- ``wizard_label`` is the discriminator that lets us exclude DB rows
+    -- that are catalog-only (rules-pack carriers) rather than wizard-visible.
+    -- After migration 450_profile_business_wizard_tree, every active row
+    -- has a wizard_label set, so the filter is currently a no-op — but
+    -- it keeps the contract future-proof when admins add rule-only rows
+    -- via the admin UI without exposing them in onboarding.
+    --
+    -- Returns the GLOBAL catalogue (namespace_id = 0). Per-tenant overrides
+    -- are a future extension once a customer actually needs custom packs.
+    -- =====================================================================
+    app:get(PREFIX .. "/business-wizard", function(self)
+        local user = requireAuth(self)
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        -- COALESCE parent_profile_key to '' so we don't have to fight
+        -- pgmoon's NULL representation in Lua (ngx.null vs nil vs cjson.null
+        -- depending on driver build) — empty-string is unambiguous.
+        local ok, rows = pcall(db.query, [[
+            SELECT profile_key,
+                   display_name,
+                   industry,
+                   user_profile_type,
+                   COALESCE(parent_profile_key, '') AS parent_profile_key,
+                   wizard_question,
+                   wizard_label,
+                   display_order,
+                   is_leaf
+            FROM classification_profiles
+            WHERE is_active = true
+              AND wizard_label IS NOT NULL
+              AND wizard_label <> ''
+            ORDER BY display_order ASC, profile_key ASC
+        ]])
+        if not ok then
+            ngx.log(ngx.ERR, "[ProfileBuilder] business-wizard query failed: ", tostring(rows))
+            return { status = 500, json = { error = "Failed to load business profile wizard" } }
+        end
+
+        -- Single-pass build: map profile_key -> node, then a second pass to
+        -- attach children to parents. O(n) and order-independent.
+        local nodes_by_key = {}
+        for _, r in ipairs(rows or {}) do
+            nodes_by_key[r.profile_key] = {
+                profile_key       = r.profile_key,
+                display_name      = r.display_name,
+                industry          = r.industry or "",
+                user_profile_type = r.user_profile_type or "",
+                wizard_question   = r.wizard_question,   -- may be nil for leaves
+                wizard_label      = r.wizard_label,
+                is_leaf           = (r.is_leaf == true) or (r.is_leaf == "t"),
+                display_order     = tonumber(r.display_order) or 0,
+                children          = {},
+            }
+        end
+
+        local roots = {}
+        for _, r in ipairs(rows or {}) do
+            local node = nodes_by_key[r.profile_key]
+            local parent_key = r.parent_profile_key
+            if not parent_key or parent_key == "" then
+                table.insert(roots, node)
+            elseif nodes_by_key[parent_key] then
+                table.insert(nodes_by_key[parent_key].children, node)
+            else
+                -- Parent referenced but parent row not in the visible set
+                -- (e.g. parent has wizard_label NULL or is_active false).
+                -- Surface as a root so the data isn't lost; log so the
+                -- admin notices the inconsistency.
+                ngx.log(ngx.WARN, "[ProfileBuilder] orphan wizard node: ",
+                        r.profile_key, " (parent ", parent_key,
+                        " not in visible set)")
+                table.insert(roots, node)
+            end
+        end
+
+        return { status = 200, json = { tree = roots } }
     end)
 
     -- =====================================================================

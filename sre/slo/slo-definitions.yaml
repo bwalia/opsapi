@@ -1,0 +1,79 @@
+# OpsAPI Service Level Objectives (SLOs)
+# ------------------------------------------------------------------------------
+# This is the SINGLE SOURCE OF TRUTH for what "good" means for OpsAPI.
+# Format is OpenSLO-flavoured and intentionally human-first: every SLO here is
+# implemented as Prometheus recording + multi-window/multi-burn-rate alerting
+# rules in ../prometheus/rules/slo-burn-rate.rules.yml, and visualised in
+# ../grafana/dashboards/slo-error-budget.json.
+#
+# Error budget = (1 - SLO target) over the rolling 30-day window.
+# Policy (see ./README.md): when a budget is exhausted, feature releases freeze
+# and the on-call/eng focus shifts to reliability until the budget recovers.
+# ------------------------------------------------------------------------------
+
+apiVersion: openslo/v1
+kind: SLOSet
+metadata:
+  name: opsapi-core
+  displayName: OpsAPI Core Platform
+spec:
+  service: opsapi
+  budgetingWindow: 30d
+
+  objectives:
+    # ── 1. Availability ──────────────────────────────────────────────────────
+    # SLI = successful_requests / total_requests (success = non-5xx).
+    # 99.95% over 30d  →  21.6 minutes/month error budget.
+    - name: availability
+      displayName: API Availability
+      target: 0.9995
+      sli:
+        ratioMetric:
+          good: 'sum(rate(nginx_http_requests_total{job="opsapi",status!~"5.."}[{{window}}]))'
+          total: 'sum(rate(nginx_http_requests_total{job="opsapi"}[{{window}}]))'
+      budget:
+        downtimePerMonth: "21.6m"
+
+    # ── 2. Latency ───────────────────────────────────────────────────────────
+    # SLI = fraction of requests served faster than 200ms (P95 target < 200ms).
+    # 99% of requests under threshold over 30d.
+    - name: latency
+      displayName: API Latency (P95 < 200ms)
+      target: 0.99
+      thresholdMs: 200
+      sli:
+        ratioMetric:
+          good: 'sum(rate(nginx_http_request_duration_seconds_bucket{job="opsapi",le="0.2"}[{{window}}]))'
+          total: 'sum(rate(nginx_http_request_duration_seconds_count{job="opsapi"}[{{window}}]))'
+
+    # ── 3. Errors ────────────────────────────────────────────────────────────
+    # Explicit error-rate objective: < 0.1% 5xx. Mirrors availability but kept
+    # separate so the error-budget dashboard can show it as its own line.
+    - name: errors
+      displayName: Error Rate (< 0.1%)
+      target: 0.999
+      sli:
+        ratioMetric:
+          good: 'sum(rate(nginx_http_requests_total{job="opsapi",status!~"5.."}[{{window}}]))'
+          total: 'sum(rate(nginx_http_requests_total{job="opsapi"}[{{window}}]))'
+
+  # ── Dependency SLOs (probed externally via blackbox-exporter) ──────────────
+  dependencies:
+    # Database availability 99.99% over 30d  →  4.32 minutes/month.
+    - name: database-availability
+      displayName: PostgreSQL Availability
+      target: 0.9999
+      sli:
+        ratioMetric:
+          good: 'avg_over_time(pg_up[{{window}}])'
+          total: '1'
+      budget:
+        downtimePerMonth: "4.32m"
+
+    - name: cache-availability
+      displayName: Redis Availability
+      target: 0.999
+      sli:
+        ratioMetric:
+          good: 'avg_over_time(redis_up[{{window}}])'
+          total: '1'

@@ -1,0 +1,223 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Expose the LOCAL Docker SRE demo (running on this machine) through wslproxy.
+# ──────────────────────────────────────────────────────────────────────────────
+# This host (slworker00 / 192.168.1.193) is BOTH the Docker host AND a k3s node,
+# so we point selector-less Services at the host's docker-published ports via
+# manual Endpoints, then attach a wslproxy Ingress (+ cert-manager TLS) — the
+# same way other services get a domain through wslproxy.
+#
+# Prereqs:
+#   1. The demo is up: `cd sre && make demo-up`
+#      (publishes Grafana :3012, Prometheus :9091, Alertmanager :9093, Gatus :8878
+#       on 0.0.0.0 → reachable at 192.168.1.193:<port>)
+#   2. DNS: add a CNAME for each host below → pop0.wslproxy.com
+#      (there is no wildcard; this matches every existing *.diytaxreturn.co.uk host)
+#   3. Set GRAFANA_ROOT_URL=https://sre-grafana.diytaxreturn.co.uk in sre/.env.sre
+#      and re-run `make demo-up` so Grafana builds correct redirect URLs.
+#
+# Apply:   kubectl apply -f local-docker-wslproxy.yaml
+# Remove:  kubectl delete -f local-docker-wslproxy.yaml
+#
+# If the host IP changes, update HOST_IP in every Endpoints below (192.168.1.193).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsapi-sre-demo
+  labels:
+    app: opsapi-sre
+---
+# ── Grafana ───────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-grafana
+  namespace: opsapi-sre-demo
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3012
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: sre-grafana          # name MUST match the Service for manual endpoints
+  namespace: opsapi-sre-demo
+subsets:
+  - addresses:
+      - ip: 192.168.1.193     # this Docker host (slworker00)
+    ports:
+      - name: http
+        port: 3012
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sre-grafana
+  namespace: opsapi-sre-demo
+  annotations:
+    cert-manager.io/cluster-issuer: main-issuer
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: sre-grafana.diytaxreturn.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sre-grafana
+                port:
+                  number: 80
+  tls:
+    - hosts: [sre-grafana.diytaxreturn.co.uk]
+      secretName: sre-grafana-tls
+---
+# ── Gatus status page ─────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-status
+  namespace: opsapi-sre-demo
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8878
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: sre-status
+  namespace: opsapi-sre-demo
+subsets:
+  - addresses:
+      - ip: 192.168.1.193
+    ports:
+      - name: http
+        port: 8878
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sre-status
+  namespace: opsapi-sre-demo
+  annotations:
+    cert-manager.io/cluster-issuer: main-issuer
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: sre-status.diytaxreturn.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sre-status
+                port:
+                  number: 80
+  tls:
+    - hosts: [sre-status.diytaxreturn.co.uk]
+      secretName: sre-status-tls
+---
+# ── Prometheus (internal tool — TLS only; lock down with auth before sharing) ──
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-prometheus
+  namespace: opsapi-sre-demo
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9091
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: sre-prometheus
+  namespace: opsapi-sre-demo
+subsets:
+  - addresses:
+      - ip: 192.168.1.193
+    ports:
+      - name: http
+        port: 9091
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sre-prometheus
+  namespace: opsapi-sre-demo
+  annotations:
+    cert-manager.io/cluster-issuer: main-issuer
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: sre-prometheus.diytaxreturn.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sre-prometheus
+                port:
+                  number: 80
+  tls:
+    - hosts: [sre-prometheus.diytaxreturn.co.uk]
+      secretName: sre-prometheus-tls
+---
+# ── Alertmanager (internal tool — same caveat as Prometheus) ──────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-alerts
+  namespace: opsapi-sre-demo
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9093
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: sre-alerts
+  namespace: opsapi-sre-demo
+subsets:
+  - addresses:
+      - ip: 192.168.1.193
+    ports:
+      - name: http
+        port: 9093
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sre-alerts
+  namespace: opsapi-sre-demo
+  annotations:
+    cert-manager.io/cluster-issuer: main-issuer
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: sre-alerts.diytaxreturn.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sre-alerts
+                port:
+                  number: 80
+  tls:
+    - hosts: [sre-alerts.diytaxreturn.co.uk]
+      secretName: sre-alerts-tls

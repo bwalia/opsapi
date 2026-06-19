@@ -1,0 +1,8 @@
+# Local demo config (copy from .env.sre.example)
+.env.sre
+
+# Synthetic-target nginx logs tailed by promtail
+logs/
+
+# DR drill reports
+dr-report-*.md
