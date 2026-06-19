@@ -70,13 +70,13 @@ const AssigneeAvatars = memo(function AssigneeAvatars({
 
   return (
     <div className="flex -space-x-2">
-      {displayed.map((assignee) => {
+      {displayed.map((assignee, idx) => {
         const initials = assignee.user
           ? `${assignee.user.first_name?.[0] || ''}${assignee.user.last_name?.[0] || ''}`
           : '?';
         return (
           <div
-            key={assignee.uuid}
+            key={assignee.uuid || assignee.user_uuid || `assignee-${idx}`}
             className="w-6 h-6 rounded-full bg-primary-100 text-primary-700 text-xs font-medium flex items-center justify-center border-2 border-white"
             title={assignee.user ? `${assignee.user.first_name} ${assignee.user.last_name}` : 'Unknown'}
           >

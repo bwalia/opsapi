@@ -1,11 +1,12 @@
 'use client';
 
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import type { CreateKanbanProjectDto, BudgetCurrency, KanbanProjectVisibility } from '@/types';
+import type { CreateKanbanProjectDto, BudgetCurrency, KanbanProjectVisibility, Customer } from '@/types';
 import { DEFAULT_LABEL_COLORS } from '@/services/kanban.service';
+import { customersService } from '@/services/customers.service';
 
 // ============================================
 // Color Picker Component
@@ -82,6 +83,16 @@ const CreateProjectModal = memo(function CreateProjectModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+
+  // Load customers for the billing link when the modal opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    customersService
+      .getCustomers({ perPage: 200 })
+      .then((res) => setCustomers(res.data || []))
+      .catch(() => setCustomers([]));
+  }, [isOpen]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -239,6 +250,31 @@ const CreateProjectModal = memo(function CreateProjectModal({
         {/* Advanced Options */}
         {showAdvanced && (
           <div className="space-y-4 pt-4 border-t border-secondary-200">
+            {/* Customer (billing link) — work logged against this project's tasks
+                is billed to this customer. */}
+            <div>
+              <label className="block text-sm font-medium text-secondary-700 mb-1">
+                Customer (for billing)
+              </label>
+              <select
+                name="customer_uuid"
+                value={formData.customer_uuid || ''}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isLoading}
+              >
+                <option value="">No customer / internal project</option>
+                {customers.map((c) => (
+                  <option key={c.uuid} value={c.uuid}>
+                    {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Unnamed'}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-secondary-500">
+                Timesheets logged against this project&apos;s tasks auto-fill this customer for invoicing.
+              </p>
+            </div>
+
             {/* Budget */}
             <div className="grid grid-cols-2 gap-4">
               <div>

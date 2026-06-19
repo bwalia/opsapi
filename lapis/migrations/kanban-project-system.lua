@@ -2106,5 +2106,22 @@ return {
         pcall(function()
             db.query("UPDATE kanban_tasks SET sprint_id = NULL WHERE sprint_id = 0")
         end)
+    end,
+
+    -- [42] CRM link: associate a kanban project with a customer for billing.
+    -- Soft reference (no hard FK) so kanban works when the customers table is
+    -- absent (project running without ecommerce/crm), mirroring how timesheets
+    -- store customer_id/customer_uuid.
+    [42] = function()
+        pcall(function()
+            db.query("ALTER TABLE kanban_projects ADD COLUMN IF NOT EXISTS customer_id BIGINT")
+        end)
+        pcall(function()
+            db.query("ALTER TABLE kanban_projects ADD COLUMN IF NOT EXISTS customer_uuid TEXT")
+        end)
+        pcall(function()
+            db.query([[CREATE INDEX IF NOT EXISTS idx_kanban_projects_customer_id
+                       ON kanban_projects (customer_id)]])
+        end)
     end
 }

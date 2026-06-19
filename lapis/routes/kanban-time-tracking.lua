@@ -123,6 +123,52 @@ return function(app)
         }
     end
 
+    -- Tenant-isolation + authorization helpers.
+    -- kanban_time_entries has no namespace_id column, so the tenant boundary is
+    -- enforced transitively: a user may only act on a task / time entry whose
+    -- owning project they are a member of. Project membership rows are
+    -- namespace-bound, so this both authorizes the user AND prevents cross-tenant
+    -- access (IDOR) without trusting any client-supplied namespace header.
+
+    -- Resolve a task by uuid and assert the caller is a member of its project.
+    -- @return task, project_id  OR  nil, nil, error_message
+    local function authorize_task(task_uuid, user_uuid)
+        local task = KanbanTaskQueries.show(task_uuid)
+        if not task then return nil, nil, "Task not found" end
+        local ctx = db.query([[
+            SELECT b.project_id AS project_id
+            FROM kanban_tasks t
+            JOIN kanban_boards b ON b.id = t.board_id
+            WHERE t.uuid = ? LIMIT 1
+        ]], task_uuid)
+        local project_id = ctx and ctx[1] and ctx[1].project_id
+        if not project_id then return nil, nil, "Task not found" end
+        if not KanbanProjectQueries.isMember(project_id, user_uuid) then
+            -- Do not reveal existence across tenants: respond as not-found.
+            return nil, nil, "Task not found"
+        end
+        return task, project_id
+    end
+
+    -- Resolve a time entry by uuid and assert the caller is a member of its
+    -- project. @return entry_ctx {id, uuid, user_uuid, project_id} OR nil, nil, err
+    local function authorize_entry(entry_uuid, user_uuid)
+        local ctx = db.query([[
+            SELECT te.id, te.uuid, te.user_uuid, b.project_id AS project_id
+            FROM kanban_time_entries te
+            JOIN kanban_tasks t ON t.id = te.task_id
+            JOIN kanban_boards b ON b.id = t.board_id
+            WHERE te.uuid = ? AND te.deleted_at IS NULL
+            LIMIT 1
+        ]], entry_uuid)
+        if not ctx or not ctx[1] then return nil, nil, "Time entry not found" end
+        local row = ctx[1]
+        if not KanbanProjectQueries.isMember(row.project_id, user_uuid) then
+            return nil, nil, "Time entry not found"
+        end
+        return row, row.project_id
+    end
+
     ----------------- Timer Routes --------------------
 
     -- POST /api/v2/kanban/timer/start - Start a timer
@@ -138,9 +184,9 @@ return function(app)
             return api_response(400, nil, "task_uuid is required")
         end
 
-        local task = KanbanTaskQueries.show(data.task_uuid)
+        local task, _, auth_err = authorize_task(data.task_uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         ngx.log(ngx.INFO, "[TimeTracking] Starting timer - task_uuid: ", data.task_uuid, " task.id: ", task.id, " user.uuid: ", user.uuid)
@@ -197,11 +243,19 @@ return function(app)
 
         ngx.log(ngx.INFO, "[TimeTracking] Stop request - raw data: ", require("cjson").encode(data))
 
-        -- Get accumulated_seconds from client (more accurate than server calculation)
+        -- Get accumulated_seconds from client (more accurate than server calculation).
+        -- Sanitize: the client value is untrusted and feeds billed time, so reject
+        -- NaN/inf/negative and cap at a sane per-session ceiling (24h) to prevent
+        -- absurd durations corrupting the billing/timesheet pipeline.
         local accumulated_seconds = nil
         if data.accumulated_seconds then
-            accumulated_seconds = tonumber(data.accumulated_seconds)
-            ngx.log(ngx.INFO, "[TimeTracking] Received accumulated_seconds from client: ", accumulated_seconds)
+            local n = tonumber(data.accumulated_seconds)
+            if n and n == n and n ~= math.huge and n ~= -math.huge and n > 0 then
+                local MAX_SESSION_SECONDS = 24 * 60 * 60
+                if n > MAX_SESSION_SECONDS then n = MAX_SESSION_SECONDS end
+                accumulated_seconds = n
+            end
+            ngx.log(ngx.INFO, "[TimeTracking] Received accumulated_seconds from client: ", tostring(accumulated_seconds))
         else
             ngx.log(ngx.INFO, "[TimeTracking] No accumulated_seconds in request")
         end
@@ -267,9 +321,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local params = {
@@ -293,6 +347,24 @@ return function(app)
         }
     end)
 
+    -- GET /api/v2/kanban/tasks/:uuid/time-summary - Combined time spent on a task
+    -- (kanban board time + Timesheets module time), with a per-contributor breakdown.
+    app:get("/api/v2/kanban/tasks/:uuid/time-summary", function(self)
+        local user, err = get_current_user()
+        if not user then
+            return api_response(401, nil, err)
+        end
+
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
+        if not task then
+            return api_response(404, nil, auth_err or "Task not found")
+        end
+
+        local summary = KanbanTimeTrackingQueries.getTaskTimeSummary(task.id, task.uuid)
+
+        return api_response(200, summary)
+    end)
+
     -- POST /api/v2/kanban/tasks/:uuid/time-entries - Create manual time entry
     app:post("/api/v2/kanban/tasks/:uuid/time-entries", function(self)
         local user, err = get_current_user()
@@ -300,9 +372,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local data = parse_request_body()
@@ -312,7 +384,17 @@ return function(app)
             return api_response(400, nil, "Either duration_minutes or started_at/ended_at is required")
         end
 
-        local entry, create_err = KanbanTimeTrackingQueries.create({
+        -- Validate duration is a sane positive number (untrusted, feeds billing).
+        if data.duration_minutes ~= nil then
+            local mins = tonumber(data.duration_minutes)
+            if not mins or mins ~= mins or mins <= 0 or mins > 24 * 60 then
+                return api_response(400, nil, "duration_minutes must be between 0 and 1440")
+            end
+        end
+
+        -- Wrap create: malformed started_at/ended_at timestamps hit a Postgres cast
+        -- and would otherwise surface as a raw 500 instead of a clean 400.
+        local ok, entry, create_err = pcall(KanbanTimeTrackingQueries.create, {
             task_id = task.id,
             user_uuid = user.uuid,
             description = data.description,
@@ -323,6 +405,10 @@ return function(app)
             hourly_rate = data.hourly_rate
         })
 
+        if not ok then
+            ngx.log(ngx.ERR, "[TimeTracking] manual entry create failed: ", tostring(entry))
+            return api_response(400, nil, "Could not create time entry — check started_at/ended_at and duration")
+        end
         if not entry then
             return api_response(400, nil, create_err or "Failed to create time entry")
         end
@@ -335,6 +421,13 @@ return function(app)
         local user, err = get_current_user()
         if not user then
             return api_response(401, nil, err)
+        end
+
+        -- Tenant + membership check: the entry must belong to a project the
+        -- caller is a member of. The query additionally enforces self-ownership.
+        local _, _, ent_err = authorize_entry(self.params.uuid, user.uuid)
+        if ent_err then
+            return api_response(404, nil, ent_err)
         end
 
         local data = parse_request_body()
@@ -375,6 +468,12 @@ return function(app)
             return api_response(401, nil, err)
         end
 
+        -- Tenant + membership check before deleting (query also enforces ownership).
+        local _, _, ent_err = authorize_entry(self.params.uuid, user.uuid)
+        if ent_err then
+            return api_response(404, nil, ent_err)
+        end
+
         local success, delete_err = KanbanTimeTrackingQueries.delete(
             self.params.uuid,
             user.uuid
@@ -394,7 +493,19 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        -- TODO: Add permission check for approver role
+        -- Approving billable time is a privileged action: the approver must be a
+        -- project admin/owner of the entry's project (which is namespace-bound).
+        -- Approvers also cannot approve their own entries.
+        local ent, project_id, ent_err = authorize_entry(self.params.uuid, user.uuid)
+        if ent_err then
+            return api_response(404, nil, ent_err)
+        end
+        if not KanbanProjectQueries.isAdmin(project_id, user.uuid) then
+            return api_response(403, nil, "Only a project admin can approve time entries")
+        end
+        if ent.user_uuid == user.uuid then
+            return api_response(403, nil, "You cannot approve your own time entry")
+        end
 
         local approved, approve_err = KanbanTimeTrackingQueries.approve(
             self.params.uuid,
@@ -413,6 +524,15 @@ return function(app)
         local user, err = get_current_user()
         if not user then
             return api_response(401, nil, err)
+        end
+
+        -- Rejecting time is privileged: require project admin/owner (namespace-bound).
+        local _, project_id, ent_err = authorize_entry(self.params.uuid, user.uuid)
+        if ent_err then
+            return api_response(404, nil, ent_err)
+        end
+        if not KanbanProjectQueries.isAdmin(project_id, user.uuid) then
+            return api_response(403, nil, "Only a project admin can reject time entries")
         end
 
         local rejected, reject_err = KanbanTimeTrackingQueries.reject(

@@ -72,6 +72,10 @@ export interface TaskOption {
   title: string;
   project_uuid?: string;
   project_name?: string;
+  // The customer linked to the task's project (if any), so selecting a task
+  // can auto-fill the timesheet customer for billing.
+  customer_uuid?: string;
+  customer_name?: string;
 }
 
 export interface CreateEntryData {

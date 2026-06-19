@@ -34,11 +34,13 @@ import type {
   KanbanTaskPriority,
   KanbanTaskStatus,
   KanbanProjectMember,
+  KanbanTaskTimeSummary,
   UpdateKanbanTaskDto,
 } from '@/types';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import {
+  kanbanService,
   formatPriority,
   formatTaskStatus,
   formatTimeMinutes,
@@ -660,6 +662,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
   const [editedTitle, setEditedTitle] = useState('');
   const [editedDescription, setEditedDescription] = useState('');
   const [showMenu, setShowMenu] = useState(false);
+  const [timeSummary, setTimeSummary] = useState<KanbanTaskTimeSummary | null>(null);
 
   useEffect(() => {
     if (task) {
@@ -667,6 +670,28 @@ const TaskDetailModal = memo(function TaskDetailModal({
       setEditedDescription(task.description || '');
     }
   }, [task]);
+
+  // Load the combined time spent (kanban timer + Timesheets module) for this
+  // task whenever the modal opens, so "Spent" reflects every tracking surface.
+  const taskUuid = task?.uuid;
+  useEffect(() => {
+    if (!isOpen || !taskUuid) {
+      setTimeSummary(null);
+      return;
+    }
+    let cancelled = false;
+    kanbanService
+      .getTaskTimeSummary(taskUuid)
+      .then((summary) => {
+        if (!cancelled) setTimeSummary(summary);
+      })
+      .catch(() => {
+        if (!cancelled) setTimeSummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, taskUuid]);
 
   const handleSave = async () => {
     if (task && editedTitle.trim()) {
@@ -879,19 +904,88 @@ const TaskDetailModal = memo(function TaskDetailModal({
               <Clock size={14} />
               <span>Time tracking</span>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-secondary-600">
-                Spent: {formatTimeMinutes(task.time_spent_minutes || 0)}
-              </span>
-              {task.time_estimate_minutes && (
+            {(() => {
+              // Combined total spans the kanban timer AND time logged via the
+              // Timesheets module; fall back to the task's stored value until the
+              // summary loads (or if the endpoint is unavailable).
+              const totalSpent =
+                timeSummary?.total_minutes ?? task.time_spent_minutes ?? 0;
+              return (
                 <>
-                  <span className="text-secondary-400">/</span>
-                  <span className="text-secondary-600">
-                    Est: {formatTimeMinutes(task.time_estimate_minutes)}
-                  </span>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-secondary-600">
+                      Spent: {formatTimeMinutes(totalSpent)}
+                    </span>
+                    {task.time_estimate_minutes && (
+                      <>
+                        <span className="text-secondary-400">/</span>
+                        <span className="text-secondary-600">
+                          Est: {formatTimeMinutes(task.time_estimate_minutes)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {timeSummary && timeSummary.total_minutes > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {/* Source split: board timer vs timesheets */}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary-500">
+                        <span>
+                          Board timer:{' '}
+                          <span className="text-secondary-700 font-medium">
+                            {formatTimeMinutes(timeSummary.kanban_minutes)}
+                          </span>
+                        </span>
+                        <span>
+                          Timesheets:{' '}
+                          <span className="text-secondary-700 font-medium">
+                            {formatTimeMinutes(timeSummary.timesheet_minutes)}
+                          </span>
+                        </span>
+                        <span>
+                          Billable:{' '}
+                          <span className="text-secondary-700 font-medium">
+                            {formatTimeMinutes(timeSummary.billable_minutes)}
+                          </span>
+                        </span>
+                      </div>
+
+                      {/* Per-developer breakdown */}
+                      {(timeSummary.by_user ?? []).length > 0 && (
+                        <div className="rounded-lg border border-secondary-200 divide-y divide-secondary-100">
+                          {(timeSummary.by_user ?? []).map((u) => (
+                            <div
+                              key={u.user_uuid}
+                              className="flex items-center justify-between px-3 py-1.5 text-xs"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[10px] font-medium flex items-center justify-center shrink-0">
+                                  {(u.name || '?').trim().charAt(0).toUpperCase()}
+                                </div>
+                                <span className="text-secondary-700 truncate" title={u.email || u.name}>
+                                  {u.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 text-secondary-500">
+                                {u.timesheet_minutes > 0 && u.kanban_minutes > 0 && (
+                                  <span className="text-[10px] text-secondary-400">
+                                    ({formatTimeMinutes(u.kanban_minutes)} timer +{' '}
+                                    {formatTimeMinutes(u.timesheet_minutes)} sheet)
+                                  </span>
+                                )}
+                                <span className="text-secondary-700 font-medium">
+                                  {formatTimeMinutes(u.total_minutes)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
-              )}
-            </div>
+              );
+            })()}
           </div>
 
           {/* Story Points */}
