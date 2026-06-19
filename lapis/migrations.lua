@@ -137,6 +137,7 @@ local bank_transaction_migrations = load_if_enabled(ProjectConfig.FEATURES.BANK_
 
 -- Academy (LMS: courses + lessons, namespace-scoped)
 local academy_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-system") or {}
+local academy_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-menu-items") or {}
 
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
@@ -1805,6 +1806,11 @@ local _migrations = {
     ['801_academy_courses_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 2),
     ['802_create_academy_lessons'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 3),
     ['803_academy_lessons_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 4),
+    -- Academy sidebar menu item + RBAC module ("courses") + role grants
+    ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
+    ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),
+    ['806_grant_academy_permissions'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 3),
+    ['807_enable_academy_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

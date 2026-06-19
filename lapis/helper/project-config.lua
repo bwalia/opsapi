@@ -66,8 +66,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
-        -- ACADEMY intentionally NOT in `all` — it only activates under
-        -- PROJECT_CODE=academy so it stays fully isolated from other projects.
+        ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -81,8 +80,9 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.THEMES,
     },
 
-    -- Academy - standalone LMS (courses + lessons + rich content).
-    -- Separate from tax_copilot; run opsapi with PROJECT_CODE=academy.
+    -- Academy - LMS (courses + lessons + rich content). Installs only the
+    -- academy tables; tenants are isolated by namespace, so it can safely share
+    -- a database with any other project. Also included in the `all` preset.
     academy = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.ACADEMY,
@@ -435,6 +435,11 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "expense_management", name = "Expenses", description = "Expense tracking and approval", category = "Accounting" },
         { machine_name = "vat_returns", name = "VAT Returns", description = "UK VAT return calculation and submission", category = "Accounting" },
         { machine_name = "financial_reports", name = "Financial Reports", description = "Trial balance, balance sheet, P&L", category = "Accounting", allowed_actions = {"read"} },
+    },
+
+    -- Academy (LMS) modules — RBAC module that routes/academy.lua gates on ("courses")
+    academy = {
+        { machine_name = "courses", name = "Courses", description = "Course and lesson content management (rich WYSIWYG)", category = "Academy" },
     },
 
     -- Theme system (platform-level; always on)

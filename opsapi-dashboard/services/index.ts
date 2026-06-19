@@ -66,6 +66,19 @@ export {
 export { menuService } from './menu.service';
 export { timesheetsService } from './timesheets.service';
 export { crmService } from './crm.service';
+export {
+  academyService,
+  getCourseStatusVariant,
+  formatCourseDuration,
+  type AcademyCourse,
+  type AcademyLesson,
+  type CourseWithLessons,
+  type CourseInput,
+  type LessonInput,
+  type CourseLevel,
+  type CourseStatus,
+  type LessonStatus,
+} from './academy.service';
 
 // Hospital & Care Home Management
 export { hospitalsService } from './hospitals.service';
