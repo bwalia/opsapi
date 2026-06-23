@@ -13,22 +13,20 @@
 
 local cjson = require("cjson")
 local MyIncomeQueries = require "queries.MyIncomeQueries"
+local IncomeTypeQueries = require "queries.IncomeTypeQueries"
 local AuthMiddleware = require("middleware.auth")
 
--- Fixed catalogue. Drive the frontend dropdown from this list.
-local VALID_INCOME_TYPES = {
-    salary          = true,
-    self_employment = true,
-    dividends       = true,
-    rental          = true,
-    interest        = true,
-    pension         = true,
-    capital_gains   = true,
-    other           = true,
-}
+-- Income types are now an admin-managed catalogue (income_types table) rather
+-- than a hard-coded Lua list. Both helpers read the active set on demand —
+-- low-frequency paths (validation + the /types dropdown), so no cache needed.
+-- See queries/IncomeTypeQueries.lua and routes/tax-admin-income-types.lua.
+local function valid_income_type(key)
+    if not key or key == "" then return false end
+    return IncomeTypeQueries.active_keys()[key] == true
+end
 local function income_type_list()
     local keys = {}
-    for k in pairs(VALID_INCOME_TYPES) do keys[#keys + 1] = k end
+    for k in pairs(IncomeTypeQueries.active_keys()) do keys[#keys + 1] = k end
     table.sort(keys)
     return keys
 end
@@ -54,7 +52,7 @@ local function validate(params, is_create)
     end
 
     if is_create or params.income_type ~= nil then
-        if not params.income_type or not VALID_INCOME_TYPES[params.income_type] then
+        if not valid_income_type(params.income_type) then
             return false, "income_type must be one of: " .. table.concat(income_type_list(), ", ")
         end
     end
@@ -102,21 +100,15 @@ return function(app)
     -- Catalogue (open — small and stable, useful for the frontend dropdown
     -- on first load. Behind auth anyway because the rest of the surface is.)
     app:get("/api/v2/tax/my-incomes/types", AuthMiddleware.requireAuth(function(_)
-        return {
-            json = {
-                data = {
-                    { key = "salary",          label = "Salary / Employment (PAYE)" },
-                    { key = "self_employment", label = "Self-employment / Sole trader" },
-                    { key = "dividends",       label = "Dividends" },
-                    { key = "rental",          label = "Rental / Property income" },
-                    { key = "interest",        label = "Bank interest" },
-                    { key = "pension",         label = "Pension income" },
-                    { key = "capital_gains",   label = "Capital gains" },
-                    { key = "other",           label = "Other income" },
-                },
-            },
-            status = 200,
-        }
+        -- Catalogue-backed: returns the active income_types rows (admin-managed)
+        -- as { key, label } so the frontend dropdown stays in lockstep with
+        -- server-side validation. Previously a hard-coded list inline here.
+        local rows = IncomeTypeQueries.list_active()
+        local data = {}
+        for _, r in ipairs(rows) do
+            data[#data + 1] = { key = r.income_type_key, label = r.display_name }
+        end
+        return { json = { data = data }, status = 200 }
     end))
 
     -- List
