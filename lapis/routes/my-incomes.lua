@@ -108,7 +108,10 @@ return function(app)
         for _, r in ipairs(rows) do
             data[#data + 1] = { key = r.income_type_key, label = r.display_name }
         end
-        return { json = { data = data }, status = 200 }
+        -- Force [] (not {}) when empty so JSON consumers that do
+        -- `(res.data.data ?? []).map(...)` don't blow up on an all-disabled
+        -- or empty catalogue (?? doesn't catch an object).
+        return { json = { data = #data > 0 and data or cjson.empty_array }, status = 200 }
     end))
 
     -- List
@@ -140,6 +143,16 @@ return function(app)
     -- Update
     app:put("/api/v2/tax/my-incomes/:id", AuthMiddleware.requireAuth(function(self)
         merge_params(self)
+        -- Grandfather an unchanged income_type: an admin may have disabled the
+        -- type after this row was created, but the user must still be able to
+        -- edit/correct the row. Only re-validate income_type when it's actually
+        -- being changed to a different value.
+        if self.params.income_type ~= nil then
+            local existing = MyIncomeQueries.show(tostring(self.params.id), self.current_user)
+            if existing and existing.income_type == self.params.income_type then
+                self.params.income_type = nil
+            end
+        end
         local ok, vmsg = validate(self.params, false)
         if not ok then return { json = { error = vmsg }, status = 400 } end
         local row, err = MyIncomeQueries.update(tostring(self.params.id), self.params, self.current_user)
