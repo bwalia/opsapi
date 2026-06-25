@@ -836,7 +836,7 @@ return function(app)
                     local ok_cfg, cfg = pcall(cjson.decode, q.config_json)
                     if ok_cfg and type(cfg) == "table" and cfg.options_source == "income_types" then
                         local ok_it, it_rows = pcall(db.query, [[
-                            SELECT income_type_key AS value, display_name AS label, display_order
+                            SELECT uuid, income_type_key AS value, display_name AS label, display_order
                             FROM income_types WHERE is_active = true
                             ORDER BY display_order ASC, display_name ASC
                         ]])
@@ -844,7 +844,7 @@ return function(app)
                             opt_list = {}
                             for _, it in ipairs(it_rows) do
                                 table.insert(opt_list, {
-                                    value = it.value, label = it.label,
+                                    uuid = it.uuid, value = it.value, label = it.label,
                                     display_order = it.display_order, is_active = true,
                                 })
                             end
@@ -1447,7 +1447,7 @@ return function(app)
                     local ok_cfg, cfg = pcall(cjson.decode, q.config_json)
                     if ok_cfg and type(cfg) == "table" and cfg.options_source == "income_types" then
                         local ok_it, it_rows = pcall(db.query, [[
-                            SELECT income_type_key AS value, display_name AS label, display_order
+                            SELECT uuid, income_type_key AS value, display_name AS label, display_order
                             FROM income_types WHERE is_active = true
                             ORDER BY display_order ASC, display_name ASC
                         ]])
@@ -1455,7 +1455,7 @@ return function(app)
                             opt_list = {}
                             for _, it in ipairs(it_rows) do
                                 table.insert(opt_list, {
-                                    value = it.value, label = it.label,
+                                    uuid = it.uuid, value = it.value, label = it.label,
                                     display_order = it.display_order, is_active = true,
                                 })
                             end
