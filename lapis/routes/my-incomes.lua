@@ -106,7 +106,16 @@ return function(app)
         local rows = IncomeTypeQueries.list_active()
         local data = {}
         for _, r in ipairs(rows) do
-            data[#data + 1] = { key = r.income_type_key, label = r.display_name }
+            -- required_documents may decode to an empty table for types with no
+            -- docs; coerce to [] so JSON consumers can .map it safely.
+            local docs = r.required_documents
+            if type(docs) ~= "table" or #docs == 0 then docs = cjson.empty_array end
+            data[#data + 1] = {
+                key = r.income_type_key,
+                label = r.display_name,
+                required_documents = docs,
+                allows_manual_entry = r.allows_manual_entry,
+            }
         end
         -- Force [] (not {}) when empty so JSON consumers that do
         -- `(res.data.data ?? []).map(...)` don't blow up on an all-disabled
