@@ -151,8 +151,9 @@ local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT,
 -- Income Types (tax_copilot feature) — admin-managed catalogue of income sources
 local income_types_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-system") or {}
 
--- Income Questionnaire (tax_copilot feature) — per-user income-source selection
-local income_questionnaire_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-questionnaire-system") or {}
+-- Income Questionnaire cleanup — drop the bespoke storage (replaced by the
+-- dynamic Profile Builder questions; see dynamic-profile-builder.lua [38]).
+local income_questionnaire_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-questionnaire-cleanup") or {}
 
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
@@ -1806,10 +1807,11 @@ local _migrations = {
     ['718_income_types_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 2),
     ['719_seed_income_types'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 3),
 
-    -- INCOME QUESTIONNAIRE — per-user income-source selection
+    -- INCOME QUESTIONNAIRE — bespoke storage (720/721) replaced by Profile Builder
+    -- questions. 722 drops the now-unused table + column; 723 seeds the questions.
     -- =========================================================================
-    ['720_add_has_income_sources'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_migrations, 1),
-    ['721_create_user_income_types'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_migrations, 2),
+    ['722_drop_income_questionnaire_bespoke'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_cleanup_migrations, 1),
+    ['723_profile_seed_income_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 38),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

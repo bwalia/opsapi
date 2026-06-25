@@ -828,6 +828,30 @@ return function(app)
                     })
                 end
 
+                -- Catalogue-sourced options: a question can pull its options live
+                -- from a catalogue via config_json {"options_source":"income_types"},
+                -- keeping a single source of truth instead of duplicating catalogue
+                -- rows into profile_question_options.
+                if q.config_json and q.config_json ~= "" then
+                    local ok_cfg, cfg = pcall(cjson.decode, q.config_json)
+                    if ok_cfg and type(cfg) == "table" and cfg.options_source == "income_types" then
+                        local ok_it, it_rows = pcall(db.query, [[
+                            SELECT income_type_key AS value, display_name AS label, display_order
+                            FROM income_types WHERE is_active = true
+                            ORDER BY display_order ASC, display_name ASC
+                        ]])
+                        if ok_it and it_rows then
+                            opt_list = {}
+                            for _, it in ipairs(it_rows) do
+                                table.insert(opt_list, {
+                                    value = it.value, label = it.label,
+                                    display_order = it.display_order, is_active = true,
+                                })
+                            end
+                        end
+                    end
+                end
+
                 table.insert(q_list, {
                     uuid = q.uuid,
                     question_key = q.question_key,
@@ -1415,6 +1439,28 @@ return function(app)
                         is_default = o.is_default, parent_option_id = o.parent_option_id,
                         metadata_json = o.metadata_json
                     })
+                end
+
+                -- Catalogue-sourced options (see GET /schema) — resolve live from
+                -- the income_types catalogue when the question opts in via config_json.
+                if q.config_json and q.config_json ~= "" then
+                    local ok_cfg, cfg = pcall(cjson.decode, q.config_json)
+                    if ok_cfg and type(cfg) == "table" and cfg.options_source == "income_types" then
+                        local ok_it, it_rows = pcall(db.query, [[
+                            SELECT income_type_key AS value, display_name AS label, display_order
+                            FROM income_types WHERE is_active = true
+                            ORDER BY display_order ASC, display_name ASC
+                        ]])
+                        if ok_it and it_rows then
+                            opt_list = {}
+                            for _, it in ipairs(it_rows) do
+                                table.insert(opt_list, {
+                                    value = it.value, label = it.label,
+                                    display_order = it.display_order, is_active = true,
+                                })
+                            end
+                        end
+                    end
                 end
 
                 table.insert(q_list, {
