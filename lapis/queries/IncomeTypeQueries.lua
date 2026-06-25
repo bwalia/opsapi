@@ -94,7 +94,10 @@ function IncomeTypeQueries.admin_list(params)
         FROM income_types it ]] .. where .. [[
         ORDER BY it.display_order ASC, it.display_name ASC
     ]])
-    return { data = decode_rows(rows), total = #(rows or {}) }
+    local data = decode_rows(rows)
+    -- Force [] (not {}) when empty so the admin page's `data.filter/.sort`
+    -- doesn't blow up on an all-inactive / empty catalogue.
+    return { data = #data > 0 and data or cjson.empty_array, total = #data }
 end
 
 function IncomeTypeQueries.show(uuid)
