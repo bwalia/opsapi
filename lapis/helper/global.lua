@@ -6,6 +6,14 @@ local saltRounds = 10
 local Global = {}
 
 function Global.generateUUID()
+    -- `ngx` only exists inside an OpenResty request/worker context. When this
+    -- runs from the `lapis migrate` CLI (e.g. the k8s bootstrap postStart hook),
+    -- ngx is nil and `ngx.md5` would throw "attempt to index global 'ngx'",
+    -- crashing seed migrations and crash-looping the pod. Fall back to the
+    -- ngx-free generator at migrate time; request-context behaviour is unchanged.
+    if not ngx or not ngx.md5 then
+        return Global.generateStaticUUID()
+    end
     local random = math.random(1000000000)
     local timestamp = os.time()
     local hash = ngx.md5(tostring(random) .. tostring(timestamp))
