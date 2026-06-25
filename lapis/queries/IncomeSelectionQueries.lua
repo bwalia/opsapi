@@ -23,6 +23,14 @@ local cjson = require("cjson")
 
 local IncomeSelectionQueries = {}
 
+-- Force a Lua list to encode as a JSON array. cjson serialises an empty table
+-- as {} (object), which breaks consumers expecting [] (e.g. new Set(...) on the
+-- web). cjson.empty_array is the lua-cjson sentinel that always encodes as [].
+local function json_array(t)
+    if type(t) == "table" and #t > 0 then return t end
+    return cjson.empty_array
+end
+
 -- Resolve internal user.id + uuid from the LapisUser (which carries uuid).
 -- Returns id, uuid or nil, nil, error_message.
 local function resolveUser(user)
@@ -56,7 +64,7 @@ local function available_types()
     for _, r in ipairs(rows) do
         out[#out + 1] = { key = r.income_type_key, label = r.display_name }
     end
-    return out
+    return json_array(out)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -79,7 +87,7 @@ function IncomeSelectionQueries.get(user)
 
     return {
         has_income_sources = has,
-        selected = selected,
+        selected = json_array(selected),
         available = available_types(),
     }
 end
@@ -143,7 +151,7 @@ function IncomeSelectionQueries.save(user, has_income_sources, income_type_keys)
         new_values = cjson.encode({ has_income_sources = has, income_type_keys = valid }),
     })
 
-    return { has_income_sources = has, selected = valid, available = available_types() }
+    return { has_income_sources = has, selected = json_array(valid), available = available_types() }
 end
 
 return IncomeSelectionQueries
