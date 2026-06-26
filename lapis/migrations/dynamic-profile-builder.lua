@@ -1869,4 +1869,440 @@ return {
 
         print("[Profile] Created profile_question_business_profiles join table")
     end,
+
+    -- =========================================================================
+    -- [37] BUSINESS-PROFILE WIZARD TREE — hierarchy + multi-profile support
+    --
+    -- Lets a user say "I'm a sole-trader electrician AND I rent out a flat"
+    -- via a 3-step wizard (root pick → drill into branches → confirm) instead
+    -- of the current single `default_profile_key` column. Strict backwards
+    -- compat — nothing existing breaks:
+    --
+    --   • The five existing classification_profiles rows
+    --     (amazon_seller, construction_company, health_and_safety,
+    --      it_contractor, landlord) are UPDATEd with the new wizard columns
+    --     ONLY where currently NULL (COALESCE-guarded), so any admin-set
+    --     value is preserved. Their profile_key, display_name, rules_markdown
+    --     and is_active are untouched.
+    --   • The new tax_user_profiles_profiles join table is additive. The
+    --     existing tax_user_profiles.default_profile_key column is kept and
+    --     remains the read-path for /profile until the Phase 6 schema-gate
+    --     change; this migration backfills the join from it so the two
+    --     views agree on day one.
+    --   • New rows are added with ON CONFLICT DO NOTHING — re-running is a
+    --     no-op.
+    --
+    -- Tree shape:
+    --   sole_trader (branch)                     ← root
+    --     ├ sole_trader_tradesperson (branch)
+    --     │   ├ construction_company (EXISTING, re-parented)
+    --     │   ├ electrician, plumber, …
+    --     ├ sole_trader_ecommerce (branch)
+    --     │   ├ amazon_seller (EXISTING, re-parented)
+    --     │   ├ ebay_etsy_seller, …
+    --     ├ sole_trader_professional (branch)
+    --     │   ├ health_and_safety (EXISTING, re-parented)
+    --     │   ├ accountant_bookkeeper, …
+    --     ├ sole_trader_tech (branch)
+    --     │   ├ it_contractor (EXISTING, re-parented)
+    --     │   ├ freelance_developer, …
+    --     ├ … (driver / hair_beauty / hospitality / creative / education / healthcare)
+    --     ├ childminder, property_developer, other_sole_trader (direct leaves)
+    --   ltd_director (leaf)                      ← root
+    --   partner (leaf)                           ← root
+    --   landlord (EXISTING, kept as a leaf root)
+    --   other_income (leaf)                      ← root
+    --
+    -- The wizard treats "CIS subcontractor?" as a *follow-up question* on
+    -- tradesperson leaves, not a separate subtree — see the profile-builder
+    -- question rules (existing infrastructure). Same for "Are you a Ltd Co
+    -- director?" which is layered as an additional pick alongside the trade.
+    -- =========================================================================
+    [37] = function()
+        -- ── 1. classification_profiles — add wizard-tree columns ──────────────
+        local cols = db.query([[
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'classification_profiles'
+              AND column_name IN ('parent_profile_key','wizard_question','wizard_label','display_order','is_leaf')
+        ]])
+        local has_col = {}
+        for _, r in ipairs(cols or {}) do has_col[r.column_name] = true end
+
+        if not has_col.parent_profile_key then
+            db.query("ALTER TABLE classification_profiles ADD COLUMN parent_profile_key VARCHAR(100)")
+        end
+        if not has_col.wizard_question then
+            db.query("ALTER TABLE classification_profiles ADD COLUMN wizard_question TEXT")
+        end
+        if not has_col.wizard_label then
+            db.query("ALTER TABLE classification_profiles ADD COLUMN wizard_label VARCHAR(255)")
+        end
+        if not has_col.display_order then
+            db.query("ALTER TABLE classification_profiles ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0")
+        end
+        if not has_col.is_leaf then
+            db.query("ALTER TABLE classification_profiles ADD COLUMN is_leaf BOOLEAN NOT NULL DEFAULT true")
+        end
+
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_classification_profiles_parent
+            ON classification_profiles (parent_profile_key)
+            WHERE parent_profile_key IS NOT NULL
+        ]])
+
+        -- ── 2. tax_user_profiles_profiles — new join table for multi-profile ──
+        local jt = db.query([[
+            SELECT to_regclass('public.tax_user_profiles_profiles') AS reg
+        ]])
+        if not (jt and jt[1] and jt[1].reg) then
+            db.query([[
+                CREATE TABLE tax_user_profiles_profiles (
+                    user_id      INTEGER      NOT NULL,
+                    profile_key  VARCHAR(100) NOT NULL,
+                    namespace_id INTEGER      NOT NULL DEFAULT 0,
+                    is_primary   BOOLEAN      NOT NULL DEFAULT false,
+                    created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, profile_key),
+                    CONSTRAINT fk_tupp_user
+                        FOREIGN KEY (user_id)
+                        REFERENCES users(id)
+                        ON DELETE CASCADE
+                )
+            ]])
+            db.query([[
+                CREATE INDEX idx_tupp_user
+                ON tax_user_profiles_profiles (user_id)
+            ]])
+            -- At most one primary per user (caches default_profile_key).
+            db.query([[
+                CREATE UNIQUE INDEX uq_tupp_user_primary
+                ON tax_user_profiles_profiles (user_id)
+                WHERE is_primary = true
+            ]])
+        end
+
+        -- ── 3. Seed: roots (4 new + 1 existing kept as-is, with wizard_label set) ──
+        -- INSERT … ON CONFLICT DO NOTHING — re-running is a no-op for new keys.
+        db.query([[
+            INSERT INTO classification_profiles
+                (profile_key, display_name, industry, user_profile_type,
+                 parent_profile_key, wizard_question, wizard_label,
+                 display_order, is_leaf, is_active, namespace_id)
+            VALUES
+                ('sole_trader',  'Sole Trader',                'self_employed', 'sole_trader',
+                 NULL, 'What kind of work do you do?',  'I work for myself as a sole trader',
+                 10, false, true, 0),
+                ('ltd_director', 'Limited Company Director',   'limited_company', 'limited_company',
+                 NULL, NULL, 'I''m a director of a Limited Company',
+                 20, true,  true, 0),
+                ('partner',      'Business Partnership',       'partnership',  'partnership',
+                 NULL, NULL, 'I''m in a business partnership',
+                 30, true,  true, 0),
+                ('other_income', 'Other Income',               'other',        'individual',
+                 NULL, NULL, 'I have other income (foreign / trust / investments)',
+                 50, true,  true, 0)
+            ON CONFLICT (profile_key) DO NOTHING
+        ]])
+
+        -- ── 4. Seed: sole-trader sub-branches ─────────────────────────────────
+        db.query([[
+            INSERT INTO classification_profiles
+                (profile_key, display_name, industry, user_profile_type,
+                 parent_profile_key, wizard_question, wizard_label,
+                 display_order, is_leaf, is_active, namespace_id)
+            VALUES
+                ('sole_trader_tradesperson', 'Tradesperson',           'construction',  'sole_trader',
+                 'sole_trader', 'What''s your trade?', 'Tradesperson (electrician, plumber, builder, …)',
+                 10,  false, true, 0),
+                ('sole_trader_driver',       'Driver',                 'transport',     'sole_trader',
+                 'sole_trader', 'What kind of driving work?', 'Driver (taxi, rideshare, delivery, …)',
+                 20,  false, true, 0),
+                ('sole_trader_ecommerce',    'E-commerce / Online',    'ecommerce',     'sole_trader',
+                 'sole_trader', 'Where do you sell?',  'E-commerce / Online seller',
+                 30,  false, true, 0),
+                ('sole_trader_hair_beauty',  'Hair, Beauty & Wellbeing','hair_beauty', 'sole_trader',
+                 'sole_trader', 'What''s your specialty?', 'Hair, beauty or wellbeing',
+                 40,  false, true, 0),
+                ('sole_trader_hospitality',  'Food & Hospitality',     'hospitality',   'sole_trader',
+                 'sole_trader', 'What''s your hospitality work?', 'Food / hospitality',
+                 50,  false, true, 0),
+                ('sole_trader_professional', 'Professional Services',  'professional',  'sole_trader',
+                 'sole_trader', 'What''s your profession?', 'Professional services (accountant, consultant, …)',
+                 60,  false, true, 0),
+                ('sole_trader_tech',         'Tech & IT',              'technology',    'sole_trader',
+                 'sole_trader', 'What kind of tech work?', 'Tech / IT (developer, designer, contractor)',
+                 70,  false, true, 0),
+                ('sole_trader_creative',     'Creative & Content',     'creative',      'sole_trader',
+                 'sole_trader', 'What''s your creative work?', 'Creative / content (photographer, writer, …)',
+                 80,  false, true, 0),
+                ('sole_trader_education',    'Education & Training',   'education',     'sole_trader',
+                 'sole_trader', 'What do you teach or instruct?', 'Education / instruction',
+                 90,  false, true, 0),
+                ('sole_trader_healthcare',   'Healthcare (non-NHS)',   'healthcare',    'sole_trader',
+                 'sole_trader', 'What''s your healthcare specialty?', 'Healthcare (non-NHS)',
+                 100, false, true, 0)
+            ON CONFLICT (profile_key) DO NOTHING
+        ]])
+
+        -- ── 5. Seed: leaves (concrete trade picks) ────────────────────────────
+        -- ~40 new leaves. Existing keys (amazon_seller, construction_company,
+        -- health_and_safety, it_contractor) are re-parented in section 6.
+        db.query([[
+            INSERT INTO classification_profiles
+                (profile_key, display_name, industry, user_profile_type,
+                 parent_profile_key, wizard_label, display_order, is_leaf,
+                 is_active, namespace_id)
+            VALUES
+                -- Tradespeople
+                ('electrician',        'Electrician',         'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Electrician',         20, true, true, 0),
+                ('plumber',            'Plumber',             'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Plumber',             30, true, true, 0),
+                ('decorator_painter',  'Decorator / Painter', 'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Decorator / Painter', 40, true, true, 0),
+                ('carpenter',          'Carpenter',           'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Carpenter',           50, true, true, 0),
+                ('gas_engineer',       'Gas Engineer',        'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Gas Engineer',        60, true, true, 0),
+                ('roofer',             'Roofer',              'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Roofer',              70, true, true, 0),
+                ('handyman',           'Handyman',            'construction', 'sole_trader',
+                 'sole_trader_tradesperson', 'Handyman',            80, true, true, 0),
+                ('mobile_mechanic',    'Mobile Mechanic',     'automotive',   'sole_trader',
+                 'sole_trader_tradesperson', 'Mobile Mechanic',     90, true, true, 0),
+
+                -- Drivers
+                ('taxi_phv',           'Taxi / Private Hire Driver', 'transport', 'sole_trader',
+                 'sole_trader_driver', 'Taxi / Private Hire',  10, true, true, 0),
+                ('rideshare',          'Rideshare Driver',           'transport', 'sole_trader',
+                 'sole_trader_driver', 'Rideshare (Uber, Bolt)', 20, true, true, 0),
+                ('delivery_driver',    'Delivery Driver',            'transport', 'sole_trader',
+                 'sole_trader_driver', 'Delivery (Amazon Flex, Deliveroo, DPD)', 30, true, true, 0),
+                ('hgv_courier',        'HGV Driver / Courier',       'transport', 'sole_trader',
+                 'sole_trader_driver', 'HGV / Courier',        40, true, true, 0),
+
+                -- E-commerce (amazon_seller is existing — re-parented in section 6)
+                ('ebay_etsy_seller',   'eBay / Etsy / Vinted Seller', 'ecommerce', 'sole_trader',
+                 'sole_trader_ecommerce', 'eBay / Etsy / Vinted',           20, true, true, 0),
+                ('shopify_dtc',        'Shopify / Direct-to-Consumer','ecommerce', 'sole_trader',
+                 'sole_trader_ecommerce', 'Shopify / Direct-to-Consumer',   30, true, true, 0),
+                ('online_subscription_creator', 'Subscription Creator',  'creative', 'sole_trader',
+                 'sole_trader_ecommerce', 'Subscription Creator (OnlyFans, Patreon)', 40, true, true, 0),
+
+                -- Hair, beauty & wellbeing
+                ('hairdresser_barber', 'Hairdresser / Barber',       'hair_beauty', 'sole_trader',
+                 'sole_trader_hair_beauty', 'Hairdresser / Barber', 10, true, true, 0),
+                ('beautician_nail',    'Beautician / Nail Tech',     'hair_beauty', 'sole_trader',
+                 'sole_trader_hair_beauty', 'Beautician / Nail Tech', 20, true, true, 0),
+                ('massage_therapist',  'Massage Therapist',          'healthcare',  'sole_trader',
+                 'sole_trader_hair_beauty', 'Massage Therapist',    30, true, true, 0),
+                ('personal_trainer',   'Personal Trainer',           'fitness',     'sole_trader',
+                 'sole_trader_hair_beauty', 'Personal Trainer / Yoga Instructor', 40, true, true, 0),
+
+                -- Hospitality
+                ('caterer',            'Caterer',                    'hospitality', 'sole_trader',
+                 'sole_trader_hospitality', 'Caterer',              10, true, true, 0),
+                ('market_trader',      'Market Trader / Food Vendor','hospitality', 'sole_trader',
+                 'sole_trader_hospitality', 'Market Trader / Food Vendor', 20, true, true, 0),
+                ('baker',              'Baker',                      'hospitality', 'sole_trader',
+                 'sole_trader_hospitality', 'Baker',                30, true, true, 0),
+
+                -- Professional (health_and_safety is existing — re-parented in section 6)
+                ('accountant_bookkeeper', 'Accountant / Bookkeeper', 'professional','sole_trader',
+                 'sole_trader_professional', 'Accountant / Bookkeeper', 10, true, true, 0),
+                ('consultant_general',    'Management Consultant',   'professional','sole_trader',
+                 'sole_trader_professional', 'Management / General Consultant', 20, true, true, 0),
+                ('financial_adviser',     'Financial Adviser',       'professional','sole_trader',
+                 'sole_trader_professional', 'Financial Adviser',    30, true, true, 0),
+
+                -- Tech (it_contractor is existing — re-parented in section 6)
+                ('freelance_developer', 'Freelance Developer',       'technology',  'sole_trader',
+                 'sole_trader_tech', 'Freelance Developer',          20, true, true, 0),
+                ('freelance_designer',  'Freelance Designer',        'creative',    'sole_trader',
+                 'sole_trader_tech', 'Freelance Designer',           30, true, true, 0),
+
+                -- Creative
+                ('photographer_videographer', 'Photographer / Videographer', 'creative', 'sole_trader',
+                 'sole_trader_creative', 'Photographer / Videographer', 10, true, true, 0),
+                ('writer_journalist',         'Writer / Journalist',         'creative', 'sole_trader',
+                 'sole_trader_creative', 'Writer / Journalist',         20, true, true, 0),
+                ('musician_performer',        'Musician / Performer',        'creative', 'sole_trader',
+                 'sole_trader_creative', 'Musician / Performer',        30, true, true, 0),
+                ('content_creator',           'Content Creator',             'creative', 'sole_trader',
+                 'sole_trader_creative', 'Content Creator (YouTube / TikTok)', 40, true, true, 0),
+
+                -- Education
+                ('tutor_teacher',      'Tutor / Teacher',            'education',   'sole_trader',
+                 'sole_trader_education', 'Tutor / Teacher',         10, true, true, 0),
+                ('driving_instructor', 'Driving Instructor',         'education',   'sole_trader',
+                 'sole_trader_education', 'Driving Instructor',      20, true, true, 0),
+                ('music_teacher',      'Music Teacher',              'education',   'sole_trader',
+                 'sole_trader_education', 'Music Teacher',           30, true, true, 0),
+
+                -- Healthcare (non-NHS)
+                ('therapist_counsellor',  'Therapist / Counsellor',  'healthcare',  'sole_trader',
+                 'sole_trader_healthcare', 'Therapist / Counsellor', 10, true, true, 0),
+                ('physiotherapist',       'Physiotherapist',         'healthcare',  'sole_trader',
+                 'sole_trader_healthcare', 'Physiotherapist',        20, true, true, 0),
+                ('osteopath_chiropractor','Osteopath / Chiropractor','healthcare',  'sole_trader',
+                 'sole_trader_healthcare', 'Osteopath / Chiropractor', 30, true, true, 0),
+
+                -- Direct leaves under sole_trader (small populations, no sub-branch)
+                ('childminder',          'Childminder',              'education',   'sole_trader',
+                 'sole_trader', 'Childminder',                       110, true, true, 0),
+                ('property_developer',   'Property Developer',       'property',    'sole_trader',
+                 'sole_trader', 'Property Developer (Flipper)',      120, true, true, 0),
+                ('other_sole_trader',    'Other Sole Trader',        'other',       'sole_trader',
+                 'sole_trader', 'Other / Not listed',                130, true, true, 0)
+            ON CONFLICT (profile_key) DO NOTHING
+        ]])
+
+        -- ── 6. Re-parent the existing 5 rows under the new tree ───────────────
+        -- COALESCE-guarded — only sets values that are currently NULL/0, so an
+        -- admin who has already keyed in a parent or wizard_label by hand keeps
+        -- their value. profile_key, display_name, rules_markdown, is_active are
+        -- untouched.
+        db.query([[
+            UPDATE classification_profiles
+            SET parent_profile_key = COALESCE(parent_profile_key, 'sole_trader_ecommerce'),
+                wizard_label       = COALESCE(wizard_label, 'Amazon Seller (FBA / FBM)'),
+                display_order      = CASE WHEN display_order = 0 THEN 10 ELSE display_order END
+            WHERE profile_key = 'amazon_seller'
+        ]])
+        db.query([[
+            UPDATE classification_profiles
+            SET parent_profile_key = COALESCE(parent_profile_key, 'sole_trader_tradesperson'),
+                wizard_label       = COALESCE(wizard_label, 'Builder / Construction'),
+                display_order      = CASE WHEN display_order = 0 THEN 10 ELSE display_order END
+            WHERE profile_key = 'construction_company'
+        ]])
+        db.query([[
+            UPDATE classification_profiles
+            SET parent_profile_key = COALESCE(parent_profile_key, 'sole_trader_professional'),
+                wizard_label       = COALESCE(wizard_label, 'Health & Safety Consultant'),
+                display_order      = CASE WHEN display_order = 0 THEN 40 ELSE display_order END
+            WHERE profile_key = 'health_and_safety'
+        ]])
+        db.query([[
+            UPDATE classification_profiles
+            SET parent_profile_key = COALESCE(parent_profile_key, 'sole_trader_tech'),
+                wizard_label       = COALESCE(wizard_label, 'IT Contractor'),
+                display_order      = CASE WHEN display_order = 0 THEN 10 ELSE display_order END
+            WHERE profile_key = 'it_contractor'
+        ]])
+        db.query([[
+            UPDATE classification_profiles
+            SET wizard_label  = COALESCE(wizard_label, 'I rent out one or more properties'),
+                display_order = CASE WHEN display_order = 0 THEN 40 ELSE display_order END
+            WHERE profile_key = 'landlord'
+        ]])
+
+        -- ── 7. Backfill: tax_user_profiles.default_profile_key → join table ───
+        -- For every user with a default_profile_key, ensure a matching
+        -- (user_id, profile_key, is_primary=true) row exists. Idempotent.
+        -- Until Phase 6 (schema-gate change) the default_profile_key column
+        -- remains the read-path, so we DON'T null it out — the two stay in
+        -- sync via the API write-paths added in Phase 3.
+        db.query([[
+            INSERT INTO tax_user_profiles_profiles
+                (user_id, profile_key, namespace_id, is_primary)
+            SELECT tup.user_id,
+                   tup.default_profile_key,
+                   COALESCE(tup.namespace_id, 0),
+                   true
+            FROM tax_user_profiles tup
+            WHERE tup.default_profile_key IS NOT NULL
+              AND tup.default_profile_key <> ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM tax_user_profiles_profiles tupp
+                  WHERE tupp.user_id = tup.user_id
+                    AND tupp.profile_key = tup.default_profile_key
+              )
+        ]])
+
+        print("[Profile] Wizard tree migration complete (added " ..
+              "wizard columns + tax_user_profiles_profiles + tree seeds)")
+    end,
+
+    -- 38. Seed the income questionnaire as Profile Builder questions, replacing
+    -- the bespoke implementation. Two questions in an "Income Sources" category:
+    --   - has_income_sources   (boolean)  "Do you have any income sources?"
+    --   - selected_income_types (multi_select) "Which income types apply to you?"
+    -- The multi-select sources its options live from the income_types catalogue
+    -- via config_json {"options_source":"income_types"} (resolved by the schema
+    -- endpoint), so admin catalogue edits flow through with no static options to
+    -- keep in sync. A visibility rule shows the multi-select only when the user
+    -- answers "yes". Idempotent (upsert by question_key).
+    [38] = function()
+        -- Income Sources category
+        local cat = db.select("id FROM profile_categories WHERE slug = ?", "income-sources")
+        local cat_id
+        if cat and #cat > 0 then
+            cat_id = cat[1].id
+            db.query([[
+                UPDATE profile_categories SET name = 'Income Sources',
+                    description = 'Tell us which kinds of income you have',
+                    icon = 'coins', is_active = true, is_archived = false, updated_at = NOW()
+                WHERE slug = 'income-sources'
+            ]])
+        else
+            db.query([[
+                INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, is_active, is_archived, created_at, updated_at)
+                VALUES (?, 0, 'Income Sources', 'income-sources', 'Tell us which kinds of income you have', 'coins', 50, true, false, NOW(), NOW())
+            ]], MigrationUtils.generateUUID())
+            local row = db.select("id FROM profile_categories WHERE slug = ?", "income-sources")
+            cat_id = row and row[1] and row[1].id or nil
+        end
+        if not cat_id then return end
+
+        -- Q1: yes/no gate
+        local has_key = "has_income_sources"
+        local q1 = db.select("id FROM profile_questions WHERE question_key = ?", has_key)
+        if q1 and #q1 > 0 then
+            db.query([[
+                UPDATE profile_questions SET category_id = ?, label = 'Do you have any income sources?',
+                    question_type = 'boolean', is_required = true, display_order = 1,
+                    is_active = true, is_archived = false, updated_at = NOW()
+                WHERE question_key = ?
+            ]], cat_id, has_key)
+        else
+            db.query([[
+                INSERT INTO profile_questions (uuid, category_id, question_key, label, question_type, is_required, display_order, is_active, version, created_at, updated_at)
+                VALUES (?, ?, ?, 'Do you have any income sources?', 'boolean', true, 1, true, 1, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), cat_id, has_key)
+        end
+
+        -- Q2: multi-select of income types; options sourced from the catalogue
+        local sel_key = "selected_income_types"
+        local cfg = '{"options_source":"income_types"}'
+        local q2 = db.select("id FROM profile_questions WHERE question_key = ?", sel_key)
+        if q2 and #q2 > 0 then
+            db.query([[
+                UPDATE profile_questions SET category_id = ?, label = 'Which income types apply to you?',
+                    question_type = 'multi_select', is_required = false, is_multi_value = true,
+                    display_order = 2, config_json = ?, is_active = true, is_archived = false, updated_at = NOW()
+                WHERE question_key = ?
+            ]], cat_id, cfg, sel_key)
+        else
+            db.query([[
+                INSERT INTO profile_questions (uuid, category_id, question_key, label, question_type, is_required, is_multi_value, display_order, config_json, is_active, version, created_at, updated_at)
+                VALUES (?, ?, ?, 'Which income types apply to you?', 'multi_select', false, true, 2, ?, true, 1, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), cat_id, sel_key, cfg)
+        end
+
+        -- Visibility rule: show Q2 only when Q1 = true
+        local tgt = db.select("id FROM profile_questions WHERE question_key = ?", sel_key)
+        local src = db.select("id FROM profile_questions WHERE question_key = ?", has_key)
+        if tgt and #tgt > 0 and src and #src > 0 then
+            local exists = db.select("id FROM profile_question_rules WHERE question_id = ? AND source_question_id = ?", tgt[1].id, src[1].id)
+            if not exists or #exists == 0 then
+                db.query([[
+                    INSERT INTO profile_question_rules (uuid, question_id, rule_name, rule_type, operator, source_question_id, expected_value, logic_group, is_active, created_at, updated_at)
+                    VALUES (?, ?, 'Show if has income sources', 'visibility', 'equals', ?, 'true', 'AND', true, NOW(), NOW())
+                ]], MigrationUtils.generateUUID(), tgt[1].id, src[1].id)
+            end
+        end
+
+        print("[Profile] Seeded income questionnaire (has_income_sources + selected_income_types + visibility rule)")
+    end,
 }

@@ -41,6 +41,7 @@ show_help() {
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
     echo "  -D, --dashboard-dev   Run the Next.js dashboard in dev mode (hot reload, no image build)"
+    echo "  -B, --no-build        Start from the existing image without rebuilding (skips Docker Hub base-image pull; avoids 429 rate limits)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Preset Environments:${NC}"
@@ -104,6 +105,7 @@ CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
 DASHBOARD_DEV=false
+NO_BUILD=false
 PROJECT_CODE=""
 APEX_DOMAIN=""
 ADMIN_EMAIL=""
@@ -161,6 +163,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -D|--dashboard-dev)
             DASHBOARD_DEV=true
+            shift
+            ;;
+        -B|--no-build)
+            NO_BUILD=true
             shift
             ;;
         -d|--domain)
@@ -1069,10 +1075,40 @@ fi
 # This ensures nginx workers have PROJECT_CODE for feature-gated route loading
 export PROJECT_CODE
 
-if ! $COMPOSE_CMD up --build -d; then
-    echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
-    $COMPOSE_CMD logs --tail=100
-    exit 1
+# Decide build strategy. `--build` re-resolves the base image (FROM
+# openresty/openresty:alpine) against Docker Hub on every run, which can fail
+# with HTTP 429 "Too Many Requests" (anonymous pull rate limit). To stay
+# resilient we:
+#   - honor -B/--no-build (start from the existing image, never pull/build),
+#   - otherwise try a normal --build, and if that fails while a previously
+#     built image already exists locally, fall back to starting WITHOUT a
+#     rebuild instead of aborting. Real Dockerfile/dep changes still rebuild
+#     normally whenever Docker Hub is reachable.
+BUILD_IMAGE="lapis-lapis:latest"   # docker compose default: <project>-<service>
+
+if $NO_BUILD; then
+    echo -e "${BLUE}[i] --no-build set: starting from the existing image (no rebuild, no base-image pull)${NC}"
+    if ! $COMPOSE_CMD up -d; then
+        echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
+        $COMPOSE_CMD logs --tail=100
+        exit 1
+    fi
+elif ! $COMPOSE_CMD up --build -d; then
+    if docker image inspect "$BUILD_IMAGE" >/dev/null 2>&1; then
+        echo -e "${YELLOW}[!] Build/start failed — this is usually a Docker Hub pull rate limit (HTTP 429).${NC}"
+        echo -e "${YELLOW}[!] An existing '${BUILD_IMAGE}' image was found — retrying WITHOUT --build...${NC}"
+        echo -e "${YELLOW}    (Tip: run 'docker login' to raise the limit, or pass -B/--no-build to skip building.)${NC}"
+        if ! $COMPOSE_CMD up -d; then
+            echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
+            $COMPOSE_CMD logs --tail=100
+            exit 1
+        fi
+    else
+        echo -e "${RED}[!] docker compose up --build failed and no existing image to fall back to.${NC}"
+        echo -e "${YELLOW}    If this is a Docker Hub 429 rate limit, run 'docker login' and retry.${NC}"
+        $COMPOSE_CMD logs --tail=100
+        exit 1
+    fi
 fi
 
 # Wait for PostgreSQL to be ready (healthcheck-based)

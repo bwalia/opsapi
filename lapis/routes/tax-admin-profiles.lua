@@ -311,16 +311,32 @@ return function(app)
                 return { status = 409, json = { error = "Profile key already exists" } }
             end
 
+            -- Wizard-tree fields: branches/leaves authored via the admin
+            -- business-types dashboard set these. Existing callers that only
+            -- create rules-pack rows (no wizard surface) leave them NULL/default,
+            -- which keeps the row out of the wizard tree (helper/profile_loader
+            -- already filters legacy rows by ``wizard_label IS NULL``).
+            -- is_leaf defaults to TRUE so a brand-new row is selectable in the
+            -- wizard unless the caller explicitly marks it a branch.
+            local is_leaf
+            if body.is_leaf == nil then
+                is_leaf = true
+            else
+                is_leaf = body.is_leaf and true or false
+            end
+
             local uuid = require("helper.global").generateStaticUUID()
             db.query([[
                 INSERT INTO classification_profiles
                     (uuid, profile_key, display_name, industry, user_profile_type,
                      category_affinity, personal_indicators, excluded_categories,
                      rules_markdown, keyword_rules, category_mappings,
+                     parent_profile_key, wizard_question, wizard_label, display_order, is_leaf,
                      is_active, namespace_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?,
                         ?::jsonb, ?::jsonb, ?::jsonb,
                         ?, ?::jsonb, ?::jsonb,
+                        ?, ?, ?, ?, ?,
                         true, 0, NOW(), NOW())
             ]],
                 uuid,
@@ -333,7 +349,12 @@ return function(app)
                 cjson.encode(body.excluded_categories or {}),
                 body.rules_markdown or db.NULL,
                 cjson.encode(body.keyword_rules or {}),
-                cjson.encode(body.category_mappings or {})
+                cjson.encode(body.category_mappings or {}),
+                body.parent_profile_key or db.NULL,
+                body.wizard_question or db.NULL,
+                body.wizard_label or db.NULL,
+                body.display_order or 100,
+                is_leaf
             )
 
             local created = db.query("SELECT * FROM classification_profiles WHERE uuid = ?", uuid)
@@ -377,6 +398,16 @@ return function(app)
             add("rules_markdown", body.rules_markdown)
             add("keyword_rules", body.keyword_rules, true)
             add("category_mappings", body.category_mappings, true)
+            -- Wizard-tree fields. is_leaf is handled specially because Lua's
+            -- truthiness coerces the JSON ``false`` to nil through pcall paths;
+            -- check for the explicit key so admins can toggle a branch ↔ leaf.
+            add("parent_profile_key", body.parent_profile_key)
+            add("wizard_question", body.wizard_question)
+            add("wizard_label", body.wizard_label)
+            add("display_order", body.display_order)
+            if body.is_leaf ~= nil then
+                table.insert(sets, "is_leaf = " .. db.interpolate_query("?", body.is_leaf and true or false))
+            end
             table.insert(sets, "updated_at = NOW()")
 
             if #sets > 0 then
@@ -402,11 +433,76 @@ return function(app)
             if not existing or #existing == 0 then
                 return { status = 404, json = { error = "Profile not found" } }
             end
+            local pk = existing[1].profile_key
+
+            -- Wizard-tree safety. Refuse delete if the node is referenced — a
+            -- soft-delete would orphan child nodes (the wizard tree breaks)
+            -- and abandon user picks (the user's saved business type silently
+            -- vanishes). Force the admin to re-parent / migrate users first.
+            local children = db.query(
+                "SELECT COUNT(*)::int AS n FROM classification_profiles WHERE parent_profile_key = ? AND is_active = true",
+                pk
+            )
+            if children and children[1] and children[1].n > 0 then
+                return { status = 409, json = {
+                    error = "Profile has " .. children[1].n .. " active child node(s) — re-parent them first",
+                    children_count = children[1].n,
+                } }
+            end
+
+            local user_picks = db.query(
+                "SELECT COUNT(*)::int AS n FROM tax_user_profiles_profiles WHERE profile_key = ?",
+                pk
+            )
+            if user_picks and user_picks[1] and user_picks[1].n > 0 then
+                return { status = 409, json = {
+                    error = "Profile is picked by " .. user_picks[1].n .. " user(s) — re-assign them first",
+                    user_picks_count = user_picks[1].n,
+                } }
+            end
 
             db.query("UPDATE classification_profiles SET is_active = false, updated_at = NOW() WHERE uuid = ?",
                 self.params.uuid)
 
             return { status = 200, json = { message = "Profile deactivated" } }
+        end)
+    )
+
+    -- ========================================
+    -- Usage counts — used by the admin tree dashboard to decide
+    -- whether the Delete button should be enabled. Cheap two-count
+    -- query so the UI can show "5 users / 2 children" inline without
+    -- racing the DELETE 409 response.
+    -- ========================================
+    app:get("/api/v2/tax/admin/profiles/:uuid/usage",
+        AuthMiddleware.requireAuth(function(self)
+            if not isAdmin(self.current_user) then
+                return { status = 403, json = { error = "Admin access required" } }
+            end
+
+            local row = db.query(
+                "SELECT profile_key FROM classification_profiles WHERE uuid = ? AND is_active = true LIMIT 1",
+                self.params.uuid
+            )
+            if not row or #row == 0 then
+                return { status = 404, json = { error = "Profile not found" } }
+            end
+            local pk = row[1].profile_key
+
+            local kids = db.query(
+                "SELECT COUNT(*)::int AS n FROM classification_profiles WHERE parent_profile_key = ? AND is_active = true",
+                pk
+            )
+            local picks = db.query(
+                "SELECT COUNT(*)::int AS n FROM tax_user_profiles_profiles WHERE profile_key = ?",
+                pk
+            )
+
+            return { status = 200, json = {
+                profile_key = pk,
+                children_count = (kids and kids[1] and kids[1].n) or 0,
+                user_picks_count = (picks and picks[1] and picks[1].n) or 0,
+            } }
         end)
     )
 

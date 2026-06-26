@@ -1,0 +1,52 @@
+# Nightly Postgres backup → S3/MinIO (Layer 8 — RPO automation).
+# pg_dumps the OpsAPI database and uploads it to the platform's MinIO `backups`
+# bucket (created by minio-init in the app stack). Verify restores periodically
+# with ../../scripts/backup-test.sh (or a scheduled restore-test job).
+#
+# Credentials come from existing secrets — adjust names to your cluster:
+#   - opsapi-db        : keys PGHOST, PGUSER, PGPASSWORD, PGDATABASE
+#   - opsapi-minio     : keys MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opsapi-pg-backup
+  namespace: opsapi
+  labels:
+    app: opsapi-sre
+spec:
+  schedule: "0 2 * * *"            # 02:00 UTC daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-backup
+              image: postgres:14-alpine
+              envFrom:
+                - secretRef: { name: opsapi-db }
+                - secretRef: { name: opsapi-minio }
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  FILE="/tmp/opsapi-${STAMP}.sql.gz"
+                  echo "pg_dump → ${FILE}"
+                  pg_dump -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" | gzip > "$FILE"
+                  echo "Uploading to MinIO bucket backups/"
+                  apk add --no-cache curl >/dev/null
+                  # mc one-shot upload
+                  wget -qO /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+                  chmod +x /usr/local/bin/mc
+                  mc alias set store "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+                  mc cp "$FILE" "store/backups/$(basename "$FILE")"
+                  echo "Backup complete: $(basename "$FILE")"
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits:   { cpu: 500m, memory: 512Mi }

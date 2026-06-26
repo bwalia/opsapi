@@ -158,6 +158,58 @@ return function(app)
         return true
     end
 
+    -- Tenant-isolation + authorization helpers.
+    -- Kanban tables carry no namespace_id, so the tenant boundary is enforced
+    -- transitively: a caller may only touch a task / checklist / item whose owning
+    -- project they are a member of. Project membership rows are namespace-bound, so
+    -- this authorizes the user AND prevents cross-tenant access (IDOR) without
+    -- trusting any client-supplied namespace header. On failure we return
+    -- "not found" rather than "forbidden" so existence is not leaked across tenants.
+
+    -- @return task, board  OR  nil, nil, error_message
+    local function authorize_task(task_uuid, user_uuid)
+        local task = KanbanTaskQueries.show(task_uuid)
+        if not task then return nil, nil, "Task not found" end
+        local board = KanbanBoardQueries.getById(task.board_id)
+        if not board or not KanbanProjectQueries.isMember(board.project_id, user_uuid) then
+            return nil, nil, "Task not found"
+        end
+        return task, board
+    end
+
+    -- @return checklist_ctx {id, uuid, project_id}  OR  nil, error_message
+    local function authorize_checklist(checklist_uuid, user_uuid)
+        local rows = db.query([[
+            SELECT cl.id, cl.uuid, b.project_id AS project_id
+            FROM kanban_task_checklists cl
+            JOIN kanban_tasks t ON t.id = cl.task_id
+            JOIN kanban_boards b ON b.id = t.board_id
+            WHERE cl.uuid = ? LIMIT 1
+        ]], checklist_uuid)
+        if not rows or not rows[1] then return nil, "Checklist not found" end
+        if not KanbanProjectQueries.isMember(rows[1].project_id, user_uuid) then
+            return nil, "Checklist not found"
+        end
+        return rows[1]
+    end
+
+    -- @return item_ctx {id, uuid, project_id}  OR  nil, error_message
+    local function authorize_checklist_item(item_uuid, user_uuid)
+        local rows = db.query([[
+            SELECT ci.id, ci.uuid, b.project_id AS project_id
+            FROM kanban_checklist_items ci
+            JOIN kanban_task_checklists cl ON cl.id = ci.checklist_id
+            JOIN kanban_tasks t ON t.id = cl.task_id
+            JOIN kanban_boards b ON b.id = t.board_id
+            WHERE ci.uuid = ? LIMIT 1
+        ]], item_uuid)
+        if not rows or not rows[1] then return nil, "Item not found" end
+        if not KanbanProjectQueries.isMember(rows[1].project_id, user_uuid) then
+            return nil, "Item not found"
+        end
+        return rows[1]
+    end
+
     ----------------- Task CRUD Routes --------------------
 
     -- GET /api/v2/kanban/boards/:board_uuid/tasks - List tasks for board
@@ -442,9 +494,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local assignees = KanbanTaskQueries.getAssignees(task.id)
@@ -537,9 +589,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local labels = KanbanTaskQueries.getLabels(task.id)
@@ -614,9 +666,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local params = {
@@ -762,9 +814,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local checklists = KanbanTaskQueries.getChecklists(task.id)
@@ -815,6 +867,12 @@ return function(app)
             return api_response(401, nil, err)
         end
 
+        -- Tenant + membership check before deleting.
+        local _, chk_err = authorize_checklist(self.params.uuid, user.uuid)
+        if chk_err then
+            return api_response(404, nil, chk_err)
+        end
+
         local success = KanbanTaskQueries.deleteChecklist(self.params.uuid)
 
         if not success then
@@ -837,14 +895,14 @@ return function(app)
             return api_response(400, nil, "content is required")
         end
 
-        -- Get checklist
-        local checklist = db.query("SELECT * FROM kanban_task_checklists WHERE uuid = ?", self.params.uuid)
-        if not checklist or #checklist == 0 then
-            return api_response(404, nil, "Checklist not found")
+        -- Tenant + membership check; resolves the checklist's internal id.
+        local checklist, chk_err = authorize_checklist(self.params.uuid, user.uuid)
+        if chk_err then
+            return api_response(404, nil, chk_err)
         end
 
         local item = KanbanTaskQueries.addChecklistItem({
-            checklist_id = checklist[1].id,
+            checklist_id = checklist.id,
             content = data.content,
             assignee_user_uuid = data.assignee_user_uuid,
             due_date = data.due_date,
@@ -865,6 +923,12 @@ return function(app)
             return api_response(401, nil, err)
         end
 
+        -- Tenant + membership check before mutating.
+        local _, item_err = authorize_checklist_item(self.params.uuid, user.uuid)
+        if item_err then
+            return api_response(404, nil, item_err)
+        end
+
         local item = KanbanTaskQueries.toggleChecklistItem(self.params.uuid, user.uuid)
 
         if not item then
@@ -879,6 +943,12 @@ return function(app)
         local user, err = get_current_user()
         if not user then
             return api_response(401, nil, err)
+        end
+
+        -- Tenant + membership check before deleting.
+        local _, item_err = authorize_checklist_item(self.params.uuid, user.uuid)
+        if item_err then
+            return api_response(404, nil, item_err)
         end
 
         local success = KanbanTaskQueries.deleteChecklistItem(self.params.uuid)
@@ -899,9 +969,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local params = {
@@ -934,9 +1004,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         local attachments = KanbanTaskQueries.getAttachments(task.id)

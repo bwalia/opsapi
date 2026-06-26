@@ -323,8 +323,19 @@ function KanbanBoardQueries.getFullBoard(uuid)
     for _, column in ipairs(board.columns or {}) do
         local tasks_sql = [[
             SELECT t.*,
-                   (SELECT json_agg(json_build_object('user_uuid', ta.user_uuid, 'assigned_at', ta.assigned_at))
-                    FROM kanban_task_assignees ta WHERE ta.task_id = t.id) as assignees,
+                   (SELECT json_agg(json_build_object(
+                            'uuid', ta.uuid,
+                            'user_uuid', ta.user_uuid,
+                            'assigned_at', ta.assigned_at,
+                            'user', json_build_object(
+                                'uuid', u.uuid,
+                                'first_name', u.first_name,
+                                'last_name', u.last_name,
+                                'email', u.email
+                            )))
+                    FROM kanban_task_assignees ta
+                    JOIN users u ON u.uuid = ta.user_uuid
+                    WHERE ta.task_id = t.id AND ta.deleted_at IS NULL) as assignees,
                    (SELECT json_agg(json_build_object('id', l.id, 'name', l.name, 'color', l.color))
                     FROM kanban_task_labels l
                     JOIN kanban_task_label_links ll ON ll.label_id = l.id

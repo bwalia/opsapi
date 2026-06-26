@@ -1,0 +1,88 @@
+# Prometheus — OpsAPI SRE stack (Docker demo)
+# Scrapes the real OpsAPI app when it is running on opsapi-network, plus the
+# synthetic target, exporters, blackbox probes, the OTel collector and itself.
+# The k3s production equivalent is expressed as ServiceMonitors + PrometheusRule
+# CRs under ../k3s/ (kube-prometheus-stack discovers targets dynamically).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: opsapi
+    environment: demo
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules/*.rules.yml
+
+scrape_configs:
+  # ── OpsAPI application (golden signals come from here) ────────────────────
+  # In the demo, `synthetic-opsapi` emits OpsAPI's exact metric schema so the
+  # SLO/golden-signal/burn-rate dashboards light up standalone. To observe the
+  # REAL app instead/as-well, uncomment the `lapis:80` target (requires the SRE
+  # stack to share opsapi-network — see ../README.md → "Observe the real app").
+  - job_name: opsapi
+    metrics_path: /metrics
+    scrape_interval: 5s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ["synthetic-opsapi:80"]
+        labels:
+          service: opsapi
+      # - targets: ["lapis:80"]
+      #   labels:
+      #     service: opsapi
+
+  # ── Infrastructure exporters ──────────────────────────────────────────────
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # ── Blackbox: external availability SLI (probe from outside the app) ──────
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://synthetic-opsapi:80/health   # demo app health
+          # - http://lapis:80/health             # real app health (when linked)
+        labels:
+          probe: availability
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ── OpenTelemetry Collector (its own + app-forwarded metrics) ─────────────
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]   # prometheus exporter on the collector
+
+  # ── Status page + self ────────────────────────────────────────────────────
+  - job_name: gatus
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["gatus:8080"]
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

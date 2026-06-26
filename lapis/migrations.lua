@@ -145,6 +145,16 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- My Income (tax_copilot feature) — manually-entered income source-of-truth
+local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
+
+-- Income Types (tax_copilot feature) — admin-managed catalogue of income sources
+local income_types_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-system") or {}
+
+-- Income Questionnaire cleanup — drop the bespoke storage (replaced by the
+-- dynamic Profile Builder questions; see dynamic-profile-builder.lua [38]).
+local income_questionnaire_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-questionnaire-cleanup") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1027,6 +1037,9 @@ local _migrations = {
     -- (a 0 violates the self/sprint FK on tasks created without a parent/sprint).
     ['760_kanban_drop_fk_defaults'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_project_migrations, 41),
+    -- [42] CRM billing link: adds customer_id/customer_uuid (soft ref) to kanban_projects.
+    ['762_kanban_projects_customer_link'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 42),
     -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
     -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
     ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
@@ -1359,6 +1372,13 @@ local _migrations = {
     ['501_tax_create_user_subscriptions']            = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 80),
     ['502_tax_add_user_subscriptions_indexes']       = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 81),
     ['503_tax_create_processed_apple_notifications'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 82),
+    -- Wizard tree depends on classification_profiles (created at 480), the
+    -- existing rules-pack seed rows (re-parented here), and
+    -- tax_user_profiles.default_profile_key (added at 496, source for the
+    -- one-time backfill into the join table). Registering after 503 puts
+    -- it safely past every direct dependency without splitting the
+    -- numbering convention used by the rest of the tax_copilot block.
+    ['504_profile_business_wizard_tree']             = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 37),
 
     -- =========================================================================
     -- CORE AUTH: Password reset tokens
@@ -1530,6 +1550,7 @@ local _migrations = {
     ['522_ts_create_approvals'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 3),
     ['523_ts_enrich_client_fields'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 4),
     ['524_ts_link_customer_task'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 5),
+    ['525_ts_entry_task_and_source'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_system_migrations, 6),
 
     -- Timesheet menu items (730-733): surface Timesheets in the sidebar
     ['730_seed_timesheet_menu_items'] = conditional_array(ProjectConfig.FEATURES.TIMESHEETS, timesheet_menu_items_migrations, 1),
@@ -1774,6 +1795,23 @@ local _migrations = {
     ['711_tax_statements_workflow_step_filed_backfill'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 84),
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
+
+    -- MY INCOME — manually-entered income source-of-truth
+    -- =========================================================================
+    ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
+    ['716_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
+
+    -- INCOME TYPES — admin-managed catalogue of income sources
+    -- =========================================================================
+    ['717_create_income_types'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 1),
+    ['718_income_types_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 2),
+    ['719_seed_income_types'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 3),
+
+    -- INCOME QUESTIONNAIRE — bespoke storage (720/721) replaced by Profile Builder
+    -- questions. 722 drops the now-unused table + column; 723 seeds the questions.
+    -- =========================================================================
+    ['722_drop_income_questionnaire_bespoke'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_cleanup_migrations, 1),
+    ['723_profile_seed_income_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 38),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

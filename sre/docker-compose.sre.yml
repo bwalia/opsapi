@@ -1,0 +1,279 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# OpsAPI · World-Class SRE stack (self-contained Docker demo)
+# ──────────────────────────────────────────────────────────────────────────────
+# One command (`make demo-up`) brings up the full reliability operating model:
+#   • Metrics  : Prometheus + recording/SLO/burn-rate rules + exporters
+#   • Logs     : Loki + Promtail
+#   • Traces   : Tempo + OpenTelemetry Collector
+#   • Alerting : Alertmanager (+ local webhook sink) with P1–P4 routing
+#   • Dashboards: Grafana (auto-provisioned, 3-pillar correlation)
+#   • Status   : Gatus public status page
+#   • Demo app : synthetic-opsapi emits OpsAPI's exact metric schema
+#   • Load     : k6 (profile: load) drives golden signals + error-budget burn
+#   • Infra    : demo Postgres/Redis so dependency SLOs + chaos tests are real
+#
+# Standalone by default. To observe the REAL OpsAPI app instead, see
+# README.md → "Observe the real app" (link this stack onto opsapi-network).
+# ──────────────────────────────────────────────────────────────────────────────
+name: opsapi-sre
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  # ── Synthetic OpsAPI (production-shaped /metrics) ──────────────────────────
+  synthetic-opsapi:
+    build: ./synthetic-target
+    container_name: sre-synthetic-opsapi
+    restart: unless-stopped
+    volumes:
+      - ./logs:/var/log/nginx          # promtail tails these as job=opsapi
+    networks: [sre-net]
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Metrics: Prometheus ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: sre-prometheus
+    restart: unless-stopped
+    ports: ["9091:9090"]              # 9091 to avoid clash with opsapi's inline prom (9090)
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'   # Tempo metrics_generator writes here
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Alerting: Alertmanager + local webhook sink ────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: sre-alertmanager
+    restart: unless-stopped
+    ports: ["9093:9093"]
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks: [sre-net]
+    logging: *default-logging
+
+  # Receives webhooks from Alertmanager + Gatus and echoes them to its logs.
+  # Stands in for PagerDuty/Slack so the demo needs zero credentials.
+  # `docker logs sre-alert-logger` shows every page/alert as it fires.
+  alert-logger:
+    image: mendhak/http-https-echo:31
+    container_name: sre-alert-logger
+    restart: unless-stopped
+    environment:
+      HTTP_PORT: "9000"
+      LOG_WITHOUT_NEWLINE: "true"
+      LOG_IGNORE_PATH: "/favicon.ico"
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Dashboards: Grafana ─────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: sre-grafana
+    restart: unless-stopped
+    ports: ["3012:3000"]              # 3012 to avoid clash with opsapi's inline grafana (3011)
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_FEATURE_TOGGLES_ENABLE: "traceqlEditor"
+      # Set to the wslproxy domain (https://sre-grafana.diytaxreturn.co.uk) when
+      # exposing via k3s/local-docker-wslproxy.yaml so login/redirects are correct.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3012}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, loki, tempo]
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Logs: Loki + Promtail ───────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: sre-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks: [sre-net]
+    logging: *default-logging
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    container_name: sre-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ./logs:/var/log/opsapi:ro                       # synthetic-opsapi nginx logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro    # all container logs
+    depends_on: [loki]
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Traces: Tempo + OpenTelemetry Collector ─────────────────────────────────
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: sre-tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo-config.yml
+    volumes:
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo_data:/var/tempo
+    networks: [sre-net]
+    logging: *default-logging
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    container_name: sre-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel/otel-collector-config.yml"]
+    volumes:
+      - ./otel-collector/otel-collector-config.yml:/etc/otel/otel-collector-config.yml:ro
+    ports:
+      - "4317:4317"      # OTLP gRPC (apps/load send spans here)
+      - "4318:4318"      # OTLP HTTP
+    depends_on: [tempo, loki]
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Exporters (saturation + dependency signals) ─────────────────────────────
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: sre-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /:/host:ro,rslave
+    networks: [sre-net]
+    logging: *default-logging
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: sre-cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [sre-net]
+    logging: *default-logging
+
+  # Demo Postgres/Redis so dependency SLOs, exporters and chaos tests are REAL.
+  demo-postgres:
+    image: postgres:14-alpine
+    container_name: sre-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-sre}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-sre}
+      POSTGRES_DB: ${PG_DB:-sre}
+    networks: [sre-net]
+    logging: *default-logging
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: sre-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${PG_USER:-sre}:${PG_PASSWORD:-sre}@demo-postgres:5432/${PG_DB:-sre}?sslmode=disable"
+    depends_on: [demo-postgres]
+    networks: [sre-net]
+    logging: *default-logging
+
+  demo-redis:
+    image: redis:7-alpine
+    container_name: sre-demo-redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    networks: [sre-net]
+    logging: *default-logging
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: sre-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: "redis://demo-redis:6379"
+    depends_on: [demo-redis]
+    networks: [sre-net]
+    logging: *default-logging
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: sre-blackbox-exporter
+    restart: unless-stopped
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Status page: Gatus ──────────────────────────────────────────────────────
+  gatus:
+    image: twinproduction/gatus:v5.13.0
+    container_name: sre-gatus
+    restart: unless-stopped
+    ports: ["8878:8080"]              # 8878 to avoid clash with opsapi's gatus (8877)
+    volumes:
+      - ./gatus:/config:ro
+      - gatus_data:/data
+    networks: [sre-net]
+    logging: *default-logging
+
+  # ── Load generator (profile: load) ──────────────────────────────────────────
+  # `make demo-load` runs this. Drives /, /slow and /error so the golden-signal
+  # dashboards populate and the error-budget visibly burns.
+  k6:
+    image: grafana/k6:0.53.0
+    container_name: sre-k6
+    profiles: ["load"]
+    command: ["run", "/scripts/k6-load.js"]
+    environment:
+      TARGET: ${K6_TARGET:-http://synthetic-opsapi:80}
+      K6_DURATION: ${K6_DURATION:-5m}
+      K6_VUS: ${K6_VUS:-10}
+      K6_ERROR_RATE: ${K6_ERROR_RATE:-0.08}     # ~8% to burn the 0.05% budget fast
+      K6_SLOW_RATE: ${K6_SLOW_RATE:-0.15}
+      K6_OTLP_ENDPOINT: ${K6_OTLP_ENDPOINT:-otel-collector:4317}
+    volumes:
+      - ./scripts/load:/scripts:ro
+    depends_on: [synthetic-opsapi]
+    networks: [sre-net]
+    logging: *default-logging
+
+networks:
+  sre-net:
+    name: opsapi-sre-net
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  tempo_data:
+  gatus_data:

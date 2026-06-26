@@ -124,7 +124,7 @@ return function(app)
     -- ============================================================
 
     app:get("/api/v2/invoices/dashboard/stats", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "read", function(self)
             local stats = InvoiceQueries.getDashboardStats(self.namespace.id)
             return api_response(200, stats)
         end)
@@ -136,7 +136,7 @@ return function(app)
 
     -- GET /api/v2/invoices/tax-rates - List tax rates
     app:get("/api/v2/invoices/tax-rates", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("tax_rates_config", "read", function(self)
             local rates = InvoiceQueries.getTaxRates(self.namespace.id)
             return api_response(200, rates)
         end)
@@ -144,7 +144,7 @@ return function(app)
 
     -- POST /api/v2/invoices/tax-rates - Create tax rate
     app:post("/api/v2/invoices/tax-rates", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("tax_rates_config", "create", function(self)
             local body = parse_json_body()
 
             local valid, err = validate_required(body, { "name", "rate" })
@@ -160,9 +160,9 @@ return function(app)
 
     -- PUT /api/v2/invoices/tax-rates/:uuid - Update tax rate
     app:put("/api/v2/invoices/tax-rates/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("tax_rates_config", "update", function(self)
             local body = parse_json_body()
-            local rate, err = InvoiceQueries.updateTaxRate(self.params.uuid, body)
+            local rate, err = InvoiceQueries.updateTaxRate(self.params.uuid, body, self.namespace.id)
             if not rate then
                 return api_response(404, nil, err)
             end
@@ -172,8 +172,8 @@ return function(app)
 
     -- DELETE /api/v2/invoices/tax-rates/:uuid - Deactivate tax rate
     app:delete("/api/v2/invoices/tax-rates/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local ok, err = InvoiceQueries.deleteTaxRate(self.params.uuid)
+        NamespaceMiddleware.requirePermission("tax_rates_config", "delete", function(self)
+            local ok, err = InvoiceQueries.deleteTaxRate(self.params.uuid, self.namespace.id)
             if not ok then
                 return api_response(404, nil, err)
             end
@@ -187,7 +187,7 @@ return function(app)
 
     -- POST /api/v2/invoices/from-timesheet - Create invoice from approved timesheet
     app:post("/api/v2/invoices/from-timesheet", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "create", function(self)
             local body = parse_json_body()
 
             local ts_ref = body.timesheet_uuid or body.timesheet_id
@@ -223,7 +223,7 @@ return function(app)
     -- billable work over a period (read-only; nothing is created).
     -- Query: customer_uuid (required), from, to, hourly_rate, currency
     app:get("/api/v2/invoices/customer-billable", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "read", function(self)
             local customer_uuid = self.params.customer_uuid
             if not customer_uuid or customer_uuid == "" then
                 return api_response(400, nil, "customer_uuid is required")
@@ -243,7 +243,7 @@ return function(app)
     -- a customer's un-invoiced billable hours over a period.
     -- Body: { customer_uuid (required), period_start, period_end, hourly_rate, due_date, currency }
     app:post("/api/v2/invoices/from-customer", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "create", function(self)
             local body = parse_json_body()
 
             local customer_uuid = body.customer_uuid
@@ -278,7 +278,7 @@ return function(app)
 
     -- GET /api/v2/invoices - List invoices
     app:get("/api/v2/invoices", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "read", function(self)
             local params = {
                 page = tonumber(self.params.page) or 1,
                 perPage = tonumber(self.params.perPage) or 20,
@@ -309,7 +309,7 @@ return function(app)
 
     -- POST /api/v2/invoices - Create invoice
     app:post("/api/v2/invoices", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "create", function(self)
             local body = parse_json_body()
 
             -- Require at least customer_name or account_id
@@ -331,15 +331,34 @@ return function(app)
                 end
             end
 
-            local result = InvoiceQueries.create(body)
+            -- Reject malformed line_items (must be an array of objects), otherwise
+            -- indexing a non-table element inside create() raises a 500.
+            if body.line_items ~= nil then
+                if type(body.line_items) ~= "table" then
+                    return api_response(400, nil, "line_items must be an array")
+                end
+                for _, it in ipairs(body.line_items) do
+                    if type(it) ~= "table" then
+                        return api_response(400, nil, "each line item must be an object")
+                    end
+                end
+            end
+
+            -- Wrap create: malformed date/number fields hit Postgres casts and would
+            -- otherwise surface as a raw 500 instead of a clean validation error.
+            local ok, result = pcall(InvoiceQueries.create, body)
+            if not ok or not result then
+                ngx.log(ngx.ERR, "[Invoices] create failed: ", tostring(result))
+                return api_response(400, nil, "Could not create invoice — check the submitted fields (dates, amounts, line items)")
+            end
             return api_response(201, result.data)
         end)
     ))
 
     -- GET /api/v2/invoices/:uuid - Get invoice with line items and payments
     app:get("/api/v2/invoices/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local invoice = InvoiceQueries.get(self.params.uuid)
+        NamespaceMiddleware.requirePermission("invoices", "read", function(self)
+            local invoice = InvoiceQueries.get(self.params.uuid, self.namespace.id)
             if not invoice then
                 return api_response(404, nil, "Invoice not found")
             end
@@ -349,9 +368,9 @@ return function(app)
 
     -- PUT /api/v2/invoices/:uuid - Update invoice
     app:put("/api/v2/invoices/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
             local body = parse_json_body()
-            local invoice, err = InvoiceQueries.update(self.params.uuid, body)
+            local invoice, err = InvoiceQueries.update(self.params.uuid, body, self.namespace.id)
             if not invoice then
                 local status = err == "Invoice not found" and 404 or 400
                 return api_response(status, nil, err)
@@ -362,8 +381,8 @@ return function(app)
 
     -- DELETE /api/v2/invoices/:uuid - Soft delete (draft only)
     app:delete("/api/v2/invoices/:uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local ok, err = InvoiceQueries.delete(self.params.uuid)
+        NamespaceMiddleware.requirePermission("invoices", "delete", function(self)
+            local ok, err = InvoiceQueries.delete(self.params.uuid, self.namespace.id)
             if not ok then
                 local status = err == "Invoice not found" and 404 or 400
                 return api_response(status, nil, err)
@@ -378,8 +397,8 @@ return function(app)
 
     -- POST /api/v2/invoices/:uuid/send - Mark as sent
     app:post("/api/v2/invoices/:uuid/send", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local invoice, err = InvoiceQueries.send(self.params.uuid)
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
+            local invoice, err = InvoiceQueries.send(self.params.uuid, self.namespace.id)
             if not invoice then
                 local status = err == "Invoice not found" and 404 or 400
                 return api_response(status, nil, err)
@@ -390,8 +409,8 @@ return function(app)
 
     -- POST /api/v2/invoices/:uuid/void - Void invoice
     app:post("/api/v2/invoices/:uuid/void", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local invoice, err = InvoiceQueries.void(self.params.uuid)
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
+            local invoice, err = InvoiceQueries.void(self.params.uuid, self.namespace.id)
             if not invoice then
                 local status = err == "Invoice not found" and 404 or 400
                 return api_response(status, nil, err)
@@ -406,11 +425,11 @@ return function(app)
 
     -- POST /api/v2/invoices/:uuid/items - Add line item
     app:post("/api/v2/invoices/:uuid/items", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
             local body = parse_json_body()
 
             -- Look up the invoice by UUID to get internal ID
-            local invoice = InvoiceQueries.get(self.params.uuid)
+            local invoice = InvoiceQueries.get(self.params.uuid, self.namespace.id)
             if not invoice then
                 return api_response(404, nil, "Invoice not found")
             end
@@ -427,9 +446,9 @@ return function(app)
 
     -- PUT /api/v2/invoices/items/:item_uuid - Update line item
     app:put("/api/v2/invoices/items/:item_uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
             local body = parse_json_body()
-            local item, err = InvoiceQueries.updateLineItem(self.params.item_uuid, body)
+            local item, err = InvoiceQueries.updateLineItem(self.params.item_uuid, body, self.namespace.id)
             if not item then
                 return api_response(404, nil, err)
             end
@@ -439,8 +458,8 @@ return function(app)
 
     -- DELETE /api/v2/invoices/items/:item_uuid - Delete line item
     app:delete("/api/v2/invoices/items/:item_uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local ok, err = InvoiceQueries.deleteLineItem(self.params.item_uuid)
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
+            local ok, err = InvoiceQueries.deleteLineItem(self.params.item_uuid, self.namespace.id)
             if not ok then
                 return api_response(404, nil, err)
             end
@@ -454,7 +473,7 @@ return function(app)
 
     -- POST /api/v2/invoices/:uuid/payments - Record payment
     app:post("/api/v2/invoices/:uuid/payments", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
+        NamespaceMiddleware.requirePermission("payments", "create", function(self)
             local body = parse_json_body()
 
             local valid, err = validate_required(body, { "amount" })
@@ -463,7 +482,7 @@ return function(app)
             end
 
             body.invoice_uuid = self.params.uuid
-            local payment, pay_err = InvoiceQueries.recordPayment(body)
+            local payment, pay_err = InvoiceQueries.recordPayment(body, self.namespace.id)
             if not payment then
                 return api_response(400, nil, pay_err)
             end
@@ -473,8 +492,8 @@ return function(app)
 
     -- GET /api/v2/invoices/:uuid/payments - List payments
     app:get("/api/v2/invoices/:uuid/payments", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local invoice = InvoiceQueries.get(self.params.uuid)
+        NamespaceMiddleware.requirePermission("payments", "read", function(self)
+            local invoice = InvoiceQueries.get(self.params.uuid, self.namespace.id)
             if not invoice then
                 return api_response(404, nil, "Invoice not found")
             end
@@ -485,8 +504,8 @@ return function(app)
 
     -- DELETE /api/v2/invoices/payments/:payment_uuid - Delete payment
     app:delete("/api/v2/invoices/payments/:payment_uuid", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local ok, err = InvoiceQueries.deletePayment(self.params.payment_uuid)
+        NamespaceMiddleware.requirePermission("payments", "delete", function(self)
+            local ok, err = InvoiceQueries.deletePayment(self.params.payment_uuid, self.namespace.id)
             if not ok then
                 return api_response(404, nil, err)
             end

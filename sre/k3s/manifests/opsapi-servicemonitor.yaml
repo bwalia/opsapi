@@ -1,0 +1,50 @@
+# Tell Prometheus to scrape the OpsAPI app's /metrics in k3s.
+# Assumes the app Service is labelled app=diytaxreturn-lapis (see
+# devops/helm-charts/diytaxreturn-lapis). Adjust the selector/namespace to match
+# your release. Also probes /health externally via a Probe CR for the
+# availability SLI (blackbox-exporter must be installed).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: opsapi
+  namespace: monitoring
+  labels:
+    app: opsapi-sre
+    release: monitoring
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app: diytaxreturn-lapis
+  endpoints:
+    - port: http               # named port on the Service; rename if different
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: opsapi
+        - targetLabel: service
+          replacement: opsapi
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: opsapi-health
+  namespace: monitoring
+  labels:
+    app: opsapi-sre
+    release: monitoring
+spec:
+  jobName: blackbox-http
+  interval: 30s
+  module: http_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        - http://diytaxreturn-lapis.opsapi.svc.cluster.local/health
+      labels:
+        probe: availability

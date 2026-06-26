@@ -1,0 +1,118 @@
+# SLO burn-rate + dependency alerts for k3s (PrometheusRule CR).
+# Mirrors ../../prometheus/rules/slo-burn-rate.rules.yml and the dependency/
+# security groups of infra-alerts.rules.yml. Availability SLO 99.95%
+# (budget 0.0005); latency SLO 99% (<200ms, budget 0.01).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: opsapi-slo
+  namespace: monitoring
+  labels:
+    app: opsapi-sre
+    release: monitoring
+spec:
+  groups:
+    - name: slo_availability_sli
+      interval: 30s
+      rules:
+        - record: opsapi:sli_error:ratio_rate5m
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[5m])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[5m])), 1)
+        - record: opsapi:sli_error:ratio_rate30m
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[30m])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[30m])), 1)
+        - record: opsapi:sli_error:ratio_rate1h
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[1h])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[1h])), 1)
+        - record: opsapi:sli_error:ratio_rate2h
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[2h])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[2h])), 1)
+        - record: opsapi:sli_error:ratio_rate6h
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[6h])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[6h])), 1)
+        - record: opsapi:sli_error:ratio_rate1d
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[1d])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[1d])), 1)
+        - record: opsapi:sli_error:ratio_rate3d
+          expr: sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[3d])) / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[3d])), 1)
+        - record: opsapi:error_budget_remaining:ratio
+          expr: |
+            1 - ((sum(rate(nginx_http_requests_total{job="opsapi",status=~"5.."}[30d]))
+              / clamp_min(sum(rate(nginx_http_requests_total{job="opsapi"}[30d])), 1)) / 0.0005)
+
+    - name: slo_availability_burn_rate
+      interval: 30s
+      rules:
+        - alert: ErrorBudgetBurnFast
+          expr: opsapi:sli_error:ratio_rate1h > (14.4 * 0.0005) and opsapi:sli_error:ratio_rate5m > (14.4 * 0.0005)
+          labels: { severity: page, priority: P1, slo: availability }
+          annotations:
+            summary: "Availability error budget burning FAST (14.4x)"
+            description: "~2% of the 30d budget will burn in 1h."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+        - alert: ErrorBudgetBurnMedium
+          expr: opsapi:sli_error:ratio_rate6h > (6 * 0.0005) and opsapi:sli_error:ratio_rate30m > (6 * 0.0005)
+          labels: { severity: page, priority: P2, slo: availability }
+          annotations:
+            summary: "Availability error budget burning (6x)"
+            description: "Sustained burn — investigate now."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+        - alert: ErrorBudgetBurnSlow
+          expr: opsapi:sli_error:ratio_rate1d > (3 * 0.0005) and opsapi:sli_error:ratio_rate2h > (3 * 0.0005)
+          labels: { severity: ticket, priority: P3, slo: availability }
+          annotations:
+            summary: "Availability error budget burning slowly (3x)"
+            description: "Fix this sprint before the budget erodes."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+        - alert: ErrorBudgetExhausted
+          expr: opsapi:error_budget_remaining:ratio <= 0
+          for: 5m
+          labels: { severity: page, priority: P2, slo: availability }
+          annotations:
+            summary: "30-day availability error budget EXHAUSTED"
+            description: "Enact the release freeze (see runbook)."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/error-budget-burn.md"
+
+    - name: dependency_availability
+      interval: 30s
+      rules:
+        - alert: PostgresDown
+          expr: pg_up == 0
+          for: 1m
+          labels: { severity: page, priority: P1, category: availability }
+          annotations:
+            summary: "PostgreSQL is down"
+            description: "pg_up == 0 for >1m."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/postgres-saturation.md"
+        - alert: RedisDown
+          expr: redis_up == 0
+          for: 1m
+          labels: { severity: page, priority: P2, category: availability }
+          annotations:
+            summary: "Redis is down"
+            description: "redis_up == 0 for >1m."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/redis-saturation.md"
+        - alert: BlackboxProbeFailed
+          expr: probe_success == 0
+          for: 2m
+          labels: { severity: page, priority: P1, category: availability }
+          annotations:
+            summary: "External probe failing: {{ $labels.instance }}"
+            description: "Blackbox probe failing for >2m."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/service-down.md"
+
+    - name: business_security
+      interval: 1m
+      rules:
+        - alert: HighPaymentFailureRate
+          expr: |
+            sum(rate(ecommerce_payment_operations_total{status!="success"}[10m]))
+            / clamp_min(sum(rate(ecommerce_payment_operations_total[10m])), 1) > 0.1
+          for: 5m
+          labels: { severity: page, priority: P1, category: business }
+          annotations:
+            summary: "Payment failure rate above 10%"
+            description: "Revenue impact: {{ $value | humanizePercentage }} failing."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/payment-failures.md"
+        - alert: DistributedDDoSAttack
+          expr: sum(rate(nginx_http_requests_total[1m])) > 10000
+          for: 5m
+          labels: { severity: page, priority: P1, category: security }
+          annotations:
+            summary: "Possible distributed DDoS detected"
+            description: "Total request rate {{ $value }} req/s."
+            runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/ddos-attack.md"

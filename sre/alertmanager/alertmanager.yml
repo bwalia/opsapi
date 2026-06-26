@@ -1,0 +1,80 @@
+# Alertmanager — incident routing (Layer 5)
+# Routes by `severity` (page / ticket) and `priority` (P1..P4). Receivers are
+# env-driven placeholders so no secrets are committed: set SLACK_WEBHOOK_URL /
+# PAGERDUTY_ROUTING_KEY / SMTP_* via the compose env and uncomment the matching
+# config blocks. The default "demo" receiver is a local webhook sink that simply
+# logs alerts, so the demo works out-of-the-box with zero credentials.
+global:
+  resolve_timeout: 5m
+  # smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
+  # smtp_from: 'alerts@opsapi.example'
+  # smtp_auth_username: '${SMTP_USER}'
+  # smtp_auth_password: '${SMTP_PASSWORD}'
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: demo-webhook
+  group_by: ['alertname', 'slo', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # P1/page → wake someone immediately (PagerDuty/OnCall), and mirror to Slack.
+    - matchers: ['severity = "page"']
+      receiver: pager
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: true
+    - matchers: ['severity = "page"']
+      receiver: slack-critical
+      continue: true
+    # Tickets → Slack warnings channel only (no paging).
+    - matchers: ['severity = "ticket"']
+      receiver: slack-warnings
+
+# Suppress noise: if the service is down, don't also page for latency/burn/etc.
+inhibit_rules:
+  - source_matchers: ['alertname = "OpsAPIServiceDown"']
+    target_matchers: ['severity =~ "page|ticket"']
+    equal: ['service']
+  - source_matchers: ['alertname = "PostgresDown"']
+    target_matchers: ['category = "database"']
+  # A firing page for an SLO inhibits the lower-severity ticket for the same SLO.
+  - source_matchers: ['severity = "page"']
+    target_matchers: ['severity = "ticket"']
+    equal: ['slo']
+
+receivers:
+  # Default: local webhook sink (the `alert-logger` container in the demo).
+  - name: demo-webhook
+    webhook_configs:
+      - url: 'http://alert-logger:9000/alert'
+        send_resolved: true
+
+  - name: pager
+    webhook_configs:
+      - url: 'http://alert-logger:9000/page'
+        send_resolved: true
+    # pagerduty_configs:
+    #   - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+    #     severity: '{{ if eq .CommonLabels.priority "P1" }}critical{{ else }}error{{ end }}'
+
+  - name: slack-critical
+    webhook_configs:
+      - url: 'http://alert-logger:9000/slack-critical'
+        send_resolved: true
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#incidents'
+    #     title: '[{{ .CommonLabels.priority }}] {{ .CommonAnnotations.summary }}'
+    #     text: "{{ range .Alerts }}{{ .Annotations.description }}\nRunbook: {{ .Annotations.runbook_url }}\n{{ end }}"
+
+  - name: slack-warnings
+    webhook_configs:
+      - url: 'http://alert-logger:9000/slack-warnings'
+        send_resolved: true
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#alerts'

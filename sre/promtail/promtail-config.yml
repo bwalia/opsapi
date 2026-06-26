@@ -1,0 +1,63 @@
+# Promtail — ships logs into Loki (Layer 3).
+# Two sources:
+#   1. OpsAPI nginx logs mounted from ../../lapis/logs (access + error)
+#   2. All Docker container logs via the Docker service-discovery
+# nginx access lines are parsed to extract status/method so logs are queryable
+# alongside metrics (e.g. {job="opsapi"} |= "500") and correlate with traces.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ── OpsAPI nginx logs (mounted volume) ─────────────────────────────────────
+  - job_name: opsapi-nginx
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: opsapi
+          service: opsapi
+          log_type: nginx-access
+          __path__: /var/log/opsapi/access.log
+      - targets: [localhost]
+        labels:
+          job: opsapi
+          service: opsapi
+          log_type: nginx-error
+          __path__: /var/log/opsapi/error.log
+    pipeline_stages:
+      # Best-effort parse of the combined access log to label status + method.
+      - match:
+          selector: '{log_type="nginx-access"}'
+          stages:
+            - regex:
+                expression: '"(?P<method>\S+) (?P<path>\S+) [^"]*" (?P<status>\d{3})'
+            - labels:
+                method:
+                status:
+            - metrics:
+                opsapi_promtail_access_lines:
+                  type: Counter
+                  description: nginx access lines parsed by promtail
+                  config:
+                    action: inc
+
+  # ── All container logs (Docker SD) ─────────────────────────────────────────
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: compose_service
+      - target_label: job
+        replacement: docker

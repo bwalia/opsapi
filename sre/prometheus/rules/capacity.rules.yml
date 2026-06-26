@@ -1,0 +1,87 @@
+# Capacity planning (Layer 9) — forecasting recording rules + headroom alerts.
+# predict_linear() extrapolates the recent trend forward; pair with the
+# capacity-planning dashboard to compare current vs predicted vs threshold.
+# See ../../capacity/capacity-planning.md for the method and review cadence.
+groups:
+  - name: capacity_forecasts
+    interval: 1m
+    rules:
+      # ── Disk: seconds until full, and projected utilisation ──────────────
+      - record: opsapi:disk_will_fill_seconds
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 0)
+          / clamp_min(
+              deriv(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h]) * -1, 1)
+      - record: opsapi:disk_util_predicted_30d:ratio
+        expr: |
+          1 - (
+            predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[7d], 30*24*3600)
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}
+          )
+
+      # ── Memory: projected utilisation in 7 days ──────────────────────────
+      - record: opsapi:mem_util_predicted_7d:ratio
+        expr: |
+          1 - (
+            predict_linear(node_memory_MemAvailable_bytes[3d], 7*24*3600)
+            / node_memory_MemTotal_bytes
+          )
+
+      # ── Database growth: projected size in 30 days (bytes) ───────────────
+      - record: opsapi:pg_database_size_predicted_30d_bytes
+        expr: predict_linear(pg_database_size_bytes[7d], 30*24*3600)
+
+      # ── Traffic growth: projected req/s in 30 days ───────────────────────
+      - record: opsapi:traffic_predicted_30d:rate
+        expr: predict_linear(opsapi:http_requests:rate5m[7d], 30*24*3600)
+
+  - name: capacity_alerts
+    interval: 1m
+    rules:
+      - alert: DiskWillFillIn4Days
+        expr: opsapi:disk_will_fill_seconds < (4 * 24 * 3600) and opsapi:disk_will_fill_seconds > 0
+        for: 30m
+        labels:
+          severity: ticket
+          priority: P3
+          signal: saturation
+        annotations:
+          summary: "Disk projected to fill within 4 days"
+          description: "At the current trend {{ $labels.mountpoint }} fills in ~{{ $value | humanizeDuration }}."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/disk-capacity.md"
+
+      - alert: DiskSpaceLow
+        expr: opsapi:node_disk_utilization:ratio > 0.85
+        for: 10m
+        labels:
+          severity: ticket
+          priority: P3
+          signal: saturation
+        annotations:
+          summary: "Disk utilisation > 85%"
+          description: "{{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/disk-capacity.md"
+
+      - alert: MemoryUtilizationHigh
+        expr: opsapi:node_memory_utilization:ratio > 0.90
+        for: 10m
+        labels:
+          severity: ticket
+          priority: P3
+          signal: saturation
+        annotations:
+          summary: "Memory utilisation > 90%"
+          description: "Host memory at {{ $value | humanizePercentage }} — risk of OOM."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/disk-capacity.md"
+
+      - alert: PostgresConnectionsNearMax
+        expr: opsapi:pg_connection_utilization:ratio > 0.80
+        for: 5m
+        labels:
+          severity: ticket
+          priority: P3
+          signal: saturation
+        annotations:
+          summary: "PostgreSQL connections > 80% of max"
+          description: "Connection pool at {{ $value | humanizePercentage }} of max_connections."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/sre/runbooks/postgres-saturation.md"

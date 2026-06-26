@@ -231,6 +231,8 @@ return function(app)
                 cover_image_url = data.cover_image_url,
                 start_date = data.start_date,
                 due_date = data.due_date,
+                customer_id = data.customer_id,
+                customer_uuid = data.customer_uuid,
                 owner_user_uuid = user.uuid,
                 settings = data.settings and cJson.encode(data.settings) or "{}",
                 metadata = data.metadata and cJson.encode(data.metadata) or "{}"
@@ -298,7 +300,8 @@ return function(app)
             local update_params = {}
             local allowed_fields = {
                 "name", "description", "status", "visibility", "color", "icon",
-                "cover_image_url", "start_date", "due_date", "settings", "metadata"
+                "cover_image_url", "start_date", "due_date", "settings", "metadata",
+                "customer_id", "customer_uuid"
             }
 
             for _, field in ipairs(allowed_fields) do
