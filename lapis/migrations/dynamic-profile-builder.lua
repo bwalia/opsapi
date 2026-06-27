@@ -2259,17 +2259,21 @@ return {
         local has_key = "has_income_sources"
         local q1 = db.select("id FROM profile_questions WHERE question_key = ?", has_key)
         if q1 and #q1 > 0 then
+            -- NOTE: the label text contains a '?', and db.query counts every
+            -- '?' in the query string as a bind placeholder. Pass the label as
+            -- a parameter (not a literal) so its '?' isn't miscounted, which
+            -- otherwise throws "db.interpolate_query: missing replacement N".
             db.query([[
-                UPDATE profile_questions SET category_id = ?, label = 'Do you have any income sources?',
+                UPDATE profile_questions SET category_id = ?, label = ?,
                     question_type = 'boolean', is_required = true, display_order = 1,
                     is_active = true, is_archived = false, updated_at = NOW()
                 WHERE question_key = ?
-            ]], cat_id, has_key)
+            ]], cat_id, "Do you have any income sources?", has_key)
         else
             db.query([[
                 INSERT INTO profile_questions (uuid, category_id, question_key, label, question_type, is_required, display_order, is_active, version, created_at, updated_at)
-                VALUES (?, ?, ?, 'Do you have any income sources?', 'boolean', true, 1, true, 1, NOW(), NOW())
-            ]], MigrationUtils.generateUUID(), cat_id, has_key)
+                VALUES (?, ?, ?, ?, 'boolean', true, 1, true, 1, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), cat_id, has_key, "Do you have any income sources?")
         end
 
         -- Q2: multi-select of income types; options sourced from the catalogue
@@ -2277,17 +2281,18 @@ return {
         local cfg = '{"options_source":"income_types"}'
         local q2 = db.select("id FROM profile_questions WHERE question_key = ?", sel_key)
         if q2 and #q2 > 0 then
+            -- Label passed as a parameter (contains a '?') — see note above.
             db.query([[
-                UPDATE profile_questions SET category_id = ?, label = 'Which income types apply to you?',
+                UPDATE profile_questions SET category_id = ?, label = ?,
                     question_type = 'multi_select', is_required = false, is_multi_value = true,
                     display_order = 2, config_json = ?, is_active = true, is_archived = false, updated_at = NOW()
                 WHERE question_key = ?
-            ]], cat_id, cfg, sel_key)
+            ]], cat_id, "Which income types apply to you?", cfg, sel_key)
         else
             db.query([[
                 INSERT INTO profile_questions (uuid, category_id, question_key, label, question_type, is_required, is_multi_value, display_order, config_json, is_active, version, created_at, updated_at)
-                VALUES (?, ?, ?, 'Which income types apply to you?', 'multi_select', false, true, 2, ?, true, 1, NOW(), NOW())
-            ]], MigrationUtils.generateUUID(), cat_id, sel_key, cfg)
+                VALUES (?, ?, ?, ?, 'multi_select', false, true, 2, ?, true, 1, NOW(), NOW())
+            ]], MigrationUtils.generateUUID(), cat_id, sel_key, "Which income types apply to you?", cfg)
         end
 
         -- Visibility rule: show Q2 only when Q1 = true

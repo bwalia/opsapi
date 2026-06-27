@@ -19,10 +19,19 @@ function MigrationUtils.generateUUID()
     local random = math.random
     local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
 
-    return string.gsub(template, "[xy]", function(c)
+    -- string.gsub returns TWO values: the result string AND the substitution
+    -- count (31 for this template). Returning it directly leaks that count as a
+    -- second return value, so any caller that inlines generateUUID() among other
+    -- db.query params has every following bind shifted by one — e.g.
+    -- `db.query("... VALUES (?, ?, ?)", generateUUID(), cat_id, key)` binds
+    -- (uuid, 31, cat_id) instead of (uuid, cat_id, key), so category_id=31 and
+    -- the fk_pq_category foreign key fails. Assign to a local so only the string
+    -- is returned.
+    local uuid = string.gsub(template, "[xy]", function(c)
         local v = (c == "x") and random(0, 15) or random(8, 11)
         return string.format("%x", v)
     end)
+    return uuid
 end
 
 -- Get current timestamp in SQL format
