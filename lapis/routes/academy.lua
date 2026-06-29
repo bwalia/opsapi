@@ -26,6 +26,7 @@
 local cJson = require("cjson")
 local CourseQueries = require "queries.CourseQueries"
 local LessonQueries = require "queries.LessonQueries"
+local EnrollmentQueries = require "queries.EnrollmentQueries"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
@@ -36,16 +37,37 @@ local LESSON_STATUS = { draft = true, published = true }
 
 return function(app)
     -- Parse a JSON or form-encoded body into a table.
+    -- Large bodies (e.g. a lesson's rich content_html) exceed
+    -- client_body_buffer_size, so nginx spills them to a temp file. In that case
+    -- get_post_args()/get_body_data() return nothing from memory, so we fall back
+    -- to reading the body file and parsing it ourselves (JSON, then urlencoded).
     local function parse_body()
         ngx.req.read_body()
+
+        -- Fast path: small form body kept in memory.
         local post_args = ngx.req.get_post_args()
         if post_args and next(post_args) then return post_args end
-        local ok, result = pcall(function()
-            local body = ngx.req.get_body_data()
-            if not body or body == "" then return {} end
-            return cJson.decode(body)
-        end)
-        if ok and type(result) == "table" then return result end
+
+        -- Body may be in memory (small JSON) or spilled to a temp file (large).
+        local body = ngx.req.get_body_data()
+        if not body or body == "" then
+            local path = ngx.req.get_body_file()
+            if path then
+                local f = io.open(path, "rb")
+                if f then
+                    body = f:read("*a")
+                    f:close()
+                end
+            end
+        end
+        if not body or body == "" then return {} end
+
+        -- JSON first, then urlencoded form fallback.
+        local ok, decoded = pcall(cJson.decode, body)
+        if ok and type(decoded) == "table" then return decoded end
+
+        local args = ngx.decode_args(body)
+        if type(args) == "table" then return args end
         return {}
     end
 
@@ -325,4 +347,67 @@ return function(app)
         for _, l in ipairs(lessons) do table.insert(ls, public_lesson(l)) end
         return { status = 200, json = public_course(course, ls) }
     end)
+
+    ---------------------------------------------------------------------------
+    -- LEARNER: enrollment (auth required; namespace by slug). Responses use the
+    -- flat shapes the learner site expects (not the {success,data} envelope).
+    ---------------------------------------------------------------------------
+
+    -- Enroll the current user in a published course.
+    app:post("/api/v2/public/academy/:namespace/courses/:slug/enroll",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            if not self.current_user or not self.current_user.uuid then
+                return api_response(401, nil, "Authentication required")
+            end
+            local course = CourseQueries.getBySlug(ns.id, self.params.slug)
+            if not course or course.status ~= "published" then
+                return api_response(404, nil, "Course not found")
+            end
+            local ok = pcall(EnrollmentQueries.enroll, ns.id, course.id, self.current_user.uuid)
+            if not ok then
+                ngx.log(ngx.ERR, "[academy] enroll failed for course ", course.uuid)
+                return { status = 500, json = { enrolled = false, error = "Could not enroll" } }
+            end
+            return {
+                status = 201,
+                json = { enrolled = true, course_id = course.uuid, message = "Enrolled successfully" },
+            }
+        end))
+
+    -- Whether the current user is enrolled in a course.
+    app:get("/api/v2/public/academy/:namespace/courses/:slug/enrollment",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            local course = CourseQueries.getBySlug(ns.id, self.params.slug)
+            if not course then return { status = 200, json = { enrolled = false } } end
+            local uuid = self.current_user and self.current_user.uuid
+            local enrolled = uuid ~= nil and EnrollmentQueries.isEnrolled(course.id, uuid)
+            return { status = 200, json = { enrolled = enrolled or false, course_id = course.uuid } }
+        end))
+
+    -- Courses the current user is enrolled in (with published lessons).
+    app:get("/api/v2/public/academy/:namespace/enrollments/me",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            local uuid = self.current_user and self.current_user.uuid
+            local courses = uuid and EnrollmentQueries.listCoursesForUser(ns.id, uuid) or {}
+
+            local ids = {}
+            for _, c in ipairs(courses) do table.insert(ids, c.id) end
+            local lessons_by_course = LessonQueries.listByCourseIds(ids, { published_only = true })
+
+            local out = {}
+            for _, c in ipairs(courses) do
+                local ls = {}
+                for _, l in ipairs(lessons_by_course[c.id] or {}) do
+                    table.insert(ls, public_lesson(l))
+                end
+                table.insert(out, public_course(c, ls))
+            end
+            return { status = 200, json = { courses = out, count = #out } }
+        end))
 end
