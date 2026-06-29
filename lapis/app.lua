@@ -517,6 +517,7 @@ load_if("accounting", "routes.accounting")
 -- ACADEMY (LMS: courses, lessons, rich content)
 -- ============================================
 load_if("academy", "routes.academy")
+load_if("academy", "routes.academy-billing")
 
 -- ============================================
 -- PROJECT MODULE ROUTES (auto-loaded from /projects/)

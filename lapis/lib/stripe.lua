@@ -348,6 +348,49 @@ function Stripe:update_price(price_id, fields)
 end
 
 -- =========================================================================
+-- Connect (Express accounts) — academy creator marketplace.
+-- Charges use destination charges (transfer_data.destination) on the PLATFORM
+-- account, so we only ever need the connected account id — no Stripe-Account
+-- header and no per-account secret keys.
+-- =========================================================================
+
+-- Create an Express connected account for a creator.
+-- options: email, country, business_type, metadata, idempotency_key.
+function Stripe:create_account(options)
+    options = options or {}
+    local data = {
+        type = "express",
+        capabilities = {
+            transfers = { requested = true },
+            card_payments = { requested = true },
+        },
+    }
+    if options.email and options.email ~= "" then data.email = options.email end
+    if options.country and options.country ~= "" then data.country = options.country end
+    if options.business_type then data.business_type = options.business_type end
+    if options.metadata then data.metadata = options.metadata end
+    return self:_request("POST", "/accounts", data, options.idempotency_key)
+end
+
+-- Create an onboarding link for an Express account.
+-- options: account (required), return_url, refresh_url, type (default account_onboarding).
+function Stripe:create_account_link(options)
+    options = options or {}
+    local data = {
+        account = options.account,
+        return_url = options.return_url,
+        refresh_url = options.refresh_url,
+        type = options.type or "account_onboarding",
+    }
+    return self:_request("POST", "/account_links", data)
+end
+
+-- Retrieve a connected account (to read details_submitted / charges_enabled).
+function Stripe:retrieve_account(account_id)
+    return self:_request("GET", "/accounts/" .. account_id, nil)
+end
+
+-- =========================================================================
 -- Webhook signature verification (module-level — runs before we know the
 -- connected account, so it does not need a client instance)
 -- =========================================================================
