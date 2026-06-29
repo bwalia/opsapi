@@ -27,6 +27,7 @@ local cJson = require("cjson")
 local CourseQueries = require "queries.CourseQueries"
 local LessonQueries = require "queries.LessonQueries"
 local EnrollmentQueries = require "queries.EnrollmentQueries"
+local EntitlementQueries = require "queries.EntitlementQueries"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
@@ -384,8 +385,10 @@ return function(app)
             local course = CourseQueries.getBySlug(ns.id, self.params.slug)
             if not course then return { status = 200, json = { enrolled = false } } end
             local uuid = self.current_user and self.current_user.uuid
-            local enrolled = uuid ~= nil and EnrollmentQueries.isEnrolled(course.id, uuid)
-            return { status = 200, json = { enrolled = enrolled or false, course_id = course.uuid } }
+            -- "enrolled" here means "has access" — free, owned, purchased, or an
+            -- active community subscription all count.
+            local has_access = EntitlementQueries.hasCourseAccess(uuid, course)
+            return { status = 200, json = { enrolled = has_access or false, course_id = course.uuid } }
         end))
 
     -- Courses the current user is enrolled in (with published lessons).
