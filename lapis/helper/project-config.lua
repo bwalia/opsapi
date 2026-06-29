@@ -39,6 +39,7 @@ ProjectConfig.FEATURES = {
     TIMESHEETS = "timesheets",         -- Timesheet tracking and approval
     INVOICING = "invoicing",           -- Invoice generation and payments
     ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
+    ACADEMY = "academy",               -- LMS: courses, lessons, rich (WYSIWYG) content
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -65,6 +66,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
+        ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -74,6 +76,16 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.TAX_COPILOT,
         ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
+    -- Academy - LMS (courses + lessons + rich content). Installs only the
+    -- academy tables; tenants are isolated by namespace, so it can safely share
+    -- a database with any other project. Also included in the `all` preset.
+    academy = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
     },
@@ -252,6 +264,10 @@ function ProjectConfig.isKanbanEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.KANBAN)
 end
 
+function ProjectConfig.isAcademyEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.ACADEMY)
+end
+
 function ProjectConfig.isHospitalEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.HOSPITAL)
 end
@@ -419,6 +435,11 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "expense_management", name = "Expenses", description = "Expense tracking and approval", category = "Accounting" },
         { machine_name = "vat_returns", name = "VAT Returns", description = "UK VAT return calculation and submission", category = "Accounting" },
         { machine_name = "financial_reports", name = "Financial Reports", description = "Trial balance, balance sheet, P&L", category = "Accounting", allowed_actions = {"read"} },
+    },
+
+    -- Academy (LMS) modules — RBAC module that routes/academy.lua gates on ("courses")
+    academy = {
+        { machine_name = "courses", name = "Courses", description = "Course and lesson content management (rich WYSIWYG)", category = "Academy" },
     },
 
     -- Theme system (platform-level; always on)

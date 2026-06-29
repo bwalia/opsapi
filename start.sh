@@ -66,6 +66,7 @@ show_help() {
     echo "  collaboration  - Chat + Kanban + Services"
     echo "  hospital       - Hospital CRM"
     echo "  business       - CRM + Timesheets + Invoicing + Accounting + Kanban"
+    echo "  academy        - LMS: courses + lessons + rich (WYSIWYG) content"
     echo "  core_only      - Just authentication tables"
     echo ""
     echo -e "${BLUE}Multi-Project (comma-separated):${NC}"
@@ -347,7 +348,7 @@ validate_protocol() {
 # Function to validate project code (supports comma-separated multi-project codes)
 validate_project_code() {
     local input="$1"
-    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business core_only"
+    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business academy core_only"
 
     # Split on commas and validate each individual code.
     # NOTE: scope IFS=',' to just the `read` so the whitespace-split loop below
@@ -387,12 +388,13 @@ prompt_project_code() {
     echo "  5) hospital       - Hospital CRM" >&2
     echo "  6) core_only      - Just authentication tables" >&2
     echo "  7) business       - CRM + Timesheets + Invoicing + Accounting + Kanban" >&2
-    echo "  8) custom combo   - Enter comma-separated codes (e.g. ecommerce,collaboration)" >&2
+    echo "  8) academy        - LMS: courses + lessons + rich (WYSIWYG) content" >&2
+    echo "  9) custom combo   - Enter comma-separated codes (e.g. ecommerce,collaboration)" >&2
     echo "" >&2
 
     local choice
     while true; do
-        read -p "Enter choice [1-8] or press Enter for default (all): " choice
+        read -p "Enter choice [1-9] or press Enter for default (all): " choice
         case "$choice" in
             ""|1|all)
                 echo "all"
@@ -422,9 +424,13 @@ prompt_project_code() {
                 echo "business"
                 return 0
                 ;;
-            8|custom)
+            8|academy)
+                echo "academy"
+                return 0
+                ;;
+            9|custom)
                 echo -e "${CYAN}Enter comma-separated project codes:${NC}" >&2
-                echo -e "${BLUE}  Valid codes: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, core_only${NC}" >&2
+                echo -e "${BLUE}  Valid codes: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, academy, core_only${NC}" >&2
                 echo -e "${BLUE}  Example: ecommerce,collaboration${NC}" >&2
                 local custom_codes
                 read -p "Project codes: " custom_codes
@@ -441,7 +447,7 @@ prompt_project_code() {
                     echo "$choice"
                     return 0
                 else
-                    echo -e "${YELLOW}Invalid choice. Please enter 1-8 or valid project code(s).${NC}" >&2
+                    echo -e "${YELLOW}Invalid choice. Please enter 1-9 or valid project code(s).${NC}" >&2
                 fi
                 ;;
         esac
@@ -846,7 +852,7 @@ if [[ -n "$PROJECT_CODE" ]]; then
         echo -e "${BLUE}[i] Project code from argument: ${CYAN}${PROJECT_CODE}${NC}"
     else
         echo -e "${RED}[!] Invalid project code: '$PROJECT_CODE'${NC}"
-        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, core_only${NC}"
+        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, academy, core_only${NC}"
         echo -e "${YELLOW}[!] Combine with commas: ecommerce,collaboration${NC}"
         exit 1
     fi
