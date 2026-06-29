@@ -152,6 +152,13 @@ local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- My Income (tax_copilot feature) — manually-entered income source-of-truth
 local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
 
+-- Income Types (tax_copilot feature) — admin-managed catalogue of income sources
+local income_types_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-system") or {}
+
+-- Income Questionnaire cleanup — drop the bespoke storage (replaced by the
+-- dynamic Profile Builder questions; see dynamic-profile-builder.lua [38]).
+local income_questionnaire_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-questionnaire-cleanup") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1797,6 +1804,18 @@ local _migrations = {
     -- =========================================================================
     ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
     ['716_my_incomes_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 2),
+
+    -- INCOME TYPES — admin-managed catalogue of income sources
+    -- =========================================================================
+    ['717_create_income_types'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 1),
+    ['718_income_types_indexes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 2),
+    ['719_seed_income_types'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_migrations, 3),
+
+    -- INCOME QUESTIONNAIRE — bespoke storage (720/721) replaced by Profile Builder
+    -- questions. 722 drops the now-unused table + column; 723 seeds the questions.
+    -- =========================================================================
+    ['722_drop_income_questionnaire_bespoke'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_cleanup_migrations, 1),
+    ['723_profile_seed_income_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 38),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so

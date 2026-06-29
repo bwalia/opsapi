@@ -12,10 +12,10 @@
     - an accidentally archived row can be unarchived
     - the catalogue audit trail is preserved
 
-  Income type is a fixed catalogue enforced in the Lapis route — see
-  VALID_INCOME_TYPES in routes/my-incomes.lua. The DB just stores the key
-  as varchar; we don't add a CHECK constraint here because the catalogue
-  is server-authoritative and a future migration may add types.
+  Income type is an admin-managed catalogue (income_types table — see
+  migrations/income-types-system.lua); routes/my-incomes.lua validates the
+  key against the active rows. The DB stores the key as varchar with no
+  CHECK / FK so retiring a type leaves historical rows intact.
 
   Pattern: mirrors tax_bank_accounts (lapis/migrations/tax-copilot-system.lua
   steps 1-2) for naming + index strategy.
