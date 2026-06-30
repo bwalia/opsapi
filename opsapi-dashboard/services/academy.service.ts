@@ -103,11 +103,42 @@ export interface CommunityPlan {
   interval: string; // month|year
 }
 
-export interface CreatorAccountStatus {
-  onboarded: boolean;
-  status: string; // none|pending|complete
-  charges_enabled: boolean;
+export interface CreatorBank {
+  account_holder_name?: string;
+  bank_name?: string;
+  account_number?: string;
+  routing_number?: string;
+  sort_code?: string;
+  iban?: string;
+  swift_bic?: string;
+  bank_country?: string;
+  payout_email?: string;
+}
+
+export interface CreatorEarnings {
+  total_net: number;
+  owed: number;
+  paid: number;
+  currency: string;
+  sales: number;
+}
+
+export interface CreatorAccount {
+  bank: CreatorBank;
+  bank_details_complete: boolean;
+  fee_pct: number; // effective cut % applied to this creator
   plan?: CommunityPlan | null;
+  earnings: CreatorEarnings;
+}
+
+export interface PayoutRow {
+  namespace_id: number;
+  namespace_name: string;
+  namespace_slug: string;
+  owed: number;
+  currency: string;
+  sales: number;
+  bank?: (CreatorBank & { complete?: boolean }) | null;
 }
 
 export interface SubscriptionPlanInput {
@@ -221,18 +252,22 @@ export const academyService = {
   },
 
   // ----------------------------------------------------------
-  // Creator monetization (Stripe Connect + community subscription)
+  // Creator monetization (bank details + community subscription).
+  // The platform is the merchant; creators are paid out manually.
   // These endpoints return flat shapes (not the {success,data} envelope).
   // ----------------------------------------------------------
 
-  async getCreatorAccount(): Promise<CreatorAccountStatus> {
+  async getCreatorAccount(): Promise<CreatorAccount> {
     const response = await apiClient.get('/api/v2/academy/creator/account');
-    return response.data as CreatorAccountStatus;
+    return response.data as CreatorAccount;
   },
 
-  async startCreatorOnboarding(): Promise<string> {
-    const response = await apiClient.post('/api/v2/academy/creator/connect/onboard', '');
-    return (response.data?.url ?? '') as string;
+  async saveBankDetails(bank: CreatorBank): Promise<{ bank_details_complete: boolean }> {
+    const response = await apiClient.put(
+      '/api/v2/academy/creator/account',
+      toFormData(bank as Record<string, unknown>),
+    );
+    return response.data as { bank_details_complete: boolean };
   },
 
   async setSubscriptionPlan(
@@ -243,6 +278,46 @@ export const academyService = {
       toFormData(input as unknown as Record<string, unknown>),
     );
     return response.data as CommunityPlan;
+  },
+
+  // ----------------------------------------------------------
+  // Super-admin (platform "administrative" role)
+  // ----------------------------------------------------------
+
+  async getDefaultFeePct(): Promise<number> {
+    const response = await apiClient.get('/api/v2/academy/admin/settings');
+    return Number(response.data?.default_fee_pct ?? 0);
+  },
+
+  async setDefaultFeePct(pct: number): Promise<number> {
+    const response = await apiClient.put(
+      '/api/v2/academy/admin/settings',
+      toFormData({ default_fee_pct: pct }),
+    );
+    return Number(response.data?.default_fee_pct ?? pct);
+  },
+
+  async setCreatorFeeOverride(namespaceId: number, pct: number | null): Promise<void> {
+    await apiClient.put(
+      `/api/v2/academy/admin/creators/${namespaceId}/fee`,
+      toFormData({ fee_pct: pct ?? '' }),
+    );
+  },
+
+  async getPayouts(): Promise<PayoutRow[]> {
+    const response = await apiClient.get('/api/v2/academy/admin/payouts');
+    return Array.isArray(response.data?.payouts) ? (response.data.payouts as PayoutRow[]) : [];
+  },
+
+  async markPayoutPaid(
+    namespaceId: number,
+    reference: string,
+  ): Promise<{ paid: boolean; amount: number; currency: string }> {
+    const response = await apiClient.post(
+      `/api/v2/academy/admin/payouts/${namespaceId}/mark-paid`,
+      toFormData({ reference }),
+    );
+    return response.data as { paid: boolean; amount: number; currency: string };
   },
 };
 

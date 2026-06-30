@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -192,7 +192,7 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
 
 function AcademyCoursesPage() {
   const router = useRouter();
-  const { canCreate, canUpdate, canDelete } = usePermissions();
+  const { canCreate, canUpdate, canDelete, isAdmin } = usePermissions();
 
   const [courses, setCourses] = useState<AcademyCourse[]>([]);
   const [total, setTotal] = useState(0);
@@ -334,6 +334,9 @@ function AcademyCoursesPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button variant="outline" leftIcon={<Banknote size={16} />} onClick={() => router.push('/dashboard/academy/admin')}>Payouts</Button>
+          )}
           <Button variant="outline" leftIcon={<CreditCard size={16} />} onClick={() => router.push('/dashboard/academy/creator')}>Monetization</Button>
           <Button variant="outline" leftIcon={<RefreshCw size={16} />} onClick={load}>Refresh</Button>
           {canCreate('courses') && (
