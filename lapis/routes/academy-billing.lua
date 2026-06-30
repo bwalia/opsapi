@@ -298,4 +298,19 @@ return function(app)
             enrolled_course_ids = ids,
         } }
     end))
+
+    ---------------------------------------------------------------------------
+    -- PUBLIC: a community's subscription plan (so the learner UI can show price)
+    ---------------------------------------------------------------------------
+
+    app:get("/api/v2/public/academy/:namespace/plan", function(self)
+        local ns = NamespaceQueries.findBySlug(self.params.namespace)
+        if not ns then return api_response(404, nil, "Namespace not found") end
+        local plan = CreatorQueries.getActivePlan(ns.id)
+        if not plan then return { status = 200, json = { has_plan = false } } end
+        return { status = 200, json = {
+            has_plan = true,
+            plan = { amount = plan.amount, currency = plan.currency, interval = plan.interval },
+        } }
+    end)
 end
