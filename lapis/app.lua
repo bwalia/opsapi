@@ -519,6 +519,7 @@ load_if("accounting", "routes.accounting")
 load_if("academy", "routes.academy")
 load_if("academy", "routes.academy-billing")
 load_if("academy", "routes.academy-stripe-webhook")
+load_if("academy", "routes.academy-admin")
 
 -- ============================================
 -- PROJECT MODULE ROUTES (auto-loaded from /projects/)

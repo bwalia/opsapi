@@ -1,18 +1,23 @@
 --[[
-    Academy Billing Routes (Stripe Connect — per-creator marketplace)
-    =================================================================
+    Academy Billing Routes (platform-as-merchant-of-record)
+    =======================================================
+
+    All charges settle in the PLATFORM Stripe account (no Connect). Creators add
+    bank details for manual payouts; the cut is recorded in the ledger by the
+    webhook using the creator's effective fee %.
 
     Creator (auth + namespace + RBAC "courses"):
-      POST /api/v2/academy/creator/connect/onboard   -> Connect onboarding URL
-      GET  /api/v2/academy/creator/account           -> onboarding status + plan
-      PUT  /api/v2/academy/creator/subscription-plan -> set community price
+      GET  /api/v2/academy/creator/account            -> bank details + fee + plan + earnings
+      PUT  /api/v2/academy/creator/account            -> save bank/payout details
+      PUT  /api/v2/academy/creator/subscription-plan  -> set community price
 
     Learner (auth; namespace by slug):
-      GET  /api/v2/public/academy/:namespace/me/entitlements
+      POST /api/v2/public/academy/:ns/checkout/course/:slug -> Stripe Checkout URL
+      POST /api/v2/public/academy/:ns/checkout/subscription -> Stripe Checkout URL
+      GET  /api/v2/public/academy/:ns/me/entitlements
 
-    Reuses lib/stripe.lua (the existing platform Stripe client, which already
-    supports Connect pass-throughs) and lib/billing-urls.lua (server-controlled
-    redirect URLs). opsapi remains the source of truth for entitlements.
+    Public:
+      GET  /api/v2/public/academy/:ns/plan            -> community subscription price
 ]]
 
 local cJson = require("cjson")
@@ -21,15 +26,11 @@ local CreatorQueries = require("queries.CreatorQueries")
 local CourseQueries = require("queries.CourseQueries")
 local EnrollmentQueries = require("queries.EnrollmentQueries")
 local EntitlementQueries = require("queries.EntitlementQueries")
+local PayoutQueries = require("queries.PayoutQueries")
 local NamespaceQueries = require("queries.NamespaceQueries")
-local BillingUrls = require("lib.billing-urls")
 local Global = require("helper.global")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
-
-local function fee_percent()
-    return tonumber(Global.getEnvVar("STRIPE_PLATFORM_FEE_PERCENT")) or 0
-end
 
 local function learner_base()
     local b = Global.getEnvVar("ACADEMY_FRONTEND_URL")
@@ -37,6 +38,11 @@ local function learner_base()
     if not b or b == "" then b = "http://localhost:3000" end
     return (b:gsub("/+$", ""))
 end
+
+local BANK_OUT_FIELDS = {
+    "account_holder_name", "bank_name", "account_number", "routing_number",
+    "sort_code", "iban", "swift_bic", "bank_country", "payout_email",
+}
 
 return function(app)
     local function parse_body()
@@ -65,81 +71,45 @@ return function(app)
         return { status = status, json = { success = true, data = data } }
     end
 
-    local CREATOR_PATH = "/dashboard/academy/creator"
-
     ---------------------------------------------------------------------------
-    -- CREATOR: Connect onboarding
-    ---------------------------------------------------------------------------
-
-    app:post("/api/v2/academy/creator/connect/onboard", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requirePermission("courses", "manage", function(self)
-            local ns = self.namespace
-            local acc = CreatorQueries.getOrCreateAccount(ns.id)
-            local stripe = Stripe.new()
-
-            if not acc.stripe_account_id or acc.stripe_account_id == "" then
-                local account, err = stripe:create_account({
-                    email = self.current_user and self.current_user.email,
-                    metadata = { namespace_id = tostring(ns.id), namespace_slug = ns.slug },
-                })
-                if not account then
-                    return api_response(502, nil, "Could not create Stripe account: " .. tostring(err))
-                end
-                CreatorQueries.update(ns.id, { stripe_account_id = account.id, onboarding_status = "pending" })
-                acc.stripe_account_id = account.id
-            end
-
-            local return_url = BillingUrls.dashboard_url(ns.id, "ACADEMY_CREATOR_PATH", CREATOR_PATH, { connect = "done" })
-            local refresh_url = BillingUrls.dashboard_url(ns.id, "ACADEMY_CREATOR_PATH", CREATOR_PATH, { connect = "refresh" })
-            local link, lerr = stripe:create_account_link({
-                account = acc.stripe_account_id,
-                return_url = return_url,
-                refresh_url = refresh_url,
-            })
-            if not link then
-                return api_response(502, nil, "Could not create onboarding link: " .. tostring(lerr))
-            end
-            return { status = 200, json = { url = link.url } }
-        end)))
-
-    ---------------------------------------------------------------------------
-    -- CREATOR: account status (refreshes from Stripe)
+    -- CREATOR: account (bank details + fee + plan + earnings)
     ---------------------------------------------------------------------------
 
     app:get("/api/v2/academy/creator/account", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("courses", "read", function(self)
             local ns = self.namespace
             local acc = CreatorQueries.getAccount(ns.id)
-            if not acc then
-                return { status = 200, json = { onboarded = false, status = "none", charges_enabled = false } }
-            end
-
-            if acc.stripe_account_id and acc.stripe_account_id ~= "" then
-                local stripe = Stripe.new()
-                local account = stripe:retrieve_account(acc.stripe_account_id)
-                if account then
-                    local status = (account.details_submitted and account.charges_enabled) and "complete" or "pending"
-                    CreatorQueries.update(ns.id, {
-                        charges_enabled = account.charges_enabled or false,
-                        payouts_enabled = account.payouts_enabled or false,
-                        onboarding_status = status,
-                    })
-                    acc.charges_enabled = account.charges_enabled or false
-                    acc.onboarding_status = status
-                end
-            end
-
             local plan = CreatorQueries.getActivePlan(ns.id)
+            local earnings = PayoutQueries.earningsForCreator(ns.id)
+            local bank = {}
+            if acc then
+                for _, k in ipairs(BANK_OUT_FIELDS) do bank[k] = acc[k] end
+            end
             return { status = 200, json = {
-                onboarded = acc.onboarding_status == "complete",
-                status = acc.onboarding_status,
-                charges_enabled = acc.charges_enabled or false,
+                bank = bank,
+                bank_details_complete = acc and acc.bank_details_complete or false,
+                fee_pct = CreatorQueries.effectiveFeePct(ns.id),
                 plan = plan and { amount = plan.amount, currency = plan.currency, interval = plan.interval } or nil,
+                earnings = {
+                    total_net = tonumber(earnings.total_net) or 0,
+                    owed = tonumber(earnings.owed) or 0,
+                    paid = tonumber(earnings.paid) or 0,
+                    currency = earnings.currency or "usd",
+                    sales = tonumber(earnings.sales) or 0,
+                },
             } }
         end)))
 
+    app:put("/api/v2/academy/creator/account", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "manage", function(self)
+            local ns = self.namespace
+            local body = parse_body()
+            local acc = CreatorQueries.updateBankDetails(ns.id, body)
+            return { status = 200, json = { bank_details_complete = acc.bank_details_complete } }
+        end)))
+
     ---------------------------------------------------------------------------
-    -- CREATOR: set community subscription price
+    -- CREATOR: community subscription price (Stripe price on the PLATFORM account)
     ---------------------------------------------------------------------------
 
     app:put("/api/v2/academy/creator/subscription-plan", AuthMiddleware.requireAuth(
@@ -152,11 +122,6 @@ return function(app)
             end
             local interval = (body.interval == "year") and "year" or "month"
             local currency = body.currency or "usd"
-
-            local acc = CreatorQueries.getAccount(ns.id)
-            if not acc or not acc.charges_enabled then
-                return api_response(400, nil, "Complete Stripe onboarding before setting a price")
-            end
 
             local stripe = Stripe.new()
             local product, perr = stripe:create_product({
@@ -183,7 +148,7 @@ return function(app)
         end)))
 
     ---------------------------------------------------------------------------
-    -- LEARNER: checkout — one-time course purchase (Connect destination charge)
+    -- LEARNER: checkout — one-time course purchase (charged to the platform)
     ---------------------------------------------------------------------------
 
     app:post("/api/v2/public/academy/:namespace/checkout/course/:slug", AuthMiddleware.requireAuth(function(self)
@@ -199,20 +164,8 @@ return function(app)
             return { status = 200, json = { already_has_access = true } }
         end
 
-        local creator = CreatorQueries.getAccount(ns.id)
-        if not creator or not creator.charges_enabled or not creator.stripe_account_id then
-            return api_response(400, nil, "This creator isn't set up to take payments yet")
-        end
-
         local amount = math.floor(tonumber(course.price) or 0)
         if amount <= 0 then return api_response(400, nil, "Invalid course price") end
-        local fee = math.floor(amount * fee_percent() / 100)
-
-        local pid = {
-            transfer_data = { destination = creator.stripe_account_id },
-            metadata = { kind = "course", course_id = tostring(course.id), namespace_id = tostring(ns.id), user_uuid = uuid },
-        }
-        if fee > 0 then pid.application_fee_amount = fee end
 
         local base = learner_base()
         local stripe = Stripe.new()
@@ -229,7 +182,6 @@ return function(app)
                     product_data = { name = course.title },
                 },
             } },
-            payment_intent_data = pid,
             metadata = { kind = "course", course_id = tostring(course.id), course_uuid = course.uuid, namespace_id = tostring(ns.id), user_uuid = uuid },
         })
         if not session then return api_response(502, nil, "Checkout failed: " .. tostring(err)) end
@@ -237,7 +189,7 @@ return function(app)
     end))
 
     ---------------------------------------------------------------------------
-    -- LEARNER: checkout — community subscription
+    -- LEARNER: checkout — community subscription (charged to the platform)
     ---------------------------------------------------------------------------
 
     app:post("/api/v2/public/academy/:namespace/checkout/subscription", AuthMiddleware.requireAuth(function(self)
@@ -251,17 +203,6 @@ return function(app)
 
         local plan = CreatorQueries.getActivePlan(ns.id)
         if not plan or not plan.stripe_price_id then return api_response(400, nil, "This community has no subscription plan") end
-        local creator = CreatorQueries.getAccount(ns.id)
-        if not creator or not creator.charges_enabled or not creator.stripe_account_id then
-            return api_response(400, nil, "This creator isn't set up to take payments yet")
-        end
-
-        local sub_data = {
-            transfer_data = { destination = creator.stripe_account_id },
-            metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid },
-        }
-        local pct = fee_percent()
-        if pct > 0 then sub_data.application_fee_percent = pct end
 
         local base = learner_base()
         local stripe = Stripe.new()
@@ -271,7 +212,7 @@ return function(app)
             cancel_url = base .. "/courses?subscribe=cancel",
             client_reference_id = uuid,
             line_items = { { price = plan.stripe_price_id, quantity = 1 } },
-            subscription_data = sub_data,
+            subscription_data = { metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid } },
             metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid },
         })
         if not session then return api_response(502, nil, "Checkout failed: " .. tostring(err)) end
@@ -300,7 +241,7 @@ return function(app)
     end))
 
     ---------------------------------------------------------------------------
-    -- PUBLIC: a community's subscription plan (so the learner UI can show price)
+    -- PUBLIC: a community's subscription plan (for showing the price)
     ---------------------------------------------------------------------------
 
     app:get("/api/v2/public/academy/:namespace/plan", function(self)
