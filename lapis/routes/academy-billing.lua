@@ -18,12 +18,25 @@
 local cJson = require("cjson")
 local Stripe = require("lib.stripe")
 local CreatorQueries = require("queries.CreatorQueries")
+local CourseQueries = require("queries.CourseQueries")
 local EnrollmentQueries = require("queries.EnrollmentQueries")
 local EntitlementQueries = require("queries.EntitlementQueries")
 local NamespaceQueries = require("queries.NamespaceQueries")
 local BillingUrls = require("lib.billing-urls")
+local Global = require("helper.global")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+
+local function fee_percent()
+    return tonumber(Global.getEnvVar("STRIPE_PLATFORM_FEE_PERCENT")) or 0
+end
+
+local function learner_base()
+    local b = Global.getEnvVar("ACADEMY_FRONTEND_URL")
+    if not b or b == "" then b = Global.getEnvVar("FRONTEND_URL") end
+    if not b or b == "" then b = "http://localhost:3000" end
+    return (b:gsub("/+$", ""))
+end
 
 return function(app)
     local function parse_body()
@@ -168,6 +181,102 @@ return function(app)
             })
             return { status = 200, json = { amount = plan.amount, currency = plan.currency, interval = plan.interval } }
         end)))
+
+    ---------------------------------------------------------------------------
+    -- LEARNER: checkout — one-time course purchase (Connect destination charge)
+    ---------------------------------------------------------------------------
+
+    app:post("/api/v2/public/academy/:namespace/checkout/course/:slug", AuthMiddleware.requireAuth(function(self)
+        local ns = NamespaceQueries.findBySlug(self.params.namespace)
+        if not ns then return api_response(404, nil, "Namespace not found") end
+        local uuid = self.current_user and self.current_user.uuid
+        if not uuid then return api_response(401, nil, "Authentication required") end
+
+        local course = CourseQueries.getBySlug(ns.id, self.params.slug)
+        if not course or course.status ~= "published" then return api_response(404, nil, "Course not found") end
+        if course.is_free == true or course.is_free == "t" then return api_response(400, nil, "Course is free") end
+        if EntitlementQueries.hasCourseAccess(uuid, course) then
+            return { status = 200, json = { already_has_access = true } }
+        end
+
+        local creator = CreatorQueries.getAccount(ns.id)
+        if not creator or not creator.charges_enabled or not creator.stripe_account_id then
+            return api_response(400, nil, "This creator isn't set up to take payments yet")
+        end
+
+        local amount = math.floor(tonumber(course.price) or 0)
+        if amount <= 0 then return api_response(400, nil, "Invalid course price") end
+        local fee = math.floor(amount * fee_percent() / 100)
+
+        local pid = {
+            transfer_data = { destination = creator.stripe_account_id },
+            metadata = { kind = "course", course_id = tostring(course.id), namespace_id = tostring(ns.id), user_uuid = uuid },
+        }
+        if fee > 0 then pid.application_fee_amount = fee end
+
+        local base = learner_base()
+        local stripe = Stripe.new()
+        local session, err = stripe:create_checkout_session({
+            mode = "payment",
+            success_url = base .. "/courses/" .. course.slug .. "?purchase=success",
+            cancel_url = base .. "/courses/" .. course.slug .. "?purchase=cancel",
+            client_reference_id = uuid,
+            line_items = { {
+                quantity = 1,
+                price_data = {
+                    currency = course.currency or "usd",
+                    unit_amount = amount,
+                    product_data = { name = course.title },
+                },
+            } },
+            payment_intent_data = pid,
+            metadata = { kind = "course", course_id = tostring(course.id), course_uuid = course.uuid, namespace_id = tostring(ns.id), user_uuid = uuid },
+        })
+        if not session then return api_response(502, nil, "Checkout failed: " .. tostring(err)) end
+        return { status = 200, json = { url = session.url } }
+    end))
+
+    ---------------------------------------------------------------------------
+    -- LEARNER: checkout — community subscription
+    ---------------------------------------------------------------------------
+
+    app:post("/api/v2/public/academy/:namespace/checkout/subscription", AuthMiddleware.requireAuth(function(self)
+        local ns = NamespaceQueries.findBySlug(self.params.namespace)
+        if not ns then return api_response(404, nil, "Namespace not found") end
+        local uuid = self.current_user and self.current_user.uuid
+        if not uuid then return api_response(401, nil, "Authentication required") end
+        if EntitlementQueries.hasActiveSubscription(uuid, ns.id) then
+            return { status = 200, json = { already_subscribed = true } }
+        end
+
+        local plan = CreatorQueries.getActivePlan(ns.id)
+        if not plan or not plan.stripe_price_id then return api_response(400, nil, "This community has no subscription plan") end
+        local creator = CreatorQueries.getAccount(ns.id)
+        if not creator or not creator.charges_enabled or not creator.stripe_account_id then
+            return api_response(400, nil, "This creator isn't set up to take payments yet")
+        end
+
+        local sub_data = {
+            transfer_data = { destination = creator.stripe_account_id },
+            metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid },
+        }
+        local pct = fee_percent()
+        if pct > 0 then sub_data.application_fee_percent = pct end
+
+        local base = learner_base()
+        local stripe = Stripe.new()
+        local session, err = stripe:create_checkout_session({
+            mode = "subscription",
+            success_url = base .. "/dashboard?subscribed=" .. ns.slug,
+            cancel_url = base .. "/courses?subscribe=cancel",
+            client_reference_id = uuid,
+            line_items = { { price = plan.stripe_price_id, quantity = 1 } },
+            subscription_data = sub_data,
+            metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid },
+        })
+        if not session then return api_response(502, nil, "Checkout failed: " .. tostring(err)) end
+        return { status = 200, json = { url = session.url } }
+    end))
 
     ---------------------------------------------------------------------------
     -- LEARNER: my entitlements within a community
