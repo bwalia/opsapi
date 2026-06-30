@@ -97,6 +97,25 @@ export interface LessonInput {
   status?: LessonStatus;
 }
 
+export interface CommunityPlan {
+  amount: number; // minor units (e.g. 999 = $9.99)
+  currency: string;
+  interval: string; // month|year
+}
+
+export interface CreatorAccountStatus {
+  onboarded: boolean;
+  status: string; // none|pending|complete
+  charges_enabled: boolean;
+  plan?: CommunityPlan | null;
+}
+
+export interface SubscriptionPlanInput {
+  amount: number; // minor units
+  interval: 'month' | 'year';
+  currency?: string;
+}
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -199,6 +218,31 @@ export const academyService = {
 
   async deleteLesson(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/academy/lessons/${uuid}`);
+  },
+
+  // ----------------------------------------------------------
+  // Creator monetization (Stripe Connect + community subscription)
+  // These endpoints return flat shapes (not the {success,data} envelope).
+  // ----------------------------------------------------------
+
+  async getCreatorAccount(): Promise<CreatorAccountStatus> {
+    const response = await apiClient.get('/api/v2/academy/creator/account');
+    return response.data as CreatorAccountStatus;
+  },
+
+  async startCreatorOnboarding(): Promise<string> {
+    const response = await apiClient.post('/api/v2/academy/creator/connect/onboard', '');
+    return (response.data?.url ?? '') as string;
+  },
+
+  async setSubscriptionPlan(
+    input: SubscriptionPlanInput,
+  ): Promise<CommunityPlan> {
+    const response = await apiClient.put(
+      '/api/v2/academy/creator/subscription-plan',
+      toFormData(input as unknown as Record<string, unknown>),
+    );
+    return response.data as CommunityPlan;
   },
 };
 

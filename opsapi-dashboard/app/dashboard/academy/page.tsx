@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -334,6 +334,7 @@ function AcademyCoursesPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" leftIcon={<CreditCard size={16} />} onClick={() => router.push('/dashboard/academy/creator')}>Monetization</Button>
           <Button variant="outline" leftIcon={<RefreshCw size={16} />} onClick={load}>Refresh</Button>
           {canCreate('courses') && (
             <Button leftIcon={<Plus size={16} />} onClick={() => { setEditing(null); setModalOpen(true); }}>New Course</Button>
