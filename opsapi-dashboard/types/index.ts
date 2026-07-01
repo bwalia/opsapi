@@ -551,6 +551,8 @@ export interface NamespaceMember {
     active: boolean;
   };
   roles?: NamespaceRole[];
+  // Combined permissions across the member's roles (returned by the switch endpoint).
+  permissions?: NamespacePermissions;
   invited_by_name?: string;
 }
 

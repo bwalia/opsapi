@@ -173,7 +173,8 @@ export const ProtectedPage: React.FC<{
   action?: PermissionAction;
   children: ReactNode;
   title?: string;
-}> = memo(function ProtectedPage({ module, action, children, title }) {
+  fallback?: ReactNode;
+}> = memo(function ProtectedPage({ module, action, children, title, fallback }) {
   const { hasPermission, canAccess, isLoading } = usePermissions();
 
   // Show loading skeleton while checking permissions
@@ -191,6 +192,11 @@ export const ProtectedPage: React.FC<{
   const hasAccess = action ? hasPermission(module, action) : canAccess(module);
 
   if (!hasAccess) {
+    // A caller can supply a friendlier fallback (e.g. an onboarding CTA) instead
+    // of the default access-denied screen.
+    if (fallback) {
+      return <>{fallback}</>;
+    }
     return (
       <AccessDenied
         title={title ? `Cannot Access ${title}` : undefined}

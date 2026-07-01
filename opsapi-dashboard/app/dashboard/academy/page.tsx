@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -192,7 +192,7 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
 
 function AcademyCoursesPage() {
   const router = useRouter();
-  const { canCreate, canUpdate, canDelete } = usePermissions();
+  const { canCreate, canUpdate, canDelete, isAdmin } = usePermissions();
 
   const [courses, setCourses] = useState<AcademyCourse[]>([]);
   const [total, setTotal] = useState(0);
@@ -334,6 +334,10 @@ function AcademyCoursesPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button variant="outline" leftIcon={<Banknote size={16} />} onClick={() => router.push('/dashboard/academy/admin')}>Payouts</Button>
+          )}
+          <Button variant="outline" leftIcon={<CreditCard size={16} />} onClick={() => router.push('/dashboard/academy/creator')}>Monetization</Button>
           <Button variant="outline" leftIcon={<RefreshCw size={16} />} onClick={load}>Refresh</Button>
           {canCreate('courses') && (
             <Button leftIcon={<Plus size={16} />} onClick={() => { setEditing(null); setModalOpen(true); }}>New Course</Button>
@@ -402,9 +406,35 @@ function AcademyCoursesPage() {
   );
 }
 
+// Shown to authenticated users who aren't instructors yet (no "courses" access):
+// an onboarding CTA into the become-an-instructor flow rather than a dead end.
+function BecomeInstructorPrompt() {
+  const router = useRouter();
+  return (
+    <div className="min-h-[400px] flex items-center justify-center p-8">
+      <div className="text-center max-w-md">
+        <div className="w-16 h-16 mx-auto mb-6 bg-primary-50 text-primary-600 rounded-full flex items-center justify-center">
+          <GraduationCap className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-semibold text-secondary-900 mb-2">Start teaching on Academy</h2>
+        <p className="text-secondary-600 mb-6">
+          You&apos;re not an instructor yet. Become one to create and sell your own courses.
+        </p>
+        <button
+          onClick={() => router.push('/dashboard/academy/join')}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+        >
+          Become an Instructor
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AcademyPage() {
   return (
-    <ProtectedPage module="courses" action="read" title="Academy">
+    <ProtectedPage module="courses" action="read" title="Academy" fallback={<BecomeInstructorPrompt />}>
       <AcademyCoursesPage />
     </ProtectedPage>
   );

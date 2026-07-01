@@ -221,6 +221,12 @@ return function(app)
                     -- consumer parsers; cjson omits nils on encode.
                     default_profile_key = default_profile_key,
                 },
+                -- Issuer claim so strict verifiers (e.g. the academy frontend's
+                -- jose jwtVerify, which requires issuer "opsapi") accept the
+                -- sign-up token, matching the login/jwt-helper token shape. A
+                -- lenient verifier simply ignores it, so existing consumers
+                -- (tax_copilot) are unaffected.
+                iss = "opsapi",
                 exp = ngx.time() + (60 * 60) -- 1 hour expiry (matches DEFAULT_EXPIRATION)
             }
 
