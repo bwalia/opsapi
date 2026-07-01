@@ -63,6 +63,11 @@ function CourseQueries.list(namespace_id, params)
         local p = "%" .. params.search .. "%"
         table.insert(values, p); table.insert(values, p)
     end
+    -- Instructors only see/manage their own courses (owner-scoped); the
+    -- namespace owner / platform admin passes no owner filter and sees all.
+    if params.owner_user_uuid and params.owner_user_uuid ~= "" then
+        table.insert(where, "owner_user_uuid = ?"); table.insert(values, params.owner_user_uuid)
+    end
 
     local where_sql = table.concat(where, " AND ")
 
@@ -86,6 +91,15 @@ end
 
 function CourseQueries.getByUuid(namespace_id, uuid)
     return findScoped(namespace_id, uuid)
+end
+
+--- Find a non-deleted course by numeric id, scoped to a namespace.
+-- Used for lesson ownership checks (lessons reference course_id, not uuid).
+function CourseQueries.findById(namespace_id, id)
+    local rows = db.query(
+        "SELECT * FROM academy_courses WHERE id = ? AND namespace_id = ? AND deleted_at IS NULL LIMIT 1",
+        id, namespace_id)
+    return rows and rows[1] or nil
 end
 
 function CourseQueries.getBySlug(namespace_id, slug)

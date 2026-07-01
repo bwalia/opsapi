@@ -51,6 +51,19 @@ export interface CourseWithLessons {
   lessons: AcademyLesson[];
 }
 
+export interface InstructorNamespace {
+  id: number;
+  uuid: string;
+  slug: string;
+  name: string;
+}
+
+export interface InstructorStatus {
+  is_instructor: boolean;
+  is_owner: boolean;
+  namespace: InstructorNamespace;
+}
+
 export interface CourseListParams {
   page?: number;
   perPage?: number;
@@ -318,6 +331,20 @@ export const academyService = {
       toFormData({ reference }),
     );
     return response.data as { paid: boolean; amount: number; currency: string };
+  },
+
+  // ----------------------------------------------------------
+  // Instructor self-service (role inside the single academy namespace)
+  // ----------------------------------------------------------
+
+  async getInstructorStatus(): Promise<InstructorStatus> {
+    const response = await apiClient.get('/api/v2/academy/instructor/status');
+    return unwrap<InstructorStatus>(response);
+  },
+
+  async registerInstructor(): Promise<InstructorStatus> {
+    const response = await apiClient.post('/api/v2/academy/instructor/register');
+    return unwrap<InstructorStatus>(response);
   },
 };
 
