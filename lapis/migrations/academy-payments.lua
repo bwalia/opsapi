@@ -41,6 +41,16 @@ local function index_exists(index_name)
     return result[1] and result[1].exists
 end
 
+local function column_exists(table_name, column_name)
+    local result = db.query([[
+        SELECT EXISTS (
+            SELECT FROM information_schema.columns
+            WHERE table_name = ? AND column_name = ?
+        ) as exists
+    ]], table_name, column_name)
+    return result[1] and result[1].exists
+end
+
 local function add_namespace_fk(table_name, constraint_name)
     pcall(function()
         db.query(string.format([[
@@ -232,5 +242,54 @@ return {
         pcall(function()
             db.query("CREATE INDEX idx_creator_payouts_ns ON creator_payouts (namespace_id)")
         end)
+    end,
+
+    -- ========================================================================
+    -- [8] Per-instructor payouts (marketplace with a single academy namespace)
+    -- ------------------------------------------------------------------------
+    -- Phase A treated the "creator" as the namespace. The marketplace hosts many
+    -- instructors inside ONE academy namespace (instructor = RBAC role), so
+    -- earnings/bank/payouts must attribute to the SELLER (course.owner_user_uuid),
+    -- not the namespace. Additive + idempotent; safe to re-run.
+    -- ========================================================================
+    [8] = function()
+        -- academy_payments: which user earns this sale. NULL = platform revenue
+        -- (e.g. an academy-wide community subscription, not tied to one instructor).
+        if table_exists("academy_payments") and not column_exists("academy_payments", "seller_user_uuid") then
+            db.query("ALTER TABLE academy_payments ADD COLUMN seller_user_uuid varchar")
+            -- Backfill existing course sales from the course owner.
+            pcall(function()
+                db.query([[
+                    UPDATE academy_payments p SET seller_user_uuid = c.owner_user_uuid
+                    FROM academy_courses c
+                    WHERE p.course_id = c.id AND p.seller_user_uuid IS NULL
+                ]])
+            end)
+            pcall(function()
+                db.query("CREATE INDEX idx_academy_payments_seller_payout ON academy_payments (seller_user_uuid, payout_status)")
+            end)
+        end
+
+        -- creator_accounts: key by instructor (user), not namespace. One namespace
+        -- now has many instructor accounts, so drop the namespace-unique constraint,
+        -- add a per-user unique, and make namespace_id optional.
+        if table_exists("creator_accounts") then
+            if not column_exists("creator_accounts", "user_uuid") then
+                db.query("ALTER TABLE creator_accounts ADD COLUMN user_uuid varchar")
+            end
+            pcall(function() db.query("DROP INDEX IF EXISTS creator_accounts_namespace_unique") end)
+            pcall(function() db.query("ALTER TABLE creator_accounts ALTER COLUMN namespace_id DROP NOT NULL") end)
+            pcall(function()
+                db.query("CREATE UNIQUE INDEX creator_accounts_user_unique ON creator_accounts (user_uuid) WHERE user_uuid IS NOT NULL")
+            end)
+        end
+
+        -- creator_payouts: record which instructor was paid.
+        if table_exists("creator_payouts") and not column_exists("creator_payouts", "user_uuid") then
+            db.query("ALTER TABLE creator_payouts ADD COLUMN user_uuid varchar")
+            pcall(function()
+                db.query("CREATE INDEX idx_creator_payouts_user ON creator_payouts (user_uuid)")
+            end)
+        end
     end,
 }

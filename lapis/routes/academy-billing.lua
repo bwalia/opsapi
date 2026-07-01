@@ -78,9 +78,12 @@ return function(app)
     app:get("/api/v2/academy/creator/account", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("courses", "read", function(self)
             local ns = self.namespace
-            local acc = CreatorQueries.getAccount(ns.id)
+            local uid = self.current_user and self.current_user.uuid
+            -- Account, fee and earnings are per-instructor (user_uuid); the
+            -- community subscription plan stays academy-wide (namespace-level).
+            local acc = CreatorQueries.getAccount(uid)
             local plan = CreatorQueries.getActivePlan(ns.id)
-            local earnings = PayoutQueries.earningsForCreator(ns.id)
+            local earnings = PayoutQueries.earningsForInstructor(uid)
             local bank = {}
             if acc then
                 for _, k in ipairs(BANK_OUT_FIELDS) do bank[k] = acc[k] end
@@ -88,7 +91,7 @@ return function(app)
             return { status = 200, json = {
                 bank = bank,
                 bank_details_complete = acc and acc.bank_details_complete or false,
-                fee_pct = CreatorQueries.effectiveFeePct(ns.id),
+                fee_pct = CreatorQueries.effectiveFeePct(uid),
                 plan = plan and { amount = plan.amount, currency = plan.currency, interval = plan.interval } or nil,
                 earnings = {
                     total_net = tonumber(earnings.total_net) or 0,
@@ -100,11 +103,13 @@ return function(app)
             } }
         end)))
 
+    -- Instructors (courses "update") manage their own payout bank details.
     app:put("/api/v2/academy/creator/account", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requirePermission("courses", "manage", function(self)
+        NamespaceMiddleware.requirePermission("courses", "update", function(self)
             local ns = self.namespace
+            local uid = self.current_user and self.current_user.uuid
             local body = parse_body()
-            local acc = CreatorQueries.updateBankDetails(ns.id, body)
+            local acc = CreatorQueries.updateBankDetails(uid, ns.id, body)
             return { status = 200, json = { bank_details_complete = acc.bank_details_complete } }
         end)))
 

@@ -1,10 +1,11 @@
 --[[
     Creator Queries  (platform-as-merchant-of-record)
     =================================================
-    A "creator" is a namespace (community). We track their payout BANK DETAILS
-    (not a Stripe account), an optional per-creator fee override, and their
-    community subscription price. The platform-wide default cut % lives in
-    academy_settings and is set by the super admin.
+    A "creator" is an INSTRUCTOR (a user) inside the single academy namespace.
+    We track their payout BANK DETAILS (not a Stripe account), an optional
+    per-instructor fee override, keyed by user_uuid. The academy-wide community
+    subscription plan remains namespace-level. The platform-wide default cut %
+    lives in academy_settings and is set by the super admin.
 ]]
 
 local CreatorAccountModel = require "models.CreatorAccountModel"
@@ -19,15 +20,21 @@ local BANK_FIELDS = {
     "sort_code", "iban", "swift_bic", "bank_country", "payout_email",
 }
 
-function CreatorQueries.getAccount(namespace_id)
-    return CreatorAccountModel:find({ namespace_id = namespace_id })
+-- ---- Instructor payout account (per user_uuid) ---------------------------
+
+function CreatorQueries.getAccount(user_uuid)
+    if not user_uuid then return nil end
+    return CreatorAccountModel:find({ user_uuid = user_uuid })
 end
 
-function CreatorQueries.getOrCreateAccount(namespace_id)
-    local acc = CreatorAccountModel:find({ namespace_id = namespace_id })
+--- Find or create the instructor's account. namespace_id is optional context
+--- (the academy namespace); the row is keyed by user_uuid.
+function CreatorQueries.getOrCreateAccount(user_uuid, namespace_id)
+    local acc = CreatorQueries.getAccount(user_uuid)
     if acc then return acc end
     return CreatorAccountModel:create({
         uuid = Global.generateUUID(),
+        user_uuid = user_uuid,
         namespace_id = namespace_id,
         bank_details_complete = false,
         created_at = db.raw("NOW()"),
@@ -37,8 +44,8 @@ end
 
 --- Save bank/payout details. Marks complete when the essentials are present
 --- (account holder + at least one of account_number / iban).
-function CreatorQueries.updateBankDetails(namespace_id, input)
-    local acc = CreatorQueries.getOrCreateAccount(namespace_id)
+function CreatorQueries.updateBankDetails(user_uuid, namespace_id, input)
+    local acc = CreatorQueries.getOrCreateAccount(user_uuid, namespace_id)
     local fields = {}
     for _, k in ipairs(BANK_FIELDS) do
         if input[k] ~= nil then fields[k] = input[k] end
@@ -53,9 +60,9 @@ function CreatorQueries.updateBankDetails(namespace_id, input)
     return acc
 end
 
---- Super-admin: set (or clear with nil) a per-creator fee override (percent).
-function CreatorQueries.setFeeOverride(namespace_id, pct)
-    local acc = CreatorQueries.getOrCreateAccount(namespace_id)
+--- Super-admin: set (or clear with nil) a per-instructor fee override (percent).
+function CreatorQueries.setFeeOverride(user_uuid, pct)
+    local acc = CreatorQueries.getOrCreateAccount(user_uuid, nil)
     acc:update({ fee_pct_override = pct, updated_at = db.raw("NOW()") })
     return acc
 end
@@ -76,16 +83,18 @@ function CreatorQueries.setDefaultFeePct(pct)
     ]], tostring(pct))
 end
 
---- The cut % that applies to a creator: their override, else the global default.
-function CreatorQueries.effectiveFeePct(namespace_id)
-    local acc = CreatorQueries.getAccount(namespace_id)
+--- The cut % that applies to an instructor: their override, else the global
+--- default. Passing nil (e.g. platform-owned subscription revenue) yields the
+--- default but is not used to compute a creator's net.
+function CreatorQueries.effectiveFeePct(user_uuid)
+    local acc = CreatorQueries.getAccount(user_uuid)
     if acc and acc.fee_pct_override ~= nil then
         return tonumber(acc.fee_pct_override) or CreatorQueries.getDefaultFeePct()
     end
     return CreatorQueries.getDefaultFeePct()
 end
 
--- ---- Community subscription plan ------------------------------------------
+-- ---- Community subscription plan (academy-wide, namespace-level) ----------
 
 function CreatorQueries.getActivePlan(namespace_id)
     local rows = db.query(

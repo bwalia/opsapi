@@ -70,7 +70,7 @@ function AdminPayouts(): React.ReactElement {
 
   const setOverride = async (r: PayoutRow): Promise<void> => {
     const input = window.prompt(
-      `Per-creator cut % for ${r.namespace_name} (blank = use default):`,
+      `Per-instructor cut % for ${r.instructor_name} (blank = use default):`,
       '',
     );
     if (input === null) return;
@@ -80,7 +80,7 @@ function AdminPayouts(): React.ReactElement {
       return;
     }
     try {
-      await academyService.setCreatorFeeOverride(r.namespace_id, pct);
+      await academyService.setInstructorFeeOverride(r.user_uuid, pct);
       toast.success('Cut override updated');
     } catch (err) {
       console.error('Override failed:', err);
@@ -90,12 +90,12 @@ function AdminPayouts(): React.ReactElement {
 
   const markPaid = async (r: PayoutRow): Promise<void> => {
     const ref = window.prompt(
-      `Mark ${money(r.owed, r.currency)} as paid to ${r.namespace_name}? Optional bank reference:`,
+      `Mark ${money(r.owed, r.currency)} as paid to ${r.instructor_name}? Optional bank reference:`,
       '',
     );
     if (ref === null) return;
     try {
-      const res = await academyService.markPayoutPaid(r.namespace_id, ref);
+      const res = await academyService.markPayoutPaid(r.user_uuid, ref);
       toast.success(`Recorded payout of ${money(res.amount, res.currency)}`);
       load();
     } catch (err) {
@@ -116,7 +116,7 @@ function AdminPayouts(): React.ReactElement {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-secondary-900">Academy payouts &amp; fees</h1>
-          <p className="text-sm text-secondary-500">Set the platform cut and pay creators their owed earnings.</p>
+          <p className="text-sm text-secondary-500">Set the platform cut and pay instructors their owed earnings.</p>
         </div>
         <Button variant="outline" leftIcon={<RefreshCw size={16} />} onClick={load}>Refresh</Button>
       </div>
@@ -136,7 +136,7 @@ function AdminPayouts(): React.ReactElement {
               <input className={inputClass} type="number" min={0} max={100} step="0.5" value={defaultFee} onChange={(e) => setDefaultFee(e.target.value)} />
             </div>
             <Button isLoading={savingFee} onClick={() => void saveFee()}>Save</Button>
-            <p className="text-xs text-secondary-400 pb-2">Applied to every creator unless they have an override.</p>
+            <p className="text-xs text-secondary-400 pb-2">Applied to every instructor unless they have an override.</p>
           </div>
         </CardContent>
       </Card>
@@ -146,7 +146,7 @@ function AdminPayouts(): React.ReactElement {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Banknote size={18} className="text-primary-600" />
-            <h2 className="text-sm font-semibold text-secondary-800">Owed to creators</h2>
+            <h2 className="text-sm font-semibold text-secondary-800">Owed to instructors</h2>
           </div>
         </CardHeader>
         <CardContent>
@@ -159,7 +159,7 @@ function AdminPayouts(): React.ReactElement {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-secondary-500 border-b border-secondary-200">
-                    <th className="py-2 pr-4 font-medium">Creator</th>
+                    <th className="py-2 pr-4 font-medium">Instructor</th>
                     <th className="py-2 pr-4 font-medium">Owed</th>
                     <th className="py-2 pr-4 font-medium">Sales</th>
                     <th className="py-2 pr-4 font-medium">Bank</th>
@@ -168,10 +168,10 @@ function AdminPayouts(): React.ReactElement {
                 </thead>
                 <tbody>
                   {payouts.map((r) => (
-                    <tr key={r.namespace_id} className="border-b border-secondary-100">
+                    <tr key={r.user_uuid} className="border-b border-secondary-100">
                       <td className="py-3 pr-4">
-                        <p className="font-medium text-secondary-900">{r.namespace_name}</p>
-                        <p className="text-xs text-secondary-400">/{r.namespace_slug}</p>
+                        <p className="font-medium text-secondary-900">{r.instructor_name}</p>
+                        {r.instructor_email && <p className="text-xs text-secondary-400">{r.instructor_email}</p>}
                       </td>
                       <td className="py-3 pr-4 font-semibold text-secondary-900">{money(r.owed, r.currency)}</td>
                       <td className="py-3 pr-4 text-secondary-600">{r.sales}</td>

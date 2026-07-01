@@ -145,9 +145,9 @@ export interface CreatorAccount {
 }
 
 export interface PayoutRow {
-  namespace_id: number;
-  namespace_name: string;
-  namespace_slug: string;
+  user_uuid: string;
+  instructor_name: string;
+  instructor_email?: string;
   owed: number;
   currency: string;
   sales: number;
@@ -310,9 +310,9 @@ export const academyService = {
     return Number(response.data?.default_fee_pct ?? pct);
   },
 
-  async setCreatorFeeOverride(namespaceId: number, pct: number | null): Promise<void> {
+  async setInstructorFeeOverride(userUuid: string, pct: number | null): Promise<void> {
     await apiClient.put(
-      `/api/v2/academy/admin/creators/${namespaceId}/fee`,
+      `/api/v2/academy/admin/instructors/${userUuid}/fee`,
       toFormData({ fee_pct: pct ?? '' }),
     );
   },
@@ -323,11 +323,11 @@ export const academyService = {
   },
 
   async markPayoutPaid(
-    namespaceId: number,
+    userUuid: string,
     reference: string,
   ): Promise<{ paid: boolean; amount: number; currency: string }> {
     const response = await apiClient.post(
-      `/api/v2/academy/admin/payouts/${namespaceId}/mark-paid`,
+      `/api/v2/academy/admin/payouts/${userUuid}/mark-paid`,
       toFormData({ reference }),
     );
     return response.data as { paid: boolean; amount: number; currency: string };

@@ -1844,6 +1844,7 @@ local _migrations = {
     ['814_create_processed_stripe_events'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 5),
     ['815_create_academy_settings'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 6),
     ['816_create_creator_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 7),
+    ['817_academy_per_instructor_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 8),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

@@ -18,6 +18,7 @@ local db = require("lapis.db")
 local EnrollmentQueries = require("queries.EnrollmentQueries")
 local SubscriptionQueries = require("queries.SubscriptionQueries")
 local PayoutQueries = require("queries.PayoutQueries")
+local CourseQueries = require("queries.CourseQueries")
 
 return function(app)
     -- Idempotency: true if already handled. Inserts the marker; a unique-violation
@@ -70,8 +71,12 @@ return function(app)
             local ns_id = tonumber(md.namespace_id)
             if md.kind == "course" and ns_id and tonumber(md.course_id) and md.user_uuid then
                 pcall(EnrollmentQueries.enroll, ns_id, tonumber(md.course_id), md.user_uuid)
+                -- Attribute the sale to the course owner (the instructor). Legacy /
+                -- admin-owned courses may have no owner -> platform revenue.
+                local course = CourseQueries.findById(ns_id, tonumber(md.course_id))
                 PayoutQueries.recordSale({
                     user_uuid = md.user_uuid, namespace_id = ns_id, course_id = tonumber(md.course_id),
+                    seller_user_uuid = course and course.owner_user_uuid or nil,
                     kind = "course", stripe_ref = obj.payment_intent, amount = obj.amount_total, currency = obj.currency,
                 })
             elseif md.kind == "subscription" and ns_id and md.user_uuid and obj.subscription then
