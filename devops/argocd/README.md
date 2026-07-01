@@ -7,6 +7,7 @@ using the existing helm chart at `../helm-charts/diytaxreturn-lapis/`.
 |---|---|
 | [`appproject.yaml`](./appproject.yaml) | Security boundary — defines which repo + which namespaces this Project may deploy. |
 | [`applicationset.yaml`](./applicationset.yaml) | One template, four Apps (`opsapi-dev`, `opsapi-int`, `opsapi-acc`, `opsapi-prod`). |
+| [`../../.github/workflows/argocd-sync-int.yml`](../../.github/workflows/argocd-sync-int.yml) | CI-triggered sync for `int`. Fires on push to `main` when the chart or ArgoCD manifests change. This is the piece that gives "push to main → int deployed automatically" without you having to run any commands after merging PR #456. |
 
 ## Why ArgoCD
 
@@ -21,32 +22,82 @@ detection, and per-env visibility come for free.
 
 See the analysis in PR description for the full trade-off discussion.
 
-## Pre-cutover state (initial commit)
+## State after merging this PR
 
-Every env is created with **`autoSync: false`**. The Applications appear in the
-ArgoCD UI as `OutOfSync` (because no sync has run yet), but ArgoCD makes no
-changes — it just reports what *would* happen.
+Every env is declared with **`autoSync: false`** in the ApplicationSet.
+Auto-reconciliation is off — sync only happens when a human clicks Sync
+in the UI OR when the `argocd-sync-int.yml` workflow triggers a sync via
+`kubectl patch`.
 
-This is safe to apply alongside the existing GitHub Actions deploy. The two
-mechanisms do not fight because ArgoCD isn't acting.
+Rationale: keeping autoSync off means ArgoCD won't fight with any
+manual-`kubectl`-patch state your team applied during incidents (all four
+envs have some). We layer explicit CI-triggered syncs on top only where
+the team wants push-to-main deploys.
+
+## What runs automatically after PR #456 merges
+
+Nothing in the cluster changes at the moment of merge. But the **next push to
+`main`** that touches the chart or the ArgoCD manifests fires the
+[`argocd-sync-int.yml`](../../.github/workflows/argocd-sync-int.yml) workflow,
+which:
+
+1. `kubectl apply -f devops/argocd/` — creates the AppProject + ApplicationSet
+   on the first run; idempotent no-op on subsequent runs unless the files
+   changed.
+2. Waits (up to 60s) for the ApplicationSet controller to materialise
+   `opsapi-int`.
+3. Triggers a sync of `opsapi-int` and waits (up to 4 min) for
+   `Synced + Healthy`.
+
+Runs on **`ubuntu-latest`** — deliberately not self-hosted. The whole point
+of moving to ArgoCD is to escape the self-hosted-runner SPOF that killed
+every deploy on 2026-06-29. Uses the existing `MY_K3S_CONFIG` secret for
+cluster access.
+
+At the same time, [`deploy-k3s.yml`](../../.github/workflows/deploy-k3s.yml)
+has been edited so main pushes only deploy **`dev`** via the old helm-from-CI
+path. `int` is now ArgoCD-only — no tug-of-war.
 
 ## Rollout sequence
 
-### 1. Apply the manifests (one-time bootstrap)
+### 1. `dev` remains on the old helm-from-CI path for now
 
-```bash
-kubectl apply -f devops/argocd/appproject.yaml
-kubectl apply -f devops/argocd/applicationset.yaml
-```
+Nothing to do — `deploy-k3s.yml` still deploys dev on push to main. It's the
+lowest-risk env to keep on the old path while ArgoCD proves itself on int.
+When you're ready to cut dev over: add `dev` to `argocd-sync-int.yml`'s
+`workflow_dispatch.env.options` list, duplicate the sync step for `opsapi-dev`,
+and remove `dev` from `deploy-k3s.yml`'s main-push matrix.
 
-You should see four Applications in the ArgoCD UI under the `opsapi` project,
-all OutOfSync. Open each and inspect the diff — it should match the helm
-output you'd get from `helm template ./devops/helm-charts/diytaxreturn-lapis -f values-<env>.yaml`.
+### 2. `int` is now ArgoCD-managed via CI-triggered sync
 
-### 2. Manually sync `dev` first
+Push to `main` that touches the chart or `devops/argocd/*` → workflow fires →
+int syncs → wait for Healthy → done. If sync fails, the workflow fails red
+in the Actions tab (unlike today's Force-Refresh-Pods that hides all
+non-fatal errors).
 
-In the ArgoCD UI → `opsapi-dev` → Sync. Watch the resources go green.
-Confirm the dev pod is Ready, `/health` returns 200.
+### 3. First-run gotcha to watch
+
+The very first sync after PR #456 merges will **adopt** the existing int
+resources into ArgoCD ownership. If someone did a `kubectl edit` during the
+recent outages that isn't reflected in `values-int.yaml`, ArgoCD will
+revert it to the git-declared state. **Before the first sync completes**,
+either:
+
+- Reconcile any wanted local changes into `values-int.yaml`, OR
+- Cancel the workflow run and manually sync via the ArgoCD UI first, so
+  you can inspect the diff before it applies.
+
+### 4. Then `acc`
+
+Same pattern — copy `argocd-sync-int.yml` to `argocd-sync-acc.yml`, change
+the `TARGET_ENV` default to `acc`, adjust the trigger paths to also fire on
+`release` branch pushes (which is how acc's helm-from-CI currently works).
+
+### 5. `prod` stays manual sync
+
+Do NOT add prod to any CI-triggered workflow. Prod is always a deliberate
+click in the ArgoCD UI. This is the same discipline as the old
+`deploy-k3s.yml` (which never auto-deployed prod either).
 
 If anything looks wrong, hit Refresh / Hard-Refresh, or Rollback to the
 previous revision. The old `deploy-k3s.yml` workflow is still wired up
