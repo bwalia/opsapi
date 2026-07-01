@@ -178,8 +178,13 @@ jobs:
           elif [ "${{ github.ref }}" = "refs/heads/release" ]; then
             ENVS_JSON='["acc"]'
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            # Low tiers — fan out so dev and int receive every main commit.
-            ENVS_JSON='["dev","int"]'
+            # `int` is now deployed via ArgoCD (see .github/workflows/argocd-sync-int.yml
+            # and devops/argocd/). This matrix keeps only `dev` on the old
+            # helm-from-CI path — it'll migrate to ArgoCD next. Do NOT
+            # add `int` back here without first removing it from the
+            # ArgoCD workflow, or you'll get two systems racing on the
+            # same Deployment (whichever runs last wins).
+            ENVS_JSON='["dev"]'
           else
             echo "::error::Unsupported trigger: ${{ github.ref }} / ${{ github.event_name }}"
             exit 1

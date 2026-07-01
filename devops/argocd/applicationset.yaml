@@ -1,0 +1,146 @@
+# =========================================================================
+# ApplicationSet — opsapi (one template, four Apps)
+# =========================================================================
+# Generates four Applications:
+#     opsapi-dev   → namespace dev,  values-dev.yaml,  tracks `main`
+#     opsapi-int   → namespace int,  values-int.yaml,  tracks `main`
+#     opsapi-acc   → namespace acc,  values-acc.yaml,  tracks `release`
+#     opsapi-prod  → namespace prod, values-prod.yaml, tracks `release`
+#
+# Every App targets the chart at:
+#     devops/helm-charts/diytaxreturn-lapis/
+#
+# Auto-sync is INTENTIONALLY OFF on every env in this initial commit.
+# That makes this PR safe to merge without disturbing the existing
+# deploy-k3s.yml GitHub Actions deploy — ArgoCD will see drift but
+# do nothing until a human clicks Sync in the UI.
+#
+# Once you've manually synced an env once via the UI and verified the
+# diff/output is what you want, flip `autoSync: true` for that env
+# (and `selfHeal` per the policy below). Migrate one env at a time
+# starting with dev. When an env is fully ArgoCD-managed, remove that
+# env from the deploy-k3s.yml matrix so the two systems don't fight.
+#
+# Recommended end-state per env (set after manual-sync verification):
+#     dev  → autoSync: true,  selfHeal: true     (move fast)
+#     int  → autoSync: true,  selfHeal: true     (move fast)
+#     acc  → autoSync: true,  selfHeal: false    (humans intervene during incidents)
+#     prod → autoSync: false, selfHeal: false    (ALWAYS manual sync)
+#
+# Apply with:  kubectl apply -f devops/argocd/applicationset.yaml
+# =========================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: opsapi
+  namespace: argocd
+spec:
+  # goTemplate preserves the original types of element fields
+  # (bool stays bool, int stays int) — required because ArgoCD's
+  # syncPolicy.automated.enabled/selfHeal are typed bool, and the
+  # legacy fasttemplate '{{var}}' renders everything as strings.
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error      # fail loudly on a typo'd field, don't silently render empty
+
+  # When the ApplicationSet is deleted, also delete the generated
+  # Applications. Their own finalizers still control whether the
+  # cluster resources get pruned (we set `prune: true` per-app
+  # via templatePatch when autoSync is enabled).
+  syncPolicy:
+    preserveResourcesOnDeletion: false
+
+  generators:
+    - list:
+        elements:
+          # ─── dev ────────────────────────────────────────────────
+          - env: dev
+            revision: main
+            autoSync: false       # flip to true after first manual sync verified
+            selfHeal: false
+          # ─── int ────────────────────────────────────────────────
+          - env: int
+            revision: main
+            autoSync: false       # flip to true after first manual sync verified
+            selfHeal: false
+          # ─── acc ────────────────────────────────────────────────
+          - env: acc
+            revision: release
+            autoSync: false       # flip to true once dev+int are stable on Argo
+            selfHeal: false
+          # ─── prod ───────────────────────────────────────────────
+          # Keep autoSync FALSE permanently for prod. Promotion to
+          # prod should always be a deliberate human click.
+          - env: prod
+            revision: release
+            autoSync: false
+            selfHeal: false
+
+  # The base template — all elements share these fields. Per-element
+  # syncPolicy is grafted on via templatePatch below so the bool
+  # fields survive with the right type.
+  template:
+    metadata:
+      name: 'opsapi-{{.env}}'
+      labels:
+        env: '{{.env}}'
+        app.kubernetes.io/part-of: opsapi
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: opsapi
+
+      source:
+        repoURL: https://github.com/bwalia/opsapi.git
+        targetRevision: '{{.revision}}'
+        path: devops/helm-charts/diytaxreturn-lapis
+        helm:
+          # Helm release name inside the cluster. Matches what the
+          # current deploy-k3s.yml uses (`helm upgrade --install
+          # diytaxreturn-lapis ...`) so there's continuity in
+          # `helm list` output, hooks, ownership labels, etc.
+          releaseName: diytaxreturn-lapis
+          valueFiles:
+            - 'values-{{.env}}.yaml'
+          # No --set overrides here. Every per-env config lives in
+          # values-{env}.yaml — that's the single source of truth.
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.env}}'
+
+      revisionHistoryLimit: 10
+
+  # templatePatch is rendered as raw YAML AFTER the base template,
+  # so the `automated.enabled` bool survives instead of being
+  # coerced to a string. The whole `automated:` block is wrapped
+  # in `{{ if .autoSync }}` so it's omitted entirely when autoSync
+  # is false — which is the safer ArgoCD semantic than `enabled: false`.
+  templatePatch: |
+    spec:
+      syncPolicy:
+        {{- if .autoSync }}
+        automated:
+          prune: true
+          selfHeal: {{ .selfHeal }}
+          allowEmpty: false
+        {{- end }}
+        syncOptions:
+          # Create the destination namespace if it doesn't exist.
+          - CreateNamespace=true
+          # Server-side apply: better handling of large manifests and
+          # field-ownership conflicts than client-side apply.
+          - ServerSideApply=true
+          # Skip re-applying resources that haven't drifted. Faster sync.
+          - ApplyOutOfSyncOnly=true
+          # When pruning (a template removed from the chart), wait for
+          # dependents to disappear before reporting sync as done.
+          - PrunePropagationPolicy=foreground
+          # Reserve the option to add per-field exclusions later.
+          - RespectIgnoreDifferences=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 5m

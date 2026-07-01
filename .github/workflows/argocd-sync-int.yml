@@ -1,0 +1,179 @@
+# =========================================================================
+# ArgoCD auto-deploy — int environment
+# =========================================================================
+# On push to main affecting the chart or the ArgoCD manifests:
+#   1. `kubectl apply` the AppProject + ApplicationSet (idempotent bootstrap
+#      that also picks up any manifest changes since the last run)
+#   2. Wait for the ApplicationSet controller to materialise `opsapi-int`
+#   3. Trigger a sync of `opsapi-int` and wait for Synced+Healthy
+#
+# Why this exists:
+# The applicationset.yaml keeps `autoSync: false` for every env by default
+# (safety-first — ArgoCD won't fight with any leftover manual state on the
+# first cutover). But we still want the "push to main deploys int"
+# behaviour the old deploy-k3s.yml matrix gave us. This workflow provides
+# that — CI-triggered sync via ArgoCD, giving us CI's immediate feedback
+# AND ArgoCD's declarative correctness. Best of both.
+#
+# Runs on ubuntu-latest — deliberately NOT self-hosted. The whole point of
+# moving to ArgoCD is to escape the self-hosted-runner SPOF that killed
+# every deploy on 2026-06-29 when slworker00 went cordoned.
+# =========================================================================
+name: ArgoCD sync — int
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Any change to the ArgoCD manifests re-applies them.
+      - 'devops/argocd/**'
+      # Any change to the chart or int's values re-syncs int through Argo.
+      - 'devops/helm-charts/diytaxreturn-lapis/**'
+      # Also fire if someone changes THIS workflow itself.
+      - '.github/workflows/argocd-sync-int.yml'
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Env to sync (dev, int, acc, prod). Defaults to int."
+        required: false
+        default: int
+        type: choice
+        options: [dev, int, acc, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Apply manifests + sync opsapi-${{ github.event.inputs.env || 'int' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_ENV: ${{ github.event.inputs.env || 'int' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.4
+
+      - name: Configure cluster access
+        env:
+          K3S_CONFIG: ${{ secrets.MY_K3S_CONFIG }}
+        run: |
+          if [ -z "$K3S_CONFIG" ]; then
+            echo "::error::Secret MY_K3S_CONFIG is empty or missing"
+            exit 1
+          fi
+          echo "$K3S_CONFIG" | base64 -d > ./kubeconfig
+          # Same kubeconfig-massaging as deploy-k3s.yml: point at the
+          # Kube-VIP DNS name and skip TLS verify (cert is bound to the
+          # per-node IP, not the VIP hostname).
+          sed -i 's|server: https://.*:6443|server: https://k3s0.diytaxreturn.co.uk:6443|g' ./kubeconfig
+          kubectl config set-cluster default \
+            --insecure-skip-tls-verify=true \
+            --kubeconfig=./kubeconfig
+          chmod 600 ./kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Verify cluster connectivity
+        run: |
+          kubectl cluster-info | head -3
+          kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-server --no-headers \
+            | grep -q Running \
+            || { echo "::error::argocd-server not Running — is ArgoCD healthy?"; exit 1; }
+
+      # =====================================================================
+      # Bootstrap / re-apply the ArgoCD manifests
+      # =====================================================================
+      # kubectl apply is idempotent — safe on every run. This picks up:
+      #   * First-run: creates the AppProject + ApplicationSet
+      #   * Subsequent: applies any diffs to appproject.yaml / applicationset.yaml
+      #     (e.g. flipping autoSync: true for an env)
+      - name: Apply ArgoCD manifests
+        run: |
+          kubectl apply -f devops/argocd/appproject.yaml
+          kubectl apply -f devops/argocd/applicationset.yaml
+
+      # The ApplicationSet controller creates the individual Applications
+      # asynchronously after seeing the ApplicationSet CR. Poll until the
+      # target env's App exists (typically <5s, cap at 60s).
+      - name: Wait for opsapi-${{ env.TARGET_ENV }} to be materialised by the ApplicationSet controller
+        run: |
+          APP="opsapi-${TARGET_ENV}"
+          for i in $(seq 1 20); do
+            if kubectl -n argocd get app "$APP" >/dev/null 2>&1; then
+              echo "$APP exists — proceeding"
+              exit 0
+            fi
+            echo "  attempt $i/20: $APP not yet materialised, sleeping 3s"
+            sleep 3
+          done
+          echo "::error::ApplicationSet controller did not create $APP within 60s"
+          kubectl -n argocd get applicationset opsapi -o yaml
+          exit 1
+
+      # =====================================================================
+      # Trigger a sync + wait for it to reach Synced+Healthy
+      # =====================================================================
+      # This works regardless of the App's autoSync setting — a manual sync
+      # request always executes. That's why we keep autoSync: false in the
+      # ApplicationSet: CI drives sync explicitly, no self-heal drift-fights.
+      - name: Trigger sync of opsapi-${{ env.TARGET_ENV }}
+        run: |
+          APP="opsapi-${TARGET_ENV}"
+          SHA="${{ github.sha }}"
+          kubectl -n argocd patch app "$APP" --type merge -p "$(cat <<EOF
+          {
+            "operation": {
+              "initiatedBy": { "username": "github-actions[${{ github.actor }}]" },
+              "info": [
+                { "name": "trigger",   "value": "workflow ${{ github.workflow }}" },
+                { "name": "commit",    "value": "${SHA}" },
+                { "name": "run",       "value": "${{ github.run_id }}" }
+              ],
+              "sync": {
+                "prune": true,
+                "syncOptions": ["CreateNamespace=true"]
+              }
+            }
+          }
+          EOF
+          )"
+          echo "Sync operation queued on $APP for commit ${SHA:0:12}"
+
+      # Poll every 6s for up to 4 minutes. Success = phase Succeeded AND
+      # sync Synced AND health Healthy. Fail fast on phase Failed/Error.
+      - name: Wait for sync + health
+        run: |
+          APP="opsapi-${TARGET_ENV}"
+          for i in $(seq 1 40); do
+            PHASE=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Pending")
+            SYNC=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "?")
+            HEALTH=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "?")
+            echo "  attempt $i/40: phase=$PHASE sync=$SYNC health=$HEALTH"
+            if [ "$PHASE" = "Succeeded" ] && [ "$SYNC" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
+              echo "::notice::$APP reached Synced+Healthy at ${SYNC}/${HEALTH}"
+              exit 0
+            fi
+            case "$PHASE" in
+              Failed|Error)
+                echo "::error::$APP sync $PHASE"
+                kubectl -n argocd get app "$APP" \
+                  -o jsonpath='{.status.operationState.message}{"\n"}{.status.conditions[*].message}{"\n"}'
+                exit 1
+                ;;
+            esac
+            sleep 6
+          done
+          echo "::error::Timed out after ~4 min waiting for $APP to reach Synced+Healthy"
+          kubectl -n argocd get app "$APP" \
+            -o jsonpath='{.status.operationState.message}{"\n"}{.status.conditions[*].message}{"\n"}'
+          exit 1
+
+      - name: Cleanup kubeconfig
+        if: always()
+        run: rm -f ./kubeconfig
