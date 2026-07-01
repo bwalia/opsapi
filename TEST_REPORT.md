@@ -14,6 +14,8 @@
 | 2 | Application page load time | ⚠️ Needs attention |
 | 3 | All 6 steps work flawlessly | ✅ Pass |
 | 4 | Transaction, Bank Account & Statements section present | ✅ Pass |
+| 5 | Projects section — can add any project | ✅ Pass |
+| 6 | Customers section — CRUD operations | ✅ Pass |
 
 ---
 
@@ -54,6 +56,26 @@
 - The Transaction section is present and accessible.
 - The Bank Account section is present and accessible.
 - The Statements section is present and accessible.
+
+---
+
+## 5. Projects Section
+
+**Status:** ✅ Pass
+
+- The Projects section is present and working.
+- Any project can be added successfully.
+- Newly created projects appear in the list as expected.
+
+---
+
+## 6. Customers Section (CRUD)
+
+**Status:** ✅ Pass
+
+- The Customers section is working fine.
+- Create, Read, Update, and Delete operations all work correctly.
+- Customer records persist and reflect changes accurately.
 
 ---
 
