@@ -95,19 +95,21 @@ function InstructorQueries.upsertProfile(user_uuid, namespace_id, input)
     return ProfileModel:create(fields, { returning = "*" })
 end
 
---- Public directory: every user who owns >=1 published course in the namespace,
---- with basic profile bits + aggregate stats.
+--- Public directory: every user who owns >=1 course in the namespace (any
+--- status, so newly-onboarded instructors with only a draft still appear), with
+--- basic profile bits + PUBLISHED-course stats. Empty accounts (no courses)
+--- are excluded so the directory stays clean.
 function InstructorQueries.listInstructors(namespace_id)
     local rows = db.query([[
         SELECT u.uuid AS user_uuid, u.username, u.first_name, u.last_name, u.email,
                p.headline, p.avatar_url, p.location,
-               COUNT(c.id) AS course_count,
-               COALESCE(ROUND(AVG(NULLIF(c.rating, 0))::numeric, 2), 0) AS avg_rating,
-               COALESCE(SUM(c.rating_count), 0) AS total_reviews
+               COUNT(c.id) FILTER (WHERE c.status = 'published') AS course_count,
+               COALESCE(ROUND((AVG(NULLIF(c.rating, 0)) FILTER (WHERE c.status = 'published'))::numeric, 2), 0) AS avg_rating,
+               COALESCE(SUM(c.rating_count) FILTER (WHERE c.status = 'published'), 0) AS total_reviews
         FROM academy_courses c
         JOIN users u ON u.uuid = c.owner_user_uuid
         LEFT JOIN academy_instructor_profiles p ON p.user_uuid = u.uuid
-        WHERE c.namespace_id = ? AND c.status = 'published' AND c.deleted_at IS NULL
+        WHERE c.namespace_id = ? AND c.deleted_at IS NULL
           AND c.owner_user_uuid IS NOT NULL
         GROUP BY u.uuid, u.username, u.first_name, u.last_name, u.email,
                  p.headline, p.avatar_url, p.location
@@ -132,7 +134,8 @@ function InstructorQueries.listInstructors(namespace_id)
 end
 
 --- A single instructor by username, scoped to the namespace. Returns nil unless
---- the user exists AND owns >=1 published course (i.e. is a public instructor).
+--- the user is a public instructor here: owns >=1 course (any status) OR has a
+--- saved profile. (Their profile page lists only their PUBLISHED courses.)
 function InstructorQueries.getByUsername(namespace_id, username)
     local users = db.query(
         "SELECT uuid, username, first_name, last_name, email FROM users WHERE username = ? LIMIT 1",
@@ -142,9 +145,11 @@ function InstructorQueries.getByUsername(namespace_id, username)
 
     local cnt = db.query([[
         SELECT COUNT(*) AS c FROM academy_courses
-        WHERE namespace_id = ? AND owner_user_uuid = ? AND status = 'published' AND deleted_at IS NULL
+        WHERE namespace_id = ? AND owner_user_uuid = ? AND deleted_at IS NULL
     ]], namespace_id, u.uuid)
-    if not (cnt and cnt[1] and tonumber(cnt[1].c) > 0) then return nil end
+    local has_course = cnt and cnt[1] and tonumber(cnt[1].c) > 0
+    local has_profile = ProfileModel:find({ user_uuid = u.uuid }) ~= nil
+    if not (has_course or has_profile) then return nil end
 
     local profile = shape_profile(ProfileModel:find({ user_uuid = u.uuid }))
     profile.id = u.uuid
