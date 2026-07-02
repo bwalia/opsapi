@@ -46,7 +46,7 @@ permissions:
 jobs:
   sync:
     name: Apply manifests + sync opsapi-${{ github.event.inputs.env || 'int' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, int]
     timeout-minutes: 10
     env:
       TARGET_ENV: ${{ github.event.inputs.env || 'int' }}
