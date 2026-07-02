@@ -64,6 +64,38 @@ export interface InstructorStatus {
   namespace: InstructorNamespace;
 }
 
+export interface InstructorSocials {
+  twitter?: string;
+  linkedin?: string;
+  github?: string;
+  youtube?: string;
+}
+
+export interface Achievement {
+  title: string;
+  issuer?: string;
+  year?: string;
+}
+
+export interface Education {
+  degree: string;
+  institution?: string;
+  year?: string;
+}
+
+export interface InstructorProfile {
+  headline?: string;
+  bio?: string;
+  avatar_url?: string;
+  location?: string;
+  website?: string;
+  socials?: InstructorSocials;
+  achievements?: Achievement[];
+  education?: Education[];
+  skills?: string[];
+  exists?: boolean;
+}
+
 export interface CourseListParams {
   page?: number;
   perPage?: number;
@@ -262,6 +294,35 @@ export const academyService = {
 
   async deleteLesson(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/academy/lessons/${uuid}`);
+  },
+
+  // ----------------------------------------------------------
+  // Instructor public profile (bio, achievements, education, skills, socials)
+  // ----------------------------------------------------------
+
+  async getInstructorProfile(): Promise<InstructorProfile> {
+    const response = await apiClient.get('/api/v2/academy/creator/profile');
+    return response.data as InstructorProfile;
+  },
+
+  async saveInstructorProfile(profile: InstructorProfile): Promise<InstructorProfile> {
+    // JSON list/object fields are sent as JSON strings inside a form-encoded body
+    // (Lapis parses form params; the backend stores the strings verbatim).
+    const response = await apiClient.put(
+      '/api/v2/academy/creator/profile',
+      toFormData({
+        headline: profile.headline ?? '',
+        bio: profile.bio ?? '',
+        avatar_url: profile.avatar_url ?? '',
+        location: profile.location ?? '',
+        website: profile.website ?? '',
+        socials: JSON.stringify(profile.socials ?? {}),
+        achievements: JSON.stringify(profile.achievements ?? []),
+        education: JSON.stringify(profile.education ?? []),
+        skills: JSON.stringify(profile.skills ?? []),
+      }),
+    );
+    return response.data as InstructorProfile;
   },
 
   // ----------------------------------------------------------

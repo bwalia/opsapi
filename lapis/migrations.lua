@@ -1827,6 +1827,7 @@ local _migrations = {
     ['801_academy_courses_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 2),
     ['802_create_academy_lessons'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 3),
     ['803_academy_lessons_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 4),
+    ['818_create_academy_instructor_profiles'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 5),
     -- Academy sidebar menu item + RBAC module ("courses") + role grants
     ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
     ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),

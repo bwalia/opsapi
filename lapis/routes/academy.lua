@@ -26,6 +26,7 @@
 local cJson = require("cjson")
 local CourseQueries = require "queries.CourseQueries"
 local LessonQueries = require "queries.LessonQueries"
+local InstructorQueries = require "queries.InstructorQueries"
 local EnrollmentQueries = require "queries.EnrollmentQueries"
 local EntitlementQueries = require "queries.EntitlementQueries"
 local NamespaceQueries = require "queries.NamespaceQueries"
@@ -532,6 +533,36 @@ return function(app)
         for _, l in ipairs(lessons) do table.insert(ls, public_lesson(l)) end
         local instructors = CourseQueries.instructorsByUuids({ course.owner_user_uuid })
         return { status = 200, json = public_course(course, ls, instructors[course.owner_user_uuid]) }
+    end)
+
+    ---------------------------------------------------------------------------
+    -- PUBLIC: instructor directory + profile (no auth; namespace by slug)
+    ---------------------------------------------------------------------------
+
+    -- All instructors (anyone who owns >=1 published course), with basic profile.
+    app:get("/api/v2/public/academy/:namespace/instructors", function(self)
+        local ns = resolve_namespace(self)
+        if not ns then return api_response(404, nil, "Namespace not found") end
+        local instructors = InstructorQueries.listInstructors(ns.id)
+        return { status = 200, json = { instructors = instructors, count = #instructors } }
+    end)
+
+    -- A single instructor's public profile + their published courses.
+    app:get("/api/v2/public/academy/:namespace/instructors/:username", function(self)
+        local ns = resolve_namespace(self)
+        if not ns then return api_response(404, nil, "Namespace not found") end
+
+        local profile = InstructorQueries.getByUsername(ns.id, self.params.username)
+        if not profile then return api_response(404, nil, "Instructor not found") end
+
+        local course_rows = InstructorQueries.coursesForOwner(ns.id, profile.id)
+        local instructor_info = { id = profile.id, name = profile.name, username = profile.username }
+        local courses = {}
+        for _, c in ipairs(course_rows) do
+            table.insert(courses, public_course(c, {}, instructor_info))
+        end
+
+        return { status = 200, json = { instructor = profile, courses = courses, course_count = #courses } }
     end)
 
     ---------------------------------------------------------------------------

@@ -217,4 +217,35 @@ return {
             ]])
         end
     end,
+
+    -- ========================================================================
+    -- [5] academy_instructor_profiles — public teacher profile (per user)
+    --     Bio, headline, avatar + JSON lists (achievements, education, skills,
+    --     socials). Keyed by user_uuid; editable by the instructor, shown to
+    --     learners on the instructor's public profile page.
+    -- ========================================================================
+    [5] = function()
+        if table_exists("academy_instructor_profiles") then return end
+        schema.create_table("academy_instructor_profiles", {
+            { "id", types.serial },
+            { "uuid", types.varchar({ unique = true }) },
+            { "user_uuid", types.varchar({ unique = true }) },
+            { "namespace_id", types.integer({ null = true }) },
+            { "headline", types.varchar({ null = true }) },
+            { "bio", types.text({ null = true }) },
+            { "avatar_url", types.varchar({ null = true }) },
+            { "location", types.varchar({ null = true }) },
+            { "website", types.varchar({ null = true }) },
+            { "socials", types.text({ null = true }) },      -- JSON object
+            { "achievements", types.text({ null = true }) }, -- JSON array
+            { "education", types.text({ null = true }) },     -- JSON array
+            { "skills", types.text({ null = true }) },        -- JSON array
+            { "created_at", types.time({ default = db.raw("NOW()") }) },
+            { "updated_at", types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)"
+        })
+        if not index_exists("idx_academy_instructor_profiles_user") then
+            db.query("CREATE UNIQUE INDEX idx_academy_instructor_profiles_user ON academy_instructor_profiles (user_uuid)")
+        end
+    end,
 }

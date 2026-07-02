@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -337,6 +337,7 @@ function AcademyCoursesPage() {
           {isAdmin && (
             <Button variant="outline" leftIcon={<Banknote size={16} />} onClick={() => router.push('/dashboard/academy/admin')}>Payouts</Button>
           )}
+          <Button variant="outline" leftIcon={<User size={16} />} onClick={() => router.push('/dashboard/academy/profile')}>My Profile</Button>
           <Button variant="outline" leftIcon={<CreditCard size={16} />} onClick={() => router.push('/dashboard/academy/creator')}>Monetization</Button>
           <Button variant="outline" leftIcon={<RefreshCw size={16} />} onClick={load}>Refresh</Button>
           {canCreate('courses') && (

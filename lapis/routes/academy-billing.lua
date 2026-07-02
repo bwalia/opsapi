@@ -24,6 +24,7 @@ local cJson = require("cjson")
 local Stripe = require("lib.stripe")
 local CreatorQueries = require("queries.CreatorQueries")
 local CourseQueries = require("queries.CourseQueries")
+local InstructorQueries = require("queries.InstructorQueries")
 local EnrollmentQueries = require("queries.EnrollmentQueries")
 local EntitlementQueries = require("queries.EntitlementQueries")
 local PayoutQueries = require("queries.PayoutQueries")
@@ -111,6 +112,37 @@ return function(app)
             local body = parse_body()
             local acc = CreatorQueries.updateBankDetails(uid, ns.id, body)
             return { status = 200, json = { bank_details_complete = acc.bank_details_complete } }
+        end)))
+
+    ---------------------------------------------------------------------------
+    -- CREATOR: public instructor profile (bio, achievements, education, skills)
+    ---------------------------------------------------------------------------
+
+    app:get("/api/v2/academy/creator/profile", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "read", function(self)
+            local uid = self.current_user and self.current_user.uuid
+            return { status = 200, json = InstructorQueries.getProfile(uid) }
+        end)))
+
+    app:put("/api/v2/academy/creator/profile", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "update", function(self)
+            local ns = self.namespace
+            local uid = self.current_user and self.current_user.uuid
+            local body = parse_body()
+            -- JSON list/object fields may arrive as JSON strings (form-encoded)
+            -- or as real values (JSON body); upsertProfile handles both.
+            InstructorQueries.upsertProfile(uid, ns.id, {
+                headline = body.headline,
+                bio = body.bio,
+                avatar_url = body.avatar_url,
+                location = body.location,
+                website = body.website,
+                socials = body.socials,
+                achievements = body.achievements,
+                education = body.education,
+                skills = body.skills,
+            })
+            return { status = 200, json = InstructorQueries.getProfile(uid) }
         end)))
 
     ---------------------------------------------------------------------------
