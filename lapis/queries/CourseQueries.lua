@@ -142,6 +142,36 @@ function CourseQueries.recalcStats(course_id)
     ]], course_id, course_id)
 end
 
+--- Resolve public instructor identity for a set of owner user uuids.
+--- Returns a map: uuid -> { id, name, username }. Missing/blank names fall back
+--- to username then email, so there is always a display value.
+function CourseQueries.instructorsByUuids(uuids)
+    local map = {}
+    if not uuids or #uuids == 0 then return map end
+    -- De-dupe.
+    local seen, unique = {}, {}
+    for _, u in ipairs(uuids) do
+        if u and u ~= "" and not seen[u] then seen[u] = true; table.insert(unique, u) end
+    end
+    if #unique == 0 then return map end
+
+    local placeholders = {}
+    for i = 1, #unique do placeholders[i] = "?" end
+    local ok, rows = pcall(db.query,
+        "SELECT uuid, first_name, last_name, username, email FROM users WHERE uuid IN (" ..
+        table.concat(placeholders, ",") .. ")",
+        table.unpack(unique))
+    if not ok or not rows then return map end
+
+    for _, u in ipairs(rows) do
+        local name = ((u.first_name or "") .. " " .. (u.last_name or ""))
+            :gsub("^%s+", ""):gsub("%s+$", "")
+        if name == "" then name = u.username or u.email or "Instructor" end
+        map[u.uuid] = { id = u.uuid, name = name, username = u.username }
+    end
+    return map
+end
+
 --- Public: published courses in a namespace (optionally only free).
 function CourseQueries.listPublished(namespace_id, params)
     params = params or {}

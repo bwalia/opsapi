@@ -114,14 +114,23 @@ return function(app)
         }
     end
 
-    -- Shape a course row for public output.
-    local function public_course(row, lessons)
+    -- Shape a course row for public output. `instructor_info` (optional) is the
+    -- resolved owner identity { id, name, username }; when present it is the
+    -- authoritative instructor. We fall back to the free-text `instructor` field
+    -- (legacy / admin-entered), then to "Instructor", so the byline is never blank.
+    local function public_course(row, lessons, instructor_info)
+        local display = (instructor_info and instructor_info.name)
+            or (row.instructor ~= nil and row.instructor ~= "" and row.instructor)
+            or "Instructor"
         return {
             id = row.uuid,
             slug = row.slug,
             title = row.title,
             description = row.description,
-            instructor = row.instructor,
+            instructor = display,
+            instructor_name = instructor_info and instructor_info.name or nil,
+            instructor_username = instructor_info and instructor_info.username or nil,
+            instructor_id = (instructor_info and instructor_info.id) or row.owner_user_uuid,
             thumbnail_url = row.thumbnail_url,
             category = row.category,
             level = row.level,
@@ -491,9 +500,13 @@ return function(app)
             category = self.params.category,
         })
 
-        local ids = {}
-        for _, c in ipairs(courses) do table.insert(ids, c.id) end
+        local ids, owner_uuids = {}, {}
+        for _, c in ipairs(courses) do
+            table.insert(ids, c.id)
+            if c.owner_user_uuid then table.insert(owner_uuids, c.owner_user_uuid) end
+        end
         local lessons_by_course = LessonQueries.listByCourseIds(ids, { published_only = true })
+        local instructors = CourseQueries.instructorsByUuids(owner_uuids)
 
         local out = {}
         for _, c in ipairs(courses) do
@@ -501,7 +514,7 @@ return function(app)
             for _, l in ipairs(lessons_by_course[c.id] or {}) do
                 table.insert(ls, public_lesson(l))
             end
-            table.insert(out, public_course(c, ls))
+            table.insert(out, public_course(c, ls, instructors[c.owner_user_uuid]))
         end
         return { status = 200, json = { courses = out, count = #out } }
     end)
@@ -517,7 +530,8 @@ return function(app)
         local lessons = LessonQueries.listByCourse(course.id, { published_only = true })
         local ls = {}
         for _, l in ipairs(lessons) do table.insert(ls, public_lesson(l)) end
-        return { status = 200, json = public_course(course, ls) }
+        local instructors = CourseQueries.instructorsByUuids({ course.owner_user_uuid })
+        return { status = 200, json = public_course(course, ls, instructors[course.owner_user_uuid]) }
     end)
 
     ---------------------------------------------------------------------------
