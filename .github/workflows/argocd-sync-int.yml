@@ -123,9 +123,20 @@ jobs:
       # request always executes. That's why we keep autoSync: false in the
       # ApplicationSet: CI drives sync explicitly, no self-heal drift-fights.
       - name: Trigger sync of opsapi-${{ env.TARGET_ENV }}
+        id: trigger
         run: |
           APP="opsapi-${TARGET_ENV}"
           SHA="${{ github.sha }}"
+          # Timestamp captured BEFORE the patch so the poll step can
+          # tell "phase came from OUR new operation" from "phase came
+          # from a previous run's operation whose result is still
+          # cached in operationState". Without this guard the poll
+          # sees a stale Failed and exits before Argo even starts the
+          # new sync — that's the failure signature in run 28518780859.
+          TRIGGER_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "trigger_at=$TRIGGER_AT" >> "$GITHUB_OUTPUT"
+          echo "Trigger timestamp: $TRIGGER_AT"
+
           kubectl -n argocd patch app "$APP" --type merge -p "$(cat <<EOF
           {
             "operation": {
@@ -146,27 +157,48 @@ jobs:
           echo "Sync operation queued on $APP for commit ${SHA:0:12}"
 
       # Poll every 6s for up to 4 minutes. Success = phase Succeeded AND
-      # sync Synced AND health Healthy. Fail fast on phase Failed/Error.
+      # sync Synced AND health Healthy. Fail fast on phase Failed/Error —
+      # BUT ONLY if the failure belongs to the operation we just triggered.
+      # The `phase` field in .status.operationState reflects the LAST
+      # completed operation until Argo picks up our new one (typically
+      # <10s but occasionally 30s+). Comparing operationState.startedAt
+      # against TRIGGER_AT tells us which operation the phase refers to.
       - name: Wait for sync + health
+        env:
+          TRIGGER_AT: ${{ steps.trigger.outputs.trigger_at }}
         run: |
           APP="opsapi-${TARGET_ENV}"
+          echo "Comparing operationState.startedAt against trigger time: $TRIGGER_AT"
           for i in $(seq 1 40); do
             PHASE=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Pending")
+            STARTED=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.operationState.startedAt}' 2>/dev/null || echo "")
             SYNC=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "?")
             HEALTH=$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "?")
-            echo "  attempt $i/40: phase=$PHASE sync=$SYNC health=$HEALTH"
-            if [ "$PHASE" = "Succeeded" ] && [ "$SYNC" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
-              echo "::notice::$APP reached Synced+Healthy at ${SYNC}/${HEALTH}"
-              exit 0
+
+            # Is the operationState reflecting OUR operation?
+            # String comparison on ISO-8601 UTC timestamps is order-preserving.
+            FRESH="no"
+            if [ -n "$STARTED" ] && [ "$STARTED" \> "$TRIGGER_AT" ]; then
+              FRESH="yes"
             fi
-            case "$PHASE" in
-              Failed|Error)
-                echo "::error::$APP sync $PHASE"
-                kubectl -n argocd get app "$APP" \
-                  -o jsonpath='{.status.operationState.message}{"\n"}{.status.conditions[*].message}{"\n"}'
-                exit 1
-                ;;
-            esac
+
+            echo "  attempt $i/40: phase=$PHASE fresh=$FRESH sync=$SYNC health=$HEALTH  (started=$STARTED)"
+
+            # Only honor a terminal phase if it belongs to the new op.
+            if [ "$FRESH" = "yes" ]; then
+              if [ "$PHASE" = "Succeeded" ] && [ "$SYNC" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
+                echo "::notice::$APP reached Synced+Healthy on our operation"
+                exit 0
+              fi
+              case "$PHASE" in
+                Failed|Error)
+                  echo "::error::$APP sync $PHASE (our operation, startedAt=$STARTED)"
+                  kubectl -n argocd get app "$APP" \
+                    -o jsonpath='{.status.operationState.message}{"\n"}{.status.conditions[*].message}{"\n"}'
+                  exit 1
+                  ;;
+              esac
+            fi
             sleep 6
           done
           echo "::error::Timed out after ~4 min waiting for $APP to reach Synced+Healthy"
