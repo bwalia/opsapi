@@ -40,6 +40,24 @@ local function learner_base()
     return (b:gsub("/+$", ""))
 end
 
+-- Stripe expects lowercase ISO-4217 codes. Guard against bad admin-entered
+-- values (e.g. "GBR") so checkout fails with a clear message, not a cryptic
+-- Stripe 502. Extend this set if you start selling in more currencies.
+local SUPPORTED_CURRENCIES = {
+    usd = true, gbp = true, eur = true, inr = true, aud = true,
+    cad = true, sgd = true, aed = true, jpy = true, nzd = true,
+}
+
+-- Returns (code, nil) for a valid currency or (nil, message) otherwise.
+local function normalize_currency(raw)
+    local c = tostring(raw or ""):lower():gsub("%s+", "")
+    if c == "" then c = "usd" end
+    if not SUPPORTED_CURRENCIES[c] then
+        return nil, "Unsupported currency '" .. tostring(raw) .. "'"
+    end
+    return c, nil
+end
+
 local BANK_OUT_FIELDS = {
     "account_holder_name", "bank_name", "account_number", "routing_number",
     "sort_code", "iban", "swift_bic", "bank_country", "payout_email",
@@ -158,7 +176,8 @@ return function(app)
                 return api_response(400, nil, "amount (in minor units, e.g. 999 = $9.99) is required")
             end
             local interval = (body.interval == "year") and "year" or "month"
-            local currency = body.currency or "usd"
+            local currency, cur_err = normalize_currency(body.currency)
+            if not currency then return api_response(400, nil, cur_err) end
 
             local stripe = Stripe.new()
             local product, perr = stripe:create_product({
@@ -204,6 +223,9 @@ return function(app)
         local amount = math.floor(tonumber(course.price) or 0)
         if amount <= 0 then return api_response(400, nil, "Invalid course price") end
 
+        local currency, cur_err = normalize_currency(course.currency)
+        if not currency then return api_response(400, nil, cur_err) end
+
         local base = learner_base()
         local stripe = Stripe.new()
         local session, err = stripe:create_checkout_session({
@@ -214,7 +236,7 @@ return function(app)
             line_items = { {
                 quantity = 1,
                 price_data = {
-                    currency = course.currency or "usd",
+                    currency = currency,
                     unit_amount = amount,
                     product_data = { name = course.title },
                 },
