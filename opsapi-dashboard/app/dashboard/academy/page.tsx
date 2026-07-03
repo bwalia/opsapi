@@ -75,7 +75,8 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
         category: course.category ?? 'general',
         level: course.level,
         is_free: course.is_free,
-        price: course.price,
+        // Stored in minor units (pence/cents); edit in major units.
+        price: (course.price ?? 0) / 100,
         currency: course.currency,
         status: course.status,
       });
@@ -100,7 +101,8 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
     try {
       const payload: CourseInput = {
         ...form,
-        price: form.is_free ? 0 : Number(form.price) || 0,
+        // Convert major units (what the user typed) back to minor units for the API.
+        price: form.is_free ? 0 : Math.round((Number(form.price) || 0) * 100),
       };
       if (course) {
         await academyService.updateCourse(course.uuid, payload);
@@ -167,11 +169,16 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
             <>
               <div>
                 <label className="block text-sm font-medium text-secondary-700 mb-1">Price</label>
-                <input className={inputClass} type="number" min={0} value={form.price} onChange={(e) => set('price', Number(e.target.value))} />
+                <input className={inputClass} type="number" min={0} step={0.01} value={form.price} onChange={(e) => set('price', Number(e.target.value))} placeholder="e.g. 9.99" />
+                <p className="mt-1 text-xs text-secondary-500">Amount charged to the learner, e.g. 9.99 for {form.currency} 9.99.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-secondary-700 mb-1">Currency</label>
-                <input className={inputClass} value={form.currency} onChange={(e) => set('currency', e.target.value)} placeholder="USD" />
+                <select className={inputClass} value={form.currency} onChange={(e) => set('currency', e.target.value)}>
+                  {['USD', 'GBP', 'EUR', 'INR', 'AUD', 'CAD', 'SGD', 'AED', 'JPY', 'NZD'].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
             </>
           )}
