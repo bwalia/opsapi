@@ -139,6 +139,7 @@ local bank_transaction_migrations = load_if_enabled(ProjectConfig.FEATURES.BANK_
 local academy_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-system") or {}
 local academy_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-menu-items") or {}
 local academy_enrollment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-enrollments") or {}
+local academy_payment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-payments") or {}
 
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
@@ -1826,6 +1827,7 @@ local _migrations = {
     ['801_academy_courses_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 2),
     ['802_create_academy_lessons'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 3),
     ['803_academy_lessons_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 4),
+    ['818_create_academy_instructor_profiles'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 5),
     -- Academy sidebar menu item + RBAC module ("courses") + role grants
     ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
     ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),
@@ -1834,6 +1836,16 @@ local _migrations = {
     -- Academy enrollments (learner ↔ course)
     ['808_create_academy_enrollments'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_enrollment_migrations, 1),
     ['809_academy_enrollments_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_enrollment_migrations, 2),
+    -- Academy money layer (platform-as-merchant: creator bank+fee, plans, subs,
+    -- payments ledger, settings, payouts)
+    ['810_create_creator_accounts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 1),
+    ['811_create_creator_subscription_plans'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 2),
+    ['812_create_academy_subscriptions'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 3),
+    ['813_create_academy_payments'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 4),
+    ['814_create_processed_stripe_events'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 5),
+    ['815_create_academy_settings'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 6),
+    ['816_create_creator_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 7),
+    ['817_academy_per_instructor_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 8),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

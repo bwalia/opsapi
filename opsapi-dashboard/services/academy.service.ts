@@ -51,6 +51,51 @@ export interface CourseWithLessons {
   lessons: AcademyLesson[];
 }
 
+export interface InstructorNamespace {
+  id: number;
+  uuid: string;
+  slug: string;
+  name: string;
+}
+
+export interface InstructorStatus {
+  is_instructor: boolean;
+  is_owner: boolean;
+  namespace: InstructorNamespace;
+}
+
+export interface InstructorSocials {
+  twitter?: string;
+  linkedin?: string;
+  github?: string;
+  youtube?: string;
+}
+
+export interface Achievement {
+  title: string;
+  issuer?: string;
+  year?: string;
+}
+
+export interface Education {
+  degree: string;
+  institution?: string;
+  year?: string;
+}
+
+export interface InstructorProfile {
+  headline?: string;
+  bio?: string;
+  avatar_url?: string;
+  location?: string;
+  website?: string;
+  socials?: InstructorSocials;
+  achievements?: Achievement[];
+  education?: Education[];
+  skills?: string[];
+  exists?: boolean;
+}
+
 export interface CourseListParams {
   page?: number;
   perPage?: number;
@@ -95,6 +140,56 @@ export interface LessonInput {
   content_html?: string;
   content_json?: string;
   status?: LessonStatus;
+}
+
+export interface CommunityPlan {
+  amount: number; // minor units (e.g. 999 = $9.99)
+  currency: string;
+  interval: string; // month|year
+}
+
+export interface CreatorBank {
+  account_holder_name?: string;
+  bank_name?: string;
+  account_number?: string;
+  routing_number?: string;
+  sort_code?: string;
+  iban?: string;
+  swift_bic?: string;
+  bank_country?: string;
+  payout_email?: string;
+}
+
+export interface CreatorEarnings {
+  total_net: number;
+  owed: number;
+  paid: number;
+  currency: string;
+  sales: number;
+}
+
+export interface CreatorAccount {
+  bank: CreatorBank;
+  bank_details_complete: boolean;
+  fee_pct: number; // effective cut % applied to this creator
+  plan?: CommunityPlan | null;
+  earnings: CreatorEarnings;
+}
+
+export interface PayoutRow {
+  user_uuid: string;
+  instructor_name: string;
+  instructor_email?: string;
+  owed: number;
+  currency: string;
+  sales: number;
+  bank?: (CreatorBank & { complete?: boolean }) | null;
+}
+
+export interface SubscriptionPlanInput {
+  amount: number; // minor units
+  interval: 'month' | 'year';
+  currency?: string;
 }
 
 // ============================================================
@@ -199,6 +294,118 @@ export const academyService = {
 
   async deleteLesson(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/academy/lessons/${uuid}`);
+  },
+
+  // ----------------------------------------------------------
+  // Instructor public profile (bio, achievements, education, skills, socials)
+  // ----------------------------------------------------------
+
+  async getInstructorProfile(): Promise<InstructorProfile> {
+    const response = await apiClient.get('/api/v2/academy/creator/profile');
+    return response.data as InstructorProfile;
+  },
+
+  async saveInstructorProfile(profile: InstructorProfile): Promise<InstructorProfile> {
+    // JSON list/object fields are sent as JSON strings inside a form-encoded body
+    // (Lapis parses form params; the backend stores the strings verbatim).
+    const response = await apiClient.put(
+      '/api/v2/academy/creator/profile',
+      toFormData({
+        headline: profile.headline ?? '',
+        bio: profile.bio ?? '',
+        avatar_url: profile.avatar_url ?? '',
+        location: profile.location ?? '',
+        website: profile.website ?? '',
+        socials: JSON.stringify(profile.socials ?? {}),
+        achievements: JSON.stringify(profile.achievements ?? []),
+        education: JSON.stringify(profile.education ?? []),
+        skills: JSON.stringify(profile.skills ?? []),
+      }),
+    );
+    return response.data as InstructorProfile;
+  },
+
+  // ----------------------------------------------------------
+  // Creator monetization (bank details + community subscription).
+  // The platform is the merchant; creators are paid out manually.
+  // These endpoints return flat shapes (not the {success,data} envelope).
+  // ----------------------------------------------------------
+
+  async getCreatorAccount(): Promise<CreatorAccount> {
+    const response = await apiClient.get('/api/v2/academy/creator/account');
+    return response.data as CreatorAccount;
+  },
+
+  async saveBankDetails(bank: CreatorBank): Promise<{ bank_details_complete: boolean }> {
+    const response = await apiClient.put(
+      '/api/v2/academy/creator/account',
+      toFormData(bank as Record<string, unknown>),
+    );
+    return response.data as { bank_details_complete: boolean };
+  },
+
+  async setSubscriptionPlan(
+    input: SubscriptionPlanInput,
+  ): Promise<CommunityPlan> {
+    const response = await apiClient.put(
+      '/api/v2/academy/creator/subscription-plan',
+      toFormData(input as unknown as Record<string, unknown>),
+    );
+    return response.data as CommunityPlan;
+  },
+
+  // ----------------------------------------------------------
+  // Super-admin (platform "administrative" role)
+  // ----------------------------------------------------------
+
+  async getDefaultFeePct(): Promise<number> {
+    const response = await apiClient.get('/api/v2/academy/admin/settings');
+    return Number(response.data?.default_fee_pct ?? 0);
+  },
+
+  async setDefaultFeePct(pct: number): Promise<number> {
+    const response = await apiClient.put(
+      '/api/v2/academy/admin/settings',
+      toFormData({ default_fee_pct: pct }),
+    );
+    return Number(response.data?.default_fee_pct ?? pct);
+  },
+
+  async setInstructorFeeOverride(userUuid: string, pct: number | null): Promise<void> {
+    await apiClient.put(
+      `/api/v2/academy/admin/instructors/${userUuid}/fee`,
+      toFormData({ fee_pct: pct ?? '' }),
+    );
+  },
+
+  async getPayouts(): Promise<PayoutRow[]> {
+    const response = await apiClient.get('/api/v2/academy/admin/payouts');
+    return Array.isArray(response.data?.payouts) ? (response.data.payouts as PayoutRow[]) : [];
+  },
+
+  async markPayoutPaid(
+    userUuid: string,
+    reference: string,
+  ): Promise<{ paid: boolean; amount: number; currency: string }> {
+    const response = await apiClient.post(
+      `/api/v2/academy/admin/payouts/${userUuid}/mark-paid`,
+      toFormData({ reference }),
+    );
+    return response.data as { paid: boolean; amount: number; currency: string };
+  },
+
+  // ----------------------------------------------------------
+  // Instructor self-service (role inside the single academy namespace)
+  // ----------------------------------------------------------
+
+  async getInstructorStatus(): Promise<InstructorStatus> {
+    const response = await apiClient.get('/api/v2/academy/instructor/status');
+    return unwrap<InstructorStatus>(response);
+  },
+
+  async registerInstructor(): Promise<InstructorStatus> {
+    const response = await apiClient.post('/api/v2/academy/instructor/register');
+    return unwrap<InstructorStatus>(response);
   },
 };
 

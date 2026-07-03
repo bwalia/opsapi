@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect } from 'react';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
+import { Node, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
@@ -41,8 +42,73 @@ import {
   Superscript as SuperscriptIcon,
   Palette,
   RemoveFormatting,
+  Youtube as YoutubeIcon,
 } from 'lucide-react';
 import styles from './RichTextEditor.module.css';
+
+// ------------------------------------------------------------
+// Video embed node (YouTube / Vimeo)
+// ------------------------------------------------------------
+// StarterKit has no iframe node, so any embedded video in existing content would
+// be silently dropped on load — and wiped on the next save. This atom node
+// parses existing <iframe> embeds, renders them in the editor, and preserves
+// them in the serialized HTML. Only trusted hosts are kept (the learner site
+// sanitises again on render).
+const ALLOWED_VIDEO_HOSTS =
+  /^(https:)?\/\/(www\.)?(youtube\.com|youtube-nocookie\.com|player\.vimeo\.com)\//i;
+
+/** Normalise a pasted YouTube/Vimeo URL to its embeddable form. */
+function toEmbedUrl(raw: string): string | null {
+  const url = raw.trim();
+  if (!url) return null;
+  const yt =
+    url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/i);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+  const vimeo = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+  if (vimeo) return `https://player.vimeo.com/video/${vimeo[1]}`;
+  return ALLOWED_VIDEO_HOSTS.test(url) ? url : null;
+}
+
+const VideoEmbed = Node.create({
+  name: 'videoEmbed',
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      src: { default: null },
+      title: { default: 'Lesson video' },
+    };
+  },
+  parseHTML() {
+    // Match any iframe; keep only trusted video hosts.
+    return [
+      {
+        tag: 'iframe',
+        getAttrs: (el) => {
+          const src = (el as HTMLElement).getAttribute('src') || '';
+          return ALLOWED_VIDEO_HOSTS.test(src) ? { src } : false;
+        },
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'div',
+      { class: 'academy-video' },
+      [
+        'iframe',
+        mergeAttributes(HTMLAttributes, {
+          frameborder: '0',
+          allow:
+            'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
+          allowfullscreen: 'true',
+        }),
+      ],
+    ];
+  },
+});
 
 export interface RichTextEditorProps {
   /** Initial / controlled HTML value */
@@ -106,6 +172,21 @@ const Toolbar: React.FC<{ editor: Editor }> = ({ editor }) => {
     if (url && url.trim()) {
       editor.chain().focus().setImage({ src: url.trim() }).run();
     }
+  }, [editor]);
+
+  const addVideo = useCallback(() => {
+    const url = window.prompt('YouTube or Vimeo URL');
+    if (!url) return;
+    const src = toEmbedUrl(url);
+    if (!src) {
+      window.alert('Please paste a valid YouTube or Vimeo link.');
+      return;
+    }
+    editor
+      .chain()
+      .focus()
+      .insertContent({ type: 'videoEmbed', attrs: { src } })
+      .run();
   }, [editor]);
 
   const insertTable = useCallback(() => {
@@ -245,6 +326,9 @@ const Toolbar: React.FC<{ editor: Editor }> = ({ editor }) => {
       <TbButton title="Insert image" onClick={addImage}>
         <ImageIcon size={16} />
       </TbButton>
+      <TbButton title="Insert video (YouTube / Vimeo)" onClick={addVideo}>
+        <YoutubeIcon size={16} />
+      </TbButton>
       <TbButton title="Insert table" onClick={insertTable}>
         <TableIcon size={16} />
       </TbButton>
@@ -284,6 +368,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       // Underline, Link, CodeBlock and Heading are bundled in StarterKit v3.
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Image.configure({ inline: false, allowBase64: true, HTMLAttributes: { class: 'academy-img' } }),
+      VideoEmbed,
       Subscript,
       Superscript,
       Table.configure({ resizable: true }),

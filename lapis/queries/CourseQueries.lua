@@ -63,6 +63,11 @@ function CourseQueries.list(namespace_id, params)
         local p = "%" .. params.search .. "%"
         table.insert(values, p); table.insert(values, p)
     end
+    -- Instructors only see/manage their own courses (owner-scoped); the
+    -- namespace owner / platform admin passes no owner filter and sees all.
+    if params.owner_user_uuid and params.owner_user_uuid ~= "" then
+        table.insert(where, "owner_user_uuid = ?"); table.insert(values, params.owner_user_uuid)
+    end
 
     local where_sql = table.concat(where, " AND ")
 
@@ -86,6 +91,15 @@ end
 
 function CourseQueries.getByUuid(namespace_id, uuid)
     return findScoped(namespace_id, uuid)
+end
+
+--- Find a non-deleted course by numeric id, scoped to a namespace.
+-- Used for lesson ownership checks (lessons reference course_id, not uuid).
+function CourseQueries.findById(namespace_id, id)
+    local rows = db.query(
+        "SELECT * FROM academy_courses WHERE id = ? AND namespace_id = ? AND deleted_at IS NULL LIMIT 1",
+        id, namespace_id)
+    return rows and rows[1] or nil
 end
 
 function CourseQueries.getBySlug(namespace_id, slug)
@@ -126,6 +140,36 @@ function CourseQueries.recalcStats(course_id)
         ) s
         WHERE c.id = ?
     ]], course_id, course_id)
+end
+
+--- Resolve public instructor identity for a set of owner user uuids.
+--- Returns a map: uuid -> { id, name, username }. Missing/blank names fall back
+--- to username then email, so there is always a display value.
+function CourseQueries.instructorsByUuids(uuids)
+    local map = {}
+    if not uuids or #uuids == 0 then return map end
+    -- De-dupe.
+    local seen, unique = {}, {}
+    for _, u in ipairs(uuids) do
+        if u and u ~= "" and not seen[u] then seen[u] = true; table.insert(unique, u) end
+    end
+    if #unique == 0 then return map end
+
+    local placeholders = {}
+    for i = 1, #unique do placeholders[i] = "?" end
+    local ok, rows = pcall(db.query,
+        "SELECT uuid, first_name, last_name, username, email FROM users WHERE uuid IN (" ..
+        table.concat(placeholders, ",") .. ")",
+        table.unpack(unique))
+    if not ok or not rows then return map end
+
+    for _, u in ipairs(rows) do
+        local name = ((u.first_name or "") .. " " .. (u.last_name or ""))
+            :gsub("^%s+", ""):gsub("%s+$", "")
+        if name == "" then name = u.username or u.email or "Instructor" end
+        map[u.uuid] = { id = u.uuid, name = name, username = u.username }
+    end
+    return map
 end
 
 --- Public: published courses in a namespace (optionally only free).

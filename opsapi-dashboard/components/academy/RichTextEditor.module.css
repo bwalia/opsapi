@@ -194,6 +194,23 @@
   border-radius: 8px;
   margin: 0.5em 0;
 }
+.editorContent :global(.ProseMirror .academy-video) {
+  margin: 0.75em 0;
+}
+.editorContent :global(.ProseMirror .academy-video iframe) {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border: 0;
+  border-radius: 8px;
+  display: block;
+}
+/* Show the selected video node clearly when clicked. */
+.editorContent :global(.ProseMirror .ProseMirror-selectednode .academy-video iframe),
+.editorContent :global(.ProseMirror .academy-video.ProseMirror-selectednode iframe) {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
 .editorContent :global(.ProseMirror hr) {
   border: none;
   border-top: 2px solid #e2e8f0;
