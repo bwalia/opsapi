@@ -206,6 +206,12 @@ return function(app)
                 })
             end
 
+            -- Match the login token's userinfo shape (helper/jwt-helper.lua).
+            -- Without a name claim, a freshly-registered user has no display name
+            -- in their session and consumers fall back to showing their email.
+            local full_name = ((user.first_name or "") .. " " .. (user.last_name or ""))
+                :gsub("^%s*(.-)%s*$", "%1")
+
             local jwt_payload = {
                 userinfo = {
                     uuid = user.uuid,
@@ -213,6 +219,10 @@ return function(app)
                     email = user.email,
                     username = user.username,
                     role = user.role,
+                    -- Additive: lenient consumers (tax_copilot) ignore unknown claims.
+                    name = full_name,
+                    first_name = user.first_name,
+                    last_name = user.last_name,
                     -- Surface the freshly-saved business profile key
                     -- so the frontend can render the right onboarding
                     -- state and pre-fill classify without a second

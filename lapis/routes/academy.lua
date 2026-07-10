@@ -228,6 +228,17 @@ return function(app)
             }
         end)))
 
+    -- A paid course with no price cannot be bought: Stripe rejects a zero amount,
+    -- so the learner's Buy button hard-fails with "Invalid course price". Refuse
+    -- to persist that state rather than let it surface at checkout.
+    local function price_error(is_free, price)
+        if is_free then return nil end
+        if not price or price <= 0 then
+            return "A paid course needs a price greater than 0 (minor units, e.g. 999 = 9.99)"
+        end
+        return nil
+    end
+
     app:post("/api/v2/academy/courses", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("courses", "create", function(self)
             local body = parse_body()
@@ -243,6 +254,11 @@ return function(app)
                 return api_response(400, nil, "Invalid status (draft|published|archived)")
             end
 
+            local is_free = to_bool(body.is_free, true)
+            local price = tonumber(body.price) or 0
+            local perr = price_error(is_free, price)
+            if perr then return api_response(400, nil, perr) end
+
             local ok, course_or_err = pcall(CourseQueries.create, self.namespace.id, {
                 title = body.title,
                 slug = body.slug,
@@ -251,8 +267,8 @@ return function(app)
                 thumbnail_url = body.thumbnail_url,
                 category = body.category or "general",
                 level = level,
-                is_free = to_bool(body.is_free, true),
-                price = tonumber(body.price) or 0,
+                is_free = is_free,
+                price = price,
                 currency = body.currency or "USD",
                 status = status,
                 owner_user_uuid = self.current_user.uuid,
@@ -294,13 +310,24 @@ return function(app)
             if body.is_free ~= nil then fields.is_free = to_bool(body.is_free, true) end
             if body.price ~= nil then fields.price = tonumber(body.price) or 0 end
 
+            local existing = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
+            if not existing then return api_response(404, nil, "Course not found") end
+
             if not can_manage_all(self) then
-                local existing = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
-                if not existing then return api_response(404, nil, "Course not found") end
                 if not ensure_owns(self, existing) then
                     return api_response(403, nil, "You can only manage your own courses")
                 end
             end
+
+            -- is_free/price may each be omitted, so validate the RESULTING course,
+            -- not just the fields in this request.
+            local eff_free = fields.is_free
+            if eff_free == nil then
+                eff_free = (existing.is_free == true or existing.is_free == "t")
+            end
+            local eff_price = fields.price or tonumber(existing.price) or 0
+            local perr = price_error(eff_free, eff_price)
+            if perr then return api_response(400, nil, perr) end
 
             local updated = CourseQueries.update(self.namespace.id, self.params.uuid, fields)
             if not updated then return api_response(404, nil, "Course not found") end
