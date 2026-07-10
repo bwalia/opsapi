@@ -81,6 +81,13 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Need full history + tags so `git describe --tags` resolves to the
+          # nearest annotated tag (e.g. v1.4.0-12-gabc1234) rather than
+          # falling back to the bare commit sha. The Determine build metadata
+          # step below depends on this; without fetch-depth: 0 you get a
+          # shallow clone with no tags and every image reports "dev".
+          fetch-depth: 0
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -91,6 +98,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Determine build metadata
+        id: version
+        run: |
+          # Mirrors the diytaxreturn-uk deploy-single-environment.yml step of
+          # the same name so opsapi + fastapi + frontend all report the same
+          # `git describe`-derived string when built from the same commit.
+          # This is the whole point of the "constant across environments"
+          # requirement — the version should reflect the CODE, not the env.
+          APP_VERSION=$(git describe --tags --always 2>/dev/null || echo 'dev')
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER:-local}"
+          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "Build: v$APP_VERSION #$BUILD_NUMBER at $BUILD_TIME"
+
       - name: Build and push OpsAPI
         uses: docker/build-push-action@v5
         with:
@@ -98,7 +121,15 @@ jobs:
           file: ./lapis/Dockerfile
           push: true
           tags: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          build-args: TAG=latest
+          # `TAG=latest` retained for existing consumers. New APP_VERSION /
+          # BUILD_NUMBER / BUILD_TIME args are what app.lua reads via
+          # os.getenv() so `/`, `/health`, `/metrics` surface the same
+          # version string in every environment.
+          build-args: |
+            TAG=latest
+            APP_VERSION=${{ steps.version.outputs.APP_VERSION }}
+            BUILD_NUMBER=${{ steps.version.outputs.BUILD_NUMBER }}
+            BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
