@@ -140,6 +140,7 @@ local academy_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migr
 local academy_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-menu-items") or {}
 local academy_enrollment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-enrollments") or {}
 local academy_payment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-payments") or {}
+local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-progress") or {}
 
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
@@ -1864,6 +1865,10 @@ local _migrations = {
     ['815_create_academy_settings'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 6),
     ['816_create_creator_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 7),
     ['817_academy_per_instructor_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 8),
+
+    -- Academy learner progress (completed lessons -> dashboard progress bars)
+    ['819_create_academy_lesson_progress'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 1),
+    ['820_academy_lesson_progress_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 2),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
