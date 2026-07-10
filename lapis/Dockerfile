@@ -3,6 +3,26 @@ FROM openresty/openresty:alpine
 ARG TARGET_NGINX_CONF=nginx.conf
 ARG TAG=latest
 
+# Build metadata — injected by CI (build-push-docker-image.yml) from
+# `git describe --tags --always` + GITHUB_RUN_NUMBER + `date -u`. Baked
+# in as container ENVs so app.lua's os.getenv() calls resolve at request
+# time (nginx.conf `env APP_VERSION;` etc. also required — declared there).
+#
+# Every environment (int/test/acc/prod) pulls the same
+# docker.io/bwalia/opsapi:latest tag, so once a new build has propagated
+# they all report the same version — which is what the "constant across
+# environments" requirement in the diytaxreturn-uk platform expects.
+ARG APP_VERSION=dev
+ARG BUILD_NUMBER=local
+ARG BUILD_TIME=""
+ENV APP_VERSION=${APP_VERSION} \
+    BUILD_NUMBER=${BUILD_NUMBER} \
+    BUILD_TIME=${BUILD_TIME}
+LABEL org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${APP_VERSION}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      opsapi.build.number="${BUILD_NUMBER}"
+
 RUN apk add --no-cache wget make gcc libc-dev \
     && wget https://luarocks.github.io/luarocks/releases/luarocks-3.12.0.tar.gz \
     && tar zxpf luarocks-3.12.0.tar.gz \

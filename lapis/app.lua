@@ -4,6 +4,20 @@ local CorsMiddleware = require("middleware.cors")
 local GlobalRateLimit = require("middleware.global-rate-limit")
 local Errors = require("lib.errors")
 
+-- Build metadata baked into the image at `docker build` time — the CI
+-- workflow passes `--build-arg APP_VERSION=$(git describe --tags --always)`
+-- + BUILD_NUMBER + BUILD_TIME, and the Dockerfile turns them into container
+-- ENVs. Every environment (int/test/acc/prod) pulls the same
+-- docker.io/bwalia/opsapi:latest tag, so they all report the same version
+-- once a new build has propagated — which is the point.
+--
+-- Captured once at module-load rather than re-read per request because it
+-- can't change without a pod restart anyway. Fallbacks match what the
+-- Dockerfile ARG defaults are so a locally-run opsapi (no CI) still boots.
+local APP_VERSION = os.getenv("APP_VERSION") or "dev"
+local BUILD_NUMBER = os.getenv("BUILD_NUMBER") or "local"
+local BUILD_TIME = os.getenv("BUILD_TIME") or ""
+
 -- Enable CORS
 CorsMiddleware.enable(app)
 
@@ -30,7 +44,12 @@ app:get("/", function(self)
     return {
         json = {
             message = "OpsAPI is running",
-            version = "1.0.0",
+            -- All three fields baked in at `docker build` time (see the
+            -- module-level constants above). Same across every environment
+            -- pulling the same :latest tag.
+            version = APP_VERSION,
+            build_number = BUILD_NUMBER,
+            build_time = BUILD_TIME,
             endpoints = {
                 documentation = "/swagger",
                 docs = "/docs",
@@ -143,7 +162,12 @@ app:get("/api/v2/system/info", function(self)
             parsed_codes = info_or_err.project_codes,
             enabled_features = info_or_err.enabled_features,
             environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
-            version = "1.0.0",
+            -- Same git-derived version everything else reports (see module-
+            -- level APP_VERSION). Keeps this endpoint in sync with `/`
+            -- and the /metrics gauge so all three agree.
+            version = APP_VERSION,
+            build_number = BUILD_NUMBER,
+            build_time = BUILD_TIME,
             timestamp = ngx.time(),
         }
     }
@@ -201,7 +225,7 @@ opsapi_up 1
 
 # HELP opsapi_info API information
 # TYPE opsapi_info gauge
-opsapi_info{version="1.0.0"} 1
+opsapi_info{version="]] .. APP_VERSION .. [["} 1
 
 # HELP opsapi_memory_usage_bytes Memory usage in bytes
 # TYPE opsapi_memory_usage_bytes gauge
