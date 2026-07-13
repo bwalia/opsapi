@@ -497,6 +497,11 @@ load_if("tax_copilot", "routes.tax-training-data")
 load_if("tax_copilot", "routes.tax-admin")
 load_if("tax_copilot", "routes.tax-admin-categories")
 load_if("tax_copilot", "routes.tax-admin-profiles")
+-- Admin unlock endpoint for the identity-lock feature (2026-07-13).
+-- Requires the `identity_lock.unlock` RBAC permission (module seeded in
+-- migration [89]); platform admins / namespace owners bypass. See
+-- routes/admin-identity-lock.lua for the full contract + audit shape.
+load_if("tax_copilot", "routes.admin-identity-lock")
 load_if("tax_copilot", "routes.tax-admin-income-types")
 load_if("tax_copilot", "routes.tax-app-settings")
 load_if("tax_copilot", "routes.tax-admin-custom-categories")

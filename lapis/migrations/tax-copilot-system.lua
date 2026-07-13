@@ -3159,4 +3159,41 @@ return {
 
         print("[Tax Copilot] Created identity_lock_settings table (per-namespace policy)")
     end,
+
+    -- 90. Seed message_catalog rows for the identity-lock feature so
+    --     Errors.raise("IDENTITY_LOCK_ACTIVE", ctx) and
+    --     Errors.raise("NINO_ALREADY_REGISTERED", ctx) surface through
+    --     the standard error envelope with the correct http_status
+    --     (403 / 409) instead of falling back to SYSTEM_500.
+    --
+    -- Matches the pattern from migration [87] (UPLOAD_DUPLICATE_FILED):
+    -- catalog rows only. Translations (title, user_message) live in
+    -- the FE translations layer OR the ctx passed to Errors.raise —
+    -- our IdentityLock library passes a full user_message in ctx so
+    -- the FE gets a self-contained "way out" message even before any
+    -- translations file is updated.
+    --
+    -- Idempotent via ON CONFLICT (code) DO NOTHING.
+    [90] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+              (
+                'IDENTITY_LOCK_ACTIVE',
+                'error',
+                'warn',
+                403,
+                'User attempted to modify a NINO or UTR that has already been locked (nino_locked_at / utr_locked_at is set on tax_user_profiles). To unlock, admin must POST /api/v2/admin/tax-user-profiles/{uuid}/unlock — see PR #464. Error ctx carries `field`, `locked_at`, `support_url`, `support_email`, `user_message`.'
+              ),
+              (
+                'NINO_ALREADY_REGISTERED',
+                'error',
+                'warn',
+                409,
+                'Anti-fraud uniqueness check: another user in the same namespace already has this exact NINO on file. Enforced by lib/identity_lock.lua assertNinoUniqueInNamespace + a PostgreSQL advisory transaction lock keyed on (namespace_id, nino_last4). If this fires legitimately, the user needs to contact support.'
+              )
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded IDENTITY_LOCK_ACTIVE + NINO_ALREADY_REGISTERED in message_catalog")
+    end,
 }

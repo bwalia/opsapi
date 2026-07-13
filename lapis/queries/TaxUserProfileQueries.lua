@@ -10,6 +10,7 @@ local db = require("lapis.db")
 local bcrypt = require("bcrypt")
 local Global = require("helper.global")
 local NamespaceResolver = require("helper.namespace-resolver")
+local IdentityLock = require("lib.identity_lock")
 
 local TaxUserProfileQueries = {}
 
@@ -77,26 +78,57 @@ function TaxUserProfileQueries.saveNino(user_uuid, nino)
         return nil, "Invalid NINO format. Expected: 2 letters + 6 digits + 1 letter (e.g. QQ123456C)"
     end
 
-    -- Hash with bcrypt (for verification)
-    local hash = bcrypt.digest(nino, BCRYPT_ROUNDS)
-
-    -- Encrypt with AES (for server-side HMRC API calls)
-    local encrypted = Global.encryptSecret(nino)
-
-    -- Extract last 4 characters for masked display
-    local last4 = nino:sub(-4)
-
-    -- Ensure profile exists
+    -- Ensure profile exists (creates the namespace-scoped row if missing)
     local profile, err = TaxUserProfileQueries.getOrCreate(user_uuid)
     if not profile then
         return nil, err or "Failed to create profile"
     end
+    local namespace_id = profile.namespace_id
 
-    db.query([[
-        UPDATE tax_user_profiles
-        SET nino_hash = ?, nino_last4 = ?, nino_encrypted = ?, has_nino = true, updated_at = NOW()
-        WHERE user_uuid = ?
-    ]], hash, last4, encrypted, user_uuid)
+    -- ─── Anti-fraud guards (see lapis/lib/identity_lock.lua for design) ───
+    -- 1. If the field is already locked (previous first-save), this raises
+    --    a catalog 403 with support_url / support_email — the caller's
+    --    error middleware surfaces it to the FE.
+    IdentityLock.assertNotLocked(user_uuid, namespace_id, "nino")
+
+    -- Hash + encrypt + last4 (compute BEFORE opening the txn so cheap
+    -- work isn't inside the advisory-lock hold).
+    local hash      = bcrypt.digest(nino, BCRYPT_ROUNDS)
+    local encrypted = Global.encryptSecret(nino)
+    local last4     = nino:sub(-4)
+
+    -- 2. + 3. Uniqueness check + write must be one transaction so the
+    --    advisory lock the guard takes covers the write. Any concurrent
+    --    save of the same NINO in the same namespace serializes here.
+    db.query("BEGIN")
+    local ok, txn_err = pcall(function()
+        IdentityLock.assertNinoUniqueInNamespace(profile.user_id, namespace_id, nino, Global)
+
+        db.query([[
+            UPDATE tax_user_profiles
+            SET nino_hash = ?, nino_last4 = ?, nino_encrypted = ?,
+                has_nino = true, updated_at = NOW()
+            WHERE user_uuid = ? AND namespace_id = ?
+        ]], hash, last4, encrypted, user_uuid, namespace_id)
+
+        -- 4. Stamp the lock in the SAME txn as the successful save so
+        --    "saved but forgot to lock" is impossible.
+        IdentityLock.stampLock(user_uuid, namespace_id, "nino")
+    end)
+    if not ok then
+        db.query("ROLLBACK")
+        error(txn_err)  -- re-raise (may be a catalog Errors.raise or a Lua error)
+    end
+    db.query("COMMIT")
+
+    -- 5. Audit-log entry for the first save. Failures are logged but
+    --    do NOT block success (see IdentityLock.emitAuditRow's pcall).
+    IdentityLock.emitAuditRow({
+        user_id      = profile.user_id,
+        namespace_id = namespace_id,
+        action       = "NINO_SAVED_AND_LOCKED",
+        new_values   = { nino_last4 = last4 },
+    })
 
     return { success = true, nino_last4 = last4 }
 end
@@ -128,13 +160,37 @@ function TaxUserProfileQueries.getNinoDecrypted(user_uuid)
     return nil
 end
 
--- Remove NINO from profile
+-- Remove NINO from profile.
+--
+-- Blocked when nino_locked_at IS NOT NULL — a locked NINO is
+-- permanent per HMRC record-keeping expectations (the filed return
+-- carries this NINO). To reset, admin must UNLOCK first via
+-- POST /api/v2/admin/tax-user-profiles/{uuid}/unlock — that endpoint
+-- writes an audit row with the admin's reason.
 function TaxUserProfileQueries.removeNino(user_uuid)
+    local profile = TaxUserProfileQueries.get(user_uuid)
+    if not profile then
+        return { success = true }  -- Idempotent: nothing to remove
+    end
+    local namespace_id = profile.namespace_id
+
+    -- Guards the "sneaky delete then re-save" workaround for the lock.
+    IdentityLock.assertNotLocked(user_uuid, namespace_id, "nino")
+
     db.query([[
         UPDATE tax_user_profiles
-        SET nino_hash = NULL, nino_last4 = NULL, nino_encrypted = NULL, has_nino = false, updated_at = NOW()
-        WHERE user_uuid = ?
-    ]], user_uuid)
+        SET nino_hash = NULL, nino_last4 = NULL, nino_encrypted = NULL,
+            has_nino = false, updated_at = NOW()
+        WHERE user_uuid = ? AND namespace_id = ?
+    ]], user_uuid, namespace_id)
+
+    IdentityLock.emitAuditRow({
+        user_id      = profile.user_id,
+        namespace_id = namespace_id,
+        action       = "NINO_REMOVED",
+        old_values   = { nino_last4 = profile.nino_last4 },
+    })
+
     return { success = true }
 end
 
