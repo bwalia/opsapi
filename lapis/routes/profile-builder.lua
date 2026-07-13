@@ -720,17 +720,25 @@ return function(app)
             end
         end
 
-        -- Resolve the user's business profile (e.g. amazon_seller, landlord).
-        -- Used below to gate which questions appear in the schema: a question
-        -- whose business_profiles link set is non-empty only shows up if the
-        -- user's default_profile_key is in that set. Questions with NO links
-        -- apply to everyone. Falls through gracefully when the user has no
-        -- tax_user_profiles row yet (treated as "no profile chosen" → only
-        -- universal questions visible).
+        -- Resolve the user's business profile (e.g. amazon_seller, landlord)
+        -- AND their identity-lock state in the same query (one DB round-trip
+        -- instead of two).
+        --
+        -- Business profile is used below to gate which questions appear in
+        -- the schema. Lock state is used to render `is_locked_for_user` on
+        -- each NINO/UTR question so the FE can disable the field without
+        -- probing a write and catching a 403.
+        --
+        -- Both fields fall through gracefully when the user has no
+        -- tax_user_profiles row yet (new user → everything unlocked, no
+        -- profile-key gating).
         local user_profile_key = nil
+        local user_nino_locked_at = nil
+        local user_utr_locked_at = nil
         if user_id then
             local ok_up, up_rows = pcall(db.query, [[
-                SELECT default_profile_key FROM tax_user_profiles
+                SELECT default_profile_key, nino_locked_at, utr_locked_at
+                FROM tax_user_profiles
                 WHERE user_id = ? LIMIT 1
             ]], user_id)
             if ok_up and up_rows and #up_rows > 0 then
@@ -738,6 +746,8 @@ return function(app)
                 if k and k ~= "" and k ~= cjson.null then
                     user_profile_key = k
                 end
+                user_nino_locked_at = up_rows[1].nino_locked_at
+                user_utr_locked_at  = up_rows[1].utr_locked_at
             end
         end
 
@@ -870,6 +880,22 @@ return function(app)
                     end
                 end
 
+                -- Identity-lock per-user computed flag. For NINO/UTR
+                -- question_keys, resolves to true iff the user has already
+                -- saved that field once (nino_locked_at / utr_locked_at is
+                -- non-null on their tax_user_profiles row). Other questions
+                -- are always false — this flag is orthogonal to the
+                -- question-level `is_editable_by_user` admin flag.
+                -- FE reads (is_locked_for_user OR NOT is_editable_by_user)
+                -- to decide whether to disable the input.
+                local is_locked_for_user = false
+                local lock_field = LOCK_FIELD_BY_QUESTION_KEY[q.question_key]
+                if lock_field == "nino" and user_nino_locked_at then
+                    is_locked_for_user = true
+                elseif lock_field == "utr" and user_utr_locked_at then
+                    is_locked_for_user = true
+                end
+
                 table.insert(q_list, {
                     uuid = q.uuid,
                     question_key = q.question_key,
@@ -881,6 +907,7 @@ return function(app)
                     is_required = q.is_required,
                     is_multi_value = q.is_multi_value,
                     is_editable_by_user = q.is_editable_by_user,
+                    is_locked_for_user = is_locked_for_user,
                     is_visible = is_visible,
                     display_order = q.display_order,
                     validation_json = q.validation_json,
