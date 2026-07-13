@@ -133,11 +133,19 @@ end
 
 --- Raise a 403 with the IDENTITY_LOCK_ACTIVE code. See migration [90]
 --- for the catalog row. `field` is "nino" or "utr".
+---
+--- IMPORTANT: Errors.raise() expects `{ status?, context?, cause? }` as
+--- its second arg — it uses `.context` to attach the ctx to the raised
+--- AppError. Passing the ctx table directly (without wrapping) drops
+--- every field because none of `support_url` / `user_message` / `field`
+--- / `locked_at` matches Errors.raise's opts shape. This bit us on the
+--- first real save-attempt against a locked user (Failed to save NINO
+--- 500 reported 2026-07-13).
 --- @param field string
 --- @param locked_at string|nil
 local function raiseLocked(field, locked_at)
     local ctx = buildLockContext(field, locked_at)
-    Errors.raise("IDENTITY_LOCK_ACTIVE", ctx)
+    Errors.raise("IDENTITY_LOCK_ACTIVE", { context = ctx })
 end
 
 -- ─── Public API ─────────────────────────────────────────────────────────
@@ -322,10 +330,15 @@ function IdentityLock.assertNinoUniqueInNamespace(current_user_id, namespace_id,
         if row.nino_encrypted then
             local existing = Global.decryptSecret(row.nino_encrypted)
             if existing and existing:upper() == submitted_nino_normalized:upper() then
+                -- Same ctx-wrapping fix as raiseLocked() above — Errors.raise()
+                -- reads ctx from the .context field of its opts arg, not from
+                -- top-level keys.
                 Errors.raise("NINO_ALREADY_REGISTERED", {
-                    support_url   = DEFAULT_SUPPORT_URL,
-                    support_email = DEFAULT_SUPPORT_EMAIL,
-                    user_message  = "This National Insurance Number is already registered on another account. If this is your NINO, please chat with support (" .. DEFAULT_SUPPORT_URL .. ") or email " .. DEFAULT_SUPPORT_EMAIL .. ".",
+                    context = {
+                        support_url   = DEFAULT_SUPPORT_URL,
+                        support_email = DEFAULT_SUPPORT_EMAIL,
+                        user_message  = "This National Insurance Number is already registered on another account. If this is your NINO, please chat with support (" .. DEFAULT_SUPPORT_URL .. ") or email " .. DEFAULT_SUPPORT_EMAIL .. ".",
+                    },
                 })
             end
         end

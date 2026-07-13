@@ -1802,6 +1802,24 @@ local _migrations = {
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
 
+    -- IDENTITY LOCK (anti-fraud) — wires slots [88]/[89]/[90] from
+    -- tax-copilot-system.lua into the top-level migration manifest so
+    -- `lapis migrate` actually runs them. Without these three lines the
+    -- migrations sit dead in tax-copilot-system.lua and every request
+    -- through IdentityLock.getPolicy() 500s with
+    -- `relation "identity_lock_settings" does not exist`. Reported
+    -- 2026-07-13 by the user testing locally in docker — the same three
+    -- migrations ran fine on int/test/acc because those envs picked up
+    -- an older version of this file that... wait, they DIDN'T run either
+    -- (the numeric [88]/[89]/[90] never appear in lapis_migrations on
+    -- acc's DB when queried via the read-only kubeconfig). The reason
+    -- acc "worked" earlier is that no one had exercised saveNino yet.
+    -- Every env needs these three mapping lines to pick up the new
+    -- feature.
+    ['819_tax_identity_lock_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 88),
+    ['820_tax_identity_lock_settings_and_module'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 89),
+    ['821_tax_identity_lock_message_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 90),
+
     -- MY INCOME — manually-entered income source-of-truth
     -- =========================================================================
     ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
