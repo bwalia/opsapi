@@ -138,6 +138,19 @@ return function(app)
         local ok_save, result, err = pcall(TaxUserProfileQueries.saveNino, user_uuid, nino)
 
         if not ok_save then
+            -- The identity-lock guards inside saveNino throw AppErrors
+            -- via Errors.raise() when a lock/uniqueness rule fires. Those
+            -- carry { __app_error = true, code = "IDENTITY_LOCK_ACTIVE"
+            -- | "NINO_ALREADY_REGISTERED", context = { ... } } and MUST
+            -- be re-thrown so app.lua's install_handler renders the
+            -- catalog envelope (proper 403/409 + support_url / user_message).
+            -- Without this the outer pcall silently converts a structured
+            -- 403 into a generic 500 "Failed to save NINO" — the bug
+            -- reported 2026-07-13 when saving a NINO on a fresh local
+            -- docker build with the identity-lock changes applied.
+            if type(result) == "table" and result.__app_error then
+                error(result)
+            end
             ngx.log(ngx.ERR, "[Tax Profile] saveNino error: ", tostring(result))
             return { status = 500, json = { error = "Failed to save NINO" } }
         end
@@ -205,6 +218,13 @@ return function(app)
         local user_uuid = user.uuid or user.id
         local ok_rm, rm_err = pcall(TaxUserProfileQueries.removeNino, user_uuid)
         if not ok_rm then
+            -- Re-raise identity-lock AppErrors so their 403 envelope
+            -- reaches the client — see the same pattern in POST above.
+            -- removeNino also calls IdentityLock.assertNotLocked, so a
+            -- locked-user delete attempt would 500 without this branch.
+            if type(rm_err) == "table" and rm_err.__app_error then
+                error(rm_err)
+            end
             ngx.log(ngx.ERR, "[Tax Profile] removeNino error: ", tostring(rm_err))
             return { status = 500, json = { error = "Failed to remove NINO" } }
         end
