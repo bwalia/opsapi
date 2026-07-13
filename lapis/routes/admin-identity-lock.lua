@@ -1,20 +1,25 @@
 --[[
-    Admin — Identity Lock Unlock Endpoint
+    Admin — Identity Lock endpoints (PR #464 unlock + PR #465 settings/announce)
 
-    Route: POST /api/v2/admin/tax-user-profiles/:user_uuid/unlock
+    Routes registered here
+    ----------------------
+        POST  /api/v2/admin/tax-user-profiles/:user_uuid/unlock
+        GET   /api/v2/admin/identity-lock/settings
+        PATCH /api/v2/admin/identity-lock/settings
+        POST  /api/v2/admin/identity-lock/announce
 
     Support flow: user hits a locked field (NINO / UTR), can't edit; the
     frontend surfaces "Chat with support" (which reaches an admin) or
     "Email support". Admin verifies the request out-of-band, then calls
-    this endpoint to clear the lock. User's next save re-locks in the
-    same transaction as the write.
+    the unlock endpoint to clear the lock. User's next save re-locks in
+    the same transaction as the write.
 
     Authorization
     -------------
-    Requires the `identity_lock.unlock` permission (module + action).
-    Registered in migration [89] via the modules table so the existing
-    RBAC editor UI can grant it. Platform admins and namespace owners
-    bypass permission checks (see middleware/namespace.lua:322-347).
+    Every route requires the `identity_lock.unlock` permission (module +
+    action). Registered in migration [89] via the modules table so the
+    existing RBAC editor UI can grant it. Platform admins and namespace
+    owners bypass permission checks (see middleware/namespace.lua:322-347).
 
     Namespace scoping
     -----------------
@@ -22,88 +27,188 @@
     namespace. Cross-tenant unlocks are a P0 anti-fraud incident — an
     admin from tenant A cannot unlock a user in tenant B.
 
-    Request
-    -------
-    Body: { field: "nino" | "utr", reason: string }
-      • field  — required. Which lock to clear.
-      • reason — required. Min 10 chars. Recorded in tax_audit_logs.
-
-    Response
-    --------
-    200 { success: true, unlocked_at: null, previous_lock_at: "..." }
-    400 { code: "INVALID_UNLOCK_REQUEST", user_message: ... }
-    403 { code: "IDENTITY_LOCK_UNLOCK_FORBIDDEN", user_message: ... }
-    404 { code: "USER_NOT_FOUND", user_message: ... }
+    Namespace resolution: we resolve the admin's namespace from their
+    JWT user_uuid via helper.namespace-resolver (same pattern as
+    routes/tax-profile.lua). NamespaceMiddleware.getNamespaceId(self)
+    relies on requireNamespace() having run first — but these routes
+    use requireAuth alone, so the middleware helper returns nil.
 
     Audit
     -----
-    Every unlock writes to tax_audit_logs with:
-      entity_type   = 'TAX_USER_PROFILE'
-      entity_id     = <target user_uuid>
-      action        = 'UNLOCK_NINO' | 'UNLOCK_UTR'
-      user_id       = <admin's user_id>
-      old_values    = { locked_at: "<ISO ts>" }
-      new_values    = { locked_at: null }
-      change_reason = <admin's reason>
-      ip_address    = <admin's IP>
+    Every unlock + settings-write writes to tax_audit_logs with the
+    admin's user_id, IP, and a change reason. See lib/identity_lock.lua
+    emitAuditRow.
 ]]
 
 local db = require("lapis.db")
 local cjson = require("cjson")
+local respond_to = require("lapis.application").respond_to
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+local NamespaceResolver = require("helper.namespace-resolver")
+local AdminCheck = require("helper.admin-check")
 local IdentityLock = require("lib.identity_lock")
 
--- Load Mail helper lazily inside the announcement handler so the whole
--- admin-identity-lock module still boots on installs that don't have
--- lua-resty-mail installed (rare, but the file has been optional).
-local function loadMail()
-    local ok, Mail = pcall(require, "helper.mail")
-    return ok and Mail or nil
-end
-
--- Parse JSON body (mirrors the pattern in routes/profile-builder.lua).
-local function parseJsonBody(self)
-    local params = self.params or {}
-    local ct = ngx.req.get_headers()["content-type"]
-    if ct and ct:find("application/json") then
-        ngx.req.read_body()
-        local body = ngx.req.get_body_data()
-        if body then
-            local ok, parsed = pcall(cjson.decode, body)
-            if ok and parsed then
-                for k, v in pairs(parsed) do params[k] = v end
+-- Merge JSON/form body into self.params so PATCH/POST bodies are
+-- accessible the same way as query-string params. Same pattern as
+-- routes/tax-statements.lua.
+local function mergeBodyParams(self)
+    ngx.req.read_body()
+    local body_params
+    local content_type = ngx.var.content_type or ""
+    if content_type:find("application/json", 1, true) then
+        local data = ngx.req.get_body_data()
+        if not data or data == "" then
+            local body_file = ngx.req.get_body_file()
+            if body_file then
+                local f = io.open(body_file, "r")
+                if f then data = f:read("*a") ; f:close() end
             end
         end
+        if data and data ~= "" then
+            local ok, parsed = pcall(cjson.decode, data)
+            if ok and type(parsed) == "table" then body_params = parsed end
+        end
+    else
+        body_params = ngx.req.get_post_args()
     end
-    return params
+    if body_params then
+        for k, v in pairs(body_params) do
+            if self.params[k] == nil then self.params[k] = v end
+        end
+    end
 end
 
--- Return the settings row for this namespace, upserting a default row
--- if none exists yet (safer than returning nulls — the FE always sees a
--- populated shape).
-local function getOrInitSettings(namespace_id)
+-- ─── Shared authorization helpers ───────────────────────────────────────
+
+-- Resolve the admin's namespace from their JWT user_uuid. This mirrors
+-- the pattern used by routes/tax-profile.lua because these admin routes
+-- run under AuthMiddleware.requireAuth only — the middleware doesn't
+-- populate self.namespace.
+local function resolveAdminNamespaceId(self)
+    local admin_uuid = self.current_user
+        and (self.current_user.uuid or self.current_user.sub)
+    if not admin_uuid then return nil end
+    local nsid = NamespaceResolver.getByUuid(admin_uuid)
+    if nsid and nsid > 0 then return nsid end
+    return nil
+end
+
+-- Check whether the JWT-authenticated user owns the given namespace.
+-- Uses namespace_members.is_owner rather than trusting a token flag.
+-- namespace_members keys on integer user_id (not uuid), so we JOIN through
+-- users for a clean lookup when we only have the JWT uuid.
+local function isOwnerOf(user_uuid, namespace_id)
+    if not user_uuid or not namespace_id then return false end
     local rows = db.query([[
-        SELECT * FROM identity_lock_settings WHERE namespace_id = ? LIMIT 1
-    ]], namespace_id)
-    if rows and #rows > 0 then
-        return rows[1]
+        SELECT nm.is_owner
+        FROM namespace_members nm
+        JOIN users u ON u.id = nm.user_id
+        WHERE u.uuid = ? AND nm.namespace_id = ?
+        LIMIT 1
+    ]], user_uuid, namespace_id)
+    if not rows or not rows[1] then return false end
+    local raw = rows[1].is_owner
+    return raw == true or raw == "t" or raw == 1
+end
+
+-- Uniform RBAC gate for every identity-lock admin route. Returns:
+--   allowed?  boolean
+--   err_resp? table   (only when allowed is false — includes the 403 body)
+--   admin_namespace_id? integer
+--
+-- These routes wrap only requireAuth (no requireNamespace), so
+-- self.is_platform_admin / self.is_namespace_owner aren't populated.
+-- We compute them locally against the JWT + DB so the bypass rules
+-- from middleware/namespace.lua:322-347 still apply here.
+local function requireIdentityLockAdmin(self)
+    local admin_ns = resolveAdminNamespaceId(self)
+    if not admin_ns then
+        return false, { status = 403, json = {
+            code = "IDENTITY_LOCK_UNLOCK_FORBIDDEN",
+            user_message = "Could not resolve your namespace. Sign out and back in, then try again.",
+        } }
     end
+
+    local admin_uuid = self.current_user
+        and (self.current_user.uuid or self.current_user.sub)
+
+    -- Populate flags so downstream calls to NamespaceMiddleware.hasPermission
+    -- see a consistent context (its internal checks also read these).
+    if self.is_platform_admin == nil then
+        self.is_platform_admin = AdminCheck.isPlatformAdmin(self.current_user)
+    end
+    if self.is_namespace_owner == nil then
+        self.is_namespace_owner = isOwnerOf(admin_uuid, admin_ns)
+    end
+
+    local allowed = self.is_platform_admin
+        or self.is_namespace_owner
+        or NamespaceMiddleware.hasPermission(self, "identity_lock", "unlock")
+    if not allowed then
+        return false, { status = 403, json = {
+            code = "IDENTITY_LOCK_UNLOCK_FORBIDDEN",
+            user_message = "Your role does not have permission to manage identity-lock policy. Ask a namespace owner to grant the `identity_lock.unlock` permission via the RBAC settings.",
+        } }
+    end
+
+    return true, nil, admin_ns
+end
+
+-- Fetch the settings row for a namespace, creating it lazily with the
+-- DB-default values if it doesn't exist yet. Every admin who visits the
+-- settings page triggers this at least once, which is why the fields
+-- default to the same values as the CREATE TABLE clauses in migration
+-- [89] — otherwise a fresh tenant would see empty toggles.
+local function getOrCreateSettings(namespace_id)
+    local rows = db.query([[
+        SELECT namespace_id,
+               nino_lock_enabled, nino_confirmation_required,
+               nino_backfill_scheduled_at, nino_backfill_completed_at,
+               nino_uniqueness_enforced,
+               utr_lock_enabled, utr_backfill_enabled,
+               utr_backfill_scheduled_at, utr_backfill_completed_at,
+               announcement_email_enabled, announcement_banner_enabled,
+               announcement_banner_message,
+               updated_by, updated_at, created_at
+        FROM identity_lock_settings
+        WHERE namespace_id = ?
+        LIMIT 1
+    ]], namespace_id)
+    if rows and rows[1] then return rows[1] end
+
+    -- No row yet — seed one with defaults. Idempotent via ON CONFLICT
+    -- so two concurrent first-loads don't collide.
     db.query([[
         INSERT INTO identity_lock_settings (namespace_id)
         VALUES (?)
         ON CONFLICT (namespace_id) DO NOTHING
     ]], namespace_id)
-    rows = db.query([[
-        SELECT * FROM identity_lock_settings WHERE namespace_id = ? LIMIT 1
+
+    local seeded = db.query([[
+        SELECT namespace_id,
+               nino_lock_enabled, nino_confirmation_required,
+               nino_backfill_scheduled_at, nino_backfill_completed_at,
+               nino_uniqueness_enforced,
+               utr_lock_enabled, utr_backfill_enabled,
+               utr_backfill_scheduled_at, utr_backfill_completed_at,
+               announcement_email_enabled, announcement_banner_enabled,
+               announcement_banner_message,
+               updated_by, updated_at, created_at
+        FROM identity_lock_settings
+        WHERE namespace_id = ?
+        LIMIT 1
     ]], namespace_id)
-    return rows and rows[1] or nil
+    return seeded and seeded[1]
 end
 
 -- opsapi's `safe_load_routes` calls this module as `route_module(app)`.
 -- Return a function that takes `app` and registers the routes — matches
 -- the convention used by routes.tax-hmrc-data / routes.tax-profile / etc.
 return function(app)
+    -- ================================================================
+    -- POST /api/v2/admin/tax-user-profiles/:user_uuid/unlock
+    -- ================================================================
     app:post("/api/v2/admin/tax-user-profiles/:user_uuid/unlock",
         AuthMiddleware.requireAuth(function(self)
             -- ─── 1. Parse + validate the request body ──────────────────────
@@ -130,19 +235,9 @@ return function(app)
                 } }
             end
 
-            -- ─── 2. RBAC — identity_lock.unlock permission ─────────────────
-            -- Platform admins + namespace owners bypass (see
-            -- middleware/namespace.lua:322-347). Other roles need the
-            -- explicit grant via the existing RBAC UI.
-            local allowed = self.is_platform_admin
-                or self.is_namespace_owner
-                or NamespaceMiddleware.hasPermission(self, "identity_lock", "unlock")
-            if not allowed then
-                return { status = 403, json = {
-                    code = "IDENTITY_LOCK_UNLOCK_FORBIDDEN",
-                    user_message = "Your role does not have permission to unlock identity fields. Ask a namespace owner to grant the `identity_lock.unlock` permission via the RBAC settings.",
-                } }
-            end
+            -- ─── 2. RBAC + admin namespace ─────────────────────────────────
+            local ok, err_resp, admin_namespace_id = requireIdentityLockAdmin(self)
+            if not ok then return err_resp end
 
             -- ─── 3. Resolve target + verify same-namespace ─────────────────
             local rows = db.query([[
@@ -158,10 +253,7 @@ return function(app)
                 } }
             end
 
-            -- Cross-tenant unlock guard. self.namespace_id is set by the
-            -- namespace middleware for authenticated requests.
-            local admin_namespace_id = NamespaceMiddleware.getNamespaceId(self)
-            if not admin_namespace_id or admin_namespace_id ~= profile.namespace_id then
+            if admin_namespace_id ~= profile.namespace_id then
                 return { status = 403, json = {
                     code = "IDENTITY_LOCK_UNLOCK_FORBIDDEN",
                     user_message = "You can only unlock users in your own namespace.",
@@ -214,278 +306,238 @@ return function(app)
         end)
     )
 
-    -- ═════════════════════════════════════════════════════════════════════
-    -- GET /api/v2/admin/identity-lock/settings
-    --
-    -- Read the identity_lock_settings row for the caller's namespace. The
-    -- FE admin dashboard's "Security & Compliance → Identity Lock" page
-    -- calls this to hydrate its form.
-    --
-    -- Auth: identity_lock.unlock (same permission — anyone who can unlock
-    -- can also read/edit the policy for that namespace). Platform admins
-    -- + namespace owners bypass.
-    --
-    -- Auto-upserts a default row if none exists — FE always sees a
-    -- populated shape, no null-checking needed on the client side.
-    -- ═════════════════════════════════════════════════════════════════════
-    app:get("/api/v2/admin/identity-lock/settings",
-        AuthMiddleware.requireAuth(function(self)
-            local allowed = self.is_platform_admin
-                or self.is_namespace_owner
-                or NamespaceMiddleware.hasPermission(self, "identity_lock", "unlock")
-            if not allowed then
-                return { status = 403, json = {
-                    code = "IDENTITY_LOCK_ADMIN_FORBIDDEN",
-                    user_message = "Your role does not have permission to read identity-lock settings.",
-                } }
-            end
-
-            local ns_id = NamespaceMiddleware.getNamespaceId(self)
-            if not ns_id then
-                return { status = 400, json = { error = "No namespace resolved for this request." } }
-            end
-
-            local row = getOrInitSettings(ns_id)
-            if not row then
-                return { status = 500, json = { error = "Failed to load settings" } }
-            end
-
-            return { status = 200, json = row }
-        end)
-    )
-
-    -- ═════════════════════════════════════════════════════════════════════
+    -- ================================================================
+    -- GET   /api/v2/admin/identity-lock/settings
     -- PATCH /api/v2/admin/identity-lock/settings
     --
-    -- Update policy fields for the caller's namespace. Only the fields
-    -- present in the body are updated (SQL COALESCE), so the FE can send
-    -- one-field patches without re-sending the whole row.
+    -- GET returns the policy row for the caller's namespace (lazily
+    -- created with defaults on first access).
     --
-    -- Whitelisted fields (matches the migration [89] schema — any
-    -- unrecognised key in the body is silently ignored, so the endpoint
-    -- is resistant to schema drift):
-    --   nino_lock_enabled, nino_confirmation_required,
-    --   nino_backfill_scheduled_at, nino_uniqueness_enforced,
-    --   utr_lock_enabled, utr_backfill_enabled,
-    --   utr_backfill_scheduled_at,
-    --   announcement_email_enabled, announcement_banner_enabled,
-    --   announcement_banner_message
+    -- PATCH is a whitelisted partial update — any field not on the
+    -- whitelist is silently dropped (never let clients set namespace_id,
+    -- updated_by, or timestamps directly).
     --
-    -- Also stamps updated_by + updated_at + writes an audit row so we
-    -- can see who changed what and when.
-    -- ═════════════════════════════════════════════════════════════════════
-    app:match("/api/v2/admin/identity-lock/settings",
-        require("lapis.application").respond_to({
-            PATCH = AuthMiddleware.requireAuth(function(self)
-                local allowed = self.is_platform_admin
-                    or self.is_namespace_owner
-                    or NamespaceMiddleware.hasPermission(self, "identity_lock", "unlock")
-                if not allowed then
-                    return { status = 403, json = {
-                        code = "IDENTITY_LOCK_ADMIN_FORBIDDEN",
-                        user_message = "Your role does not have permission to modify identity-lock settings.",
-                    } }
-                end
+    -- Both verbs share one respond_to() so a single route entry claims
+    -- the URL path. Lapis has no `app:patch` verb; registering a second
+    -- app:match(..., {PATCH=...}) on the same path would swallow GET
+    -- too (returning "don't know how to respond to GET"). Same pattern
+    -- as routes/tax-statements.lua for the workflow patch.
+    -- ================================================================
+    app:match("/api/v2/admin/identity-lock/settings", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            local ok, err_resp, admin_namespace_id = requireIdentityLockAdmin(self)
+            if not ok then return err_resp end
 
-                local ns_id = NamespaceMiddleware.getNamespaceId(self)
-                if not ns_id then
-                    return { status = 400, json = { error = "No namespace resolved for this request." } }
-                end
+            local row = getOrCreateSettings(admin_namespace_id)
+            if not row then
+                return { status = 500, json = {
+                    code = "IDENTITY_LOCK_SETTINGS_UNAVAILABLE",
+                    user_message = "Could not load identity-lock settings. Please retry.",
+                } }
+            end
+            return { status = 200, json = row }
+        end),
+        PATCH = AuthMiddleware.requireAuth(function(self)
+            mergeBodyParams(self)
+            local ok, err_resp, admin_namespace_id = requireIdentityLockAdmin(self)
+            if not ok then return err_resp end
 
-                -- Ensure the row exists — first PATCH also creates the row.
-                getOrInitSettings(ns_id)
-
-                local params = parseJsonBody(self)
-                local admin_uid = self.current_user
-                    and (self.current_user.user_id or self.current_user.id)
-                    or nil
-
-                -- Whitelist: allow-list what can be patched. Any key not
-                -- here is silently dropped.
-                local allow_bool = {
-                    nino_lock_enabled = true,
-                    nino_confirmation_required = true,
-                    nino_uniqueness_enforced = true,
-                    utr_lock_enabled = true,
-                    utr_backfill_enabled = true,
-                    announcement_email_enabled = true,
-                    announcement_banner_enabled = true,
-                }
-                local allow_ts = {
-                    nino_backfill_scheduled_at = true,
-                    utr_backfill_scheduled_at = true,
-                }
-                local allow_text = {
-                    announcement_banner_message = true,
-                }
-
-                local before_row = getOrInitSettings(ns_id)
-                local updates = {}
-                local values = {}
-
-                for k, v in pairs(params) do
-                    if allow_bool[k] then
-                        table.insert(updates, k .. " = ?")
-                        -- Accept boolean or "true"/"false" strings for HTTP form-safe input.
-                        table.insert(values, v == true or v == "true" or v == "1")
-                    elseif allow_ts[k] then
-                        table.insert(updates, k .. " = ?")
-                        -- NULL clears a schedule; otherwise treat as ISO timestamp string.
-                        if v == nil or v == "" or v == cjson.null then
-                            table.insert(values, db.NULL)
-                        else
-                            table.insert(values, tostring(v))
-                        end
-                    elseif allow_text[k] then
-                        table.insert(updates, k .. " = ?")
-                        table.insert(values, v == cjson.null and db.NULL or tostring(v))
-                    end
-                end
-
-                if #updates == 0 then
-                    return { status = 400, json = {
-                        code = "INVALID_PATCH",
-                        user_message = "No known settings fields in the request body.",
-                    } }
-                end
-
-                -- Always stamp who made the change and when.
-                table.insert(updates, "updated_by = ?")
-                table.insert(values, admin_uid or db.NULL)
-                table.insert(updates, "updated_at = NOW()")
-
-                table.insert(values, ns_id)  -- WHERE param
-                local sql = "UPDATE identity_lock_settings SET " .. table.concat(updates, ", ")
-                          .. " WHERE namespace_id = ?"
-                db.query(sql, unpack(values))
-
-                local after_row = getOrInitSettings(ns_id)
-
-                -- Audit-log the change with before + after so support has full trace.
-                IdentityLock.emitAuditRow({
-                    admin_user_id = admin_uid,
-                    namespace_id  = ns_id,
-                    action        = "IDENTITY_LOCK_SETTINGS_UPDATED",
-                    old_values    = before_row,
-                    new_values    = after_row,
-                    request_ip    = ngx.var.remote_addr,
-                })
-
-                return { status = 200, json = after_row }
-            end)
-        })
-    )
-
-    -- ═════════════════════════════════════════════════════════════════════
-    -- POST /api/v2/admin/identity-lock/announce
-    --
-    -- Trigger the "your NINO is about to be locked" announcement. Reads
-    -- announcement_email_enabled / announcement_banner_enabled from the
-    -- settings row to decide which channels to fire. The BANNER channel
-    -- is effectively passive — the FE reads announcement_banner_message
-    -- from the settings row directly, so all this endpoint does for the
-    -- banner is confirm it's enabled + non-empty.
-    --
-    -- The EMAIL channel iterates every user in the namespace who has
-    -- has_nino=true AND nino_locked_at IS NULL (i.e. would be affected
-    -- by an upcoming backfill), and sends via helper/mail.lua async
-    -- (ngx.timer.at inside Mail.send). Runs to completion in the
-    -- background; the endpoint returns 202 with a summary.
-    --
-    -- Idempotency + cost control: each user is emailed AT MOST ONCE per
-    -- announcement — enforced by a per-user "announcement fired" flag
-    -- we drop into user_profile_answers via a synthetic question_key
-    -- (LATER — for the MVP we simply log the count and let the caller
-    -- re-trigger only if they mean to).
-    -- ═════════════════════════════════════════════════════════════════════
-    app:post("/api/v2/admin/identity-lock/announce",
-        AuthMiddleware.requireAuth(function(self)
-            local allowed = self.is_platform_admin
-                or self.is_namespace_owner
-                or NamespaceMiddleware.hasPermission(self, "identity_lock", "unlock")
-            if not allowed then
-                return { status = 403, json = {
-                    code = "IDENTITY_LOCK_ADMIN_FORBIDDEN",
-                    user_message = "Your role does not have permission to trigger identity-lock announcements.",
+            -- Ensure the row exists (defaults) before we UPDATE.
+            local before = getOrCreateSettings(admin_namespace_id)
+            if not before then
+                return { status = 500, json = {
+                    code = "IDENTITY_LOCK_SETTINGS_UNAVAILABLE",
+                    user_message = "Could not load identity-lock settings. Please retry.",
                 } }
             end
 
-            local ns_id = NamespaceMiddleware.getNamespaceId(self)
-            if not ns_id then
-                return { status = 400, json = { error = "No namespace resolved for this request." } }
+            -- Whitelist of admin-writable columns. Each entry maps the
+            -- JSON key → the SQL type coercer for the incoming value.
+            -- Anything not on this list is dropped (namespace_id,
+            -- *_completed_at, updated_by, timestamps are all system-managed).
+            local BOOLEAN_FIELDS = {
+                "nino_lock_enabled", "nino_confirmation_required",
+                "nino_uniqueness_enforced", "utr_lock_enabled",
+                "utr_backfill_enabled", "announcement_email_enabled",
+                "announcement_banner_enabled",
+            }
+            local TIMESTAMP_FIELDS = {
+                "nino_backfill_scheduled_at", "utr_backfill_scheduled_at",
+            }
+            local TEXT_FIELDS = { "announcement_banner_message" }
+
+            local sets  = {}       -- SQL fragments "col = ?"
+            local args  = {}       -- values for the ? placeholders
+            local changes = {}     -- { key = { old, new } } for audit
+
+            local function coerceBool(v)
+                if type(v) == "boolean" then return v end
+                if type(v) == "string" then
+                    v = v:lower()
+                    if v == "true" or v == "1" then return true end
+                    if v == "false" or v == "0" then return false end
+                end
+                return nil
             end
 
-            local settings = getOrInitSettings(ns_id)
-            if not settings then
-                return { status = 500, json = { error = "Failed to load settings" } }
+            local function includeField(col, sql_value, incoming, prev)
+                table.insert(sets, col .. " = ?")
+                table.insert(args, sql_value)
+                changes[col] = { old = prev, new = incoming }
             end
 
-            local Mail = loadMail()
-            local email_enabled = settings.announcement_email_enabled and Mail and Mail.isConfigured and Mail.isConfigured()
-
-            -- Query recipients — users in this namespace with a NINO on
-            -- file but not yet locked. That's the population that would
-            -- be affected by a scheduled backfill.
-            local recipients = db.query([[
-                SELECT u.email, u.name, tp.user_uuid
-                FROM tax_user_profiles tp
-                JOIN users u ON u.id = tp.user_id
-                WHERE tp.namespace_id = ?
-                  AND tp.has_nino = TRUE
-                  AND tp.nino_locked_at IS NULL
-                  AND u.email IS NOT NULL
-                  AND u.email <> ''
-            ]], ns_id)
-
-            local recipient_count = recipients and #recipients or 0
-            local email_sent = 0
-
-            if email_enabled and recipient_count > 0 then
-                local scheduled_at = settings.nino_backfill_scheduled_at
-                local banner_msg   = settings.announcement_banner_message
-                    or "From the date below, the NINO you have on file will become permanent and can only be changed by contacting support. Please review your NINO now and correct it if needed."
-
-                for _, r in ipairs(recipients) do
-                    local ok = pcall(Mail.send, {
-                        to      = r.email,
-                        subject = "Important: Your NINO on file is about to become permanent",
-                        html    = string.format([[
-                            <p>Hi %s,</p>
-                            <p>%s</p>
-                            <p><strong>Change deadline:</strong> %s</p>
-                            <p>To review your NINO, sign in and visit your Settings page.</p>
-                            <p>If you have questions, chat with support at <a href="/support">/support</a>.</p>
-                        ]],
-                            r.name or "there",
-                            banner_msg,
-                            scheduled_at and tostring(scheduled_at) or "Not scheduled yet — check your Settings page"
-                        ),
-                    })
-                    if ok then email_sent = email_sent + 1 end
+            for _, col in ipairs(BOOLEAN_FIELDS) do
+                if self.params[col] ~= nil then
+                    local v = coerceBool(self.params[col])
+                    if v ~= nil and v ~= before[col] then
+                        includeField(col, v, v, before[col])
+                    end
                 end
             end
 
-            -- Audit row for the trigger.
+            for _, col in ipairs(TIMESTAMP_FIELDS) do
+                if self.params[col] ~= nil then
+                    local v = self.params[col]
+                    if type(v) == "userdata" then v = nil end -- cjson.null
+                    local sql_value
+                    if v == nil or v == "" then
+                        sql_value = db.NULL
+                    else
+                        sql_value = tostring(v)
+                    end
+                    -- Only mark as changed if it actually differs. Simple
+                    -- string equality is fine here — inputs come as ISO
+                    -- strings from datetime-local.
+                    local prev = before[col]
+                    local prev_str = prev and tostring(prev) or nil
+                    if tostring(sql_value) ~= tostring(prev_str or db.NULL) then
+                        includeField(col, sql_value, v, prev)
+                    end
+                end
+            end
+
+            for _, col in ipairs(TEXT_FIELDS) do
+                if self.params[col] ~= nil then
+                    local v = self.params[col]
+                    if type(v) == "userdata" then v = nil end
+                    local sql_value = (v == nil or v == "") and db.NULL or tostring(v)
+                    if tostring(sql_value) ~= tostring(before[col] or db.NULL) then
+                        includeField(col, sql_value, v, before[col])
+                    end
+                end
+            end
+
+            if #sets == 0 then
+                -- Idempotent no-op: return the current row.
+                return { status = 200, json = before }
+            end
+
+            local admin_user_id = self.current_user
+                and (self.current_user.user_id or self.current_user.id)
+                or nil
+
+            table.insert(sets, "updated_at = NOW()")
+            table.insert(sets, "updated_by = ?")
+            table.insert(args, admin_user_id or db.NULL)
+
+            -- Append the WHERE arg last.
+            table.insert(args, admin_namespace_id)
+
+            local sql = "UPDATE identity_lock_settings SET " ..
+                table.concat(sets, ", ") ..
+                " WHERE namespace_id = ?"
+            db.query(sql, unpack(args))
+
+            -- Re-read to return the canonical shape (with NOW() timestamps).
+            local after = getOrCreateSettings(admin_namespace_id)
+
+            -- Audit: one row for the batch, with the diff in change_reason
+            -- context. Keeps the audit log lean.
             IdentityLock.emitAuditRow({
-                admin_user_id = self.current_user and (self.current_user.user_id or self.current_user.id) or nil,
-                namespace_id  = ns_id,
-                action        = "IDENTITY_LOCK_ANNOUNCEMENT_SENT",
-                new_values    = {
-                    recipient_count = recipient_count,
-                    email_sent      = email_sent,
-                    email_channel_enabled = email_enabled and true or false,
-                    banner_channel_enabled = settings.announcement_banner_enabled and true or false,
-                },
+                user_id       = admin_user_id,
+                admin_user_id = admin_user_id,
+                namespace_id  = admin_namespace_id,
+                action        = "IDENTITY_LOCK_SETTINGS_UPDATED",
+                old_values    = changes,      -- includes old + new per field
+                new_values    = nil,
+                reason        = "Admin updated identity-lock policy",
                 request_ip    = ngx.var.remote_addr,
             })
 
-            return { status = 202, json = {
+            return { status = 200, json = after }
+        end),
+    }))
+
+    -- ================================================================
+    -- POST /api/v2/admin/identity-lock/announce
+    -- Compute the audience for the "your NINO will be locked" heads-up.
+    -- Returns the count now; email fan-out is a follow-up (email_sent=0).
+    -- The frontend surfaces recipient_count so admins can gauge blast
+    -- radius before wiring the fan-out into Mail.send.
+    -- ================================================================
+    app:post("/api/v2/admin/identity-lock/announce",
+        AuthMiddleware.requireAuth(function(self)
+            local ok, err_resp, admin_namespace_id = requireIdentityLockAdmin(self)
+            if not ok then return err_resp end
+
+            local settings = getOrCreateSettings(admin_namespace_id)
+            if not settings then
+                return { status = 500, json = {
+                    code = "IDENTITY_LOCK_SETTINGS_UNAVAILABLE",
+                    user_message = "Could not load identity-lock settings. Please retry.",
+                } }
+            end
+
+            -- Audience: users in this namespace who have a NINO on file
+            -- (has_nino = true) but haven't been locked yet. Those are
+            -- the people who'll be affected the next time they save.
+            local rows = db.query([[
+                SELECT COUNT(*) AS n
+                FROM tax_user_profiles
+                WHERE namespace_id = ?
+                  AND has_nino = true
+                  AND nino_locked_at IS NULL
+            ]], admin_namespace_id)
+            local recipient_count = tonumber(rows and rows[1] and rows[1].n) or 0
+
+            -- Whether Mail.send() can actually deliver depends on
+            -- SMTP_HOST + SMTP_USERNAME + SMTP_PASSWORD being set. We
+            -- surface that so the admin isn't misled into thinking
+            -- emails went out when they didn't.
+            local smtp_host = os.getenv("SMTP_HOST")
+            local smtp_user = os.getenv("SMTP_USERNAME")
+            local smtp_pass = os.getenv("SMTP_PASSWORD")
+            local mail_configured = smtp_host and smtp_host ~= ""
+                and smtp_user and smtp_user ~= ""
+                and smtp_pass and smtp_pass ~= ""
+
+            -- Audit even a dry-run — clients see this in the audit trail.
+            local admin_user_id = self.current_user
+                and (self.current_user.user_id or self.current_user.id)
+                or nil
+            IdentityLock.emitAuditRow({
+                user_id       = admin_user_id,
+                admin_user_id = admin_user_id,
+                namespace_id  = admin_namespace_id,
+                action        = "IDENTITY_LOCK_ANNOUNCE_TRIGGERED",
+                old_values    = nil,
+                new_values    = {
+                    recipient_count       = recipient_count,
+                    email_channel_enabled = settings.announcement_email_enabled,
+                    banner_channel_enabled= settings.announcement_banner_enabled,
+                    mail_configured       = mail_configured and true or false,
+                },
+                reason        = "Admin triggered identity-lock announcement",
+                request_ip    = ngx.var.remote_addr,
+            })
+
+            return { status = 200, json = {
                 success                = true,
                 recipient_count        = recipient_count,
-                email_sent             = email_sent,
-                email_channel_enabled  = email_enabled and true or false,
+                email_sent             = 0,
+                email_channel_enabled  = settings.announcement_email_enabled and true or false,
                 banner_channel_enabled = settings.announcement_banner_enabled and true or false,
-                mail_configured        = Mail and Mail.isConfigured and Mail.isConfigured() or false,
+                mail_configured        = mail_configured and true or false,
             } }
         end)
     )
