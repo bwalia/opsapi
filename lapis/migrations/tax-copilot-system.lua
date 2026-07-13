@@ -3034,4 +3034,166 @@ return {
         ]])
         print("[Tax Copilot] Added nino_locked_at + utr_locked_at columns to tax_user_profiles")
     end,
+
+    -- 89. Identity-lock POLICY per namespace + register the RBAC module.
+    --
+    -- ─── Purpose ────────────────────────────────────────────────────────
+    -- Every knob the client asked to be admin-controllable (grace period,
+    -- backfill scope, announcement channels, banner copy) lands in one
+    -- per-namespace `identity_lock_settings` row. No hard-coded thresholds
+    -- anywhere in application code — the admin dashboard reads/writes this
+    -- row and everything downstream (guards, backfill worker, banner
+    -- component) reads its policy from here.
+    --
+    -- Pairs with migration [88] (nino_locked_at / utr_locked_at columns
+    -- on tax_user_profiles). [88] holds the per-user lock state; [89]
+    -- holds the per-namespace policy that governs how [88] gets set.
+    --
+    -- ─── Why per-namespace (not global) ─────────────────────────────────
+    -- opsapi is fully multi-tenant. Tenant A may want a 3-day grace period
+    -- while tenant B needs 14 days for regulatory reasons. Same for
+    -- backfill scope, banner wording, etc. Global settings would require
+    -- coordinating a rollout across every tenant simultaneously — a
+    -- non-starter for a real product.
+    --
+    -- ─── Column choices ─────────────────────────────────────────────────
+    -- nino_lock_enabled          — master kill-switch per tenant. Default
+    --                              true (client's anti-fraud requirement).
+    -- nino_confirmation_required — the "please verify carefully" modal on
+    --                              first save. Default true (safety).
+    -- nino_backfill_scheduled_at — admin sets this; JIT-backfill fires at
+    --                              or after this time. NULL means "no
+    --                              retroactive lock" (forward-only).
+    -- nino_backfill_completed_at — stamped by the daily sweeper when it
+    --                              confirms 0 remaining unlocked-but-
+    --                              should-be users. Stays NULL until
+    --                              admin schedules a backfill.
+    -- nino_uniqueness_enforced   — the "same NINO in two accounts in same
+    --                              namespace" check. Default TRUE
+    --                              (anti-fraud); admin can disable for
+    --                              edge cases (test tenants, migration
+    --                              periods). Only affects new writes.
+    -- utr_lock_enabled           — same shape as NINO.
+    -- utr_backfill_enabled       — off by default. UTR is a return-address
+    --                              field (issued by HMRC after first
+    --                              filing), not an identity field — the
+    --                              anti-fraud angle is weaker AND UTRs
+    --                              occasionally need correcting because
+    --                              HMRC issues them under a wrong name.
+    --                              Admin flips on if they decide the
+    --                              anti-fraud argument dominates for
+    --                              their tenant.
+    -- announcement_email_enabled — email channel for the "your NINO is
+    --                              about to be locked" heads-up.
+    -- announcement_banner_enabled— in-app banner channel. Both channels
+    --                              are independent — admin can pick one,
+    --                              both, or none.
+    -- announcement_banner_message— overrideable copy. Default is baked
+    --                              into the FE (English), tenants
+    --                              serving other locales override here.
+    -- updated_by / updated_at    — audit trail for the settings row
+    --                              itself. Actual lock/unlock events
+    --                              go to tax_audit_logs — see PR #4.
+    --
+    -- ─── RBAC — module registration ─────────────────────────────────────
+    -- Also seeds an `identity_lock` module into the `modules` table so
+    -- the existing RBAC permission editor can show its actions
+    -- (`unlock`) as a checkbox next to every role. Which role gets the
+    -- permission is a namespace-admin decision, not a code decision —
+    -- so we do NOT touch any existing role's `permissions` JSON here.
+    -- Platform admins and namespace owners already bypass permission
+    -- checks (see middleware/namespace.lua:322-347), so out of the box
+    -- they can unlock without an explicit grant. Other roles need a
+    -- one-click grant via the RBAC UI.
+    --
+    -- ─── Idempotency ────────────────────────────────────────────────────
+    -- CREATE TABLE IF NOT EXISTS + a pre-INSERT existence check on the
+    -- module row. Safe to re-run under `lapis migrate`.
+    [89] = function()
+        -- 1. Per-namespace policy table.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS identity_lock_settings (
+                namespace_id                     INTEGER PRIMARY KEY,
+                -- NINO policy
+                nino_lock_enabled                BOOLEAN NOT NULL DEFAULT true,
+                nino_confirmation_required       BOOLEAN NOT NULL DEFAULT true,
+                nino_backfill_scheduled_at       TIMESTAMP,
+                nino_backfill_completed_at       TIMESTAMP,
+                nino_uniqueness_enforced         BOOLEAN NOT NULL DEFAULT true,
+                -- UTR policy
+                utr_lock_enabled                 BOOLEAN NOT NULL DEFAULT true,
+                utr_backfill_enabled             BOOLEAN NOT NULL DEFAULT false,
+                utr_backfill_scheduled_at        TIMESTAMP,
+                utr_backfill_completed_at        TIMESTAMP,
+                -- Announcement policy
+                announcement_email_enabled       BOOLEAN NOT NULL DEFAULT true,
+                announcement_banner_enabled      BOOLEAN NOT NULL DEFAULT true,
+                announcement_banner_message      TEXT,
+                -- Row-level audit
+                updated_by                       BIGINT,
+                updated_at                       TIMESTAMP NOT NULL DEFAULT NOW(),
+                created_at                       TIMESTAMP NOT NULL DEFAULT NOW(),
+                FOREIGN KEY (namespace_id) REFERENCES namespaces(id) ON DELETE CASCADE
+            )
+        ]])
+        -- No secondary indexes needed — namespace_id is the PK, and every
+        -- read is by namespace_id. The FE settings page shows exactly one
+        -- row per tenant.
+
+        -- 2. Register `identity_lock` as an RBAC-visible module. Mirrors
+        --    the seed pattern in rbac-enhancements.lua migration [2].
+        --    Non-destructive — only inserts if machine_name isn't there.
+        local existing = db.select("* FROM modules WHERE machine_name = ?", "identity_lock")
+        if #existing == 0 then
+            db.insert("modules", {
+                uuid          = "m-identity-lock-100",
+                machine_name  = "identity_lock",
+                name          = "Identity Lock",
+                description   = "Anti-fraud: lock NINO/UTR after first save. Assign the `unlock` action to allow a role to override the lock on support requests.",
+                priority      = "100",  -- appears after existing modules (which stop at 9)
+                created_at    = db.raw("NOW()"),
+                updated_at    = db.raw("NOW()")
+            })
+            print("[Tax Copilot] Registered `identity_lock` module for RBAC")
+        end
+
+        print("[Tax Copilot] Created identity_lock_settings table (per-namespace policy)")
+    end,
+
+    -- 90. Seed message_catalog rows for the identity-lock feature so
+    --     Errors.raise("IDENTITY_LOCK_ACTIVE", ctx) and
+    --     Errors.raise("NINO_ALREADY_REGISTERED", ctx) surface through
+    --     the standard error envelope with the correct http_status
+    --     (403 / 409) instead of falling back to SYSTEM_500.
+    --
+    -- Matches the pattern from migration [87] (UPLOAD_DUPLICATE_FILED):
+    -- catalog rows only. Translations (title, user_message) live in
+    -- the FE translations layer OR the ctx passed to Errors.raise —
+    -- our IdentityLock library passes a full user_message in ctx so
+    -- the FE gets a self-contained "way out" message even before any
+    -- translations file is updated.
+    --
+    -- Idempotent via ON CONFLICT (code) DO NOTHING.
+    [90] = function()
+        db.query([[
+            INSERT INTO message_catalog (code, category, severity, http_status, developer_note)
+            VALUES
+              (
+                'IDENTITY_LOCK_ACTIVE',
+                'error',
+                'warn',
+                403,
+                'User attempted to modify a NINO or UTR that has already been locked (nino_locked_at / utr_locked_at is set on tax_user_profiles). To unlock, admin must POST /api/v2/admin/tax-user-profiles/{uuid}/unlock — see PR #464. Error ctx carries `field`, `locked_at`, `support_url`, `support_email`, `user_message`.'
+              ),
+              (
+                'NINO_ALREADY_REGISTERED',
+                'error',
+                'warn',
+                409,
+                'Anti-fraud uniqueness check: another user in the same namespace already has this exact NINO on file. Enforced by lib/identity_lock.lua assertNinoUniqueInNamespace + a PostgreSQL advisory transaction lock keyed on (namespace_id, nino_last4). If this fires legitimately, the user needs to contact support.'
+              )
+            ON CONFLICT (code) DO NOTHING
+        ]])
+        print("[Tax Copilot] Seeded IDENTITY_LOCK_ACTIVE + NINO_ALREADY_REGISTERED in message_catalog")
+    end,
 }

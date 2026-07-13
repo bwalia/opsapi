@@ -11,6 +11,24 @@
 
 local db = require("lapis.db")
 local cjson = require("cjson")
+local IdentityLock = require("lib.identity_lock")
+
+-- ─── Locked-field guard for the generic answers endpoint ──────────────────
+-- The profile-builder /answers endpoint is the historical back-door for
+-- NINO/UTR writes: users' Personal Details wizard writes `question_key`
+-- values 'nino', 'ni_number', and 'utr_number' straight into
+-- user_profile_answers, bypassing the dedicated NINO endpoints. Without
+-- this guard the whole anti-fraud lock is a paper tiger.
+--
+-- Mapping (question_key → lock field):
+--   'nino'         → nino   (older seed, still in flight for some tenants)
+--   'ni_number'    → nino   (newer wizard-tree seed — see dynamic-profile-builder.lua:1710)
+--   'utr_number'   → utr    (Personal Details, is_required=true)
+local LOCK_FIELD_BY_QUESTION_KEY = {
+    nino        = "nino",
+    ni_number   = "nino",
+    utr_number  = "utr",
+}
 
 -- =========================================================================
 -- Helper Functions
@@ -2840,12 +2858,26 @@ return function(app)
             if not ans.question_uuid or ans.question_uuid == "" then
                 table.insert(errors, { index = i, error = "question_uuid is required" })
             else
-                local ok_q, q_rows = pcall(db.query, "SELECT id, version, category_id FROM profile_questions WHERE uuid = ? AND is_active = true LIMIT 1", ans.question_uuid)
+                local ok_q, q_rows = pcall(db.query, "SELECT id, version, category_id, question_key FROM profile_questions WHERE uuid = ? AND is_active = true LIMIT 1", ans.question_uuid)
                 if not ok_q or not q_rows or #q_rows == 0 then
                     table.insert(errors, { index = i, error = "Question not found: " .. ans.question_uuid })
                 else
                     local question = q_rows[1]
                     affected_category_ids[question.category_id] = true
+
+                    -- ─── Identity-lock guard for NINO / UTR back-door ─────────
+                    -- If this question_key is one of the identity fields
+                    -- (nino / ni_number / utr_number) AND the user's lock is
+                    -- already stamped, the write must be rejected — same rule
+                    -- the dedicated /nino endpoints enforce.
+                    -- assertNotLocked raises a catalog 403 via Errors.raise,
+                    -- which the app-level error middleware catches and turns
+                    -- into the standard error envelope with support_url etc.
+                    -- No need to trap here — letting it bubble is correct.
+                    local lock_field = LOCK_FIELD_BY_QUESTION_KEY[question.question_key]
+                    if lock_field then
+                        IdentityLock.assertNotLocked(user_uuid, namespace_id or 0, lock_field)
+                    end
 
                     -- Get existing answer for history
                     local old_answer = nil
@@ -2890,6 +2922,28 @@ return function(app)
                         table.insert(errors, { index = i, error = "Failed to save answer for " .. ans.question_uuid })
                     else
                         saved = saved + 1
+
+                        -- ─── First-write auto-lock for NINO / UTR answers ─────
+                        -- Stamp the lock on this user's tax_user_profiles row
+                        -- once the answer is committed. Idempotent — repeat
+                        -- upserts of the same question_key just no-op the
+                        -- COALESCE(...) that preserves the original stamp.
+                        -- Also emits an audit row for the "first time this
+                        -- user wrote a locking answer" event.
+                        if lock_field then
+                            IdentityLock.stampLock(user_uuid, namespace_id or 0, lock_field)
+                            IdentityLock.emitAuditRow({
+                                user_id      = user_id,
+                                namespace_id = namespace_id or 0,
+                                action       = (lock_field == "nino")
+                                    and "NINO_SAVED_AND_LOCKED"
+                                    or  "UTR_SAVED_AND_LOCKED",
+                                new_values   = {
+                                    question_key = question.question_key,
+                                    path         = "/api/v2/profile-builder/answers",
+                                },
+                            })
+                        end
 
                         -- Insert history record
                         if old_answer then

@@ -16,6 +16,7 @@ local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local Global = require("helper.global")
 local NamespaceResolver = require("helper.namespace-resolver")
+local IdentityLock = require("lib.identity_lock")
 local respond_to = require("lapis.application").respond_to
 
 -- Resolve the numeric user id (tax_user_profiles is keyed on it) from the JWT uuid.
@@ -321,40 +322,89 @@ return function(app)
                     error = "Please confirm you consent to us securely storing your National "
                         .. "Insurance number so we can file with HMRC." } }
             end
-            local user_id = getUserId(self.current_user.uuid or self.current_user.id)
+            local user_uuid = self.current_user.uuid or self.current_user.id
+            local user_id = getUserId(user_uuid)
             if not user_id then return { status = 401, json = { error = "User not found" } } end
+            local namespace_id = NamespaceResolver.getByUuid(user_uuid) or 0
+
+            -- ─── Anti-fraud guard (see lib/identity_lock.lua) ─────────────
+            -- Blocks re-write once the lock timestamp is set. Errors.raise
+            -- from inside surfaces as a catalog 403 with support_url etc.
+            IdentityLock.assertNotLocked(user_uuid, namespace_id, "nino")
 
             local enc = Global.encryptSecret(nino)
             local last4 = nino:sub(-4)
-            local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
-            if existing and #existing > 0 then
-                db.update("tax_user_profiles",
-                    { nino_encrypted = enc, nino_last4 = last4, has_nino = true,
-                      nino_consent_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
-                    { user_id = user_id })
-            else
-                db.insert("tax_user_profiles", {
-                    uuid = Global.generateStaticUUID(),
-                    user_id = user_id,
-                    nino_encrypted = enc,
-                    nino_last4 = last4,
-                    has_nino = true,
-                    nino_consent_at = db.raw("NOW()"),
-                    created_at = db.raw("NOW()"),
-                    updated_at = db.raw("NOW()"),
-                })
+
+            -- Uniqueness check + write in one txn so the advisory lock
+            -- covers the CAS.
+            db.query("BEGIN")
+            local ok, txn_err = pcall(function()
+                IdentityLock.assertNinoUniqueInNamespace(user_id, namespace_id, nino, Global)
+
+                local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", user_id)
+                if existing and #existing > 0 then
+                    db.update("tax_user_profiles",
+                        { nino_encrypted = enc, nino_last4 = last4, has_nino = true,
+                          nino_consent_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
+                        { user_id = user_id })
+                else
+                    db.insert("tax_user_profiles", {
+                        uuid = Global.generateStaticUUID(),
+                        user_id = user_id,
+                        namespace_id = namespace_id,
+                        nino_encrypted = enc,
+                        nino_last4 = last4,
+                        has_nino = true,
+                        nino_consent_at = db.raw("NOW()"),
+                        created_at = db.raw("NOW()"),
+                        updated_at = db.raw("NOW()"),
+                    })
+                end
+                -- Stamp lock in the SAME txn so a successful save is ALWAYS
+                -- accompanied by a lock stamp.
+                IdentityLock.stampLock(user_uuid, namespace_id, "nino")
+            end)
+            if not ok then
+                db.query("ROLLBACK")
+                error(txn_err)
             end
+            db.query("COMMIT")
+
+            IdentityLock.emitAuditRow({
+                user_id      = user_id,
+                namespace_id = namespace_id,
+                action       = "NINO_SAVED_AND_LOCKED",
+                new_values   = { nino_last4 = last4, path = "/api/v2/hmrc/nino" },
+            })
+
             return { status = 200, json = { success = true, data = { has_nino = true, last4 = last4 } } }
         end),
 
         -- DELETE — erase the stored NINO (GDPR right to erasure / user request).
+        -- BLOCKED when nino_locked_at IS NOT NULL: sneaky delete-then-re-save
+        -- would defeat the anti-fraud lock. Admin unlock is the only route
+        -- to remove a locked NINO — see POST /api/v2/admin/tax-user-profiles/
+        -- {uuid}/unlock.
         DELETE = AuthMiddleware.requireAuth(function(self)
-            local user_id = getUserId(self.current_user.uuid or self.current_user.id)
+            local user_uuid = self.current_user.uuid or self.current_user.id
+            local user_id = getUserId(user_uuid)
             if not user_id then return { status = 401, json = { error = "User not found" } } end
+            local namespace_id = NamespaceResolver.getByUuid(user_uuid) or 0
+
+            IdentityLock.assertNotLocked(user_uuid, namespace_id, "nino")
+
             db.update("tax_user_profiles",
                 { nino_encrypted = db.NULL, nino_last4 = db.NULL, has_nino = false,
                   nino_consent_at = db.NULL, updated_at = db.raw("NOW()") },
                 { user_id = user_id })
+
+            IdentityLock.emitAuditRow({
+                user_id      = user_id,
+                namespace_id = namespace_id,
+                action       = "NINO_REMOVED",
+                old_values   = { path = "/api/v2/hmrc/nino" },
+            })
+
             return { status = 200, json = { success = true, data = { has_nino = false } } }
         end),
     }))
@@ -374,32 +424,62 @@ return function(app)
 
             -- Persist the test user's NINO (encrypted) on the current user's tax profile
             -- so HMRC filing calls can use it without asking the user to re-enter it.
+            --
+            -- Also respects the identity-lock: if the user's NINO is already
+            -- locked (they filed a real return earlier and now switched to
+            -- sandbox testing), we DO NOT overwrite. Sandbox users regenerate
+            -- test-users regularly, and silently swapping their real NINO for
+            -- a fake HMRC-issued one would defeat the anti-fraud lock's whole
+            -- purpose. The catalog error surfaces cleanly to the FE.
             if data.nino and data.nino ~= "" then
-                pcall(function()
-                    local user_uuid = self.current_user.uuid or self.current_user.id
-                    local urows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
-                    local uid = urows and urows[1] and urows[1].id
-                    if not uid then return end
+                local user_uuid = self.current_user.uuid or self.current_user.id
+                local urows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+                local uid = urows and urows[1] and urows[1].id
+                if uid then
+                    local namespace_id = NamespaceResolver.getByUuid(user_uuid) or 0
+
+                    -- Same guard the regular /nino POST uses.
+                    IdentityLock.assertNotLocked(user_uuid, namespace_id, "nino")
+
                     local enc = Global.encryptSecret(data.nino)
                     local last4 = data.nino:sub(-4)
-                    local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", uid)
-                    if existing and #existing > 0 then
-                        db.update("tax_user_profiles",
-                            { nino_encrypted = enc, nino_last4 = last4, has_nino = true,
-                              updated_at = db.raw("NOW()") },
-                            { user_id = uid })
-                    else
-                        db.insert("tax_user_profiles", {
-                            uuid = Global.generateStaticUUID(),
-                            user_id = uid,
-                            nino_encrypted = enc,
-                            nino_last4 = last4,
-                            has_nino = true,
-                            created_at = db.raw("NOW()"),
-                            updated_at = db.raw("NOW()"),
-                        })
+
+                    db.query("BEGIN")
+                    local ok, txn_err = pcall(function()
+                        IdentityLock.assertNinoUniqueInNamespace(uid, namespace_id, data.nino, Global)
+                        local existing = db.select("id FROM tax_user_profiles WHERE user_id = ? LIMIT 1", uid)
+                        if existing and #existing > 0 then
+                            db.update("tax_user_profiles",
+                                { nino_encrypted = enc, nino_last4 = last4, has_nino = true,
+                                  updated_at = db.raw("NOW()") },
+                                { user_id = uid })
+                        else
+                            db.insert("tax_user_profiles", {
+                                uuid = Global.generateStaticUUID(),
+                                user_id = uid,
+                                namespace_id = namespace_id,
+                                nino_encrypted = enc,
+                                nino_last4 = last4,
+                                has_nino = true,
+                                created_at = db.raw("NOW()"),
+                                updated_at = db.raw("NOW()"),
+                            })
+                        end
+                        IdentityLock.stampLock(user_uuid, namespace_id, "nino")
+                    end)
+                    if not ok then
+                        db.query("ROLLBACK")
+                        error(txn_err)
                     end
-                end)
+                    db.query("COMMIT")
+
+                    IdentityLock.emitAuditRow({
+                        user_id      = uid,
+                        namespace_id = namespace_id,
+                        action       = "NINO_SAVED_AND_LOCKED",
+                        new_values   = { nino_last4 = last4, path = "/api/v2/hmrc/sandbox/create-test-user" },
+                    })
+                end
             end
 
             return { status = 201, json = { data = data } }
