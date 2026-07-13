@@ -103,6 +103,13 @@ return function(app)
                 uuid = profile.uuid,
                 has_nino = profile.has_nino,
                 nino_masked = nino_display,
+                -- Identity-lock state (anti-fraud). Non-null timestamp = user
+                -- has already saved this field once and cannot edit it. FE
+                -- reads these to render the locked card + support links
+                -- without probing a write and catching the 403. See PR
+                -- #464 / lib/identity_lock.lua for the enforcement logic.
+                nino_locked_at = profile.nino_locked_at,
+                utr_locked_at  = profile.utr_locked_at,
                 hmrc_connected = hmrc_connected,
                 hmrc_token_expires_at = hmrc_token and hmrc_token.expires_at or nil,
                 default_business_id = profile.default_business_id,
