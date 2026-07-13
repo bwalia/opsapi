@@ -2986,4 +2986,52 @@ return {
         ]])
         print("[Tax Copilot] Added file_hash column + index to tax_statements")
     end,
+
+    -- 88. Add lock timestamps for NINO and UTR on tax_user_profiles.
+    --
+    -- ─── Business rationale ─────────────────────────────────────────────
+    -- Client anti-fraud policy (2026-07-13): a subscriber must not be able
+    -- to file for multiple identities from a single account. The concrete
+    -- rule is "NINO becomes non-editable once the user saves it the first
+    -- time; UTR becomes non-editable once first successfully written".
+    -- Support can UNLOCK on request via the admin panel (see PR #3/#4 for
+    -- the settings table + unlock endpoint).
+    --
+    -- ─── Column shape rationale ─────────────────────────────────────────
+    -- TIMESTAMP (not BOOLEAN) so we can:
+    --   • distinguish "never locked" (NULL) from "locked at T" (timestamp)
+    --   • report time-since-lock in support UIs / audit exports
+    --   • let the JIT backfill worker do
+    --     `SET nino_locked_at = NOW() WHERE has_nino AND nino_locked_at IS NULL`
+    --     idempotently — subsequent runs see IS NOT NULL and skip.
+    -- Mirrors the existing `nino_consent_at` column added in migration #83.
+    --
+    -- ─── Guard implementation (defers to later PR) ──────────────────────
+    -- This migration is intentionally COLUMNS-ONLY. The write guards in
+    -- routes/tax-profile.lua, routes/tax-hmrc-data.lua, and
+    -- routes/profile-builder.lua (the last is the current back-door: the
+    -- generic /api/v2/profile-builder/answers endpoint accepts
+    -- question_key='nino'|'ni_number'|'utr_number' payloads without any
+    -- field-specific validation) land in a follow-up PR alongside the
+    -- admin unlock endpoint. Shipping this migration first is safe —
+    -- adding NULL-defaulted timestamp columns is behaviour-free.
+    --
+    -- ─── Idempotency ────────────────────────────────────────────────────
+    -- ADD COLUMN IF NOT EXISTS makes re-running a no-op. Safe to include
+    -- in the standard `lapis migrate` sweep at every deploy.
+    --
+    -- ─── Namespace scoping (nothing to do here — informational) ─────────
+    -- tax_user_profiles.namespace_id is already NOT NULL (see the table
+    -- declaration and the guardrail comment in
+    -- backend/app/models/tax_user_profile.py:38-46). Every subsequent
+    -- lock/unlock query MUST scope by namespace_id — that's an
+    -- application-code discipline, not a schema constraint.
+    [88] = function()
+        db.query([[
+            ALTER TABLE tax_user_profiles
+            ADD COLUMN IF NOT EXISTS nino_locked_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS utr_locked_at  TIMESTAMP
+        ]])
+        print("[Tax Copilot] Added nino_locked_at + utr_locked_at columns to tax_user_profiles")
+    end,
 }
