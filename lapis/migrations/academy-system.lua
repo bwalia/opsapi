@@ -248,4 +248,128 @@ return {
             db.query("CREATE UNIQUE INDEX idx_academy_instructor_profiles_user ON academy_instructor_profiles (user_uuid)")
         end
     end,
+
+    -- ========================================================================
+    -- [6] Seed the "academy" tenant namespace
+    --
+    -- The learner site addresses one fixed tenant by slug (BACKEND_ACADEMY_NAMESPACE,
+    -- default "academy"): every public route is /public/academy/ACADEMY/... . On a
+    -- fresh database only the "system" namespace exists, so without this the site's
+    -- resolve_namespace finds nothing and every catalogue request 500s.
+    --
+    -- Mirrors the system-namespace seed (namespace-system.lua [22]/[23]): namespace
+    -- row + roles + the admin user as owner. The role permissions bake in the
+    -- academy RBAC module ("courses") directly, because 806_grant_academy_permissions
+    -- runs BEFORE this namespace exists and so can't grant to it.
+    --
+    -- Idempotent (guarded on the slug) and ACADEMY-feature-gated, so it never runs
+    -- in a non-academy deployment.
+    -- ========================================================================
+    [6] = function()
+        local MigrationUtils = require("helper.migration-utils")
+        local ts = MigrationUtils.getCurrentTimestamp()
+        local slug = os.getenv("BACKEND_ACADEMY_NAMESPACE") or "academy"
+
+        if #db.select("* FROM namespaces WHERE slug = ?", slug) > 0 then return end
+
+        db.insert("namespaces", {
+            uuid = MigrationUtils.generateUUID(),
+            name = "Academy",
+            slug = slug,
+            description = "Academy LMS tenant (courses, lessons, instructors)",
+            status = "active",
+            plan = "enterprise",
+            settings = "{}",
+            max_users = 1000000,
+            max_stores = 1000000,
+            created_at = ts,
+            updated_at = ts,
+        })
+        local namespace_id = db.select("* FROM namespaces WHERE slug = ?", slug)[1].id
+
+        -- owner/admin can manage courses; member is the default for a signed-up
+        -- learner. "courses" is the academy RBAC module the route handlers check.
+        local roles = {
+            {
+                role_name = "owner", display_name = "Owner",
+                description = "Full control over the academy namespace",
+                permissions = '{"dashboard":["create","read","update","delete","manage"],"users":["create","read","update","delete","manage"],"roles":["create","read","update","delete","manage"],"settings":["create","read","update","delete","manage"],"namespace":["create","read","update","delete","manage"],"courses":["create","read","update","delete","manage"],"reports":["create","read","update","delete","manage"]}',
+                is_system = true, is_default = false, priority = 100,
+            },
+            {
+                role_name = "admin", display_name = "Administrator",
+                description = "Administrative access except namespace deletion",
+                permissions = '{"dashboard":["create","read","update","delete","manage"],"users":["create","read","update","delete"],"roles":["create","read","update","delete"],"settings":["create","read","update","delete"],"namespace":["read","update"],"courses":["create","read","update","delete","manage"],"reports":["read","manage"]}',
+                is_system = true, is_default = false, priority = 90,
+            },
+            {
+                role_name = "member", display_name = "Member",
+                description = "Standard learner",
+                permissions = '{"dashboard":["read"],"courses":["read"]}',
+                is_system = true, is_default = true, priority = 20,
+            },
+        }
+        for _, r in ipairs(roles) do
+            db.insert("namespace_roles", {
+                uuid = MigrationUtils.generateUUID(),
+                namespace_id = namespace_id,
+                role_name = r.role_name,
+                display_name = r.display_name,
+                description = r.description,
+                permissions = r.permissions,
+                is_system = r.is_system,
+                is_default = r.is_default,
+                priority = r.priority,
+                created_at = ts,
+                updated_at = ts,
+            })
+        end
+
+        -- Make the platform admin the owner, so the namespace is manageable from
+        -- the dashboard out of the box.
+        local admin = db.select("* FROM users WHERE username = ?", "administrative")
+        if #admin > 0 then
+            local user_id = admin[1].id
+            local member_uuid = MigrationUtils.generateUUID()
+            db.insert("namespace_members", {
+                uuid = member_uuid,
+                namespace_id = namespace_id,
+                user_id = user_id,
+                status = "active",
+                is_owner = true,
+                joined_at = ts,
+                created_at = ts,
+                updated_at = ts,
+            })
+            local member = db.select("* FROM namespace_members WHERE uuid = ?", member_uuid)
+            local owner_role = db.select("* FROM namespace_roles WHERE namespace_id = ? AND role_name = ?", namespace_id, "owner")
+            if #member > 0 and #owner_role > 0 then
+                db.insert("namespace_user_roles", {
+                    uuid = MigrationUtils.generateUUID(),
+                    namespace_member_id = member[1].id,
+                    namespace_role_id = owner_role[1].id,
+                    created_at = ts,
+                    updated_at = ts,
+                })
+            end
+            db.update("namespaces", { owner_user_id = user_id }, { id = namespace_id })
+        end
+
+        -- Show the Academy item in this namespace's dashboard sidebar. The menu row
+        -- (key "academy") is seeded by 805; 807 only enabled it for namespaces that
+        -- existed then, so enable it here for the one we just created.
+        if table_exists("namespace_menu_config") then
+            local menu = db.select("* FROM menu_items WHERE key = ?", "academy")
+            if #menu > 0 then
+                db.insert("namespace_menu_config", {
+                    uuid = MigrationUtils.generateUUID(),
+                    namespace_id = namespace_id,
+                    menu_item_id = menu[1].id,
+                    is_enabled = true,
+                    created_at = ts,
+                    updated_at = ts,
+                })
+            end
+        end
+    end,
 }
