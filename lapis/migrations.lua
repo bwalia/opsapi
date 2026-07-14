@@ -1864,6 +1864,12 @@ local _migrations = {
     ['802_create_academy_lessons'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 3),
     ['803_academy_lessons_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 4),
     ['818_create_academy_instructor_profiles'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 5),
+    -- Seed the "academy" tenant namespace (owner + roles + sidebar). Runs after the
+    -- namespace tables, the admin user, and the academy menu/RBAC migrations, so it
+    -- can wire itself to all of them. Prefix 822: 819/820 are this repo's academy
+    -- progress migrations and 819/820/821 are tax identity-lock — distinct features,
+    -- but 822 is free everywhere, avoiding any numeric-prefix dedup in the `all` preset.
+    ['822_seed_academy_namespace'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 6),
     -- Academy sidebar menu item + RBAC module ("courses") + role grants
     ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
     ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),
