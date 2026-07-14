@@ -1,4 +1,4 @@
-FROM openresty/openresty:alpine
+FROM openresty/openresty:1.31-alpine-fat
 
 ARG TARGET_NGINX_CONF=nginx.conf
 ARG TAG=latest
