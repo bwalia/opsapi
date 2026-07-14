@@ -29,6 +29,7 @@ local LessonQueries = require "queries.LessonQueries"
 local InstructorQueries = require "queries.InstructorQueries"
 local EnrollmentQueries = require "queries.EnrollmentQueries"
 local EntitlementQueries = require "queries.EntitlementQueries"
+local ProgressQueries = require "queries.ProgressQueries"
 local NamespaceQueries = require "queries.NamespaceQueries"
 local NamespaceRoleQueries = require "queries.NamespaceRoleQueries"
 local NamespaceMemberQueries = require "queries.NamespaceMemberQueries"
@@ -58,9 +59,17 @@ return function(app)
     local function parse_body()
         ngx.req.read_body()
 
-        -- Fast path: small form body kept in memory.
-        local post_args = ngx.req.get_post_args()
-        if post_args and next(post_args) then return post_args end
+        -- get_post_args() parses ANY body as urlencoded, which turns a JSON body
+        -- into a single bogus key (and silently drops the real fields). Only take
+        -- the form fast path when the client didn't declare JSON.
+        local ctype = ngx.var.content_type or ""
+        local is_json = ctype:find("application/json", 1, true) ~= nil
+
+        if not is_json then
+            -- Fast path: small form body kept in memory.
+            local post_args = ngx.req.get_post_args()
+            if post_args and next(post_args) then return post_args end
+        end
 
         -- Body may be in memory (small JSON) or spilled to a temp file (large).
         local body = ngx.req.get_body_data()
@@ -219,6 +228,17 @@ return function(app)
             }
         end)))
 
+    -- A paid course with no price cannot be bought: Stripe rejects a zero amount,
+    -- so the learner's Buy button hard-fails with "Invalid course price". Refuse
+    -- to persist that state rather than let it surface at checkout.
+    local function price_error(is_free, price)
+        if is_free then return nil end
+        if not price or price <= 0 then
+            return "A paid course needs a price greater than 0 (minor units, e.g. 999 = 9.99)"
+        end
+        return nil
+    end
+
     app:post("/api/v2/academy/courses", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("courses", "create", function(self)
             local body = parse_body()
@@ -234,6 +254,11 @@ return function(app)
                 return api_response(400, nil, "Invalid status (draft|published|archived)")
             end
 
+            local is_free = to_bool(body.is_free, true)
+            local price = tonumber(body.price) or 0
+            local perr = price_error(is_free, price)
+            if perr then return api_response(400, nil, perr) end
+
             local ok, course_or_err = pcall(CourseQueries.create, self.namespace.id, {
                 title = body.title,
                 slug = body.slug,
@@ -242,8 +267,8 @@ return function(app)
                 thumbnail_url = body.thumbnail_url,
                 category = body.category or "general",
                 level = level,
-                is_free = to_bool(body.is_free, true),
-                price = tonumber(body.price) or 0,
+                is_free = is_free,
+                price = price,
                 currency = body.currency or "USD",
                 status = status,
                 owner_user_uuid = self.current_user.uuid,
@@ -285,13 +310,24 @@ return function(app)
             if body.is_free ~= nil then fields.is_free = to_bool(body.is_free, true) end
             if body.price ~= nil then fields.price = tonumber(body.price) or 0 end
 
+            local existing = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
+            if not existing then return api_response(404, nil, "Course not found") end
+
             if not can_manage_all(self) then
-                local existing = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
-                if not existing then return api_response(404, nil, "Course not found") end
                 if not ensure_owns(self, existing) then
                     return api_response(403, nil, "You can only manage your own courses")
                 end
             end
+
+            -- is_free/price may each be omitted, so validate the RESULTING course,
+            -- not just the fields in this request.
+            local eff_free = fields.is_free
+            if eff_free == nil then
+                eff_free = (existing.is_free == true or existing.is_free == "t")
+            end
+            local eff_price = fields.price or tonumber(existing.price) or 0
+            local perr = price_error(eff_free, eff_price)
+            if perr then return api_response(400, nil, perr) end
 
             local updated = CourseQueries.update(self.namespace.id, self.params.uuid, fields)
             if not updated then return api_response(404, nil, "Course not found") end
@@ -628,5 +664,148 @@ return function(app)
                 table.insert(out, public_course(c, ls))
             end
             return { status = 200, json = { courses = out, count = #out } }
+        end))
+
+    -- ------------------------------------------------------------------
+    -- LEARNER: lesson progress
+    -- A row in academy_lesson_progress means "completed"; toggling off deletes
+    -- it. Writes are gated on the learner actually having access to the course
+    -- (free / owned / purchased / subscribed), so progress can never be
+    -- recorded against a course the learner cannot open.
+    -- ------------------------------------------------------------------
+
+    -- Mark a lesson complete / incomplete. Body: { completed: boolean }.
+    app:post("/api/v2/public/academy/:namespace/lessons/:uuid/progress",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            local user_uuid = self.current_user and self.current_user.uuid
+            if not user_uuid then return api_response(401, nil, "Authentication required") end
+
+            local lesson = LessonQueries.getByUuid(ns.id, self.params.uuid)
+            if not lesson then return api_response(404, nil, "Lesson not found") end
+
+            local course = CourseQueries.findById(ns.id, lesson.course_id)
+            if not course then return api_response(404, nil, "Course not found") end
+            if not EntitlementQueries.hasCourseAccess(user_uuid, course) then
+                return api_response(403, nil, "You do not have access to this course")
+            end
+
+            -- Accept JSON booleans and form-encoded strings alike.
+            local body = parse_body() or {}
+            local raw = body.completed
+            local completed = not (raw == false or raw == "false" or raw == 0 or raw == "0")
+
+            if completed then
+                ProgressQueries.complete(ns.id, course.id, lesson.id, user_uuid)
+            else
+                ProgressQueries.uncomplete(lesson.id, user_uuid)
+            end
+
+            local lessons = LessonQueries.listByCourse(course.id, { published_only = true })
+            local done = ProgressQueries.completedLessonIds(course.id, user_uuid)
+            local count = 0
+            for _, l in ipairs(lessons) do if done[l.id] then count = count + 1 end end
+
+            return { status = 200, json = {
+                completed = completed,
+                completed_count = count,
+                total = #lessons,
+            } }
+        end))
+
+    -- Which lessons of a course the current learner has completed.
+    app:get("/api/v2/public/academy/:namespace/courses/:slug/progress",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            local user_uuid = self.current_user and self.current_user.uuid
+
+            local course = CourseQueries.getBySlug(ns.id, self.params.slug)
+            if not course then return api_response(404, nil, "Course not found") end
+
+            local lessons = LessonQueries.listByCourse(course.id, { published_only = true })
+            local done = ProgressQueries.completedLessonIds(course.id, user_uuid)
+
+            local ids, count, next_lesson = {}, 0, nil
+            for _, l in ipairs(lessons) do
+                if done[l.id] then
+                    table.insert(ids, l.uuid)
+                    count = count + 1
+                elseif not next_lesson then
+                    next_lesson = l.uuid
+                end
+            end
+
+            return { status = 200, json = {
+                completed_lesson_ids = #ids > 0 and ids or cJson.empty_array,
+                completed = count,
+                total = #lessons,
+                next_lesson_id = next_lesson,
+            } }
+        end))
+
+    -- The learner's dashboard feed: every course they're enrolled in (purchased)
+    -- or have made progress on (free courses need no enrollment), each with its
+    -- progress, plus headline stats.
+    app:get("/api/v2/public/academy/:namespace/me/learning",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            local user_uuid = self.current_user and self.current_user.uuid
+
+            local courses, seen = {}, {}
+            for _, c in ipairs(EnrollmentQueries.listCoursesForUser(ns.id, user_uuid)) do
+                if not seen[c.id] then seen[c.id] = true; table.insert(courses, c) end
+            end
+            for _, c in ipairs(ProgressQueries.coursesWithProgress(ns.id, user_uuid)) do
+                if not seen[c.id] then seen[c.id] = true; table.insert(courses, c) end
+            end
+
+            local ids = {}
+            for _, c in ipairs(courses) do table.insert(ids, c.id) end
+            local lessons_by_course = LessonQueries.listByCourseIds(ids, { published_only = true })
+            local summary = ProgressQueries.summaryByCourse(ns.id, user_uuid)
+
+            local instructor_ids = {}
+            for _, c in ipairs(courses) do
+                if c.owner_user_uuid then table.insert(instructor_ids, c.owner_user_uuid) end
+            end
+            local instructors = CourseQueries.instructorsByUuids(instructor_ids)
+
+            local out, courses_completed = {}, 0
+            for _, c in ipairs(courses) do
+                local ls = lessons_by_course[c.id] or {}
+                local done = ProgressQueries.completedLessonIds(c.id, user_uuid)
+
+                local next_lesson = nil
+                for _, l in ipairs(ls) do
+                    if not done[l.id] and not next_lesson then next_lesson = l.uuid end
+                end
+
+                local completed = (summary[c.id] and summary[c.id].completed) or 0
+                local total = #ls
+                if total > 0 and completed >= total then courses_completed = courses_completed + 1 end
+
+                local shaped = public_course(c, {}, instructors[c.owner_user_uuid])
+                shaped.progress = {
+                    completed = completed,
+                    total = total,
+                    percent = total > 0 and math.floor((completed / total) * 100) or 0,
+                    next_lesson_id = next_lesson,
+                    last_activity_at = summary[c.id] and summary[c.id].last_activity_at or nil,
+                }
+                table.insert(out, shaped)
+            end
+
+            local stats = ProgressQueries.statsForUser(ns.id, user_uuid)
+            stats.courses_enrolled = #out
+            stats.courses_completed = courses_completed
+
+            return { status = 200, json = {
+                courses = #out > 0 and out or cJson.empty_array,
+                count = #out,
+                stats = stats,
+            } }
         end))
 end

@@ -140,6 +140,7 @@ local academy_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migr
 local academy_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-menu-items") or {}
 local academy_enrollment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-enrollments") or {}
 local academy_payment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-payments") or {}
+local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-progress") or {}
 
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
@@ -211,6 +212,23 @@ end
 -- migration runs if the active PROJECT_CODE enables ANY of them. This lets a
 -- single table be shared across project codes, e.g.
 --   conditional({ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT}, fn)
+-- A disabled feature's migration must NOT be registered at all.
+--
+-- Returning a no-op function here would let lapis run it and then write the key
+-- into `lapis_migrations`. The feature's tables would never be created, and
+-- because the key is recorded as "applied", turning the feature on later would
+-- silently skip it forever — you'd get routes that 500 with
+-- "relation ... does not exist". Returning nil omits the key from the migrations
+-- table, so lapis neither runs nor records it, and the migration is still
+-- pending the day the feature is enabled.
+--
+-- The skip is recorded here (registry-build time, after MigrationTracker.init)
+-- so the run summary still reports it.
+local function skip_unregistered(name, label)
+    MigrationTracker.recordSkipped(name, label)
+    return nil
+end
+
 local function conditional(feature, migration_func)
     local label = feature_label(feature)
     if ProjectConfig.isAnyFeatureEnabled(feature) and migration_func then
@@ -219,10 +237,10 @@ local function conditional(feature, migration_func)
             return migration_func(...)
         end
     end
-    return skip_migration(label, label)
+    return skip_unregistered(label, label)
 end
 
--- Returns the migration from an array or a skip function (with tracking).
+-- Returns the migration from an array, or nil when the feature is off (see above).
 -- `feature` may be a single feature string or a list (OR semantics) — see conditional().
 local function conditional_array(feature, migrations_array, index)
     local label = feature_label(feature)
@@ -233,7 +251,7 @@ local function conditional_array(feature, migrations_array, index)
             return migrations_array[index](...)
         end
     end
-    return skip_migration(name, label)
+    return skip_unregistered(name, label)
 end
 
 -- Dry-run: preview what would run/skip without touching the DB.
@@ -1864,6 +1882,10 @@ local _migrations = {
     ['815_create_academy_settings'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 6),
     ['816_create_creator_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 7),
     ['817_academy_per_instructor_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 8),
+
+    -- Academy learner progress (completed lessons -> dashboard progress bars)
+    ['819_create_academy_lesson_progress'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 1),
+    ['820_academy_lesson_progress_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 2),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
