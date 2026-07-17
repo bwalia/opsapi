@@ -110,8 +110,67 @@ return function(app)
         return s == "true" or s == "1" or s == "yes"
     end
 
+    -- Postgres booleans reach us either as a real boolean or as the string "t",
+    -- depending on the driver path — EntitlementQueries.hasCourseAccess checks
+    -- for both, which is why this cannot use to_bool(): that maps "t" to FALSE
+    -- (it only knows "true"/"1"/"yes"), so a free lesson would have its content
+    -- withheld.
+    local function pg_true(v)
+        return v == true or v == "t" or v == "true" or v == 1 or v == "1"
+    end
+
+    -- `has_access` comes from EntitlementQueries.hasCourseAccess, which already
+    -- returns true for a FREE course (even anonymously) as well as for the
+    -- owner, an enrolled learner and an active subscriber. So the only thing
+    -- left to decide here is the free sample of a paid course.
+    local function lesson_content_visible(lesson, has_access)
+        if has_access then return true end
+        return pg_true(lesson.is_preview)
+    end
+
+    -- Resolve the caller WITHOUT requiring a token.
+    --
+    -- The course-detail route is public — an anonymous visitor must be able to
+    -- browse a paid course's syllabus before buying. But an ENROLLED learner
+    -- hits the same URL and has to get the content they paid for, so the token
+    -- is honoured when present and ignored when not. requireAuth would 401 the
+    -- shopper; no auth at all would starve the learner.
+    --
+    -- AuthMiddleware.authenticate returns (nil, err) for a missing/!bad token
+    -- rather than throwing, so a failure here simply means "anonymous".
+    local function optional_user(self)
+        local user = AuthMiddleware.authenticate(self)
+        return user
+    end
+
     -- Shape a lesson row for public output.
-    local function public_lesson(row)
+    --
+    -- `include_content` decides whether the lesson BODY goes out. It is not a
+    -- convenience flag — it is the paywall. Everything else here (title,
+    -- duration, position) is catalogue metadata a paid course WANTS public so
+    -- the syllabus is browsable; `content_html` is the thing being sold.
+    --
+    -- There is deliberately no default: every public endpoint below is
+    -- unauthenticated, so a forgotten argument would publish a paid course's
+    -- entire body text to anyone holding the slug. `content_html` and `s3_key`
+    -- are omitted (nil) rather than blanked, so "withheld" is distinguishable
+    -- from "empty".
+    --
+    -- `has_video` is syllabus metadata and always goes out: "this lesson has a
+    -- video" is something a paid course wants on its sales page, and the learner
+    -- site needs it to decide whether to render a player at all. It leaks
+    -- nothing — the KEY stays behind the same gate as the content.
+    --
+    -- `s3_key` follows content, which is what makes free video work offline: the
+    -- learner site caches free lessons into SQLite and signs the URL itself,
+    -- with no backend call (its golden rule). A paid lesson's key is withheld;
+    -- that site asks /lessons/:uuid/stream-url instead, which re-checks
+    -- entitlement before signing. Publishing the key is not itself a breach (the
+    -- bucket is private and a GET needs a signature), but handing it out invites
+    -- exactly the kind of "the key was public so signing it seemed fine" bug
+    -- this gate exists to prevent.
+    local function public_lesson(row, include_content)
+        local key = row.s3_key
         return {
             id = row.uuid,
             title = row.title,
@@ -119,7 +178,9 @@ return function(app)
             position = row.position,
             duration_seconds = row.duration_seconds,
             is_preview = row.is_preview,
-            content_html = row.content_html,
+            has_video = key ~= nil and key ~= "",
+            s3_key = include_content and key or nil,
+            content_html = include_content and row.content_html or nil,
             created_at = row.created_at,
         }
     end
@@ -549,7 +610,11 @@ return function(app)
         for _, c in ipairs(courses) do
             local ls = {}
             for _, l in ipairs(lessons_by_course[c.id] or {}) do
-                table.insert(ls, public_lesson(l))
+                -- No auth on this route. hasCourseAccess(nil, c) is true for a
+                -- FREE course and false for a paid one, so a paid lesson's body
+                -- is withheld unless it is an explicit preview.
+                table.insert(ls, public_lesson(l,
+                    lesson_content_visible(l, EntitlementQueries.hasCourseAccess(nil, c))))
             end
             table.insert(out, public_course(c, ls, instructors[c.owner_user_uuid]))
         end
@@ -565,8 +630,18 @@ return function(app)
             return api_response(404, nil, "Course not found")
         end
         local lessons = LessonQueries.listByCourse(course.id, { published_only = true })
+
+        -- A paid course always publishes its syllabus (titles, durations, order)
+        -- so it can be browsed and sold. The lesson BODIES are the product, and
+        -- go out only to someone entitled to them — or on an is_preview lesson,
+        -- which is the free sample.
+        local viewer = optional_user(self)
+        local has_access = EntitlementQueries.hasCourseAccess(viewer and viewer.uuid, course)
+
         local ls = {}
-        for _, l in ipairs(lessons) do table.insert(ls, public_lesson(l)) end
+        for _, l in ipairs(lessons) do
+            table.insert(ls, public_lesson(l, lesson_content_visible(l, has_access)))
+        end
         local instructors = CourseQueries.instructorsByUuids({ course.owner_user_uuid })
         return { status = 200, json = public_course(course, ls, instructors[course.owner_user_uuid]) }
     end)
@@ -659,7 +734,9 @@ return function(app)
             for _, c in ipairs(courses) do
                 local ls = {}
                 for _, l in ipairs(lessons_by_course[c.id] or {}) do
-                    table.insert(ls, public_lesson(l))
+                    -- This route is requireAuth and lists only the caller's OWN
+                    -- enrollments, so the body is exactly what they paid for.
+                    table.insert(ls, public_lesson(l, true))
                 end
                 table.insert(out, public_course(c, ls))
             end
