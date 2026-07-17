@@ -838,6 +838,24 @@ return function(app)
             for _, c in ipairs(ProgressQueries.coursesWithProgress(ns.id, user_uuid)) do
                 if not seen[c.id] then seen[c.id] = true; table.insert(courses, c) end
             end
+            -- Courses this user AUTHORED.
+            --
+            -- An instructor is never "enrolled" on their own course and has no
+            -- progress against it, so the two sources above miss it entirely and
+            -- the author's own work is invisible on their dashboard — while
+            -- hasCourseAccess (used by the watch page, progress and streaming)
+            -- has always treated the owner as fully entitled. This closes that
+            -- disagreement: "has access" and "shows in My Courses" now answer
+            -- the same way for an owner.
+            --
+            -- Unpublished ones are included on purpose: a draft you are writing
+            -- is exactly what you want a link to. `seen` keeps a course you both
+            -- own and are enrolled on from appearing twice.
+            for _, c in ipairs((CourseQueries.list(ns.id, {
+                owner_user_uuid = user_uuid, perPage = 200,
+            }) or {}).data or {}) do
+                if not seen[c.id] then seen[c.id] = true; table.insert(courses, c) end
+            end
 
             local ids = {}
             for _, c in ipairs(courses) do table.insert(ids, c.id) end
