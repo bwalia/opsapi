@@ -152,9 +152,25 @@ return function(app)
     --
     -- There is deliberately no default: every public endpoint below is
     -- unauthenticated, so a forgotten argument would publish a paid course's
-    -- entire body text to anyone holding the slug. `content_html` is omitted
-    -- (nil) rather than blanked, so "withheld" is distinguishable from "empty".
+    -- entire body text to anyone holding the slug. `content_html` and `s3_key`
+    -- are omitted (nil) rather than blanked, so "withheld" is distinguishable
+    -- from "empty".
+    --
+    -- `has_video` is syllabus metadata and always goes out: "this lesson has a
+    -- video" is something a paid course wants on its sales page, and the learner
+    -- site needs it to decide whether to render a player at all. It leaks
+    -- nothing — the KEY stays behind the same gate as the content.
+    --
+    -- `s3_key` follows content, which is what makes free video work offline: the
+    -- learner site caches free lessons into SQLite and signs the URL itself,
+    -- with no backend call (its golden rule). A paid lesson's key is withheld;
+    -- that site asks /lessons/:uuid/stream-url instead, which re-checks
+    -- entitlement before signing. Publishing the key is not itself a breach (the
+    -- bucket is private and a GET needs a signature), but handing it out invites
+    -- exactly the kind of "the key was public so signing it seemed fine" bug
+    -- this gate exists to prevent.
     local function public_lesson(row, include_content)
+        local key = row.s3_key
         return {
             id = row.uuid,
             title = row.title,
@@ -162,6 +178,8 @@ return function(app)
             position = row.position,
             duration_seconds = row.duration_seconds,
             is_preview = row.is_preview,
+            has_video = key ~= nil and key ~= "",
+            s3_key = include_content and key or nil,
             content_html = include_content and row.content_html or nil,
             created_at = row.created_at,
         }
