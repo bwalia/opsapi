@@ -265,10 +265,14 @@ return {
             if not q or #q == 0 then return end
             local exists = db.select("id FROM profile_question_options WHERE question_id = ? AND value = ?", q[1].id, value)
             if exists and #exists > 0 then return end
+            -- parent_option_id must be an EXPLICIT NULL: the column is
+            -- types.integer({null = true}), which Lapis renders as
+            -- `integer DEFAULT 0` — omitting it inserts 0 and violates the
+            -- self-referencing fk_pqo_parent constraint (broke migrate on int).
             db.query([[
                 INSERT INTO profile_question_options
-                    (uuid, question_id, label, value, display_order, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, true, NOW(), NOW())
+                    (uuid, question_id, label, value, display_order, is_active, parent_option_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, true, NULL, NOW(), NOW())
             ]], MigrationUtils.generateUUID(), q[1].id, label, value, display_order)
         end
 
