@@ -61,6 +61,17 @@ permissions:
   contents: read
   packages: write
 
+# There is exactly ONE self-hosted runner, and the smoke test binds a fixed
+# host port and a fixed set of container names. Two overlapping runs used to
+# stomp each other — the newer run's `docker rm` killed the older run's
+# smoke container mid-poll, which showed up as a spurious smoke-test failure.
+# Serialise instead. `cancel-in-progress: false` because a run that has
+# already reached the deploy job should be allowed to finish rather than be
+# torn down halfway through a helm upgrade.
+concurrency:
+  group: deploy-k3s-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   IMAGE_REGISTRY: bwalia
   IMAGE_NAME: opsapi
@@ -74,6 +85,11 @@ jobs:
     name: Build OpsAPI Image
     runs-on: [self-hosted, Linux, X64]
     if: github.event.inputs.SKIP_BUILD != 'true'
+    outputs:
+      # The immutable tag this run produced. The smoke test pulls THIS rather
+      # than :latest — otherwise a concurrent run that pushes :latest in
+      # between build and smoke means we smoke-test someone else's commit.
+      image_ref: ${{ steps.version.outputs.IMAGE_REF }}
     steps:
       - name: Clean up Workspace
         run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
@@ -112,7 +128,14 @@ jobs:
           echo "APP_VERSION=$APP_VERSION" >> $GITHUB_OUTPUT
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
           echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
-          echo "Build: v$APP_VERSION #$BUILD_NUMBER at $BUILD_TIME"
+
+          # Immutable per-run tag. Docker tags allow [A-Za-z0-9_.-] only, so
+          # squash anything else out of the git-describe string.
+          SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
+          IMAGE_TAG="${SAFE_VERSION}-${BUILD_NUMBER}"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "IMAGE_REF=${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Build: v$APP_VERSION #$BUILD_NUMBER at $BUILD_TIME (tag: $IMAGE_TAG)"
 
       - name: Build and push OpsAPI
         uses: docker/build-push-action@v5
@@ -120,7 +143,12 @@ jobs:
           context: ./lapis
           file: ./lapis/Dockerfile
           push: true
-          tags: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # Both tags point at the same image. :latest is what every
+          # environment pulls; the versioned tag is what the smoke test
+          # verifies and what you need to roll back to a known-good build.
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ steps.version.outputs.IMAGE_REF }}
           # `TAG=latest` retained for existing consumers. New APP_VERSION /
           # BUILD_NUMBER / BUILD_TIME args are what app.lua reads via
           # os.getenv() so `/`, `/health`, `/metrics` surface the same
@@ -152,38 +180,110 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWD }}
 
       - name: Run smoke test container
+        env:
+          # Fall back to :latest only when the build was explicitly skipped
+          # (SKIP_BUILD dispatch), where there is no fresh image to reference.
+          IMAGE_REF: ${{ needs.build.outputs.image_ref || format('{0}/{1}:latest', env.IMAGE_REGISTRY, env.IMAGE_NAME) }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          docker pull ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker stop opsapi-smoke-test || true
-          docker rm opsapi-smoke-test || true
-          docker run -d --name opsapi-smoke-test \
-            -p 34080:80 \
-            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          set -euo pipefail
+          echo "Smoke-testing image: $IMAGE_REF"
+          docker pull "$IMAGE_REF"
+
+          # Names/network are scoped to the run id so a stray container from a
+          # previous run can never be mistaken for this one's.
+          docker rm -f "opsapi-smoke-$RUN_ID" "opsapi-smoke-pg-$RUN_ID" >/dev/null 2>&1 || true
+          docker network rm "opsapi-smoke-net-$RUN_ID" >/dev/null 2>&1 || true
+          docker network create "opsapi-smoke-net-$RUN_ID"
+
+          # A real Postgres. Without one, config.lua falls back to a hardcoded
+          # 172.72.0.10 that nothing answers on — connects then blackhole for
+          # the full 60s socket timeout, which is what made this job flaky.
+          docker run -d --name "opsapi-smoke-pg-$RUN_ID" \
+            --network "opsapi-smoke-net-$RUN_ID" \
+            -e POSTGRES_USER=pguser \
+            -e POSTGRES_PASSWORD=pgpassword \
+            -e POSTGRES_DB=opsapi \
+            postgres:14-alpine
+
+          echo "Waiting for Postgres..."
+          for i in $(seq 1 30); do
+            if docker exec "opsapi-smoke-pg-$RUN_ID" pg_isready -U pguser -d opsapi >/dev/null 2>&1; then
+              echo "Postgres ready after ${i}s"; break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "::error::Postgres did not become ready in 30s"
+              docker logs "opsapi-smoke-pg-$RUN_ID" || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Port 0 lets Docker pick a free host port — no fixed-port collisions.
+          docker run -d --name "opsapi-smoke-$RUN_ID" \
+            --network "opsapi-smoke-net-$RUN_ID" \
+            -p 0:80 \
+            -e POSTGRES_HOST="opsapi-smoke-pg-$RUN_ID" \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=pguser \
+            -e POSTGRES_PASSWORD=pgpassword \
+            -e POSTGRES_DB=opsapi \
+            -e JWT_SECRET_KEY=smoke-test-not-a-real-secret \
+            "$IMAGE_REF"
+
+          PORT=$(docker port "opsapi-smoke-$RUN_ID" 80/tcp | head -1 | sed 's/.*://')
+          echo "SMOKE_PORT=$PORT" >> "$GITHUB_ENV"
+          echo "Container listening on host port $PORT"
 
       - name: Check container starts
+        env:
+          RUN_ID: ${{ github.run_id }}
         run: |
-          echo "Waiting for OpenResty to start..."
+          set -uo pipefail
+          echo "Waiting for OpenResty to serve /health..."
           for i in $(seq 1 30); do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:34080/health 2>/dev/null || echo "000")
-            echo "Attempt $i: HTTP $HTTP_CODE"
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "Health check passed!"
-              exit 0
+            # Fail fast if the container died (e.g. a worker segfault loop) —
+            # polling a dead container for 90s just hides the real error.
+            STATE=$(docker inspect -f '{{.State.Status}}' "opsapi-smoke-$RUN_ID" 2>/dev/null || echo "missing")
+            if [ "$STATE" != "running" ]; then
+              echo "::error::Container is '$STATE', not running"
+              break
             fi
-            # Accept 503 as OK for smoke test - means OpenResty is running but no DB available
-            if [ "$HTTP_CODE" = "503" ]; then
-              echo "OpenResty is running (503 expected without database). Smoke test passed."
+
+            # --max-time matters: a request that hangs on a DB connect would
+            # otherwise consume the entire retry budget in one attempt.
+            HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+              "http://localhost:${SMOKE_PORT}/health" 2>/dev/null || echo "000")
+            echo "Attempt $i: HTTP $HTTP_CODE"
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Health check passed."
+              curl -s --max-time 10 "http://localhost:${SMOKE_PORT}/health" | head -c 2000 || true
               exit 0
             fi
             sleep 2
           done
-          echo "Smoke test failed - container not responding"
-          docker logs opsapi-smoke-test
+
+          # 503 is a real failure now that a database is present: it means the
+          # app could not reach Postgres, which is exactly what we're testing.
+          echo "::error::Smoke test failed - /health never returned 200"
+          echo "===== opsapi container logs ====="
+          docker logs --tail 100 "opsapi-smoke-$RUN_ID" 2>&1 || true
+          echo "===== opsapi nginx error log ====="
+          docker exec "opsapi-smoke-$RUN_ID" tail -100 /var/log/nginx/error.log 2>/dev/null || echo "(unavailable)"
+          echo "===== postgres logs ====="
+          docker logs --tail 30 "opsapi-smoke-pg-$RUN_ID" 2>&1 || true
           exit 1
 
       - name: Cleanup
         if: always()
-        run: docker rm -f opsapi-smoke-test || true
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          docker rm -f "opsapi-smoke-$RUN_ID" "opsapi-smoke-pg-$RUN_ID" >/dev/null 2>&1 || true
+          docker network rm "opsapi-smoke-net-$RUN_ID" >/dev/null 2>&1 || true
+          # Sweep any orphans left by runs that were cancelled mid-flight.
+          docker rm -f opsapi-smoke-test >/dev/null 2>&1 || true
 
   # =========================================================================
   # 3. PLAN — derive which env(s) this run targets, based on the trigger
