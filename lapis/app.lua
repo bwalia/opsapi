@@ -509,6 +509,9 @@ load_if("tax_copilot", "routes.tax-custom-categories")
 load_if("tax_copilot", "routes.tax-categories")
 load_if("tax_copilot", "routes.tax-support")
 load_if("tax_copilot", "routes.my-incomes")
+-- Rental hub: properties (user_profile_entities) + SA105 line items.
+-- Property-scope questions stay under routes.profile-builder (?context=&entity=).
+load_if("tax_copilot", "routes.tax-properties")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
 load_if("tax_copilot", "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")
