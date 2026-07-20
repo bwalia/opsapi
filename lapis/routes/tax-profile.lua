@@ -115,6 +115,11 @@ return function(app)
                 default_business_id = profile.default_business_id,
                 default_tax_year = profile.default_tax_year,
                 default_profile_key = profile.default_profile_key,
+                -- Making Tax Digital (MTD) enrolment. Drives filing pipeline
+                -- selection (SA100 legacy vs quarterly MTD updates) and the
+                -- HMRC OAuth scopes we request. See migration [91]. Boolean,
+                -- NOT NULL — default false on older rows.
+                mtd_enabled = profile.mtd_enabled and true or false,
                 businesses = business_list,
                 open_obligations_count = open_count,
                 created_at = profile.created_at,
@@ -295,6 +300,18 @@ return function(app)
             if not ok_pk then
                 ngx.log(ngx.ERR, "[Tax Profile] setDefaultProfileKey error: ", tostring(pk_err))
                 return { status = 500, json = { error = "Failed to update business profile" } }
+            end
+        end
+
+        -- Making Tax Digital (MTD) enrolment toggle. Presence-based (not
+        -- truthy-based) so `{"mtd_enabled": false}` can turn it OFF —
+        -- if we gated on `if params.mtd_enabled` the false path would
+        -- silently drop through unchanged.
+        if params.mtd_enabled ~= nil then
+            local ok_mtd, mtd_err = pcall(TaxUserProfileQueries.setMtdEnabled, user_uuid, params.mtd_enabled)
+            if not ok_mtd then
+                ngx.log(ngx.ERR, "[Tax Profile] setMtdEnabled error: ", tostring(mtd_err))
+                return { status = 500, json = { error = "Failed to update MTD enrolment" } }
             end
         end
 

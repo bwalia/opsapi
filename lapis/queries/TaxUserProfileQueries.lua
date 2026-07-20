@@ -214,6 +214,18 @@ function TaxUserProfileQueries.setDefaultTaxYear(user_uuid, tax_year)
     return { success = true }
 end
 
+-- Update Making Tax Digital (MTD) enrolment flag. HMRC's MTD is a per-taxpayer
+-- registration (per NINO), so this lives on tax_user_profiles rather than
+-- per-business. See migration [91] for the column definition and rationale.
+function TaxUserProfileQueries.setMtdEnabled(user_uuid, enabled)
+    db.query([[
+        UPDATE tax_user_profiles
+        SET mtd_enabled = ?, updated_at = NOW()
+        WHERE user_uuid = ?
+    ]], enabled and true or false, user_uuid)
+    return { success = true }
+end
+
 -- Update the user's default business profile key (e.g. "sole_trader", "amazon_seller").
 function TaxUserProfileQueries.setDefaultProfileKey(user_uuid, profile_key)
     db.query([[

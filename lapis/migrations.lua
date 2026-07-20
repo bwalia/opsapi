@@ -1837,6 +1837,7 @@ local _migrations = {
     ['819_tax_identity_lock_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 88),
     ['820_tax_identity_lock_settings_and_module'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 89),
     ['821_tax_identity_lock_message_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 90),
+    ['822_tax_user_profile_mtd_enabled'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 91),
 
     -- MY INCOME — manually-entered income source-of-truth
     -- =========================================================================
