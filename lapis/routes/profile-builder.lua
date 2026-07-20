@@ -175,12 +175,15 @@ local function recalculateCompletion(user_id, user_uuid, category_id)
 
         -- Pre-load the user's answers once; ipairs(questions) iterates
         -- over the SAME data the evaluators need.
+        -- entity_uuid IS NULL: per-entity (property) rows must not shadow
+        -- classic answers — with several entities there can be many rows per
+        -- question_id and the map would keep whichever came back last.
         local answer_map = {}
         local ok_ans, ans_rows = pcall(db.query, [[
             SELECT question_id, answer_text, answer_number, answer_boolean,
                    answer_date, answer_json, is_draft
             FROM user_profile_answers
-            WHERE user_id = ?
+            WHERE user_id = ? AND entity_uuid IS NULL
         ]], user_id)
         if ok_ans and ans_rows then
             for _, a in ipairs(ans_rows) do
@@ -266,12 +269,15 @@ local function evaluateTagRules(user_id, user_uuid)
         ]])
         if not rules or #rules == 0 then return end
 
-        -- Get user's current answers indexed by question_id (include drafts for visibility)
+        -- Get user's current answers indexed by question_id (include drafts for
+        -- visibility). entity_uuid IS NULL: tag rules evaluate against the
+        -- classic answer set only — per-property rows would collide on
+        -- question_id and make tag assignment depend on row order.
         local answer_map = {}
         local answers = db.query([[
             SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
             FROM user_profile_answers
-            WHERE user_id = ?
+            WHERE user_id = ? AND entity_uuid IS NULL
         ]], user_id)
         for _, a in ipairs(answers or {}) do
             answer_map[a.question_id] = a
@@ -689,6 +695,34 @@ return function(app)
         local user_id = getUserIdByUuid(user_uuid)
         local namespace_id = getNamespaceId(self)
 
+        -- Contexted schemas: ?context=rental_business|property returns ONLY
+        -- categories flagged with that context (profile_categories.context).
+        -- Without the param, only classic NULL-context categories are served
+        -- so the /profile questionnaire and its completion gate never see
+        -- hub/per-property sections. ?entity=<uuid> scopes the merged-in
+        -- answers to that user_profile_entities row (asked-once-PER-property
+        -- questions); the entity must belong to the caller.
+        local schema_context = self.params.context
+        if schema_context == "" then schema_context = nil end
+        local entity_uuid = self.params.entity
+        if entity_uuid == "" then entity_uuid = nil end
+        if entity_uuid then
+            local ok_ent, ent_rows = pcall(db.query, [[
+                SELECT id FROM user_profile_entities
+                WHERE uuid = ? AND user_id = ? AND is_archived = false
+                LIMIT 1
+            ]], entity_uuid, user_id or -1)
+            if not ok_ent or not ent_rows or #ent_rows == 0 then
+                return { status = 404, json = { error = "Entity not found" } }
+            end
+        end
+        local ctx_filter
+        if schema_context then
+            ctx_filter = " AND context = " .. db.escape_literal(schema_context)
+        else
+            ctx_filter = " AND context IS NULL"
+        end
+
         -- Include global categories (namespace_id = 0) and user's namespace categories
         local ns_filter = ""
         if namespace_id and namespace_id > 0 then
@@ -697,7 +731,7 @@ return function(app)
         local ok_cats, categories = pcall(db.query, [[
             SELECT * FROM profile_categories
             WHERE is_active = true AND is_archived = false
-            ]] .. ns_filter .. [[
+            ]] .. ns_filter .. ctx_filter .. [[
             ORDER BY display_order ASC, name ASC
         ]])
         if not ok_cats then
@@ -705,14 +739,26 @@ return function(app)
             return { status = 500, json = { error = "Failed to load schema" } }
         end
 
-        -- Pre-load all user answers indexed by question_id (include drafts for visibility/completion)
+        -- Pre-load all user answers indexed by question_id (include drafts for
+        -- visibility/completion). Entity scoping keeps the map unambiguous:
+        -- classic answers are entity_uuid IS NULL; per-entity requests load
+        -- ONLY that entity's rows so rules evaluate against that property.
         local answer_map = {}
         if user_id then
-            local ok_all_ans, all_ans = pcall(db.query, [[
-                SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
-                FROM user_profile_answers
-                WHERE user_id = ?
-            ]], user_id)
+            local ok_all_ans, all_ans
+            if entity_uuid then
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid = ?
+                ]], user_id, entity_uuid)
+            else
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid IS NULL
+                ]], user_id)
+            end
             if ok_all_ans and all_ans then
                 for _, a in ipairs(all_ans) do
                     answer_map[a.question_id] = a
@@ -1056,12 +1102,16 @@ return function(app)
         -- what the user sees on the /profile UI — otherwise text-only
         -- categories sit at 0% on the server while showing 100% to
         -- the user, exactly the trap we just hit.
+        -- entity_uuid IS NULL: per-entity answers (rental properties) must
+        -- never leak into the profile gate — with several entities there can
+        -- be many rows per question_id and the map would become whichever
+        -- row happened to come back last.
         local answer_map = {}
         local ok_ans, ans_rows = pcall(db.query, [[
             SELECT question_id, answer_text, answer_number, answer_boolean,
                    answer_date, answer_json
             FROM user_profile_answers
-            WHERE user_id = ?
+            WHERE user_id = ? AND entity_uuid IS NULL
         ]], user_id)
         if ok_ans and ans_rows then
             for _, a in ipairs(ans_rows) do
@@ -1132,12 +1182,16 @@ return function(app)
               )]]
         end
 
+        -- pc.context IS NULL: contexted categories (rental hub / per-property
+        -- sections) are separate surfaces with their own client-side
+        -- completion — they must never gate the dashboard.
         local ok_qs, questions = pcall(db.query, [[
             SELECT pq.id, pq.question_key, pq.label, pq.is_required
             FROM profile_questions pq
             JOIN profile_categories pc ON pc.id = pq.category_id
             WHERE pq.is_active = true AND pq.is_archived = false
               AND pc.is_active = true AND pc.is_archived = false
+              AND pc.context IS NULL
             ]] .. ns_filter .. bp_filter, unpack(query_params))
         if not ok_qs then
             ngx.log(ngx.ERR, "[ProfileBuilder] completion-status questions query failed: ", tostring(questions))
@@ -1777,9 +1831,15 @@ return function(app)
         local admin_uuid = admin.uuid or admin.id
         local admin_id = resolveUserId(admin_uuid)
 
+        -- context: NULL = classic /profile section; 'rental_business' /
+        -- 'property' = contexted sections rendered on the rental hub /
+        -- per-property pages. Empty string normalises to NULL.
+        local context = params.context
+        if context == "" or context == cjson.null then context = nil end
+
         local ok, result = pcall(db.query, [[
-            INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, parent_id, is_active, is_archived, visibility_rule_json, completion_rule_json, created_by, updated_by, created_at, updated_at)
-            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, true, false, ?, ?, ?, ?, NOW(), NOW())
+            INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, parent_id, context, is_active, is_archived, visibility_rule_json, completion_rule_json, created_by, updated_by, created_at, updated_at)
+            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, true, false, ?, ?, ?, ?, NOW(), NOW())
             RETURNING *
         ]],
             namespace_id or 0,
@@ -1789,6 +1849,7 @@ return function(app)
             params.icon or db.NULL,
             params.display_order or 0,
             params.parent_id or db.NULL,
+            context or db.NULL,
             params.visibility_rule_json or db.NULL,
             params.completion_rule_json or db.NULL,
             admin_id,
@@ -1841,11 +1902,15 @@ return function(app)
 
         local set_parts = {}
         local set_vals = {}
-        local allowed = {"name", "slug", "description", "icon", "display_order", "parent_id", "is_active", "is_archived", "visibility_rule_json", "completion_rule_json"}
+        local allowed = {"name", "slug", "description", "icon", "display_order", "parent_id", "context", "is_active", "is_archived", "visibility_rule_json", "completion_rule_json"}
         for _, field in ipairs(allowed) do
             if params[field] ~= nil then
+                -- context: empty string from the admin form means "classic
+                -- profile section" → store NULL, not ''.
+                local v = params[field]
+                if field == "context" and (v == "" or v == cjson.null) then v = db.NULL end
                 table.insert(set_parts, db.escape_identifier(field) .. " = ?")
-                table.insert(set_vals, params[field])
+                table.insert(set_vals, v)
             end
         end
 
@@ -2825,6 +2890,15 @@ return function(app)
 
         local category_slug = self.params.category_slug
 
+        -- ?entity=<uuid> returns that entity's answers (per-property scope);
+        -- default returns only classic questionnaire answers.
+        local entity_uuid = self.params.entity
+        if entity_uuid == "" then entity_uuid = nil end
+        local entity_filter = " AND upa.entity_uuid IS NULL"
+        if entity_uuid then
+            entity_filter = " AND upa.entity_uuid = " .. db.escape_literal(tostring(entity_uuid))
+        end
+
         local sql
         local vals = {user_id}
         if category_slug and category_slug ~= "" then
@@ -2834,7 +2908,7 @@ return function(app)
                 FROM user_profile_answers upa
                 JOIN profile_questions pq ON pq.id = upa.question_id
                 JOIN profile_categories pc ON pc.id = pq.category_id
-                WHERE upa.user_id = ? AND pc.slug = ?
+                WHERE upa.user_id = ? AND pc.slug = ?]] .. entity_filter .. [[
                 ORDER BY pq.display_order ASC
             ]]
             table.insert(vals, category_slug)
@@ -2843,7 +2917,7 @@ return function(app)
                 SELECT upa.*, pq.question_key, pq.label AS question_label, pq.uuid AS question_uuid
                 FROM user_profile_answers upa
                 JOIN profile_questions pq ON pq.id = upa.question_id
-                WHERE upa.user_id = ?
+                WHERE upa.user_id = ?]] .. entity_filter .. [[
                 ORDER BY pq.display_order ASC
             ]]
         end
@@ -2876,21 +2950,81 @@ return function(app)
             return { status = 400, json = { error = "answers array is required" } }
         end
 
+        -- Optional entity scope for the whole batch: answers are stored
+        -- against that user_profile_entities row (asked-once-PER-property
+        -- questions). The entity must exist, belong to the caller, and not
+        -- be archived. NULL entity = classic questionnaire behaviour.
+        local entity_uuid = params.entity_uuid
+        if entity_uuid == "" or entity_uuid == cjson.null then entity_uuid = nil end
+        if entity_uuid then
+            local ok_ent, ent_rows = pcall(db.query, [[
+                SELECT id FROM user_profile_entities
+                WHERE uuid = ? AND user_id = ? AND is_archived = false
+                LIMIT 1
+            ]], entity_uuid, user_id)
+            if not ok_ent or not ent_rows or #ent_rows == 0 then
+                return { status = 404, json = { error = "Entity not found" } }
+            end
+        end
+
         local namespace_id = getNamespaceId(self)
         local saved = 0
         local errors = {}
         local affected_category_ids = {}
 
+        -- JSON null arrives as cjson.null (truthy lightuserdata); the DB
+        -- layer can't escape it. Map nil/cjson.null to db.NULL so clearing
+        -- an answer persists instead of failing the upsert.
+        local function scrub(v)
+            if v == nil or v == cjson.null then return db.NULL end
+            return v
+        end
+
         for i, ans in ipairs(answers) do
             if not ans.question_uuid or ans.question_uuid == "" then
                 table.insert(errors, { index = i, error = "question_uuid is required" })
             else
-                local ok_q, q_rows = pcall(db.query, "SELECT id, version, category_id, question_key FROM profile_questions WHERE uuid = ? AND is_active = true LIMIT 1", ans.question_uuid)
-                if not ok_q or not q_rows or #q_rows == 0 then
-                    table.insert(errors, { index = i, error = "Question not found: " .. ans.question_uuid })
+                local ok_q, q_rows = pcall(db.query, [[
+                    SELECT pq.id, pq.version, pq.category_id, pq.question_key,
+                           pc.context AS category_context
+                    FROM profile_questions pq
+                    JOIN profile_categories pc ON pc.id = pq.category_id
+                    WHERE pq.uuid = ? AND pq.is_active = true LIMIT 1
+                ]], ans.question_uuid)
+                local question = (ok_q and q_rows and q_rows[1]) or nil
+
+                -- Scope guard: the batch's entity scope must match the
+                -- question's category context. Per-entity batches may only
+                -- carry 'property'-context questions; classic batches must
+                -- not carry them. Without this, answers land in a scope no
+                -- surface renders (shadow rows) — and an entity-scoped save
+                -- of an identity question would stamp the NINO/UTR lock
+                -- without ever writing the canonical value.
+                local q_ctx = nil
+                local reject = nil
+                if not question then
+                    reject = "Question not found: " .. ans.question_uuid
                 else
-                    local question = q_rows[1]
-                    affected_category_ids[question.category_id] = true
+                    q_ctx = question.category_context
+                    if q_ctx == cjson.null or q_ctx == "" then q_ctx = nil end
+                    if entity_uuid and q_ctx ~= "property" then
+                        reject = "Question " .. ans.question_uuid
+                            .. " is not a per-property question — save it without entity_uuid"
+                    elseif not entity_uuid and q_ctx == "property" then
+                        reject = "Question " .. ans.question_uuid
+                            .. " is a per-property question — entity_uuid is required"
+                    end
+                end
+
+                if reject then
+                    table.insert(errors, { index = i, error = reject })
+                else
+                    -- Completion is a classic-profile concept; contexted
+                    -- (hub / per-property) categories are excluded from the
+                    -- gate, so never cache completion rows for them.
+                    if q_ctx == nil then
+                        affected_category_ids[question.category_id] = true
+                    end
 
                     -- ─── Identity-lock guard for NINO / UTR back-door ─────────
                     -- If this question_key is one of the identity fields
@@ -2906,19 +3040,35 @@ return function(app)
                         IdentityLock.assertNotLocked(user_uuid, namespace_id or 0, lock_field)
                     end
 
-                    -- Get existing answer for history
+                    -- Get existing answer for history (scoped to this batch's
+                    -- entity — NULL scope and per-entity scope are distinct rows)
                     local old_answer = nil
-                    local ok_old, old_rows = pcall(db.query, [[
-                        SELECT * FROM user_profile_answers WHERE user_id = ? AND question_id = ? LIMIT 1
-                    ]], user_id, question.id)
+                    local ok_old, old_rows
+                    if entity_uuid then
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers WHERE user_id = ? AND question_id = ? AND entity_uuid = ? LIMIT 1
+                        ]], user_id, question.id, entity_uuid)
+                    else
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers WHERE user_id = ? AND question_id = ? AND entity_uuid IS NULL LIMIT 1
+                        ]], user_id, question.id)
+                    end
                     if ok_old and old_rows and #old_rows > 0 then
                         old_answer = old_rows[1]
                     end
 
+                    -- The unique indexes are partial (see migration 725), so
+                    -- the conflict target must name the matching predicate.
+                    local conflict_clause
+                    if entity_uuid then
+                        conflict_clause = "ON CONFLICT (user_id, question_id, entity_uuid) WHERE entity_uuid IS NOT NULL DO UPDATE SET"
+                    else
+                        conflict_clause = "ON CONFLICT (user_id, question_id) WHERE entity_uuid IS NULL DO UPDATE SET"
+                    end
                     local ok_upsert, upsert_err = pcall(db.query, [[
-                        INSERT INTO user_profile_answers (uuid, user_id, user_uuid, namespace_id, question_id, question_version, answer_text, answer_number, answer_boolean, answer_date, answer_json, answer_file_url, is_draft, answered_at, updated_at)
-                        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-                        ON CONFLICT (user_id, question_id) DO UPDATE SET
+                        INSERT INTO user_profile_answers (uuid, user_id, user_uuid, namespace_id, question_id, entity_uuid, question_version, answer_text, answer_number, answer_boolean, answer_date, answer_json, answer_file_url, is_draft, answered_at, updated_at)
+                        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                        ]] .. conflict_clause .. [[
                             question_version = EXCLUDED.question_version,
                             answer_text = EXCLUDED.answer_text,
                             answer_number = EXCLUDED.answer_number,
@@ -2934,14 +3084,15 @@ return function(app)
                         user_uuid,
                         namespace_id or 0,
                         question.id,
+                        entity_uuid or db.NULL,
                         question.version or 1,
-                        ans.answer_text or db.NULL,
-                        ans.answer_number or db.NULL,
-                        ans.answer_boolean == nil and db.NULL or ans.answer_boolean,
-                        ans.answer_date or db.NULL,
-                        ans.answer_json or db.NULL,
-                        ans.answer_file_url or db.NULL,
-                        ans.is_draft == nil and false or ans.is_draft
+                        scrub(ans.answer_text),
+                        scrub(ans.answer_number),
+                        scrub(ans.answer_boolean),
+                        scrub(ans.answer_date),
+                        scrub(ans.answer_json),
+                        scrub(ans.answer_file_url),
+                        (ans.is_draft == nil or ans.is_draft == cjson.null) and false or ans.is_draft
                     )
 
                     if not ok_upsert then
@@ -2957,7 +3108,13 @@ return function(app)
                         -- COALESCE(...) that preserves the original stamp.
                         -- Also emits an audit row for the "first time this
                         -- user wrote a locking answer" event.
-                        if lock_field then
+                        -- `not entity_uuid`: identity questions are classic-
+                        -- scope only (the scope guard above enforces it); the
+                        -- extra check keeps an entity-scoped write from ever
+                        -- stamping the lock without the canonical value even
+                        -- if an admin mis-files an identity question into a
+                        -- property-context category.
+                        if lock_field and not entity_uuid then
                             IdentityLock.stampLock(user_uuid, namespace_id or 0, lock_field)
                             IdentityLock.emitAuditRow({
                                 user_id      = user_id,
@@ -2987,14 +3144,14 @@ return function(app)
                                 old_answer.answer_boolean == nil and db.NULL or old_answer.answer_boolean,
                                 old_answer.answer_date or db.NULL,
                                 old_answer.answer_json or db.NULL,
-                                ans.answer_text or db.NULL,
-                                ans.answer_number or db.NULL,
-                                ans.answer_boolean == nil and db.NULL or ans.answer_boolean,
-                                ans.answer_date or db.NULL,
-                                ans.answer_json or db.NULL,
+                                scrub(ans.answer_text),
+                                scrub(ans.answer_number),
+                                scrub(ans.answer_boolean),
+                                scrub(ans.answer_date),
+                                scrub(ans.answer_json),
                                 user_id,
                                 "user",
-                                ans.change_reason or db.NULL
+                                scrub(ans.change_reason)
                             )
                         end
                     end
@@ -3002,13 +3159,19 @@ return function(app)
             end
         end
 
-        -- Recalculate completion for affected categories
-        for category_id, _ in pairs(affected_category_ids) do
-            recalculateCompletion(user_id, user_uuid, category_id)
-        end
+        -- Completion + auto-tag machinery is profile-global (it reads the
+        -- NULL-entity answer set); running it for a per-entity batch would
+        -- both waste work and mis-count. Entity saves return current tags
+        -- untouched.
+        if not entity_uuid then
+            -- Recalculate completion for affected categories
+            for category_id, _ in pairs(affected_category_ids) do
+                recalculateCompletion(user_id, user_uuid, category_id)
+            end
 
-        -- Evaluate auto-tag rules based on updated answers
-        evaluateTagRules(user_id, user_uuid)
+            -- Evaluate auto-tag rules based on updated answers
+            evaluateTagRules(user_id, user_uuid)
+        end
 
         -- Get updated tags to return to frontend
         local updated_tags = getUserTags(user_id)

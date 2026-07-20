@@ -162,6 +162,10 @@ local income_types_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPIL
 -- dynamic Profile Builder questions; see dynamic-profile-builder.lua [38]).
 local income_questionnaire_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-questionnaire-cleanup") or {}
 
+-- Property Income (tax_copilot feature) — rental hub + per-property entities,
+-- entity-scoped profile answers, and SA105 line-item catalogue/rows
+local property_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.property-income-system") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1855,6 +1859,20 @@ local _migrations = {
     -- =========================================================================
     ['722_drop_income_questionnaire_bespoke'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_cleanup_migrations, 1),
     ['723_profile_seed_income_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 38),
+
+    -- =========================================================================
+    -- PROPERTY INCOME — rental hub + per-property drill-down (UX option A).
+    -- 724-726 extend the Profile Builder with entity scoping + category
+    -- contexts; 727-729 add the SA105 line-item catalogue and rows; 730
+    -- seeds the admin-editable rental_business / property question sections.
+    -- =========================================================================
+    ['724_create_profile_entities'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 1),
+    ['725_answers_entity_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 2),
+    ['726_categories_context'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 3),
+    ['727_create_property_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 4),
+    ['728_seed_property_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 5),
+    ['729_create_property_line_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 6),
+    ['730_seed_property_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 7),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
