@@ -6,7 +6,7 @@
   keeping every question admin-configurable through the existing
   Dynamic Profile Builder:
 
-  1. user_profile_entities      : user-owned instances ("9 McClintock…")
+  1. user_profile_entities      : user-owned instances ("10 High Street…")
                                   that answers can be scoped to. Today
                                   entity_type is always 'property'; the
                                   table is deliberately generic so a later
@@ -50,7 +50,7 @@ return {
             { "user_uuid",     types.varchar },
             { "namespace_id",  types.integer({ null = true }) },
             { "entity_type",   types.varchar },                    -- 'property' (generic for future reuse)
-            { "label",         types.varchar },                    -- user-facing nickname, e.g. "9 McClintock Road"
+            { "label",         types.varchar },                    -- user-facing nickname, e.g. "10 High Street"
             { "metadata_json", types.text({ null = true }) },
             { "display_order", types.integer({ default = 0 }) },
             { "is_archived",   types.boolean({ default = false }) },
