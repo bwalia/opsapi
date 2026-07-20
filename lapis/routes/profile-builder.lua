@@ -1004,6 +1004,12 @@ return function(app)
                 icon = cat.icon,
                 display_order = cat.display_order,
                 parent_id = cat.parent_id,
+                -- context lets clients VERIFY they got the surface they asked
+                -- for. ContextSections drops categories whose context doesn't
+                -- match its request, so a backend that ignores ?context=
+                -- (pre-migration deploys) can never render the classic
+                -- questionnaire inside the rental hub / property pages.
+                context = cat.context,
                 visibility_rule_json = cat.visibility_rule_json,
                 completion_rule_json = cat.completion_rule_json,
                 questions = q_list,
