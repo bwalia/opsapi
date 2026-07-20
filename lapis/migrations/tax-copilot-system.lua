@@ -3196,4 +3196,27 @@ return {
         ]])
         print("[Tax Copilot] Seeded IDENTITY_LOCK_ACTIVE + NINO_ALREADY_REGISTERED in message_catalog")
     end,
+
+    -- 91. Making Tax Digital (MTD) enrolment flag on tax_user_profiles.
+    --
+    -- ─── Purpose ────────────────────────────────────────────────────────
+    -- MTD is HMRC's mandatory digital-filing initiative for self-assessment
+    -- (sole traders + landlords). The user's MTD status is a first-class
+    -- profile fact: it drives which filing pipeline the app routes them
+    -- through (SA100 legacy vs quarterly MTD updates), which reminders they
+    -- see, and which permissions the HMRC OAuth request asks for.
+    --
+    -- Stored per-user (1:1 with tax_user_profiles, keyed via user_uuid).
+    -- Not per-business — HMRC MTD registration is per-taxpayer (per NINO).
+    --
+    -- Default false so existing rows are safe (users are on legacy SA100
+    -- unless they explicitly say otherwise). NOT NULL keeps every read
+    -- path free of null-check gymnastics.
+    [91] = function()
+        db.query([[
+            ALTER TABLE tax_user_profiles
+            ADD COLUMN IF NOT EXISTS mtd_enabled BOOLEAN NOT NULL DEFAULT false
+        ]])
+        print("[Tax Copilot] Added mtd_enabled column to tax_user_profiles")
+    end,
 }
