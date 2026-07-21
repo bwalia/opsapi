@@ -353,12 +353,13 @@ jobs:
 
       - name: Ensure the CNAME for this environment
         env:
-          # opsapi authenticates to Cloudflare with the legacy global key +
-          # account email (cloudflare-dns.sh supports this path). CLOUDFLARE_ZONE
-          # is set to workstation.co.uk here, overriding the repo's default zone
-          # secret, so the record lands in the right zone.
-          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
-          CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
+          # Scoped API token (Bearer) — cloudflare-dns.sh prefers this over the
+          # legacy global key. We switched because opsapi's legacy
+          # CLOUDFLARE_ACCOUNT_EMAIL/API_KEY are invalid (Cloudflare 9103
+          # "Unknown X-Auth-Key or X-Auth-Email"). This token has Zone:Read +
+          # Zone:DNS:Edit and covers the workstation.co.uk zone. CLOUDFLARE_ZONE
+          # gives the script the zone name to resolve the id from.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE: ${{ env.DNS_ZONE }}
         run: |
           set -euo pipefail
@@ -464,18 +465,34 @@ jobs:
             PROJECT_CODE_ARG="--set projectCode=${{ github.event.inputs.PROJECT_CODE }}"
           fi
 
+          # No --wait here on purpose. The app's config.lua lives in a Secret
+          # (rendered by the ExternalSecret), not the pod template, so a
+          # config-only change does not alter the Deployment and helm --wait
+          # would just block on the EXISTING pods. We drive the rollout
+          # explicitly in the next step instead.
           helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
             -f "$VALUES" \
             --namespace "${TARGET_ENV}" --create-namespace \
             --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
             --set image.tag="${TAG}" \
-            $PROJECT_CODE_ARG \
-            --wait --timeout 5m
+            $PROJECT_CODE_ARG
 
-      - name: Rollout status
+      - name: Roll out and wait
         run: |
-          kubectl -n "${TARGET_ENV}" rollout status "deploy/${RELEASE_NAME}" --timeout=5m
-          kubectl -n "${TARGET_ENV}" get pods -o wide -l app="${RELEASE_NAME}"
+          set -euo pipefail
+          NS="${TARGET_ENV}"; REL="${RELEASE_NAME}"
+          # Wait for ESO to sync the Secret (which carries config.lua) BEFORE
+          # rolling, so the new pods start with the current config rather than
+          # a stale/half-rendered one.
+          kubectl -n "$NS" wait --for=condition=Ready "externalsecret/${REL}-secrets" --timeout=120s \
+            || echo "::warning::ExternalSecret ${REL}-secrets not Ready within 120s — rolling anyway"
+          # Force a fresh rollout so pods pick up Secret/config changes even
+          # when the pod template is unchanged (this is what a Secret-only
+          # change is). This makes config-only deploys reliable and skips any
+          # stale pod stuck in CrashLoopBackOff.
+          kubectl -n "$NS" rollout restart "deploy/$REL"
+          kubectl -n "$NS" rollout status "deploy/$REL" --timeout=6m
+          kubectl -n "$NS" get pods -o wide -l app="$REL"
 
       - name: Public URL probe (informational)
         run: |
