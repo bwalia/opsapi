@@ -353,12 +353,13 @@ jobs:
 
       - name: Ensure the CNAME for this environment
         env:
-          # opsapi authenticates to Cloudflare with the legacy global key +
-          # account email (cloudflare-dns.sh supports this path). CLOUDFLARE_ZONE
-          # is set to workstation.co.uk here, overriding the repo's default zone
-          # secret, so the record lands in the right zone.
-          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
-          CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
+          # Scoped API token (Bearer) — cloudflare-dns.sh prefers this over the
+          # legacy global key. We switched because opsapi's legacy
+          # CLOUDFLARE_ACCOUNT_EMAIL/API_KEY are invalid (Cloudflare 9103
+          # "Unknown X-Auth-Key or X-Auth-Email"). This token has Zone:Read +
+          # Zone:DNS:Edit and covers the workstation.co.uk zone. CLOUDFLARE_ZONE
+          # gives the script the zone name to resolve the id from.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE: ${{ env.DNS_ZONE }}
         run: |
           set -euo pipefail
