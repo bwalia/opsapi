@@ -242,6 +242,34 @@ jobs:
           echo "SMOKE_PORT=$PORT" >> "$GITHUB_ENV"
           echo "Container listening on host port $PORT"
 
+      # ── Migration gate ────────────────────────────────────────────────────
+      # Run EVERY migration from a zero-state database using the image this
+      # run just built — the exact invocation the helm pre-upgrade hook uses
+      # (migrate-job.yaml: LAPIS_ENVIRONMENT=production lapis migrate, from
+      # /app, pgcrypto pre-created). Migrations only execute the first time a
+      # database sees them, so static review/syntax checks can never prove
+      # them against real Postgres constraints — this step does. It would
+      # have caught both live incidents to date before they reached int:
+      # chk_question_type violation (#481) and fk_pqo_parent DEFAULT 0 (#476).
+      # A failure here fails smoke-test, which blocks every deploy job.
+      - name: Migration gate (fresh database)
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          docker exec "opsapi-smoke-pg-$RUN_ID" \
+            psql -U pguser -d opsapi -c "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+          # PROJECT_CODE=tax_copilot matches the deployed fleet so the
+          # feature-gated tax migrations (7xx) actually run, not just core.
+          if ! docker exec \
+              -e LAPIS_ENVIRONMENT=production \
+              -e PROJECT_CODE=tax_copilot \
+              "opsapi-smoke-$RUN_ID" sh -c "cd /app && lapis migrate"; then
+            echo "::error::lapis migrate failed against a fresh database — deploying this image would break the migrate hook (deploys blocked)"
+            exit 1
+          fi
+          echo "All migrations applied cleanly from zero state."
+
       - name: Check container starts
         env:
           RUN_ID: ${{ github.run_id }}
