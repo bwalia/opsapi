@@ -159,7 +159,14 @@ jobs:
             BUILD_NUMBER=${{ steps.version.outputs.BUILD_NUMBER }}
             BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ignore-error: the GitHub Actions Cache export is a pure build-speed
+          # optimisation. When that service has a blip it returns an HTML error
+          # page instead of JSON, buildx fails to parse it, and the WHOLE build
+          # aborts (cancelling the already-successful image push) — which then
+          # skips smoke + deploy. A build whose image built and pushed fine must
+          # not fail because the cache backend was briefly unavailable, so make
+          # the export non-fatal: on error it logs a warning and continues.
+          cache-to: type=gha,mode=max,ignore-error=true
 
   # =========================================================================
   # 2. SMOKE TEST
