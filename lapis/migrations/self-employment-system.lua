@@ -383,8 +383,11 @@ return {
         local bd_id = ensure_category("business-details", "Business details",
             "Details about this business", "briefcase", 1, "business")
         if bd_id then
+            -- 'short_text', not 'text' — profile_questions.chk_question_type
+            -- has a fixed whitelist and 'text' is not in it (broke migrate
+            -- 736 on int with a check-constraint violation).
             ensure_question(bd_id, { question_key = "se_description", label = "What does the business do?",
-                question_type = "text", is_required = false, display_order = 1,
+                question_type = "short_text", is_required = false, display_order = 1,
                 placeholder = "e.g. Plumbing and heating services" })
             ensure_question(bd_id, { question_key = "se_address", label = "Business address (unless you work from home)",
                 question_type = "address", is_required = false, display_order = 2 })
