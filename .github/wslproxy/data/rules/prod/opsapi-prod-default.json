@@ -1,0 +1,35 @@
+{
+  "id": "opsapi-prod-default",
+  "name": "opsapi-prod-default",
+  "profile_id": "prod",
+  "priority": 1,
+  "rules_tags": ["opsapi", "workstation", "prod"],
+  "match": {
+    "rules": {
+      "path": "/",
+      "path_key": "starts_with",
+      "jwt_token_validation": "equals"
+    },
+    "response": {
+      "code": 305,
+      "redirect_uri": "13.42.188.136:80",
+      "strip_path": false,
+      "backends": [
+        {
+          "address": "13.42.188.136:80",
+          "weight": 100,
+          "label": "k3s1 traefik ingress (wslproxy class); workstation-opsapi release routes by Host header"
+        }
+      ],
+      "routing": {
+        "mode": "least_conn"
+      }
+    }
+  },
+  "servers": [
+    "host:opsapi.workstation.co.uk",
+    "host:int-opsapi.workstation.co.uk",
+    "host:test-opsapi.workstation.co.uk",
+    "host:acc-opsapi.workstation.co.uk"
+  ]
+}

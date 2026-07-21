@@ -1,58 +1,50 @@
 name: Build and Deploy OpsAPI to K3s
 
+# The ONE workflow that runs on a merge to main (argocd-sync-int, cypress, and
+# deploy-docker-self-hosted have been taken off push:main so nothing else
+# fires). Mirrors the monitoring-go (Beacon) deploy-k3s.yml pattern:
+#
+#   push to main    → build → smoke → dns → wslproxy → deploy to `int`
+#   manual dispatch → any env (int/test/acc/prod), any DEPLOYMENT_TYPE
+#
+# It deploys the `workstation-opsapi` Helm release to k3s1, serving the
+# *-opsapi.workstation.co.uk hosts (int-opsapi / test-opsapi / acc-opsapi /
+# opsapi). This is a SEPARATE release from the legacy `diytaxreturn-lapis`
+# one that still serves *.diytaxreturn.co.uk — nothing on the old domain is
+# touched. Cloudflare DNS + the WSL Proxy edge are wired by the dns/wslproxy
+# jobs before helm rolls the app.
 on:
-  # Auto-deploy rules:
-  #   push to `main`     → fans out to `dev` + `int` in parallel (low tiers)
-  #   push to `release`  → deploys to `acc` (single-tier promotion)
-  #   manual dispatch    → single env chosen via TARGET_ENV input
-  #
-  # `acc` is INTENTIONALLY excluded from main pushes — every commit
-  # landing on main used to redeploy acc and risk breaking it. The
-  # weekly-acc-release workflow still promotes main → acc on Fridays
-  # as a scheduled safety net; this workflow's on-demand acc path is
-  # now the `release` branch (cut from main when you want to promote).
-  # `prod` is never auto-deployed — manual dispatch only.
   push:
     branches:
       - main
-      - release
   workflow_dispatch:
     inputs:
       TARGET_ENV:
-        description: "Environment to deploy (dev, int, acc, prod)"
+        description: "Environment to deploy"
         required: true
-        default: "acc"
+        default: "int"
         type: choice
         options:
-          - dev
           - int
+          - test
           - acc
           - prod
-      SKIP_BUILD:
-        description: "Skip Docker build (deploy only)?"
-        type: boolean
-        default: false
-      SKIP_SMOKE_TEST:
-        description: "Skip smoke test?"
-        type: boolean
-        default: false
+      DEPLOYMENT_TYPE:
+        description: "Build only, deploy only, or both"
+        required: true
+        default: "build-and-deploy"
+        type: choice
+        options:
+          - build
+          - deploy
+          - build-and-deploy
+      IMAGE_TAG:
+        description: "Image tag to DEPLOY (deploy-only). Blank → this run's build tag / latest."
+        required: false
+        default: ""
+        type: string
       PROJECT_CODE:
-        description: "Override migration project code(s) — single (tax_copilot) or comma-separated (ecommerce,collaboration). Leave BLANK to use the env's values file (e.g. values-acc.yaml → tax_copilot)."
-        required: false
-        default: ""
-        type: string
-      ADMIN_EMAIL:
-        description: "Super admin email for namespace setup"
-        required: false
-        default: ""
-        type: string
-      ADMIN_PASSWORD:
-        description: "Super admin password for namespace setup"
-        required: false
-        default: ""
-        type: string
-      NAMESPACE_SLUG:
-        description: "Namespace slug (default: derived from project code)"
+        description: "Override migration project code(s). Leave BLANK to use the env's values file (tax_copilot)."
         required: false
         default: ""
         type: string
@@ -76,6 +68,24 @@ env:
   IMAGE_REGISTRY: bwalia
   IMAGE_NAME: opsapi
   HELM_CHART_PATH: ./devops/helm-charts/diytaxreturn-lapis
+  # Helm release name for the workstation.co.uk deployment. Distinct from the
+  # legacy `diytaxreturn-lapis` release so both can coexist in the same
+  # namespace on k3s1. Every rendered resource (Deployment, Service, Ingress,
+  # container, ExternalSecret) derives its name from this.
+  RELEASE_NAME: workstation-opsapi
+  # Push events carry no inputs, so these resolve the defaults: a merge to main
+  # is a build-and-deploy to int.
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+  # DNS: each host is a CNAME to the WSL Proxy edge, DNS-only (not proxied) —
+  # cert-manager is NOT on k3s1, so the edge terminates TLS and traefik serves
+  # plain HTTP behind it. The hostname itself is read from the env's values
+  # file (`host:`) so DNS can never drift from what the Ingress serves.
+  #   browser -> <host> --(Cloudflare CNAME)--> pop0.wslproxy.com (edge, TLS)
+  #           -> 13.42.188.136:80 (k3s1 traefik) -> workstation-opsapi pods
+  DNS_ZONE: workstation.co.uk
+  DNS_TARGET: pop0.wslproxy.com
+  DNS_PROXIED: "false"
 
 jobs:
   # =========================================================================
@@ -84,7 +94,8 @@ jobs:
   build:
     name: Build OpsAPI Image
     runs-on: [self-hosted, Linux, X64]
-    if: github.event.inputs.SKIP_BUILD != 'true'
+    # Skip the build job on a deploy-only dispatch (image already exists).
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
     outputs:
       # The immutable tag this run produced. The smoke test pulls THIS rather
       # than :latest — otherwise a concurrent run that pushes :latest in
@@ -175,7 +186,9 @@ jobs:
     name: Smoke Test OpsAPI
     needs: build
     runs-on: [self-hosted, Linux, X64]
-    if: always() && (needs.build.result == 'success' || github.event.inputs.SKIP_BUILD == 'true') && github.event.inputs.SKIP_SMOKE_TEST != 'true'
+    # Runs on build-and-deploy and build-only; skipped on deploy-only (no fresh
+    # image to smoke). Gates the deploy job below.
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
     steps:
       - name: Identify Runner
         run: echo "Running on $(hostname)"
@@ -188,8 +201,7 @@ jobs:
 
       - name: Run smoke test container
         env:
-          # Fall back to :latest only when the build was explicitly skipped
-          # (SKIP_BUILD dispatch), where there is no fresh image to reference.
+          # image_ref is this run's immutable tag; :latest is only a fallback.
           IMAGE_REF: ${{ needs.build.outputs.image_ref || format('{0}/{1}:latest', env.IMAGE_REGISTRY, env.IMAGE_NAME) }}
           RUN_ID: ${{ github.run_id }}
         run: |
@@ -326,246 +338,156 @@ jobs:
           docker rm -f opsapi-smoke-test >/dev/null 2>&1 || true
 
   # =========================================================================
-  # 3. PLAN — derive which env(s) this run targets, based on the trigger
+  # 3. DNS — ensure the Cloudflare CNAME for this env's host → the WSL Proxy
+  #    edge, BEFORE the app rolls, so the hostname resolves by the time real
+  #    traffic (and any edge cert issuance) arrives. Cloudflare needs only
+  #    egress, so this runs on a GitHub-hosted runner.
   # =========================================================================
-  # Why a separate job rather than computing inside deploy-to-k3s: matrix
-  # strategies must be defined at job-level and YAML can't conditionally
-  # expand them, so we compute a JSON array here and feed it into the
-  # next job's matrix via `fromJson(needs.plan.outputs.envs)`.
-  plan:
-    name: Plan target environment(s)
-    needs: [smoke-test]
-    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure')
-    runs-on: [self-hosted, Linux, X64]
-    outputs:
-      envs: ${{ steps.plan.outputs.envs }}
+  dns:
+    name: Ensure Cloudflare DNS
+    runs-on: ubuntu-latest
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
     steps:
-      - id: plan
-        name: Resolve envs from trigger
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure the CNAME for this environment
+        env:
+          # opsapi authenticates to Cloudflare with the legacy global key +
+          # account email (cloudflare-dns.sh supports this path). CLOUDFLARE_ZONE
+          # is set to workstation.co.uk here, overriding the repo's default zone
+          # secret, so the record lands in the right zone.
+          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
+          CLOUDFLARE_ACCOUNT_API_KEY: ${{ secrets.CLOUDFLARE_ACCOUNT_API_KEY }}
+          CLOUDFLARE_ZONE: ${{ env.DNS_ZONE }}
         run: |
-          # Manual dispatch always wins — single env from the input.
-          if [ -n "${{ github.event.inputs.TARGET_ENV }}" ]; then
-            ENVS_JSON='["${{ github.event.inputs.TARGET_ENV }}"]'
-          elif [ "${{ github.ref }}" = "refs/heads/release" ]; then
-            ENVS_JSON='["acc"]'
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            # `int` is now deployed via ArgoCD (see .github/workflows/argocd-sync-int.yml
-            # and devops/argocd/). This matrix keeps only `dev` on the old
-            # helm-from-CI path — it'll migrate to ArgoCD next. Do NOT
-            # add `int` back here without first removing it from the
-            # ArgoCD workflow, or you'll get two systems racing on the
-            # same Deployment (whichever runs last wins).
-            ENVS_JSON='["dev"]'
-          else
-            echo "::error::Unsupported trigger: ${{ github.ref }} / ${{ github.event_name }}"
-            exit 1
-          fi
-          echo "envs=$ENVS_JSON" >> "$GITHUB_OUTPUT"
-          echo "Planned envs: $ENVS_JSON"
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file for env '${TARGET_ENV}' ($VALUES)"; exit 1; }
+
+          # Single source of truth: whatever host the chart's Ingress claims.
+          HOST="$(awk '/^host:/{print $2; exit}' "$VALUES")"
+          [ -n "$HOST" ] || { echo "::error::no 'host:' in $VALUES"; exit 1; }
+
+          echo "Ensuring ${HOST} -> ${DNS_TARGET} (proxied=${DNS_PROXIED})"
+          chmod +x devops/scripts/cloudflare-dns.sh
+          ./devops/scripts/cloudflare-dns.sh \
+            --name "$HOST" \
+            --content "$DNS_TARGET" \
+            --proxied "$DNS_PROXIED"
 
   # =========================================================================
-  # 4. DEPLOY TO K3S — one parallel job per planned env
+  # 4. WSL PROXY — register the vhost + rule on the edge control plane BEFORE
+  #    helm rolls the app, else the hostname resolves to an edge with no
+  #    config for it. All opsapi hosts live under the 'prod' WSL Proxy profile
+  #    (matches the beacon layout); ACTIVATE_CONFIG=true takes them live.
   # =========================================================================
-  deploy-to-k3s:
-    name: Deploy OpsAPI to K3s (${{ matrix.target_env }})
-    needs: [smoke-test, plan]
-    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure') && needs.plan.result == 'success'
+  wslproxy:
+    name: Register WSL Proxy vhost
+    needs: [dns]
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  # =========================================================================
+  # 5. DEPLOY — helm upgrade the `workstation-opsapi` release to k3s1. Runs on
+  #    a self-hosted runner because the k3s1 API and the WSL Proxy control
+  #    plane only answer on the operator network. Waits for build + smoke +
+  #    dns + wslproxy (skipped needs are tolerated for deploy-only runs).
+  # =========================================================================
+  deploy:
+    name: Deploy workstation-opsapi to K3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [build, smoke-test, dns, wslproxy]
     runs-on: [self-hosted, Linux, X64]
-    # fail-fast off: a broken dev shouldn't cancel an in-flight int deploy.
-    strategy:
-      fail-fast: false
-      matrix:
-        target_env: ${{ fromJson(needs.plan.outputs.envs) }}
-    # Backstop: never let a hung kubectl step hold the (single) self-hosted
-    # runner for GitHub's 6h default — fail fast and free it for the next run.
     timeout-minutes: 15
+    if: >-
+      ${{ always()
+          && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build'
+          && (needs.build.result == 'success' || needs.build.result == 'skipped')
+          && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')
+          && needs.dns.result == 'success'
+          && needs.wslproxy.result == 'success' }}
     steps:
       - name: Identify Runner
-        run: echo "Running on $(hostname) — target=${{ matrix.target_env }}"
-
-      - name: Clean up Workspace
-        run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
-        shell: bash
+        run: echo "Running on $(hostname) — env=${TARGET_ENV}, release=${RELEASE_NAME}"
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Resolve target environment
-        id: env
-        run: |
-          TARGET_ENV="${{ matrix.target_env }}"
-          echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
-
-          # Select the right values file
-          if [ -f "${{ env.HELM_CHART_PATH }}/values-${TARGET_ENV}.yaml" ]; then
-            echo "VALUES_FILE=${{ env.HELM_CHART_PATH }}/values-${TARGET_ENV}.yaml" >> $GITHUB_OUTPUT
-          else
-            echo "::error::Values file not found: values-${TARGET_ENV}.yaml"
-            exit 1
-          fi
-          echo "Deploying to $TARGET_ENV"
-
-      - name: Set up Kubeconfig
-        run: |
-          if [ -z "${{ secrets.MY_K3S_CONFIG }}" ]; then
-            echo "::error::Secret MY_K3S_CONFIG is empty or missing!"
-            exit 1
-          fi
-          echo "${{ secrets.MY_K3S_CONFIG }}" | base64 -d > ./kubeconfig
-
-          # Override to use the Kube-VIP address
-          echo "Overriding Kubeconfig server to k3s0.diytaxreturn.co.uk..."
-          sed -i 's|server: https://.*:6443|server: https://k3s0.diytaxreturn.co.uk:6443|g' ./kubeconfig
-
-          # Disable TLS verification in case the cert is bound to 127.0.0.1
-          kubectl config set-cluster default --insecure-skip-tls-verify=true --kubeconfig=./kubeconfig
-
-          chmod 600 ./kubeconfig
-          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
-
-      - name: Verify Cluster Connectivity
-        run: |
-          echo "Checking connectivity to Kube-VIP k3s0.diytaxreturn.co.uk..."
-          nc -zv -w 5 k3s0.diytaxreturn.co.uk 6443 && echo "Kube-VIP is REACHABLE" || (echo "Kube-VIP is UNREACHABLE"; exit 1)
-          kubectl cluster-info --kubeconfig=./kubeconfig
-
-      - name: Install Helm
-        uses: azure/setup-helm@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Namespace
-        run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          kubectl create namespace ${{ steps.env.outputs.TARGET_ENV }} --dry-run=client -o yaml | kubectl apply -f -
-
-      # For dev: Vault ExternalSecrets are disabled, so create secrets manually.
-      # For int/acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
-      - name: Create Secrets (dev only — int/acc/prod use Vault)
-        if: steps.env.outputs.TARGET_ENV == 'dev'
+      - name: Decode kubeconfig (k3s1)
         env:
-          ENV_CONTENT: ${{ secrets.OPSAPI_ENV_FILE }}
-          TARGET_ENV: ${{ steps.env.outputs.TARGET_ENV }}
+          # Base64 kubeconfig for the CURRENT k3s1 cluster. Keep this secret in
+          # sync with the live cluster (server: https://k3s1api.diytaxreturn.co.uk:6443).
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          echo "$ENV_CONTENT" > ./.env-opsapi.tmp
-          chmod 600 ./.env-opsapi.tmp
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
 
-          # Create opsapi secret from .env file
-          kubectl create secret generic diytaxreturn-lapis-secrets \
-            --from-env-file=./.env-opsapi.tmp \
-            --namespace "$TARGET_ENV" \
-            --dry-run=client -o yaml | kubectl apply --validate=false -f -
-
-          rm -f ./.env-opsapi.tmp
-
-      - name: Deploy OpsAPI
+      - name: Ensure kubectl + helm
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          # Only override projectCode when an explicit value is passed on
-          # workflow_dispatch. When blank (a push to main, or a dispatch that
-          # leaves it empty) the env's values file decides — values-acc.yaml
-          # sets projectCode: tax_copilot. Previously this forced 'all', which
-          # re-enabled every feature's migrations regardless of the values file.
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || {
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          }
+          kubectl version --client=true 2>/dev/null | head -1 || true
+          helm version --short || true
+
+      - name: Deploy workstation-opsapi
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file ($VALUES)"; exit 1; }
+
+          # Which image tag to roll: explicit dispatch input wins; else this
+          # run's immutable build tag; else :latest.
+          TAG="${{ github.event.inputs.IMAGE_TAG }}"
+          if [ -z "$TAG" ]; then
+            REF="${{ needs.build.outputs.image_ref }}"
+            if [ -n "$REF" ]; then TAG="${REF##*:}"; else TAG="latest"; fi
+          fi
+          echo "Deploying release '${RELEASE_NAME}' to namespace '${TARGET_ENV}' with image tag '${TAG}'"
+
+          # Only override projectCode when a value is explicitly passed on
+          # dispatch; otherwise the values file (tax_copilot) decides.
           PROJECT_CODE_ARG=""
           if [ -n "${{ github.event.inputs.PROJECT_CODE }}" ]; then
             PROJECT_CODE_ARG="--set projectCode=${{ github.event.inputs.PROJECT_CODE }}"
           fi
-          helm upgrade --install diytaxreturn-lapis ${{ env.HELM_CHART_PATH }} \
-            -f ${{ steps.env.outputs.VALUES_FILE }} \
-            --namespace ${{ steps.env.outputs.TARGET_ENV }} \
-            --create-namespace \
-            --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
-            --set image.tag=latest \
-            --set env=${{ steps.env.outputs.TARGET_ENV }} \
-            --set setup.adminEmail=${{ github.event.inputs.ADMIN_EMAIL || '' }} \
-            --set setup.adminPassword=${{ github.event.inputs.ADMIN_PASSWORD || '' }} \
-            --set setup.namespaceSlug=${{ github.event.inputs.NAMESPACE_SLUG || '' }} \
-            $PROJECT_CODE_ARG
 
-      - name: Force Refresh Pods
-        run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          NS=${{ steps.env.outputs.TARGET_ENV }}
-          # Remove failed pods so K3s recreates them with new config.
-          # --wait=false is REQUIRED: kubectl delete otherwise blocks until
-          # the pods fully terminate, and a pod stuck in Terminating (a
-          # finalizer, a container ignoring SIGTERM, or an unresponsive
-          # kubelet) hangs the whole job for hours — this exact step hung
-          # the acc deploy for 2h+ on 2026-06-11. We only want to *issue*
-          # the deletes; the Deployment recreates pods and the next step
-          # waits on the rollout. --grace-period=30 bounds termination.
-          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed \
-            --wait=false --grace-period=30 || true
-          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis \
-            --wait=false --grace-period=30 || true
+          helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
+            -f "$VALUES" \
+            --namespace "${TARGET_ENV}" --create-namespace \
+            --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
+            --set image.tag="${TAG}" \
+            $PROJECT_CODE_ARG \
+            --wait --timeout 5m
 
-      - name: Wait for rollout
+      - name: Rollout status
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          NS=${{ steps.env.outputs.TARGET_ENV }}
-          echo "Waiting for diytaxreturn-lapis rollout..."
-          kubectl rollout status deployment/diytaxreturn-lapis -n "$NS" --timeout=180s || true
+          kubectl -n "${TARGET_ENV}" rollout status "deploy/${RELEASE_NAME}" --timeout=5m
+          kubectl -n "${TARGET_ENV}" get pods -o wide -l app="${RELEASE_NAME}"
 
-      # Why this gate exists:
-      # `kubectl rollout status` only proves the Pod is Ready. It does NOT
-      # prove the public URL actually returns 200 — and on 2026-06-15 we
-      # had a 4-day intermittent outage of int-api where the Pod was healthy
-      # but a stale Ingress in a different namespace was sharing the host
-      # claim, so the wslproxy ingress controller flapped between a working
-      # backend and an orphaned one. Symptom: 9/10 requests succeeded; 1/10
-      # returned the wslproxy ingress controller's stock 404 page. Both
-      # `kubectl get pods` and the rollout step happily reported success.
-      #
-      # The gate below requires 5 CONSECUTIVE fast 200s within 2 minutes
-      # before the deploy is declared green. The consecutive bar is the
-      # important part — it catches the "sometimes works" regression mode
-      # that a single-shot probe would have missed today.
-      - name: Public-URL health gate
+      - name: Public URL probe (informational)
         run: |
-          # Map env -> public URL. dev/int/acc follow the `<env>-api.*`
-          # convention; prod's public URL is bare `api.*`. New envs need
-          # to be added here explicitly rather than left to a default,
-          # so a typo in an env name fails CI instead of silently passing.
-          case "${{ matrix.target_env }}" in
-            prod) URL="https://api.diytaxreturn.co.uk/health" ;;
-            dev|int|acc) URL="https://${{ matrix.target_env }}-api.diytaxreturn.co.uk/health" ;;
-            *)
-              echo "::error::Unknown env '${{ matrix.target_env }}' — extend the case above with its public URL"
-              exit 1
-              ;;
-          esac
-          echo "Health-gating against $URL — need 5 consecutive fast 200s within 2 min"
-          ok_run=0
-          last_code=""
-          last_time=""
-          # ~30 attempts * 4s sleep = ~2 min ceiling. The 8s connect timeout
-          # is intentional: any single probe taking longer than the slow-path
-          # threshold (3s) breaks the streak — that's how we catch the
-          # Ingress-conflict pattern where one backend works and another
-          # times out at ~5s.
-          for i in $(seq 1 30); do
-            t=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" -m 8 "$URL" 2>&1 || true)
-            last_code=$(echo "$t" | awk '{print $1}')
-            last_time=$(echo "$t" | awk '{print $2}')
-            slow=$(echo "$last_time" | awk '{print ($1 >= 3.0) ? 1 : 0}')
-            if [ "$last_code" = "200" ] && [ "$slow" = "0" ]; then
-              ok_run=$((ok_run+1))
-              echo "  attempt $i: code=$last_code time=${last_time}s — streak=$ok_run/5"
-              if [ "$ok_run" -ge 5 ]; then
-                echo "::notice::$URL healthy — 5 consecutive fast 200s"
-                exit 0
-              fi
-            else
-              ok_run=0
-              echo "  attempt $i: code=$last_code time=${last_time}s — streak reset"
-            fi
-            sleep 4
+          # Best-effort only: on a first deploy the DNS record + WSL Proxy edge
+          # cert can take a few minutes to propagate, so a hard gate here would
+          # flap. Rollout status above is the authoritative health signal.
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          HOST="$(awk '/^host:/{print $2; exit}' "$VALUES")"
+          echo "Probing https://${HOST}/health ..."
+          for i in $(seq 1 5); do
+            CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "https://${HOST}/health" || echo "000")
+            echo "Attempt $i: HTTP $CODE"
+            [ "$CODE" = "200" ] && { echo "Public health OK."; break; }
+            sleep 5
           done
-          echo "::error::Public health gate failed — $URL did not produce 5 consecutive fast 200s in ~2 min (last: code=$last_code time=${last_time}s)"
-          exit 1
-
-      - name: Cleanup Kubeconfig
-        if: always()
-        run: |
-          rm -f ./kubeconfig ./.env-opsapi.tmp

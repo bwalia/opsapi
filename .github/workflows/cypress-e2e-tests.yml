@@ -2,8 +2,11 @@ name: Cypress E2E Tests
 
 on:
   push:
+    # `main` intentionally removed: a merge to main must trigger ONLY
+    # deploy-k3s.yml. Cypress still runs on the feature/dev branches and on
+    # pull_request → main (below), so dashboard changes are still covered
+    # before they land — just not again on the main push itself.
     branches:
-      - main
       - develop
       - "feature/**"
       - "harcharan/**"
