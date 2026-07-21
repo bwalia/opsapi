@@ -30,6 +30,21 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
     utr_number  = "utr",
 }
 
+-- Category contexts whose answers are scoped to a user_profile_entities row
+-- (asked once PER entity, saved with entity_uuid), mapped to the
+-- entity_type that context is allowed to attach to. Every other context —
+-- NULL (classic /profile) or asked-once surfaces like 'rental_business' —
+-- stores answers in the user-wide NULL scope. The /answers scope guard and
+-- the contexted /schema endpoint key off this table, so a new per-entity
+-- surface (e.g. a future vehicle or partnership drill-down) only needs its
+-- context registered here. The entity_type value is what prevents
+-- cross-type shadow rows (business answers saved against a property
+-- entity, or a property's answers merged into a business schema).
+local PER_ENTITY_CONTEXTS = {
+    property = "property",   -- rental hub → per-property pages
+    business = "business",   -- self-employment hub → per-business pages
+}
+
 -- =========================================================================
 -- Helper Functions
 -- =========================================================================
@@ -708,11 +723,18 @@ return function(app)
         if entity_uuid == "" then entity_uuid = nil end
         if entity_uuid then
             local ok_ent, ent_rows = pcall(db.query, [[
-                SELECT id FROM user_profile_entities
+                SELECT id, entity_type FROM user_profile_entities
                 WHERE uuid = ? AND user_id = ? AND is_archived = false
                 LIMIT 1
             ]], entity_uuid, user_id or -1)
             if not ok_ent or not ent_rows or #ent_rows == 0 then
+                return { status = 404, json = { error = "Entity not found" } }
+            end
+            -- A per-entity context may only be served against an entity of
+            -- its own type — otherwise ?context=business&entity=<property>
+            -- would merge a property's answer rows into the business schema.
+            local required_type = schema_context and PER_ENTITY_CONTEXTS[schema_context]
+            if required_type and ent_rows[1].entity_type ~= required_type then
                 return { status = 404, json = { error = "Entity not found" } }
             end
         end
@@ -2962,15 +2984,17 @@ return function(app)
         -- be archived. NULL entity = classic questionnaire behaviour.
         local entity_uuid = params.entity_uuid
         if entity_uuid == "" or entity_uuid == cjson.null then entity_uuid = nil end
+        local entity_type = nil
         if entity_uuid then
             local ok_ent, ent_rows = pcall(db.query, [[
-                SELECT id FROM user_profile_entities
+                SELECT id, entity_type FROM user_profile_entities
                 WHERE uuid = ? AND user_id = ? AND is_archived = false
                 LIMIT 1
             ]], entity_uuid, user_id)
             if not ok_ent or not ent_rows or #ent_rows == 0 then
                 return { status = 404, json = { error = "Entity not found" } }
             end
+            entity_type = ent_rows[1].entity_type
         end
 
         local namespace_id = getNamespaceId(self)
@@ -3000,12 +3024,15 @@ return function(app)
                 local question = (ok_q and q_rows and q_rows[1]) or nil
 
                 -- Scope guard: the batch's entity scope must match the
-                -- question's category context. Per-entity batches may only
-                -- carry 'property'-context questions; classic batches must
-                -- not carry them. Without this, answers land in a scope no
-                -- surface renders (shadow rows) — and an entity-scoped save
-                -- of an identity question would stamp the NINO/UTR lock
-                -- without ever writing the canonical value.
+                -- question's category context — including the ENTITY TYPE,
+                -- so business questions can't be saved against a property
+                -- entity (or vice versa). Per-entity batches may only carry
+                -- questions whose context maps to the target entity's type;
+                -- classic batches must not carry per-entity questions.
+                -- Without this, answers land in a scope no surface renders
+                -- (shadow rows) — and an entity-scoped save of an identity
+                -- question would stamp the NINO/UTR lock without ever
+                -- writing the canonical value.
                 local q_ctx = nil
                 local reject = nil
                 if not question then
@@ -3013,12 +3040,17 @@ return function(app)
                 else
                     q_ctx = question.category_context
                     if q_ctx == cjson.null or q_ctx == "" then q_ctx = nil end
-                    if entity_uuid and q_ctx ~= "property" then
+                    local required_type = PER_ENTITY_CONTEXTS[q_ctx]
+                    if entity_uuid and not required_type then
                         reject = "Question " .. ans.question_uuid
-                            .. " is not a per-property question — save it without entity_uuid"
-                    elseif not entity_uuid and q_ctx == "property" then
+                            .. " is not a per-entity question — save it without entity_uuid"
+                    elseif entity_uuid and required_type ~= entity_type then
                         reject = "Question " .. ans.question_uuid
-                            .. " is a per-property question — entity_uuid is required"
+                            .. " belongs to '" .. tostring(q_ctx)
+                            .. "' — it cannot be saved against a '" .. tostring(entity_type) .. "' entity"
+                    elseif not entity_uuid and required_type then
+                        reject = "Question " .. ans.question_uuid
+                            .. " is a per-entity question — entity_uuid is required"
                     end
                 end
 
