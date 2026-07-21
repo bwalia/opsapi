@@ -171,6 +171,11 @@ local property_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- and the Capital Allowances grid
 local self_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.self-employment-system") or {}
 
+-- Overseas Property (tax_copilot feature) — "Land and property abroad" hub:
+-- reuses user_profile_entities + property_line_items with a catalogue
+-- schedule split, plus the overseas_property income type + question section
+local overseas_property_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.overseas-property-system") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1892,6 +1897,16 @@ local _migrations = {
     ['734_create_business_ca_catalogues'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 4),
     ['735_create_business_ca_values'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 5),
     ['736_seed_business_section'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 6),
+
+    -- =========================================================================
+    -- OVERSEAS PROPERTY — "Land and property abroad" (SA106) hub. 737 adds
+    -- the catalogue schedule split; 738 seeds the overseas categories; 739
+    -- the income type; 740 the admin-editable per-holding question section.
+    -- =========================================================================
+    ['737_property_categories_schedule'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 1),
+    ['738_seed_overseas_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 2),
+    ['739_seed_overseas_income_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 3),
+    ['740_seed_overseas_section'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 4),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
