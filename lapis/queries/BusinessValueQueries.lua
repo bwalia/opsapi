@@ -45,12 +45,23 @@ local function owned_business(business_uuid, internal_user_id)
 end
 
 -- numeric(15,2)-safe parse: nil/"" → nil, otherwise a finite number within
--- column bounds (negative allowed — balance-sheet boxes can be negative).
+-- column bounds. The bound is the column's actual max (9999999999999.99),
+-- not 1e13 — doubles just below 1e13 would pass a 1e13 check but round to
+-- 14 integer digits in Postgres and overflow. Sign rules are per-kind and
+-- enforced by the callers.
+local MAX_AMOUNT = 9999999999999.99
 local function parse_amount(v)
     if v == nil or v == "" then return nil, true end
     local n = tonumber(v)
-    if not n or n ~= n or n >= 1e13 or n <= -1e13 then return nil, false end
+    if not n or n ~= n or n > MAX_AMOUNT or n < -MAX_AMOUNT then return nil, false end
     return n, true
+end
+
+-- Only balance-sheet and adjustment boxes may go negative; SA103F income,
+-- allowance, expense and capital-allowance boxes are non-negative, and a
+-- sign typo in turnover would otherwise flow silently into hub totals.
+local function kind_allows_negative(kind)
+    return kind == "balance_sheet" or kind == "adjustment"
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -111,21 +122,27 @@ function BusinessValueQueries.upsert_values(business_uuid, tax_year, values, use
     for i, v in ipairs(values) do
         local key = v and v.category_key
         local cat = key and catalogue[key] or nil
-        if not cat then
+        local amount, ok_a = parse_amount(v and v.amount)
+        local disallowable, ok_d = parse_amount(v and v.disallowable_amount)
+        -- Clearing is allowed even for retired categories — otherwise a
+        -- value whose category an admin deactivates becomes permanently
+        -- stuck (no box renders it, and re-saving its key is rejected).
+        if key and amount == nil and disallowable == nil and ok_a and ok_d then
+            local res = db.query([[
+                DELETE FROM business_line_values
+                WHERE user_id = ? AND business_uuid = ? AND tax_year = ? AND category_key = ?
+            ]], internal_user_id, business_uuid, tax_year, key)
+            deleted = deleted + ((res and res.affected_rows) or 0)
+        elseif not cat then
             table.insert(errors, { index = i, error = "Unknown or inactive category: " .. tostring(key) })
         else
-            local amount, ok_a = parse_amount(v.amount)
-            local disallowable, ok_d = parse_amount(v.disallowable_amount)
             if not ok_a or not ok_d then
-                table.insert(errors, { index = i, error = "Amount for " .. key .. " must be a number" })
+                table.insert(errors, { index = i, error = "Amount for " .. key .. " must be a number within range" })
             elseif disallowable ~= nil and not cat.supports_disallowable then
                 table.insert(errors, { index = i, error = key .. " does not take a disallowable amount" })
-            elseif amount == nil and disallowable == nil then
-                local res = db.query([[
-                    DELETE FROM business_line_values
-                    WHERE user_id = ? AND business_uuid = ? AND tax_year = ? AND category_key = ?
-                ]], internal_user_id, business_uuid, tax_year, key)
-                deleted = deleted + ((res and res.affected_rows) or 0)
+            elseif not kind_allows_negative(cat.kind)
+                and ((amount and amount < 0) or (disallowable and disallowable < 0)) then
+                table.insert(errors, { index = i, error = key .. " cannot be negative" })
             else
                 db.query([[
                     INSERT INTO business_line_values

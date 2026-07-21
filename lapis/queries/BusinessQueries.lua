@@ -74,7 +74,9 @@ function BusinessQueries.all(params, user)
 
     -- Per-business totals for the requested tax year (one grouped query,
     -- not N+1). value_count spans ALL kinds so the hub can tell "untouched"
-    -- from "no income yet".
+    -- from "no income yet". Values whose category was deactivated are
+    -- excluded — the trade form no longer renders their box, so counting
+    -- them would make the hub disagree with the form forever.
     local totals = {}
     if params.tax_year and params.tax_year ~= "" and #rows > 0 then
         local t_rows = db.query([[
@@ -83,6 +85,9 @@ function BusinessQueries.all(params, user)
                    COUNT(*) AS value_count
             FROM business_line_values
             WHERE user_id = ? AND tax_year = ?
+              AND category_key IN (
+                  SELECT category_key FROM business_line_categories WHERE is_active = true
+              )
             GROUP BY business_uuid, kind
         ]], internal_user_id, params.tax_year) or {}
         for _, t in ipairs(t_rows) do
@@ -132,6 +137,12 @@ function BusinessQueries.create(data, user)
     if not data.label or data.label == "" then
         return nil, "label is required"
     end
+    -- A JSON-object metadata_json decodes to a Lua table, which the db
+    -- layer can't escape (unhandled 500) — encode it, matching the
+    -- crm-accounts convention.
+    if type(data.metadata_json) == "table" then
+        data.metadata_json = cjson.encode(data.metadata_json)
+    end
 
     local uuid = Global.generateUUID()
     -- namespace_id is always resolved server-side — a client-supplied value
@@ -170,12 +181,19 @@ function BusinessQueries.update(business_uuid, data, user)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
+    -- is_archived = false: every other write path 404s on archived
+    -- businesses, so rename must too — otherwise an archived page looks
+    -- half-alive (rename works, figures don't).
     local existing = db.query([[
         SELECT * FROM user_profile_entities
-        WHERE uuid = ? AND user_id = ? AND entity_type = ? LIMIT 1
+        WHERE uuid = ? AND user_id = ? AND entity_type = ? AND is_archived = false LIMIT 1
     ]], business_uuid, internal_user_id, ENTITY_TYPE)
     if not existing or #existing == 0 then return nil end
     local old = existing[1]
+
+    if type(data.metadata_json) == "table" then
+        data.metadata_json = cjson.encode(data.metadata_json)
+    end
 
     local updates, args = {}, {}
     if data.label ~= nil then

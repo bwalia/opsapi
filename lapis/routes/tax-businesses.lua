@@ -44,6 +44,20 @@ local function parse_request_body()
     if content_type:find("application/json", 1, true) then
         local ok, result = pcall(function()
             local body = ngx.req.get_body_data()
+            if not body or body == "" then
+                -- Bodies over client_body_buffer_size (16k default) are
+                -- spooled to disk and get_body_data() returns nil — the
+                -- 200-entry values batches this route allows can exceed
+                -- that. Same fallback as academy.lua.
+                local path = ngx.req.get_body_file()
+                if path then
+                    local f = io.open(path, "rb")
+                    if f then
+                        body = f:read("*a")
+                        f:close()
+                    end
+                end
+            end
             if not body or body == "" then return {} end
             return cjson.decode(body)
         end)
