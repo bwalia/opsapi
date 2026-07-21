@@ -30,6 +30,17 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
     utr_number  = "utr",
 }
 
+-- Category contexts whose answers are scoped to a user_profile_entities row
+-- (asked once PER entity, saved with entity_uuid). Every other context —
+-- NULL (classic /profile) or asked-once surfaces like 'rental_business' —
+-- stores answers in the user-wide NULL scope. The /answers scope guard
+-- keys off this table, so a new per-entity surface (e.g. a future vehicle
+-- or partnership drill-down) only needs its context registered here.
+local PER_ENTITY_CONTEXTS = {
+    property = true,   -- rental hub → per-property pages
+    business = true,   -- self-employment hub → per-business pages
+}
+
 -- =========================================================================
 -- Helper Functions
 -- =========================================================================
@@ -3001,11 +3012,12 @@ return function(app)
 
                 -- Scope guard: the batch's entity scope must match the
                 -- question's category context. Per-entity batches may only
-                -- carry 'property'-context questions; classic batches must
-                -- not carry them. Without this, answers land in a scope no
-                -- surface renders (shadow rows) — and an entity-scoped save
-                -- of an identity question would stamp the NINO/UTR lock
-                -- without ever writing the canonical value.
+                -- carry questions from PER_ENTITY_CONTEXTS categories;
+                -- classic batches must not carry them. Without this,
+                -- answers land in a scope no surface renders (shadow rows)
+                -- — and an entity-scoped save of an identity question would
+                -- stamp the NINO/UTR lock without ever writing the
+                -- canonical value.
                 local q_ctx = nil
                 local reject = nil
                 if not question then
@@ -3013,12 +3025,12 @@ return function(app)
                 else
                     q_ctx = question.category_context
                     if q_ctx == cjson.null or q_ctx == "" then q_ctx = nil end
-                    if entity_uuid and q_ctx ~= "property" then
+                    if entity_uuid and not PER_ENTITY_CONTEXTS[q_ctx] then
                         reject = "Question " .. ans.question_uuid
-                            .. " is not a per-property question — save it without entity_uuid"
-                    elseif not entity_uuid and q_ctx == "property" then
+                            .. " is not a per-entity question — save it without entity_uuid"
+                    elseif not entity_uuid and PER_ENTITY_CONTEXTS[q_ctx] then
                         reject = "Question " .. ans.question_uuid
-                            .. " is a per-property question — entity_uuid is required"
+                            .. " is a per-entity question — entity_uuid is required"
                     end
                 end
 

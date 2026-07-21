@@ -166,6 +166,11 @@ local income_questionnaire_cleanup_migrations = load_if_enabled(ProjectConfig.FE
 -- entity-scoped profile answers, and SA105 line-item catalogue/rows
 local property_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.property-income-system") or {}
 
+-- Self-Employment (tax_copilot feature) — sole-trader hub + per-business
+-- entities (reuses user_profile_entities), SA103 fixed-box catalogue/values,
+-- and the Capital Allowances grid
+local self_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.self-employment-system") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1873,6 +1878,20 @@ local _migrations = {
     ['728_seed_property_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 5),
     ['729_create_property_line_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 6),
     ['730_seed_property_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 7),
+
+    -- =========================================================================
+    -- SELF-EMPLOYMENT — sole-trader hub + per-business drill-down (same
+    -- architecture as Property Income). 731-732 add the SA103 fixed-box
+    -- catalogue + seed; 733 the per-year values; 734-735 the Capital
+    -- Allowances grid catalogues + cells; 736 seeds the admin-editable
+    -- 'business' contexted question section.
+    -- =========================================================================
+    ['731_create_business_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 1),
+    ['732_seed_business_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 2),
+    ['733_create_business_line_values'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 3),
+    ['734_create_business_ca_catalogues'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 4),
+    ['735_create_business_ca_values'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 5),
+    ['736_seed_business_section'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 6),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
