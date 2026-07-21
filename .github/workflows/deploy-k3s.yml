@@ -206,12 +206,17 @@ jobs:
           # A real Postgres. Without one, config.lua falls back to a hardcoded
           # 172.72.0.10 that nothing answers on — connects then blackhole for
           # the full 60s socket timeout, which is what made this job flaky.
+          # pgvector/pgvector (NOT plain postgres): the migration gate runs
+          # every migration from zero, and tax-copilot-system creates a
+          # vector(384) column — production (Zalando Spilo) ships pgvector,
+          # so the gate database must too or it fails on a capability gap
+          # rather than a real migration bug.
           docker run -d --name "opsapi-smoke-pg-$RUN_ID" \
             --network "opsapi-smoke-net-$RUN_ID" \
             -e POSTGRES_USER=pguser \
             -e POSTGRES_PASSWORD=pgpassword \
             -e POSTGRES_DB=opsapi \
-            postgres:14-alpine
+            pgvector/pgvector:pg14
 
           echo "Waiting for Postgres..."
           for i in $(seq 1 30); do
