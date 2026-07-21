@@ -465,18 +465,34 @@ jobs:
             PROJECT_CODE_ARG="--set projectCode=${{ github.event.inputs.PROJECT_CODE }}"
           fi
 
+          # No --wait here on purpose. The app's config.lua lives in a Secret
+          # (rendered by the ExternalSecret), not the pod template, so a
+          # config-only change does not alter the Deployment and helm --wait
+          # would just block on the EXISTING pods. We drive the rollout
+          # explicitly in the next step instead.
           helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
             -f "$VALUES" \
             --namespace "${TARGET_ENV}" --create-namespace \
             --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
             --set image.tag="${TAG}" \
-            $PROJECT_CODE_ARG \
-            --wait --timeout 5m
+            $PROJECT_CODE_ARG
 
-      - name: Rollout status
+      - name: Roll out and wait
         run: |
-          kubectl -n "${TARGET_ENV}" rollout status "deploy/${RELEASE_NAME}" --timeout=5m
-          kubectl -n "${TARGET_ENV}" get pods -o wide -l app="${RELEASE_NAME}"
+          set -euo pipefail
+          NS="${TARGET_ENV}"; REL="${RELEASE_NAME}"
+          # Wait for ESO to sync the Secret (which carries config.lua) BEFORE
+          # rolling, so the new pods start with the current config rather than
+          # a stale/half-rendered one.
+          kubectl -n "$NS" wait --for=condition=Ready "externalsecret/${REL}-secrets" --timeout=120s \
+            || echo "::warning::ExternalSecret ${REL}-secrets not Ready within 120s — rolling anyway"
+          # Force a fresh rollout so pods pick up Secret/config changes even
+          # when the pod template is unchanged (this is what a Secret-only
+          # change is). This makes config-only deploys reliable and skips any
+          # stale pod stuck in CrashLoopBackOff.
+          kubectl -n "$NS" rollout restart "deploy/$REL"
+          kubectl -n "$NS" rollout status "deploy/$REL" --timeout=6m
+          kubectl -n "$NS" get pods -o wide -l app="$REL"
 
       - name: Public URL probe (informational)
         run: |
