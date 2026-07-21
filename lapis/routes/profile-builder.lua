@@ -41,8 +41,9 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
 -- cross-type shadow rows (business answers saved against a property
 -- entity, or a property's answers merged into a business schema).
 local PER_ENTITY_CONTEXTS = {
-    property = "property",   -- rental hub → per-property pages
-    business = "business",   -- self-employment hub → per-business pages
+    property = "property",                     -- rental hub → per-property pages
+    business = "business",                     -- self-employment hub → per-business pages
+    overseas_property = "overseas_property",   -- land & property abroad → per-holding pages
 }
 
 -- =========================================================================

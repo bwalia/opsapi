@@ -42,22 +42,25 @@ end
 -- ────────────────────────────────────────────────────────────────────────────
 -- Catalogue
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyLineQueries.categories()
+-- schedule: which surface's catalogue — 'uk_property' (default, the UK
+-- rental hub) or 'overseas_property' (Land and property abroad). The
+-- default keeps every pre-existing caller's behaviour unchanged.
+function PropertyLineQueries.categories(schedule)
     local rows = db.query([[
         SELECT uuid, kind, category_key, label, description, hmrc_mapping, display_order
         FROM property_line_categories
-        WHERE is_active = true
+        WHERE is_active = true AND schedule = ?
         ORDER BY kind ASC, display_order ASC, label ASC
-    ]]) or {}
+    ]], schedule or "uk_property") or {}
     return rows
 end
 
 -- Set of active keys for one kind — validation helper for routes.
-function PropertyLineQueries.active_keys(kind)
+function PropertyLineQueries.active_keys(kind, schedule)
     local rows = db.query([[
         SELECT category_key FROM property_line_categories
-        WHERE is_active = true AND kind = ?
-    ]], kind) or {}
+        WHERE is_active = true AND kind = ? AND schedule = ?
+    ]], kind, schedule or "uk_property") or {}
     local set = {}
     for _, r in ipairs(rows) do set[r.category_key] = true end
     return set
@@ -95,23 +98,27 @@ end
 -- Create — route layer validates kind/category/amount/tax_year and property
 -- ownership; re-checked defensively here.
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyLineQueries.create(property_uuid, data, user)
+-- entity_type: 'property' (default) or 'overseas_property' — the parent
+-- entity the line hangs off. Overseas lines also allow the extra kinds
+-- ('finance_cost', 'adjustment') their catalogue defines.
+function PropertyLineQueries.create(property_uuid, data, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
     -- The property must exist, belong to this user, and not be archived.
     local prop = db.query([[
         SELECT uuid, namespace_id FROM user_profile_entities
-        WHERE uuid = ? AND user_id = ? AND entity_type = 'property' AND is_archived = false
+        WHERE uuid = ? AND user_id = ? AND entity_type = ? AND is_archived = false
         LIMIT 1
-    ]], property_uuid, internal_user_id)
+    ]], property_uuid, internal_user_id, entity_type or "property")
     if not prop or #prop == 0 then return nil, "Property not found" end
 
     if not data.amount or tonumber(data.amount) == nil or tonumber(data.amount) <= 0 then
         return nil, "amount must be a positive number"
     end
-    if data.kind ~= "income" and data.kind ~= "expense" then
-        return nil, "kind must be 'income' or 'expense'"
+    local VALID_KINDS = { income = true, expense = true, finance_cost = true, adjustment = true }
+    if not VALID_KINDS[data.kind] then
+        return nil, "kind must be one of income, expense, finance_cost, adjustment"
     end
     if not data.category_key or data.category_key == "" then
         return nil, "category_key is required"

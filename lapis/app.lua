@@ -516,6 +516,9 @@ load_if("tax_copilot", "routes.tax-properties")
 -- values + Capital Allowances grid. Business-scope questions stay under
 -- routes.profile-builder (?context=business&entity=).
 load_if("tax_copilot", "routes.tax-businesses")
+-- Overseas property hub ("Land and property abroad", SA106): same engine as
+-- tax-properties with entity_type='overseas_property' + overseas catalogue.
+load_if("tax_copilot", "routes.tax-overseas-properties")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
 load_if("tax_copilot", "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")

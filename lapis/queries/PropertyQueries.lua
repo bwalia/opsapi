@@ -22,7 +22,21 @@ local cjson = require("cjson")
 
 local PropertyQueries = {}
 
+-- Default entity type — the UK rental hub. Every function accepts an
+-- optional trailing entity_type so the overseas hub ("Land and property
+-- abroad", entity_type='overseas_property') reuses the exact same engine;
+-- omitting it keeps the original UK behaviour byte-for-byte.
 local ENTITY_TYPE = "property"
+
+local function resolve_type(entity_type)
+    return entity_type or ENTITY_TYPE
+end
+
+-- Audit label: 'property' stays "PROPERTY" (historical rows unchanged);
+-- 'overseas_property' becomes "OVERSEAS_PROPERTY".
+local function audit_label(entity_type)
+    return string.upper(resolve_type(entity_type))
+end
 
 local function resolveUserId(user)
     if not user then return nil, "User not authenticated" end
@@ -59,12 +73,12 @@ end
 -- hub can render "Income / Expenses / Net" per property in a single call.
 -- ────────────────────────────────────────────────────────────────────────────
 -- params: { tax_year?, include_archived? }
-function PropertyQueries.all(params, user)
+function PropertyQueries.all(params, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
     local where = { "user_id = ?", "entity_type = ?" }
-    local args = { internal_user_id, ENTITY_TYPE }
+    local args = { internal_user_id, resolve_type(entity_type) }
     if params.include_archived ~= "true" and params.include_archived ~= true then
         table.insert(where, "is_archived = false")
     end
@@ -108,7 +122,7 @@ end
 -- Show (ownership-scoped). Used by routes AND by profile-builder's
 -- entity-answer guard — keep the return shape stable.
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyQueries.show(property_uuid, user)
+function PropertyQueries.show(property_uuid, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
@@ -116,7 +130,7 @@ function PropertyQueries.show(property_uuid, user)
         SELECT * FROM user_profile_entities
         WHERE uuid = ? AND user_id = ? AND entity_type = ?
         LIMIT 1
-    ]], property_uuid, internal_user_id, ENTITY_TYPE)
+    ]], property_uuid, internal_user_id, resolve_type(entity_type))
     if not rows or #rows == 0 then return nil end
     return present(rows[1])
 end
@@ -125,7 +139,7 @@ end
 -- Create — label is the only required field; everything else about a
 -- property is admin-driven questions answered later on its page.
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyQueries.create(data, user)
+function PropertyQueries.create(data, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
@@ -145,7 +159,7 @@ function PropertyQueries.create(data, user)
         internal_user_id,
         tostring(user.uuid or user.id),
         resolveNamespaceId(internal_user_id) or db.NULL,
-        ENTITY_TYPE,
+        resolve_type(entity_type),
         tostring(data.label),
         data.metadata_json or db.NULL,
         tonumber(data.display_order) or 0
@@ -155,7 +169,7 @@ function PropertyQueries.create(data, user)
     TaxAuditLogQueries.log({
         user_id = internal_user_id,
         user_email = user.email,
-        entity_type = "PROPERTY",
+        entity_type = audit_label(entity_type),
         entity_id = uuid,
         action = "CREATE",
         new_values = cjson.encode(row),
@@ -166,14 +180,14 @@ end
 -- ────────────────────────────────────────────────────────────────────────────
 -- Update (label / metadata / display_order)
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyQueries.update(property_uuid, data, user)
+function PropertyQueries.update(property_uuid, data, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
     local existing = db.query([[
         SELECT * FROM user_profile_entities
         WHERE uuid = ? AND user_id = ? AND entity_type = ? LIMIT 1
-    ]], property_uuid, internal_user_id, ENTITY_TYPE)
+    ]], property_uuid, internal_user_id, resolve_type(entity_type))
     if not existing or #existing == 0 then return nil end
     local old = existing[1]
 
@@ -204,7 +218,7 @@ function PropertyQueries.update(property_uuid, data, user)
     TaxAuditLogQueries.log({
         user_id = internal_user_id,
         user_email = user.email,
-        entity_type = "PROPERTY",
+        entity_type = audit_label(entity_type),
         entity_id = property_uuid,
         action = "UPDATE",
         old_values = cjson.encode(old),
@@ -218,14 +232,14 @@ end
 -- figures drop out of summaries; entity-scoped answers are left in place
 -- (they're harmless once the parent is archived and keep history intact).
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyQueries.archive(property_uuid, user)
+function PropertyQueries.archive(property_uuid, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
     local existing = db.query([[
         SELECT * FROM user_profile_entities
         WHERE uuid = ? AND user_id = ? AND entity_type = ? LIMIT 1
-    ]], property_uuid, internal_user_id, ENTITY_TYPE)
+    ]], property_uuid, internal_user_id, resolve_type(entity_type))
     if not existing or #existing == 0 then return nil end
 
     db.query([[
@@ -242,7 +256,7 @@ function PropertyQueries.archive(property_uuid, user)
     TaxAuditLogQueries.log({
         user_id = internal_user_id,
         user_email = user.email,
-        entity_type = "PROPERTY",
+        entity_type = audit_label(entity_type),
         entity_id = property_uuid,
         action = "DELETE",
         old_values = cjson.encode(existing[1]),
@@ -254,11 +268,11 @@ end
 -- Summary — the hub's read-only strip: business-wide totals for one tax
 -- year plus the per-property breakdown.
 -- ────────────────────────────────────────────────────────────────────────────
-function PropertyQueries.summary(tax_year, user)
+function PropertyQueries.summary(tax_year, user, entity_type)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
 
-    local list = PropertyQueries.all({ tax_year = tax_year }, user)
+    local list = PropertyQueries.all({ tax_year = tax_year }, user, entity_type)
     local income, expense = 0, 0
     for _, p in ipairs(list.data) do
         income = income + (tonumber(p.income_total) or 0)
