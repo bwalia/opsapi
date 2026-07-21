@@ -19,16 +19,10 @@ name: Deploy OPSAPI via Docker Compose (Self-Hosted)
 # - SLACK_WEBHOOK secret configured for notifications
 
 on:
-  # Auto-trigger on push to main branch
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - ".gitignore"
-
-  # Manual trigger with options
+  # RETIRED from push:main. Deployment on a merge to main is owned solely by
+  # deploy-k3s.yml (the single workflow, release workstation-opsapi on k3s1).
+  # This docker-compose self-hosted path is kept dispatch-only for manual /
+  # legacy use so a main push triggers exactly one workflow.
   workflow_dispatch:
     inputs:
       APEX_DOMAIN:

@@ -22,15 +22,12 @@
 name: ArgoCD sync — int
 
 on:
-  push:
-    branches: [main]
-    paths:
-      # Any change to the ArgoCD manifests re-applies them.
-      - 'devops/argocd/**'
-      # Any change to the chart or int's values re-syncs int through Argo.
-      - 'devops/helm-charts/diytaxreturn-lapis/**'
-      # Also fire if someone changes THIS workflow itself.
-      - '.github/workflows/argocd-sync-int.yml'
+  # RETIRED from push:main. `int` is now owned by the single deploy-k3s.yml
+  # workflow (release workstation-opsapi), so ArgoCD must NOT also sync int on
+  # a merge to main — two systems racing on the same Deployment is exactly the
+  # failure this avoids, and the requirement is that only ONE workflow runs on
+  # a main push. Kept dispatch-only so it can still be triggered by hand if a
+  # manual Argo sync is ever needed.
   workflow_dispatch:
     inputs:
       env:
