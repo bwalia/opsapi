@@ -180,6 +180,11 @@ local overseas_property_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_
 -- (SA100 TR4): section catalogue + payment rows, no per-entity drill-down
 local pension_payments_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-payments-system") or {}
 
+-- Form Sections engine (tax_copilot feature) — generic admin-defined
+-- sections + sub-form rows; supersedes the pension-specific stack and
+-- ends per-screen Lua work for this screen family
+local form_sections_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.form-sections-system") or {}
+
 -- Dynamic answer scope — moves the "how are these answers scoped?"
 -- decision from a hardcoded map in routes/profile-builder.lua into two
 -- new columns on profile_categories (answer_scope + entity_type) and a
@@ -1958,6 +1963,18 @@ local _migrations = {
     -- older revision of step 750 inserted it without the column.
     ['750a_force_sa100_dividends_year_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 2),
     ['751_seed_sa100_dividends_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 3),
+
+    -- ─────────────────────────────────────────────────────────────────────
+    -- FORM SECTIONS ENGINE — generic "sections with sub-form rows" pages.
+    -- 752 the section catalogue; 753 the user rows; 754 ports pension
+    -- payments onto the engine (must sort after 744-747, which it does).
+    -- Renumbered from 748-750 when the dividends feature claimed those
+    -- prefixes on main — full key strings never collided, this is purely
+    -- for one-feature-per-prefix readability.
+    -- ─────────────────────────────────────────────────────────────────────
+    ['752_create_tax_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 1),
+    ['753_create_tax_form_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 2),
+    ['754_port_pension_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 3),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
