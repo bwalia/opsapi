@@ -112,17 +112,31 @@ end
 --
 -- Returns (namespace_id, err). err is nil on success. Call sites that want
 -- to enforce the deny should use denyNamespace(self) when err is truthy.
+-- pcall-wrapped query — the ONLY primitive this helper uses so a DB blip
+-- (transient connection error, schema drift, permissions) never bubbles
+-- up as a bare-exception 500 out of a namespace-resolution path that is
+-- called from every profile-builder read/write. On failure we log and
+-- return nil so the caller falls through to the safe-default branch.
+local function safe_query(sql, ...)
+    local ok, rows = pcall(db.query, sql, ...)
+    if not ok then
+        ngx.log(ngx.ERR, "[ProfileBuilder] safe_query failed: ", tostring(rows), " sql=", sql)
+        return nil
+    end
+    return rows
+end
+
 local function getNamespaceId(self)
     local user = self.current_user
     if not user then return 0 end
     local user_uuid = user.uuid or user.id
 
-    local urows = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+    local urows = safe_query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
     if not urows or #urows == 0 then return 0 end
     local user_id = urows[1].id
 
     -- Platform-admin bypass, same roles NamespaceMiddleware honors.
-    local admin_rows = db.query([[
+    local admin_rows = safe_query([[
         SELECT 1 FROM user__roles ur
         JOIN roles r ON ur.role_id = r.id
         WHERE ur.user_id = ?
@@ -136,12 +150,12 @@ local function getNamespaceId(self)
         local n = tonumber(ns_header)
         if n then
             if is_platform_admin then return n end
-            local ok, m = pcall(db.query, [[
+            local m = safe_query([[
                 SELECT 1 FROM namespace_members
                 WHERE user_id = ? AND namespace_id = ? AND status = 'active'
                 LIMIT 1
             ]], user_id, n)
-            if ok and m and #m > 0 then
+            if m and #m > 0 then
                 return n
             end
             return nil, "forbidden_namespace"
@@ -150,7 +164,7 @@ local function getNamespaceId(self)
 
     -- Default from user_namespace_settings, but only when the pointer still
     -- corresponds to an active membership (JOIN guards against stale settings).
-    local rows = db.query([[
+    local rows = safe_query([[
         SELECT uns.default_namespace_id
         FROM user_namespace_settings uns
         JOIN namespace_members nm
@@ -2371,7 +2385,21 @@ return function(app)
         end
         local category = cat_rows[1]
 
-        local namespace_id = category.namespace_id or getNamespaceId(self)
+        -- Prefer the category's own tenant (safer — inherit from the target
+        -- row we've already loaded). Only fall back to the caller's namespace
+        -- when the category is genuinely global (namespace_id NULL/0). Use
+        -- an explicit two-step check because Lua's `or` truncates a
+        -- multi-return to its first value, which would silently discard the
+        -- `forbidden_namespace` error signal from getNamespaceId and let a
+        -- non-member land writes on the target tenant.
+        local namespace_id
+        if category.namespace_id and category.namespace_id ~= 0 then
+            namespace_id = category.namespace_id
+        else
+            local caller_ns, ns_err = getNamespaceId(self)
+            if ns_err then return denyNamespace(self) end
+            namespace_id = caller_ns
+        end
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
 

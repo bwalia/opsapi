@@ -204,27 +204,63 @@ return function(app)
             -- otherwise the two paths could pick different tenants on a
             -- pod whose PROJECT_CODE env differs from the request header.
             user_create_params.project_code = project_code
-            local user = UserQueries.create(user_create_params)
-            user.password = nil
 
-            -- Auto-assign to project namespace (member role + default namespace).
-            -- Hard-fail 400 if unresolvable: the previous silent fallback into
-            -- slug='system' was exactly what mis-routed self-registered users
-            -- on int.
-            local ns_id, ns_reason = NamespaceAssignment.assignUserToProjectNamespace(
-                user.id, user.uuid, project_code
-            )
-            if not ns_id then
-                ngx.log(ngx.ERR, "[Register] Namespace resolution failed for ",
-                    tostring(user.uuid), " project_code=", tostring(project_code),
-                    " reason=", tostring(ns_reason))
-                return Errors.response(self, "VALIDATION_400", {
-                    context = {
-                        field = "project_code",
-                        reason = "namespace_unresolvable",
-                        provided = project_code,
-                        detail = ns_reason,
-                    },
+            -- Atomic: user INSERT + namespace assignment run in one transaction
+            -- so a failed assignment rolls back the user row. Without this
+            -- wrap, an assignment failure leaves an orphan `users` row that
+            -- (a) permanently blocks retry (findByEmail returns AUTH_EMAIL_TAKEN)
+            -- and (b) is invisible in the failure envelope. Assignment throws
+            -- (via `error(...)`) rather than returning `(nil, reason)` so the
+            -- transaction rolls back — Lapis' db.transaction commits on
+            -- normal return, aborts on any raised error.
+            local user, ns_id, ns_reason
+            local tx_ok, tx_err = pcall(function()
+                db.query("BEGIN")
+                user = UserQueries.create(user_create_params)
+                user.password = nil
+                local id, reason = NamespaceAssignment.assignUserToProjectNamespace(
+                    user.id, user.uuid, project_code
+                )
+                if not id then
+                    ns_reason = reason
+                    error({ kind = "assignment_failed", reason = reason })
+                end
+                ns_id = id
+                db.query("COMMIT")
+            end)
+            if not tx_ok then
+                pcall(db.query, "ROLLBACK")
+                -- tx_err is either the structured table we raised on
+                -- assignment failure, or a raw string from an unexpected
+                -- exception (validation, DB constraint, etc).
+                local kind = type(tx_err) == "table" and tx_err.kind or "internal_error"
+                local reason = type(tx_err) == "table" and tx_err.reason or tostring(tx_err)
+                ngx.log(ngx.ERR, "[Register] Transaction rolled back for ",
+                    tostring(params.email), " kind=", kind, " reason=", reason)
+
+                if kind == "assignment_failed"
+                   and reason
+                   and not reason:find("^internal_error:") then
+                    -- Genuinely client-actionable: they gave us a project_code
+                    -- that doesn't exist, or omitted it AND the pod has no
+                    -- PROJECT_CODE env. Public 400 shape carries the reason
+                    -- code but NOT the raw provided value (that becomes an
+                    -- enumeration oracle for valid project_codes).
+                    return Errors.response(self, "VALIDATION_400", {
+                        context = {
+                            field = "project_code",
+                            reason = "namespace_unresolvable",
+                            detail = reason,
+                        },
+                    })
+                end
+                -- Everything else — internal_error from pcall on a DB fault,
+                -- validation exception, constraint violation — is a server
+                -- problem. Raw pcall text (may contain Postgres schema detail,
+                -- stack fragments, bcrypt errors) is logged, NOT surfaced to
+                -- the client.
+                return Errors.response(self, "SYSTEM_500", {
+                    cause = "user_registration_failed",
                 })
             end
 

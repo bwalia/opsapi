@@ -850,6 +850,14 @@ return function(app)
             -- rode inside the OAuth `state` back here, and pins the tenant
             -- the user actually signed up under. If it's missing we fall
             -- through to the pod's PROJECT_CODE env var inside the helper.
+            --
+            -- HARD-FAIL on assignment failure — previously we logged and
+            -- continued, minting a JWT for a user with no namespace
+            -- membership. That handed OAuth signups a session token they
+            -- couldn't use (every namespace-gated page 404s) AND left an
+            -- orphan `users` row indistinguishable from a corrupted record.
+            -- Now: delete the just-created user + redirect to /login with
+            -- an error code so the frontend can surface a real message.
             if user then
                 local ns_id, ns_reason = NamespaceAssignment.assignUserToProjectNamespace(
                     user.id, user.uuid, state_project_code
@@ -858,6 +866,19 @@ return function(app)
                     ngx.log(ngx.ERR, "[OAuth/Google/callback] Namespace resolution failed for ",
                         tostring(user.uuid), " project_code=", tostring(state_project_code),
                         " reason=", tostring(ns_reason))
+                    -- Best-effort rollback of the just-created user. pcall so
+                    -- a delete failure never blocks the error response — the
+                    -- log breadcrumb is enough for an operator to clean up.
+                    pcall(db.query, "DELETE FROM users WHERE id = ?", user.id)
+                    local err_frontend = state_frontend_url
+                        or Global.getEnvVar("FRONTEND_URL")
+                        or "http://127.0.0.1:3033"
+                    return {
+                        redirect_to = string.format(
+                            "%s/login?error=oauth_namespace_unresolvable&provider=google",
+                            err_frontend
+                        )
+                    }
                 end
             end
         end
@@ -886,25 +907,24 @@ return function(app)
             end
         end
 
-        -- Get user's namespaces
-        local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
-        local default_namespace = nil
+        -- Namespace selection — honor user_namespace_settings.default_namespace_id
+        -- via the same helper /auth/login uses (getUserDefaultNamespace ->
+        -- default -> last_active -> first_available). Previously this path
+        -- iterated `getForUser` and `break`d on the FIRST active row, which
+        -- for a user with memberships {system, tax_copilot} picked whichever
+        -- ordered first in the query — landing multi-namespace users in the
+        -- wrong tenant on OAuth login even when they'd explicitly selected
+        -- tax_copilot as their default via the UI. Also write back
+        -- last_active_namespace_id so a subsequent /auth/login stays sticky.
+        local default_namespace = NamespaceQueries.getUserDefaultNamespace(userWithRoles.id)
         local namespace_membership = nil
-
-        -- Find first active namespace
-        for _, ns in ipairs(namespaces) do
-            if ns.status == "active" and ns.member_status == "active" then
-                default_namespace = ns
-                break
-            end
-        end
-
-        -- Get namespace membership if available
         if default_namespace then
             namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
                 userWithRoles.uuid,
                 default_namespace.id
             )
+            pcall(NamespaceQueries.updateLastActiveNamespace,
+                userWithRoles.id, default_namespace.id)
         end
 
         -- Generate JWT token with namespace context
@@ -1159,6 +1179,19 @@ return function(app)
                     ngx.log(ngx.ERR, "[OAuth/validate] Namespace resolution failed for ",
                         tostring(user.uuid), " project_code=", tostring(pc),
                         " reason=", tostring(ns_reason))
+                    -- Same treatment as /auth/google/callback: roll back the
+                    -- just-created user rather than mint a JWT for someone
+                    -- with no namespace membership. Direct POST caller (not
+                    -- a browser redirect) so we return a JSON error, not a
+                    -- redirect_to.
+                    pcall(db.query, "DELETE FROM users WHERE id = ?", user.id)
+                    return {
+                        status = 400,
+                        json = {
+                            error = "oauth_namespace_unresolvable",
+                            reason = ns_reason,
+                        }
+                    }
                 end
             end
 
@@ -1184,25 +1217,19 @@ return function(app)
                 end
             end
 
-            -- Get user's namespaces
-            local namespaces = NamespaceQueries.getForUser(userWithRoles.uuid) or {}
-            local default_namespace = nil
+            -- Namespace selection — see /auth/google/callback for the full
+            -- rationale. Same fix: honor user_namespace_settings via
+            -- getUserDefaultNamespace so a multi-namespace user lands in
+            -- the tenant they picked, not whichever ordered first.
+            local default_namespace = NamespaceQueries.getUserDefaultNamespace(userWithRoles.id)
             local namespace_membership = nil
-
-            -- Find first active namespace
-            for _, ns in ipairs(namespaces) do
-                if ns.status == "active" and ns.member_status == "active" then
-                    default_namespace = ns
-                    break
-                end
-            end
-
-            -- Get namespace membership if available
             if default_namespace then
                 namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
                     userWithRoles.uuid,
                     default_namespace.id
                 )
+                pcall(NamespaceQueries.updateLastActiveNamespace,
+                    userWithRoles.id, default_namespace.id)
             end
 
             -- Generate JWT token
