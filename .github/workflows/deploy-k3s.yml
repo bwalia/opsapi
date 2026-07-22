@@ -231,8 +231,14 @@ jobs:
             pgvector/pgvector:pg14
 
           echo "Waiting for Postgres..."
+          # Probe over TCP, not the unix socket: the official entrypoint runs
+          # a TEMPORARY socket-only server during first-boot init, then stops
+          # it and starts the real one. Socket pg_isready can pass during the
+          # temp phase, letting later psql calls land in the stop/restart gap
+          # (bit main run 29901977909). The temp server never listens on TCP, so a
+          # TCP probe only succeeds once the real server is up.
           for i in $(seq 1 30); do
-            if docker exec "opsapi-smoke-pg-$RUN_ID" pg_isready -U pguser -d opsapi >/dev/null 2>&1; then
+            if docker exec "opsapi-smoke-pg-$RUN_ID" pg_isready -h 127.0.0.1 -U pguser -d opsapi >/dev/null 2>&1; then
               echo "Postgres ready after ${i}s"; break
             fi
             if [ "$i" = "30" ]; then
@@ -274,8 +280,23 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          docker exec "opsapi-smoke-pg-$RUN_ID" \
-            psql -U pguser -d opsapi -c "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+          # Belt and braces vs the init-restart race (see the readiness wait
+          # above): retry the first psql briefly rather than failing the whole
+          # gate on a connection gap that heals within seconds.
+          ok=""
+          for i in $(seq 1 10); do
+            if docker exec "opsapi-smoke-pg-$RUN_ID" \
+                psql -U pguser -d opsapi -c "CREATE EXTENSION IF NOT EXISTS pgcrypto"; then
+              ok=1; break
+            fi
+            echo "Postgres not accepting connections yet (attempt $i) — retrying..."
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Postgres never accepted connections for the migration gate"
+            docker logs "opsapi-smoke-pg-$RUN_ID" || true
+            exit 1
+          fi
           # PROJECT_CODE=tax_copilot matches the deployed fleet so the
           # feature-gated tax migrations (7xx) actually run, not just core.
           if ! docker exec \
