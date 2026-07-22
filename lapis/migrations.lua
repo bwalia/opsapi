@@ -185,6 +185,21 @@ local pension_payments_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_C
 -- ends per-screen Lua work for this screen family
 local form_sections_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.form-sections-system") or {}
 
+-- Dynamic answer scope — moves the "how are these answers scoped?"
+-- decision from a hardcoded map in routes/profile-builder.lua into two
+-- new columns on profile_categories (answer_scope + entity_type) and a
+-- new tax_year column on user_profile_answers. Admins can define brand
+-- new form sections — SA100 income boxes today, US 1040 or any other
+-- regional form tomorrow — without a code deploy. Every subsequent
+-- profile-builder-driven feature depends on this.
+local dynamic_answer_scope_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-answer-scope") or {}
+
+-- SA100 dividends & interest — first consumer of answer_scope='year'.
+-- Seeds a category + 7 boxes as `currency` questions so admins can
+-- rename / reorder / add rules / add new boxes via
+-- /admin/profile-builder/*.
+local sa100_dividend_questions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa100-dividend-questions") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1929,14 +1944,37 @@ local _migrations = {
     ['746_create_pension_payment_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 3),
     ['747_seed_pension_payments_income_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 4),
 
+    -- Dynamic answer scope — DB-driven scoping model (user | entity | year)
+    -- so admins can define new form sections without code changes. Must run
+    -- before any seed migration that sets answer_scope on categories.
+    ['748_add_answer_scope_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 1),
+    ['748a_add_entity_type_column'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 2),
+    ['748b_add_tax_year_column'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 3),
+    ['748c_add_year_scope_unique_index'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 4),
+    ['749_backfill_answer_scope_from_context'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 5),
+
+    -- SA100 dividends & interest — first consumer of answer_scope='year'.
+    -- Seeds a category + 7 boxes as `currency` questions so admins can
+    -- rename / reorder / add rules / add new boxes via
+    -- /admin/profile-builder/*. Must run AFTER 748* so the answer_scope
+    -- column exists.
+    ['750_seed_sa100_dividends_category'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 1),
+    -- Self-heals the answer_scope on the dividends category if an
+    -- older revision of step 750 inserted it without the column.
+    ['750a_force_sa100_dividends_year_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 2),
+    ['751_seed_sa100_dividends_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 3),
+
     -- ─────────────────────────────────────────────────────────────────────
     -- FORM SECTIONS ENGINE — generic "sections with sub-form rows" pages.
-    -- 748 the section catalogue; 749 the user rows; 750 ports pension
+    -- 752 the section catalogue; 753 the user rows; 754 ports pension
     -- payments onto the engine (must sort after 744-747, which it does).
+    -- Renumbered from 748-750 when the dividends feature claimed those
+    -- prefixes on main — full key strings never collided, this is purely
+    -- for one-feature-per-prefix readability.
     -- ─────────────────────────────────────────────────────────────────────
-    ['748_create_tax_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 1),
-    ['749_create_tax_form_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 2),
-    ['750_port_pension_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 3),
+    ['752_create_tax_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 1),
+    ['753_create_tax_form_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 2),
+    ['754_port_pension_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 3),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
