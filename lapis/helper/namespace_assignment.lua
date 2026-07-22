@@ -8,24 +8,33 @@
     context and the frontend's billing / settings pages 404 with "Namespace
     not found" because `NamespaceMiddleware.requireNamespace` rejects them.
 
-    Tenant resolution — the caller passes `project_code` (from the browser's
-    `X-Project-Code` header at register.lua, or a query param at the OAuth
-    callback). If the caller doesn't provide it, we fall back to the pod's
-    `PROJECT_CODE` env var. If BOTH are missing (or the value doesn't match
-    any active namespace) we return `nil, reason` and the caller MUST 400 —
-    we deliberately do NOT fall back to "first active tenant" any more, as
-    that was the exact silent-mis-routing behavior that put self-registered
-    tax-copilot users into the `system` namespace on int.
+    Tenant resolution — three tiers, first non-empty wins:
+      1. Caller-supplied `project_code` (from the browser's `X-Project-Code`
+         header at register.lua, or the OAuth `state.project_code`).
+      2. Pod `PROJECT_CODE` env var (docker-compose / Helm-injected).
+      3. `DEFAULT_PROJECT_CODE` — hardcoded module-level constant (see
+         below). This codebase is dedicated to the `tax_copilot` product;
+         every deploy is that tenant. The constant is a safety net so a
+         misconfigured pod (missing env, missing header) still lands users
+         in the right namespace instead of erroring, which was the fix-2
+         request from the product owner: "if any how env miss then we
+         will still go to tax_copilot because this whole repo going to
+         tax_copilot".
+
+    If the resolved code doesn't match any active `namespaces.project_code`
+    (someone renamed the namespace, or the DB seed hasn't run), the helper
+    returns `nil, reason` so the caller can surface a clean error rather
+    than silently mis-routing — the class-of-bug that motivated PR #491.
+
+    A future US/AU/CA tenant that ships this codebase forks the repo and
+    changes `DEFAULT_PROJECT_CODE`. There is no runtime multi-tenant story
+    for opsapi itself, only for the data (see `namespaces` table).
 
     Idempotent — every INSERT carries an `ON CONFLICT … DO NOTHING/UPDATE`
-    clause, so repeating the call (e.g. after a partial earlier failure)
-    leaves the user in the correct end state without dupes.
+    clause, so repeating the call leaves the user in the correct end state.
 
-    Error-tolerant — the DB work runs in `pcall`. A hard failure returns
-    `nil, "internal_error:<err>"` so the caller can decide whether to roll
-    back the user or surface a 5xx. This is a stricter contract than the
-    previous fire-and-forget shape: silent success on a broken assignment
-    left the user unable to reach any namespace-scoped page.
+    Error-tolerant — the DB work runs in `pcall`. Hard failure returns
+    `nil, "internal_error:<err>"` for the caller to decide 500 vs retry.
 
     Callers:
       - routes/register.lua  (email/password sign-up)
@@ -34,6 +43,11 @@
 ]]
 
 local db = require("lapis.db")
+
+-- Product this codebase serves. Overridable at every layer above (header,
+-- env), so a rebrand only needs this constant changed — no other code
+-- knows the tenant slug. Do NOT sprinkle "tax_copilot" literals elsewhere.
+local DEFAULT_PROJECT_CODE = "tax_copilot"
 
 local M = {}
 
@@ -51,11 +65,22 @@ local M = {}
 function M.assignUserToProjectNamespace(user_id, user_uuid, project_code)
     local resolved_ns_id, resolved_reason
     local ok, err = pcall(function()
+        -- Header > env > module default. First non-empty wins. "all" is
+        -- a legacy env-var value that means "no specific tenant" — skip it
+        -- and fall through to the next tier rather than treating it as a
+        -- literal project_code.
         local effective_code = project_code
         if not effective_code or effective_code == "" then
-            effective_code = os.getenv("PROJECT_CODE")
+            local env_code = os.getenv("PROJECT_CODE")
+            if env_code and env_code ~= "" and env_code ~= "all" then
+                effective_code = env_code
+            end
         end
-        if not effective_code or effective_code == "" or effective_code == "all" then
+        if not effective_code or effective_code == "" then
+            effective_code = DEFAULT_PROJECT_CODE
+        end
+        if not effective_code or effective_code == "" then
+            -- Only reachable if someone edits DEFAULT_PROJECT_CODE to empty.
             resolved_reason = "no_project_code"
             return
         end

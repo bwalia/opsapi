@@ -48,28 +48,36 @@ function UserQueries.create(params)
 
     -- Auto-add user to a namespace.
     --
-    -- Resolution order:
+    -- Resolution order (same tiers as helper/namespace_assignment.lua —
+    -- kept aligned so both paths always agree on the tenant):
     --   1. Explicit `params.namespace_id` (admin user-create; server-side
     --      seeders). Always wins — the caller already knows the tenant.
     --   2. Per-request `params.project_code` (from X-Project-Code header on
-    --      register.lua). Matches on `namespaces.project_code` — the SAME
-    --      column NamespaceAssignment uses, so both writes hit one tenant.
-    --   3. Pod-level `PROJECT_CODE` env var. Legacy fallback for server-side
-    --      user creation that doesn't ride HTTP (CLI, background jobs).
+    --      register.lua). Matches on `namespaces.project_code`.
+    --   3. Pod-level `PROJECT_CODE` env var.
+    --   4. Product default `"tax_copilot"` — this codebase is dedicated to
+    --      that product; a misconfigured pod (missing env, missing header)
+    --      still lands users in the right namespace instead of silently
+    --      leaving them with no membership.
     --
     -- No `slug='system'` fallback. No "first active namespace" fallback.
-    -- If none of the above resolves, we leave `target_namespace_id` nil
-    -- and skip the membership INSERT entirely — the caller (register.lua)
-    -- performs a second, authoritative resolution via NamespaceAssignment
-    -- and returns HTTP 400 when that also fails. This turns the previous
-    -- silent mis-routing into a loud failure.
+    -- Those were the silent mis-routing paths PR #491 removed.
     local target_namespace_id = namespace_id
     if not target_namespace_id then
         local project_code = override_project_code
         if not project_code or project_code == "" then
-            project_code = os.getenv("PROJECT_CODE")
+            local env_code = os.getenv("PROJECT_CODE")
+            if env_code and env_code ~= "" and env_code ~= "all" then
+                project_code = env_code
+            end
         end
-        if project_code and project_code ~= "" and project_code ~= "all" then
+        if not project_code or project_code == "" then
+            -- Kept in sync with DEFAULT_PROJECT_CODE in helper/namespace_assignment.lua.
+            -- Both files carry the constant so the module boundary is clean:
+            -- neither imports the other's helper just for a literal.
+            project_code = "tax_copilot"
+        end
+        if project_code and project_code ~= "" then
             local project_ns = db.select(
                 "id FROM namespaces WHERE project_code = ? AND status = 'active' ORDER BY id ASC LIMIT 1",
                 project_code
