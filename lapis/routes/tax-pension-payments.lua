@@ -13,9 +13,11 @@
 
     relief_at_source = the form's "Basic rate tax relief claimed by
     provider?" checkbox (routes a registered-scheme row to TR4 box 1 vs
-    box 2); one_off = "Is this a one off payment?" (box 1.1). Both are only
-    accepted where the section's catalogue row supports them — otherwise
-    they're forced false so a section switch can't leave stale flags behind.
+    box 2); one_off = "Is this a one off payment?" (box 1.1). Flags are
+    forced false against the RESOLVED target section whether or not the
+    payload carries them, so neither a section switch nor an edit can leave
+    a true flag on a section that doesn't offer the checkbox; on rows whose
+    section an admin retired, flags are frozen (updates to them ignored).
 ]]
 
 local cjson = require("cjson")
@@ -73,8 +75,9 @@ end
 
 -- JSON bodies carry real booleans; form bodies carry strings — normalise
 -- both ("false"/"0" are truthy in Lua, so a plain truthiness check lies).
+-- "on" is what a bare HTML form posts for a checked checkbox.
 local function to_bool(v)
-    return v == true or v == "true" or v == "1" or v == 1
+    return v == true or v == "true" or v == "1" or v == 1 or v == "on"
 end
 
 -- Validate a payment payload against the catalogue. `category` (resolved by
@@ -96,11 +99,20 @@ local function validate_payment(params, is_create, category)
             return false, "tax_year must be YYYY-YY (e.g. 2026-27)"
         end
     end
-    if params.description and type(params.description) == "string" and #params.description > 500 then
-        return false, "description must be 500 characters or fewer"
+    if params.description ~= nil then
+        -- Reject non-strings up front: a JSON number/bool/object (or a
+        -- repeated form key, which arrives as a Lua table) would otherwise
+        -- sail past the length check into SQL interpolation → 500.
+        if type(params.description) ~= "string" then
+            return false, "description must be a string"
+        end
+        if #params.description > 500 then
+            return false, "description must be 500 characters or fewer"
+        end
     end
-    -- Normalise flags, and force them off where the section doesn't offer
-    -- the checkbox — a section switch must not smuggle stale flags along.
+    -- Normalise flags, then enforce them against the RESOLVED target
+    -- section unconditionally — forcing only payload-present flags would
+    -- let a category switch smuggle the row's stored true flags along.
     if params.relief_at_source ~= nil then
         params.relief_at_source = to_bool(params.relief_at_source)
     end
@@ -108,12 +120,14 @@ local function validate_payment(params, is_create, category)
         params.one_off = to_bool(params.one_off)
     end
     if category then
-        if not category.supports_relief_flag and params.relief_at_source then
-            params.relief_at_source = false
-        end
-        if not category.supports_one_off_flag and params.one_off then
-            params.one_off = false
-        end
+        if not category.supports_relief_flag then params.relief_at_source = false end
+        if not category.supports_one_off_flag then params.one_off = false end
+    else
+        -- Grandfathered retired section: its catalogue row isn't visible,
+        -- so flag support can't be checked — freeze the stored flags
+        -- (ignore any sent values) rather than accept or clobber them.
+        params.relief_at_source = nil
+        params.one_off = nil
     end
     return true
 end

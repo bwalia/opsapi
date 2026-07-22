@@ -68,7 +68,12 @@ return {
                 label = "Payments into registered schemes and retirement annuity contracts",
                 desc = "Personal payments into registered pension schemes and retirement annuity contracts. "
                     .. "Tick 'relief claimed by provider' where the scheme adds basic-rate tax relief for you (relief at source).",
-                mapping = '{"sa100_box":"TR4.1","sa100_box_no_relief":"TR4.2","sa100_box_one_off":"TR4.1.1"}',
+                -- gross_up: amounts are recorded NET (what the user paid);
+                -- TR4 box 1 wants the grossed-up figure (net × 100/80), so any
+                -- box-emitting consumer MUST apply basic-rate gross-up to
+                -- relief-at-source rows. Recording net + this marker mirrors
+                -- how the reference software collects the value.
+                mapping = '{"sa100_box":"TR4.1","sa100_box_no_relief":"TR4.2","sa100_box_one_off":"TR4.1.1","gross_up":"basic_rate"}',
                 relief_flag = true,
                 one_off_flag = true,
                 order = 1,
@@ -156,6 +161,13 @@ return {
     --    how users opt sections onto their return, so it lives in the same
     --    catalogue (display name spells out the distinction from the existing
     --    'pension' income type).
+    --
+    --    allows_manual_entry = FALSE is load-bearing: a my_incomes row typed
+    --    'pension_payments' would be SUMMED AS INCOME by the calculation —
+    --    the exact wrong direction for a relief. routes/my-incomes.lua
+    --    enforces this flag on create/type-change; the questionnaire options
+    --    and the /types dropdown filter on is_active only, so the section
+    --    stays selectable and the hub link stays visible.
     -- =========================================================================
     [4] = function()
         local docs = cjson.encode({
@@ -170,7 +182,7 @@ return {
                  created_at, updated_at)
             VALUES (?, 'pension_payments', 'Pension payments (tax relief)',
                     'Payments you made INTO pension schemes that qualify for tax relief — not pension income.',
-                    ?::jsonb, true,
+                    ?::jsonb, false,
                     '[]'::jsonb, '{}'::jsonb, NULL,
                     '{}'::jsonb, 65, true, NULL, NOW(), NOW())
             ON CONFLICT (income_type_key) DO NOTHING

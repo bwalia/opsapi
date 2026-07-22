@@ -79,10 +79,12 @@ function PensionPaymentQueries.all(params, user)
 
     local where = { "user_id = ?" }
     local args = { internal_user_id }
-    if params.tax_year and params.tax_year ~= "" then
+    -- type() guards: a repeated query-string key arrives as a Lua table,
+    -- which passes `~= ""` and would blow up in SQL interpolation.
+    if type(params.tax_year) == "string" and params.tax_year ~= "" then
         table.insert(where, "tax_year = ?"); table.insert(args, params.tax_year)
     end
-    if params.category_key and params.category_key ~= "" then
+    if type(params.category_key) == "string" and params.category_key ~= "" then
         table.insert(where, "category_key = ?"); table.insert(args, params.category_key)
     end
     if params.include_archived ~= "true" and params.include_archived ~= true then
@@ -148,11 +150,16 @@ end
 -- ────────────────────────────────────────────────────────────────────────────
 -- Show / Update / Archive — addressed by row uuid, always ownership-scoped.
 -- ────────────────────────────────────────────────────────────────────────────
+-- Archived rows are readable history via all(include_archived=true) but are
+-- immutable: show/update/archive all 404 on them (same convention Business
+-- entities adopted), so a stale tab can't edit or double-archive a row and
+-- scramble the audit trail.
 function PensionPaymentQueries.show(item_uuid, user)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
     local rows = db.query([[
-        SELECT * FROM pension_payment_items WHERE uuid = ? AND user_id = ? LIMIT 1
+        SELECT * FROM pension_payment_items
+        WHERE uuid = ? AND user_id = ? AND is_archived = false LIMIT 1
     ]], item_uuid, internal_user_id)
     if not rows or #rows == 0 then return nil end
     return present(rows[1])
@@ -163,7 +170,8 @@ function PensionPaymentQueries.update(item_uuid, data, user)
     if not internal_user_id then return nil, err end
 
     local existing = db.query([[
-        SELECT * FROM pension_payment_items WHERE uuid = ? AND user_id = ? LIMIT 1
+        SELECT * FROM pension_payment_items
+        WHERE uuid = ? AND user_id = ? AND is_archived = false LIMIT 1
     ]], item_uuid, internal_user_id)
     if not existing or #existing == 0 then return nil end
     local old = existing[1]
@@ -224,7 +232,8 @@ function PensionPaymentQueries.archive(item_uuid, user)
     if not internal_user_id then return nil, err end
 
     local existing = db.query([[
-        SELECT * FROM pension_payment_items WHERE uuid = ? AND user_id = ? LIMIT 1
+        SELECT * FROM pension_payment_items
+        WHERE uuid = ? AND user_id = ? AND is_archived = false LIMIT 1
     ]], item_uuid, internal_user_id)
     if not existing or #existing == 0 then return nil end
 

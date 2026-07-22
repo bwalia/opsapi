@@ -78,6 +78,19 @@ function IncomeTypeQueries.active_keys()
     return set
 end
 
+-- Active keys that may be WRITTEN as my_incomes rows. Catalogue rows with
+-- allows_manual_entry = false (e.g. 'pension_payments' — a RELIEF whose
+-- amounts must never be summed as income) stay selectable in the profile
+-- questionnaire and visible in /types, but my-incomes create/type-change
+-- validates against THIS set.
+function IncomeTypeQueries.manual_entry_keys()
+    local rows = db.query(
+        "SELECT income_type_key FROM income_types WHERE is_active = true AND allows_manual_entry = true")
+    local set = {}
+    for _, r in ipairs(rows or {}) do set[r.income_type_key] = true end
+    return set
+end
+
 -- ── Admin CRUD (consumed by routes/tax-admin-income-types.lua) ───────────────
 
 -- params: { include_inactive? = "false" }. Each row carries usage_count.
