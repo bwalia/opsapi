@@ -30,21 +30,13 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
     utr_number  = "utr",
 }
 
--- Category contexts whose answers are scoped to a user_profile_entities row
--- (asked once PER entity, saved with entity_uuid), mapped to the
--- entity_type that context is allowed to attach to. Every other context —
--- NULL (classic /profile) or asked-once surfaces like 'rental_business' —
--- stores answers in the user-wide NULL scope. The /answers scope guard and
--- the contexted /schema endpoint key off this table, so a new per-entity
--- surface (e.g. a future vehicle or partnership drill-down) only needs its
--- context registered here. The entity_type value is what prevents
--- cross-type shadow rows (business answers saved against a property
--- entity, or a property's answers merged into a business schema).
-local PER_ENTITY_CONTEXTS = {
-    property = "property",                     -- rental hub → per-property pages
-    business = "business",                     -- self-employment hub → per-business pages
-    overseas_property = "overseas_property",   -- land & property abroad → per-holding pages
-}
+-- NOTE: the old PER_ENTITY_CONTEXTS map that hardcoded which contexts
+-- were per-entity is GONE. Scope routing is now database-driven via
+-- `profile_categories.answer_scope` + `profile_categories.entity_type`
+-- (see migration dynamic-answer-scope.lua). Admins define new form
+-- sections — SA100 income boxes, US 1040 sections, any future region —
+-- without a code deploy. See the /schema and /answers endpoints for
+-- the read/write paths.
 
 -- =========================================================================
 -- Helper Functions
@@ -711,17 +703,61 @@ return function(app)
         local user_id = getUserIdByUuid(user_uuid)
         local namespace_id = getNamespaceId(self)
 
-        -- Contexted schemas: ?context=rental_business|property returns ONLY
-        -- categories flagged with that context (profile_categories.context).
-        -- Without the param, only classic NULL-context categories are served
-        -- so the /profile questionnaire and its completion gate never see
-        -- hub/per-property sections. ?entity=<uuid> scopes the merged-in
-        -- answers to that user_profile_entities row (asked-once-PER-property
-        -- questions); the entity must belong to the caller.
+        -- Contexted schemas: ?context=rental_business|property|dividends
+        -- returns ONLY categories flagged with that context
+        -- (profile_categories.context). Without the param only classic
+        -- NULL-context categories are served, so the /profile
+        -- questionnaire and its completion gate never see hub /
+        -- per-property / SA100 sections.
+        --
+        -- Scope routing is DB-driven (see migration dynamic-answer-scope.lua):
+        --   answer_scope='user'   → one answer per user (classic + rental_business)
+        --   answer_scope='entity' → one answer per user per entity of `entity_type`
+        --   answer_scope='year'   → one answer per user per tax year
+        -- The `?entity=<uuid>` and `?tax_year=YYYY-YY` params carry the
+        -- extra scope key; missing / mismatched params return a 400 so
+        -- clients that skip a required param fail loud instead of silently
+        -- reading the wrong answer set.
         local schema_context = self.params.context
         if schema_context == "" then schema_context = nil end
         local entity_uuid = self.params.entity
         if entity_uuid == "" then entity_uuid = nil end
+        local tax_year = self.params.tax_year
+        if tax_year == "" then tax_year = nil end
+
+        -- Resolve the scope of this context from the DB. Convention: all
+        -- categories under one context share the same (answer_scope,
+        -- entity_type) — enforced by the admin category editor's UI.
+        -- If the context has no categories yet, the scope defaults to
+        -- 'user' (harmless — the schema will just return no rows).
+        local answer_scope = "user"
+        local required_entity_type = nil
+        if schema_context then
+            local ok_sc, sc_rows = pcall(db.query, [[
+                SELECT answer_scope, entity_type
+                FROM profile_categories
+                WHERE context = ? AND is_active = true AND is_archived = false
+                LIMIT 1
+            ]], schema_context)
+            if ok_sc and sc_rows and #sc_rows > 0 then
+                answer_scope = sc_rows[1].answer_scope or "user"
+                required_entity_type = sc_rows[1].entity_type
+                if required_entity_type == cjson.null or required_entity_type == "" then
+                    required_entity_type = nil
+                end
+            end
+        end
+
+        -- Validate required scope params. 400 (bad request) rather than
+        -- 404 so clients get a clear "you forgot the tax_year" message.
+        if answer_scope == "entity" and not entity_uuid then
+            return { status = 400, json = { error = "entity is required for entity-scoped context" } }
+        elseif answer_scope == "year" then
+            if not tax_year or not tax_year:match("^%d%d%d%d%-%d%d$") then
+                return { status = 400, json = { error = "tax_year is required in YYYY-YY format for year-scoped context" } }
+            end
+        end
+
         if entity_uuid then
             local ok_ent, ent_rows = pcall(db.query, [[
                 SELECT id, entity_type FROM user_profile_entities
@@ -734,8 +770,7 @@ return function(app)
             -- A per-entity context may only be served against an entity of
             -- its own type — otherwise ?context=business&entity=<property>
             -- would merge a property's answer rows into the business schema.
-            local required_type = schema_context and PER_ENTITY_CONTEXTS[schema_context]
-            if required_type and ent_rows[1].entity_type ~= required_type then
+            if required_entity_type and ent_rows[1].entity_type ~= required_entity_type then
                 return { status = 404, json = { error = "Entity not found" } }
             end
         end
@@ -763,9 +798,14 @@ return function(app)
         end
 
         -- Pre-load all user answers indexed by question_id (include drafts for
-        -- visibility/completion). Entity scoping keeps the map unambiguous:
-        -- classic answers are entity_uuid IS NULL; per-entity requests load
-        -- ONLY that entity's rows so rules evaluate against that property.
+        -- visibility/completion). Scoping keeps the map unambiguous:
+        --   classic         → entity_uuid IS NULL AND tax_year IS NULL
+        --   per-entity      → entity_uuid = ?                       (rules eval
+        --                                                              against
+        --                                                              THAT entity)
+        --   per-year        → tax_year = ? AND entity_uuid IS NULL  (rules eval
+        --                                                              against
+        --                                                              THAT year)
         local answer_map = {}
         if user_id then
             local ok_all_ans, all_ans
@@ -775,11 +815,17 @@ return function(app)
                     FROM user_profile_answers
                     WHERE user_id = ? AND entity_uuid = ?
                 ]], user_id, entity_uuid)
+            elseif tax_year then
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid IS NULL AND tax_year = ?
+                ]], user_id, tax_year)
             else
                 ok_all_ans, all_ans = pcall(db.query, [[
                     SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
                     FROM user_profile_answers
-                    WHERE user_id = ? AND entity_uuid IS NULL
+                    WHERE user_id = ? AND entity_uuid IS NULL AND tax_year IS NULL
                 ]], user_id)
             end
             if ok_all_ans and all_ans then
@@ -2979,12 +3025,22 @@ return function(app)
             return { status = 400, json = { error = "answers array is required" } }
         end
 
-        -- Optional entity scope for the whole batch: answers are stored
-        -- against that user_profile_entities row (asked-once-PER-property
-        -- questions). The entity must exist, belong to the caller, and not
-        -- be archived. NULL entity = classic questionnaire behaviour.
+        -- Scope for the whole batch — mirrors the /schema endpoint's three
+        -- modes. Every question in the batch must be a category with a
+        -- matching scope, or the individual write is rejected below:
+        --   entity_uuid → per-entity save   (batch's `entity_uuid` param)
+        --   tax_year    → per-year save     (batch's `tax_year`    param)
+        --   neither     → classic per-user save
         local entity_uuid = params.entity_uuid
         if entity_uuid == "" or entity_uuid == cjson.null then entity_uuid = nil end
+        local tax_year = params.tax_year
+        if tax_year == "" or tax_year == cjson.null then tax_year = nil end
+        if tax_year and not tax_year:match("^%d%d%d%d%-%d%d$") then
+            return { status = 400, json = { error = "tax_year must be YYYY-YY format" } }
+        end
+        if entity_uuid and tax_year then
+            return { status = 400, json = { error = "entity_uuid and tax_year are mutually exclusive scopes" } }
+        end
         local entity_type = nil
         if entity_uuid then
             local ok_ent, ent_rows = pcall(db.query, [[
@@ -3017,41 +3073,63 @@ return function(app)
             else
                 local ok_q, q_rows = pcall(db.query, [[
                     SELECT pq.id, pq.version, pq.category_id, pq.question_key,
-                           pc.context AS category_context
+                           pc.context AS category_context,
+                           pc.answer_scope AS category_answer_scope,
+                           pc.entity_type AS category_entity_type
                     FROM profile_questions pq
                     JOIN profile_categories pc ON pc.id = pq.category_id
                     WHERE pq.uuid = ? AND pq.is_active = true LIMIT 1
                 ]], ans.question_uuid)
                 local question = (ok_q and q_rows and q_rows[1]) or nil
 
-                -- Scope guard: the batch's entity scope must match the
-                -- question's category context — including the ENTITY TYPE,
-                -- so business questions can't be saved against a property
-                -- entity (or vice versa). Per-entity batches may only carry
-                -- questions whose context maps to the target entity's type;
-                -- classic batches must not carry per-entity questions.
-                -- Without this, answers land in a scope no surface renders
-                -- (shadow rows) — and an entity-scoped save of an identity
-                -- question would stamp the NINO/UTR lock without ever
-                -- writing the canonical value.
+                -- Scope guard: the batch's scope params (entity_uuid,
+                -- tax_year, or neither) must match the question's
+                -- category answer_scope. Without this, answers land in a
+                -- scope no surface renders (shadow rows) — and an
+                -- entity-scoped save of an identity question would stamp
+                -- the NINO/UTR lock without ever writing the canonical
+                -- value. Scope + entity_type come from profile_categories
+                -- so admins can change them via the admin UI without a
+                -- code deploy.
                 local q_ctx = nil
+                local q_scope = "user"
+                local q_entity_type = nil
                 local reject = nil
                 if not question then
                     reject = "Question not found: " .. ans.question_uuid
                 else
                     q_ctx = question.category_context
                     if q_ctx == cjson.null or q_ctx == "" then q_ctx = nil end
-                    local required_type = PER_ENTITY_CONTEXTS[q_ctx]
-                    if entity_uuid and not required_type then
-                        reject = "Question " .. ans.question_uuid
-                            .. " is not a per-entity question — save it without entity_uuid"
-                    elseif entity_uuid and required_type ~= entity_type then
-                        reject = "Question " .. ans.question_uuid
-                            .. " belongs to '" .. tostring(q_ctx)
-                            .. "' — it cannot be saved against a '" .. tostring(entity_type) .. "' entity"
-                    elseif not entity_uuid and required_type then
-                        reject = "Question " .. ans.question_uuid
-                            .. " is a per-entity question — entity_uuid is required"
+                    q_scope = question.category_answer_scope or "user"
+                    q_entity_type = question.category_entity_type
+                    if q_entity_type == cjson.null or q_entity_type == "" then
+                        q_entity_type = nil
+                    end
+
+                    if q_scope == "entity" then
+                        if not entity_uuid then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is per-entity — entity_uuid is required"
+                        elseif q_entity_type and q_entity_type ~= entity_type then
+                            reject = "Question " .. ans.question_uuid
+                                .. " belongs to a '" .. tostring(q_entity_type)
+                                .. "' category — it cannot be saved against a '"
+                                .. tostring(entity_type) .. "' entity"
+                        end
+                    elseif q_scope == "year" then
+                        if not tax_year then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is per-year — tax_year is required"
+                        end
+                    else
+                        -- q_scope == "user" (or unrecognised → treat as user)
+                        if entity_uuid then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is not per-entity — save it without entity_uuid"
+                        elseif tax_year then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is not per-year — save it without tax_year"
+                        end
                     end
                 end
 
@@ -3080,33 +3158,48 @@ return function(app)
                     end
 
                     -- Get existing answer for history (scoped to this batch's
-                    -- entity — NULL scope and per-entity scope are distinct rows)
+                    -- entity/year — the three scopes live as distinct rows
+                    -- under the three partial unique indexes).
                     local old_answer = nil
                     local ok_old, old_rows
                     if entity_uuid then
                         ok_old, old_rows = pcall(db.query, [[
-                            SELECT * FROM user_profile_answers WHERE user_id = ? AND question_id = ? AND entity_uuid = ? LIMIT 1
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ? AND entity_uuid = ? LIMIT 1
                         ]], user_id, question.id, entity_uuid)
+                    elseif tax_year then
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ?
+                              AND entity_uuid IS NULL AND tax_year = ? LIMIT 1
+                        ]], user_id, question.id, tax_year)
                     else
                         ok_old, old_rows = pcall(db.query, [[
-                            SELECT * FROM user_profile_answers WHERE user_id = ? AND question_id = ? AND entity_uuid IS NULL LIMIT 1
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ?
+                              AND entity_uuid IS NULL AND tax_year IS NULL LIMIT 1
                         ]], user_id, question.id)
                     end
                     if ok_old and old_rows and #old_rows > 0 then
                         old_answer = old_rows[1]
                     end
 
-                    -- The unique indexes are partial (see migration 725), so
-                    -- the conflict target must name the matching predicate.
+                    -- The unique indexes are partial (see migrations
+                    -- property-income-system + dynamic-answer-scope), so
+                    -- the conflict target must name the matching predicate
+                    -- exactly — Postgres won't infer the right partial
+                    -- index from the values alone.
                     local conflict_clause
                     if entity_uuid then
                         conflict_clause = "ON CONFLICT (user_id, question_id, entity_uuid) WHERE entity_uuid IS NOT NULL DO UPDATE SET"
+                    elseif tax_year then
+                        conflict_clause = "ON CONFLICT (user_id, question_id, tax_year) WHERE entity_uuid IS NULL AND tax_year IS NOT NULL DO UPDATE SET"
                     else
-                        conflict_clause = "ON CONFLICT (user_id, question_id) WHERE entity_uuid IS NULL DO UPDATE SET"
+                        conflict_clause = "ON CONFLICT (user_id, question_id) WHERE entity_uuid IS NULL AND tax_year IS NULL DO UPDATE SET"
                     end
                     local ok_upsert, upsert_err = pcall(db.query, [[
-                        INSERT INTO user_profile_answers (uuid, user_id, user_uuid, namespace_id, question_id, entity_uuid, question_version, answer_text, answer_number, answer_boolean, answer_date, answer_json, answer_file_url, is_draft, answered_at, updated_at)
-                        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                        INSERT INTO user_profile_answers (uuid, user_id, user_uuid, namespace_id, question_id, entity_uuid, tax_year, question_version, answer_text, answer_number, answer_boolean, answer_date, answer_json, answer_file_url, is_draft, answered_at, updated_at)
+                        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                         ]] .. conflict_clause .. [[
                             question_version = EXCLUDED.question_version,
                             answer_text = EXCLUDED.answer_text,
@@ -3124,6 +3217,7 @@ return function(app)
                         namespace_id or 0,
                         question.id,
                         entity_uuid or db.NULL,
+                        tax_year or db.NULL,
                         question.version or 1,
                         scrub(ans.answer_text),
                         scrub(ans.answer_number),
@@ -3147,13 +3241,14 @@ return function(app)
                         -- COALESCE(...) that preserves the original stamp.
                         -- Also emits an audit row for the "first time this
                         -- user wrote a locking answer" event.
-                        -- `not entity_uuid`: identity questions are classic-
-                        -- scope only (the scope guard above enforces it); the
-                        -- extra check keeps an entity-scoped write from ever
-                        -- stamping the lock without the canonical value even
-                        -- if an admin mis-files an identity question into a
-                        -- property-context category.
-                        if lock_field and not entity_uuid then
+                        -- `not entity_uuid and not tax_year`: identity
+                        -- questions are classic user-scope only (the scope
+                        -- guard above enforces it via q_scope). The extra
+                        -- check keeps an entity-scoped OR year-scoped write
+                        -- from ever stamping the lock without the canonical
+                        -- value even if an admin mis-files an identity
+                        -- question into a per-entity or per-year category.
+                        if lock_field and not entity_uuid and not tax_year then
                             IdentityLock.stampLock(user_uuid, namespace_id or 0, lock_field)
                             IdentityLock.emitAuditRow({
                                 user_id      = user_id,
