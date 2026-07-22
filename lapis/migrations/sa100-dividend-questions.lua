@@ -131,11 +131,18 @@ return {
             -- column stays as the string the frontend passes on
             -- /schema?context=dividends — it's the DISCOVERY key, not
             -- the scoping mechanism anymore.
+            -- namespace_id=0 (global) matches the pattern every other
+            -- seeded category uses. The /schema endpoint filters
+            -- `namespace_id = <user_ns> OR namespace_id = 0` and
+            -- excludes NULL rows, so a category without namespace_id
+            -- is invisible to every user regardless of tenant. Seeded
+            -- categories live in the global tenant.
             db.query([[
                 INSERT INTO profile_categories
-                    (uuid, name, slug, description, icon, display_order,
-                     is_active, context, answer_scope, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, 'year', NOW(), NOW())
+                    (uuid, namespace_id, name, slug, description, icon,
+                     display_order, is_active, context, answer_scope,
+                     created_at, updated_at)
+                VALUES (?, 0, ?, ?, ?, ?, ?, TRUE, ?, 'year', NOW(), NOW())
             ]],
                 MigrationUtils.generateUUID(),
                 "Dividends and interest",
@@ -150,29 +157,45 @@ return {
     end,
 
     -- =========================================================================
-    -- 1b. Self-healing: force `answer_scope='year'` on the dividends
-    --     category if it exists but isn't year-scoped.
+    -- 1b. Self-healing: force the invariants on any pre-existing
+    --     dividends row that shipped from an older revision of step [1].
     --
-    --     History: an early revision of step [1] inserted the row
-    --     WITHOUT the `answer_scope` column, so environments that ran
-    --     that revision have the row with the DEFAULT 'user' and
-    --     wouldn't see the SA100 boxes render (the /schema endpoint
-    --     would 400 because dividends is supposed to be year-scoped).
-    --     Because migrations don't re-run, the original step [1] can't
-    --     fix pre-existing rows — this step does, idempotently.
+    --     Two things earlier revisions of step [1] got wrong before
+    --     this migration file settled:
+    --       (a) answer_scope wasn't set on the INSERT, so the row got
+    --           the DEFAULT 'user' — /schema then 400s year-scoped
+    --           requests and the SA100 boxes never render.
+    --       (b) namespace_id wasn't set on the INSERT, so the row got
+    --           NULL — the /schema endpoint's tenant filter
+    --           (`namespace_id = <user_ns> OR namespace_id = 0`) has
+    --           no branch for NULL, so the category is invisible to
+    --           every user regardless of tenant.
     --
-    --     Safe to run every time: WHERE answer_scope != 'year' means
-    --     an admin who intentionally changed it back to 'user' via the
-    --     admin UI wouldn't be surprised — but that would break the
-    --     dividends page, and this migration exists precisely to
-    --     restore the invariant that the seeded row is year-scoped.
+    --     Migrations don't re-run once tracked in lapis_migrations, so
+    --     step [1] can't fix the pre-existing row. This step does,
+    --     idempotently — safe on repeat, and self-heals every env
+    --     without any manual DB work.
+    --
+    --     Question rows have the same NULL-namespace hazard even
+    --     though the /schema query doesn't filter questions by
+    --     namespace today (categories carry the tenant scope). Fixed
+    --     here too for defence — a future change that DOES filter
+    --     questions per-tenant would otherwise silently break.
     -- =========================================================================
     [2] = function()
         db.query([[
             UPDATE profile_categories
-            SET answer_scope = 'year', updated_at = NOW()
+            SET answer_scope = 'year',
+                namespace_id = COALESCE(namespace_id, 0),
+                updated_at = NOW()
             WHERE slug = 'dividends-and-interest'
-              AND answer_scope <> 'year'
+              AND (answer_scope <> 'year' OR namespace_id IS NULL)
+        ]])
+        db.query([[
+            UPDATE profile_questions
+            SET namespace_id = 0, updated_at = NOW()
+            WHERE question_key LIKE 'sa100_%'
+              AND namespace_id IS NULL
         ]])
     end,
 
@@ -199,14 +222,20 @@ return {
                 q.key
             )
             if #existing == 0 then
+                -- namespace_id=0 (global) — same rationale as the
+                -- category insert: the schema endpoint's tenant filter
+                -- doesn't accept NULL. Categories carry the tenant
+                -- scope today, but future changes that filter
+                -- questions per-tenant would silently break otherwise.
                 db.query([[
                     INSERT INTO profile_questions
-                        (uuid, category_id, question_key, label, help_text,
-                         question_type, is_required, is_multi_value,
-                         is_editable_by_user, display_order, config_json,
-                         is_active, is_archived, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, FALSE, FALSE, TRUE, ?, ?::jsonb,
-                            TRUE, FALSE, NOW(), NOW())
+                        (uuid, namespace_id, category_id, question_key,
+                         label, help_text, question_type, is_required,
+                         is_multi_value, is_editable_by_user,
+                         display_order, config_json, is_active,
+                         is_archived, created_at, updated_at)
+                    VALUES (?, 0, ?, ?, ?, ?, ?, FALSE, FALSE, TRUE, ?,
+                            ?::jsonb, TRUE, FALSE, NOW(), NOW())
                 ]],
                     MigrationUtils.generateUUID(),
                     category_id,
