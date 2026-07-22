@@ -1,0 +1,224 @@
+--[[
+    Form Section Routes — user surface of the generic sections/sub-forms
+    engine. One set of endpoints serves EVERY income type whose page is a
+    stack of admin-defined sections (repeating rows of description +
+    amount + configured checkboxes) — adding the next such screen needs
+    catalogue rows, not routes.
+
+    Endpoints (all auth-required):
+      GET    /api/v2/tax/form-sections?income_type=        active sections + sub-form config
+      GET    /api/v2/tax/form-items?income_type=&tax_year=&section=
+      POST   /api/v2/tax/form-items                        { income_type_key, section_key, tax_year, amount, description?, extra? }
+      PUT    /api/v2/tax/form-items/:uuid                  { amount?, description?, extra? }
+      DELETE /api/v2/tax/form-items/:uuid                  soft archive
+      GET    /api/v2/tax/form-summary?income_type=&tax_year=
+      GET    /api/v2/tax/form-card-summary                 all-years per-type totals (overview cards)
+
+    `extra` is the checkbox values object. It is validated against the
+    TARGET section's config: only configured keys persist (true-only,
+    false is absence), unknown keys are stripped, and rows whose section
+    an admin has retired have their checkboxes frozen. A row's income
+    type / section / tax year are immutable — delete + re-add to move.
+]]
+
+local cjson = require("cjson")
+local FormSectionQueries = require "queries.FormSectionQueries"
+local AuthMiddleware = require("middleware.auth")
+
+-- YYYY-YY (e.g. 2026-27) — same contract as my-incomes / tax-properties.
+local function valid_tax_year(s)
+    if type(s) ~= "string" then return false end
+    local y1, y2 = s:match("^(%d%d%d%d)%-(%d%d)$")
+    if not y1 or not y2 then return false end
+    return tonumber(y2) == (tonumber(y1) + 1) % 100
+end
+
+-- Parse JSON or form body — same helper as tax-properties.lua: cjson.null
+-- stripped at the boundary, body-file fallback for spooled bodies.
+local function parse_request_body()
+    ngx.req.read_body()
+    local content_type = ngx.var.content_type or ""
+    if content_type:find("application/json", 1, true) then
+        local ok, result = pcall(function()
+            local body = ngx.req.get_body_data()
+            if not body or body == "" then
+                local path = ngx.req.get_body_file()
+                if path then
+                    local f = io.open(path, "rb")
+                    if f then
+                        body = f:read("*a")
+                        f:close()
+                    end
+                end
+            end
+            if not body or body == "" then return {} end
+            return cjson.decode(body)
+        end)
+        if ok and type(result) == "table" then
+            for k, v in pairs(result) do
+                if v == cjson.null then result[k] = nil end
+            end
+            return result
+        end
+        return {}
+    end
+    local post_args = ngx.req.get_post_args()
+    if post_args and next(post_args) then return post_args end
+    return {}
+end
+
+local function merge_params(self)
+    local body_params = parse_request_body()
+    for k, v in pairs(body_params) do
+        if self.params[k] == nil then self.params[k] = v end
+    end
+end
+
+-- JSON bodies carry real booleans; form bodies carry strings ("on" is a
+-- bare HTML checkbox) — "false"/"0" are truthy in Lua, so normalise.
+local function to_bool(v)
+    return v == true or v == "true" or v == "1" or v == 1 or v == "on"
+end
+
+-- Build the stored extra_json from a submitted `extra` object and the
+-- TARGET section's checkbox config: configured keys only, true-only
+-- (false = absence). Returns nil (SQL NULL / clear) when nothing is true.
+-- A nil section (retired) freezes checkboxes: returns "SKIP".
+local function encode_extra(extra, section)
+    if not section then return "SKIP" end
+    if type(extra) ~= "table" then return nil end
+    local allowed = FormSectionQueries.checkbox_keys(section.config)
+    local out = {}
+    for key in pairs(allowed) do
+        if to_bool(extra[key]) then out[key] = true end
+    end
+    if not next(out) then return nil end
+    return cjson.encode(out)
+end
+
+local function validate_common(params, is_create)
+    if is_create or params.amount ~= nil then
+        local n = tonumber(params.amount)
+        if not n or n ~= n or n <= 0 then
+            return false, "amount is required and must be a positive number"
+        end
+        if n > FormSectionQueries.MAX_AMOUNT then
+            return false, "amount is too large"
+        end
+        params.amount = n
+    end
+    if params.description ~= nil then
+        -- Reject non-strings up front: a JSON number/object (or repeated
+        -- form key → Lua table) would otherwise reach SQL interpolation.
+        if type(params.description) ~= "string" then
+            return false, "description must be a string"
+        end
+        if #params.description > 500 then
+            return false, "description must be 500 characters or fewer"
+        end
+    end
+    if params.extra ~= nil and type(params.extra) ~= "table" then
+        return false, "extra must be an object of checkbox values"
+    end
+    return true
+end
+
+return function(app)
+    -- ── Section catalogue for one income type ──────────────────────────────
+    app:get("/api/v2/tax/form-sections", AuthMiddleware.requireAuth(function(self)
+        local income_type = self.params.income_type
+        if type(income_type) ~= "string" or income_type == "" then
+            return { json = { error = "income_type is required" }, status = 400 }
+        end
+        local rows = FormSectionQueries.sections_for_type(income_type)
+        return { json = { data = #rows > 0 and rows or cjson.empty_array }, status = 200 }
+    end))
+
+    -- ── Items ───────────────────────────────────────────────────────────────
+    app:get("/api/v2/tax/form-items", AuthMiddleware.requireAuth(function(self)
+        local result, err = FormSectionQueries.items(self.params, self.current_user)
+        if not result then
+            return { json = { error = err or "Failed to list entries" }, status = 400 }
+        end
+        if #result.data == 0 then result.data = cjson.empty_array end
+        return { json = result, status = 200 }
+    end))
+
+    app:post("/api/v2/tax/form-items", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+        if type(self.params.income_type_key) ~= "string" or type(self.params.section_key) ~= "string" then
+            return { json = { error = "income_type_key and section_key are required" }, status = 400 }
+        end
+        local section = FormSectionQueries.active_section(
+            self.params.income_type_key, self.params.section_key)
+        if not section then
+            return { json = { error = "section_key is not an active section of this income type" }, status = 400 }
+        end
+        if not valid_tax_year(self.params.tax_year) then
+            return { json = { error = "tax_year must be YYYY-YY (e.g. 2026-27)" }, status = 400 }
+        end
+        local ok, vmsg = validate_common(self.params, true)
+        if not ok then return { json = { error = vmsg }, status = 400 } end
+        self.params.extra_json = encode_extra(self.params.extra, section)
+        local row, err = FormSectionQueries.create_item(self.params, self.current_user)
+        if not row then return { json = { error = err or "Failed to save the entry" }, status = 400 } end
+        return { json = { data = row }, status = 201 }
+    end))
+
+    app:put("/api/v2/tax/form-items/:uuid", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+        local existing = FormSectionQueries.show_item(tostring(self.params.uuid), self.current_user)
+        if not existing then return { json = { error = "Entry not found" }, status = 404 } end
+        local ok, vmsg = validate_common(self.params, false)
+        if not ok then return { json = { error = vmsg }, status = 400 } end
+
+        local data = { amount = self.params.amount, description = self.params.description }
+        if self.params.extra ~= nil then
+            -- Checkbox edits validate against the row's OWN section; a
+            -- retired section freezes them (encode_extra → "SKIP").
+            local section = FormSectionQueries.active_section(
+                existing.income_type_key, existing.section_key)
+            local encoded = encode_extra(self.params.extra, section)
+            if encoded ~= "SKIP" then
+                -- nil means "all false" here, which must CLEAR the stored
+                -- value — pass "" so update_item writes NULL (its own nil
+                -- means "not provided").
+                data.extra_json = encoded or ""
+            end
+        end
+        local row, err = FormSectionQueries.update_item(tostring(self.params.uuid), data, self.current_user)
+        if not row then return { json = { error = err or "Entry not found" }, status = err and 400 or 404 } end
+        return { json = { data = row }, status = 200 }
+    end))
+
+    app:delete("/api/v2/tax/form-items/:uuid", AuthMiddleware.requireAuth(function(self)
+        local ok = FormSectionQueries.archive_item(tostring(self.params.uuid), self.current_user)
+        if not ok then return { json = { error = "Entry not found" }, status = 404 } end
+        return { json = { message = "Entry removed" }, status = 200 }
+    end))
+
+    -- ── Summaries (read-only, derived) ──────────────────────────────────────
+    app:get("/api/v2/tax/form-summary", AuthMiddleware.requireAuth(function(self)
+        local income_type = self.params.income_type
+        if type(income_type) ~= "string" or income_type == "" then
+            return { json = { error = "income_type is required" }, status = 400 }
+        end
+        if not valid_tax_year(self.params.tax_year) then
+            return { json = { error = "tax_year must be YYYY-YY (e.g. 2026-27)" }, status = 400 }
+        end
+        local result, err = FormSectionQueries.summary(income_type, self.params.tax_year, self.current_user)
+        if not result then
+            return { json = { error = err or "Failed to build summary" }, status = 400 }
+        end
+        if #result.sections == 0 then result.sections = cjson.empty_array end
+        return { json = { data = result }, status = 200 }
+    end))
+
+    app:get("/api/v2/tax/form-card-summary", AuthMiddleware.requireAuth(function(self)
+        local rows, err = FormSectionQueries.card_summary(self.current_user)
+        if not rows then
+            return { json = { error = err or "Failed to build summary" }, status = 400 }
+        end
+        return { json = { data = #rows > 0 and rows or cjson.empty_array }, status = 200 }
+    end))
+end
