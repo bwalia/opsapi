@@ -150,11 +150,38 @@ return {
     end,
 
     -- =========================================================================
-    -- 2. Seed the 7 SA100 questions under the category.
+    -- 1b. Self-healing: force `answer_scope='year'` on the dividends
+    --     category if it exists but isn't year-scoped.
+    --
+    --     History: an early revision of step [1] inserted the row
+    --     WITHOUT the `answer_scope` column, so environments that ran
+    --     that revision have the row with the DEFAULT 'user' and
+    --     wouldn't see the SA100 boxes render (the /schema endpoint
+    --     would 400 because dividends is supposed to be year-scoped).
+    --     Because migrations don't re-run, the original step [1] can't
+    --     fix pre-existing rows — this step does, idempotently.
+    --
+    --     Safe to run every time: WHERE answer_scope != 'year' means
+    --     an admin who intentionally changed it back to 'user' via the
+    --     admin UI wouldn't be surprised — but that would break the
+    --     dividends page, and this migration exists precisely to
+    --     restore the invariant that the seeded row is year-scoped.
+    -- =========================================================================
+    [2] = function()
+        db.query([[
+            UPDATE profile_categories
+            SET answer_scope = 'year', updated_at = NOW()
+            WHERE slug = 'dividends-and-interest'
+              AND answer_scope <> 'year'
+        ]])
+    end,
+
+    -- =========================================================================
+    -- 3. Seed the 7 SA100 questions under the category.
     --    Idempotent on question_key; skip if the admin has already
     --    edited (we only ever INSERT, never UPDATE seed rows).
     -- =========================================================================
-    [2] = function()
+    [3] = function()
         local cat = db.select(
             "id FROM profile_categories WHERE slug = ? LIMIT 1",
             "dividends-and-interest"

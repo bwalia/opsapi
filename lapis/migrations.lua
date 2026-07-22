@@ -1954,7 +1954,10 @@ local _migrations = {
     -- /admin/profile-builder/*. Must run AFTER 748* so the answer_scope
     -- column exists.
     ['750_seed_sa100_dividends_category'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 1),
-    ['751_seed_sa100_dividends_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 2),
+    -- Self-heals the answer_scope on the dividends category if an
+    -- older revision of step 750 inserted it without the column.
+    ['750a_force_sa100_dividends_year_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 2),
+    ['751_seed_sa100_dividends_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 3),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
