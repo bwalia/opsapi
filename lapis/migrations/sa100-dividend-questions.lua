@@ -42,6 +42,26 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local MigrationUtils = require "helper.migration-utils"
 
+-- Resolve the tax-copilot namespace ID from the DB. Falls back to 0
+-- (global — visible to every tenant) if the namespace hasn't been
+-- created yet, which keeps the seed working on unusual boot orders
+-- and on any project code that ships without the tax-copilot tenant.
+--
+-- We look up by SLUG (not id) because namespace IDs are auto-increment
+-- and differ per environment — hardcoding an ID would silently target
+-- the wrong tenant on a fresh install.
+local function taxCopilotNamespaceId()
+    local ok, rows = pcall(db.query, [[
+        SELECT id FROM namespaces
+        WHERE slug = 'tax-copilot' AND status = 'active'
+        LIMIT 1
+    ]])
+    if ok and rows and #rows > 0 then
+        return tonumber(rows[1].id)
+    end
+    return 0
+end
+
 -- The 7 SA100 dividend & interest boxes, in the order they appear on
 -- the paper form. Values live in `config_json` because that's how the
 -- profile builder carries arbitrary per-question metadata.
@@ -131,20 +151,29 @@ return {
             -- column stays as the string the frontend passes on
             -- /schema?context=dividends — it's the DISCOVERY key, not
             -- the scoping mechanism anymore.
-            -- namespace_id=0 (global) matches the pattern every other
-            -- seeded category uses. The /schema endpoint filters
-            -- `namespace_id = <user_ns> OR namespace_id = 0` and
-            -- excludes NULL rows, so a category without namespace_id
-            -- is invisible to every user regardless of tenant. Seeded
-            -- categories live in the global tenant.
+            -- Tenant-scoped to the tax-copilot namespace. Rationale:
+            -- SA100 is UK-specific — pinning the seed to the tax-copilot
+            -- namespace means a future US 1040 tenant (or any other
+            -- regional tenant) can have its OWN dividends category
+            -- with region-specific boxes, without either side leaking
+            -- into the other. The /schema endpoint filter is
+            -- `namespace_id = <user_ns> OR namespace_id = 0` — so
+            -- rows with the tax-copilot namespace show up for
+            -- tax-copilot users only, exactly what we want.
+            --
+            -- Fallback to 0 (global) if the tax-copilot namespace
+            -- doesn't exist yet keeps the seed from crashing on
+            -- unusual boot orders — the /schema filter accepts 0 for
+            -- every tenant, so the boxes still render.
             db.query([[
                 INSERT INTO profile_categories
                     (uuid, namespace_id, name, slug, description, icon,
                      display_order, is_active, context, answer_scope,
                      created_at, updated_at)
-                VALUES (?, 0, ?, ?, ?, ?, ?, TRUE, ?, 'year', NOW(), NOW())
+                VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, ?, 'year', NOW(), NOW())
             ]],
                 MigrationUtils.generateUUID(),
+                taxCopilotNamespaceId(),
                 "Dividends and interest",
                 slug,
                 "SA100 income section: dividends and interest from UK banks and building societies. One set of answers per tax year.",
@@ -183,20 +212,30 @@ return {
     --     questions per-tenant would otherwise silently break.
     -- =========================================================================
     [2] = function()
+        local ns_id = taxCopilotNamespaceId()
+        -- Force the target invariants:
+        --   1. answer_scope='year' (SA100 boxes are per-year)
+        --   2. namespace_id=<tax-copilot> (was 0/NULL on earlier
+        --      revisions — tenant-scope the seed to tax-copilot so
+        --      future US/AU/CA tenants can have their own dividend
+        --      catalogues without collision)
+        -- Runs whenever the target row is off-invariant, so
+        -- environments that ran either earlier revision self-heal.
         db.query([[
             UPDATE profile_categories
             SET answer_scope = 'year',
-                namespace_id = COALESCE(namespace_id, 0),
+                namespace_id = ?,
                 updated_at = NOW()
             WHERE slug = 'dividends-and-interest'
-              AND (answer_scope <> 'year' OR namespace_id IS NULL)
-        ]])
+              AND (answer_scope <> 'year'
+                   OR namespace_id IS DISTINCT FROM ?)
+        ]], ns_id, ns_id)
         db.query([[
             UPDATE profile_questions
-            SET namespace_id = 0, updated_at = NOW()
+            SET namespace_id = ?, updated_at = NOW()
             WHERE question_key LIKE 'sa100_%'
-              AND namespace_id IS NULL
-        ]])
+              AND namespace_id IS DISTINCT FROM ?
+        ]], ns_id, ns_id)
     end,
 
     -- =========================================================================
@@ -222,11 +261,10 @@ return {
                 q.key
             )
             if #existing == 0 then
-                -- namespace_id=0 (global) — same rationale as the
-                -- category insert: the schema endpoint's tenant filter
-                -- doesn't accept NULL. Categories carry the tenant
-                -- scope today, but future changes that filter
-                -- questions per-tenant would silently break otherwise.
+                -- Questions get the same tenant scope as the category
+                -- (tax-copilot). Categories carry the tenant filter
+                -- today, but a future change that filters questions
+                -- per-tenant would silently break otherwise.
                 db.query([[
                     INSERT INTO profile_questions
                         (uuid, namespace_id, category_id, question_key,
@@ -234,10 +272,11 @@ return {
                          is_multi_value, is_editable_by_user,
                          display_order, config_json, is_active,
                          is_archived, created_at, updated_at)
-                    VALUES (?, 0, ?, ?, ?, ?, ?, FALSE, FALSE, TRUE, ?,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, FALSE, TRUE, ?,
                             ?::jsonb, TRUE, FALSE, NOW(), NOW())
                 ]],
                     MigrationUtils.generateUUID(),
+                    taxCopilotNamespaceId(),
                     category_id,
                     q.key,
                     q.label,
