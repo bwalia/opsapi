@@ -519,6 +519,9 @@ load_if("tax_copilot", "routes.tax-businesses")
 -- Overseas property hub ("Land and property abroad", SA106): same engine as
 -- tax-properties with entity_type='overseas_property' + overseas catalogue.
 load_if("tax_copilot", "routes.tax-overseas-properties")
+-- Pension payments ("Relief: Pension payments", SA100 TR4): section
+-- catalogue + payment rows straight off the user — no entity layer.
+load_if("tax_copilot", "routes.tax-pension-payments")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
 load_if("tax_copilot", "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")

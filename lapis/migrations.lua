@@ -176,6 +176,10 @@ local self_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- schedule split, plus the overseas_property income type + question section
 local overseas_property_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.overseas-property-system") or {}
 
+-- Pension Payments (tax_copilot feature) — "Relief: Pension payments"
+-- (SA100 TR4): section catalogue + payment rows, no per-entity drill-down
+local pension_payments_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-payments-system") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1907,6 +1911,18 @@ local _migrations = {
     ['738_seed_overseas_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 2),
     ['739_seed_overseas_income_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 3),
     ['740_seed_overseas_section'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 4),
+
+    -- ─────────────────────────────────────────────────────────────────────
+    -- PENSION PAYMENTS — "Relief: Pension payments" (SA100 TR4). 744-745
+    -- add the section catalogue + seed; 746 the payment rows; 747 the
+    -- income type. (Prefixes 741-743 are shared with unrelated invoicing
+    -- keys — full key strings differ, so ordering is unaffected; these
+    -- start at 744 purely for readability.)
+    -- ─────────────────────────────────────────────────────────────────────
+    ['744_create_pension_payment_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 1),
+    ['745_seed_pension_payment_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 2),
+    ['746_create_pension_payment_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 3),
+    ['747_seed_pension_payments_income_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 4),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
