@@ -89,26 +89,108 @@ local function requireAdmin(self)
     return nil, "forbidden"
 end
 
+-- Membership-gated namespace resolution for the profile-builder surface.
+--
+-- Previously trusted `X-Namespace-Id` unconditionally: a logged-in user of
+-- tenant A could send `X-Namespace-Id: <tenant B>` and read/write tenant B's
+-- profile-builder data, because none of these routes wrap themselves in
+-- NamespaceMiddleware.requireNamespace (which DOES check membership).
+--
+-- Now:
+--   1. Header present + user is an active member of that ns → allow.
+--   2. Header present + user is platform admin (administrative/tax_admin)
+--      → allow (mirrors NamespaceMiddleware's platform-admin bypass at
+--      middleware/namespace.lua:116-131 so cross-tenant support flows work).
+--   3. Header present + user is NOT a member and NOT a platform admin
+--      → return nil, "forbidden_namespace". Caller MUST 403 rather than
+--      silently falling back to the user's default (silent fallback would
+--      let attackers probe tenant existence without a signal).
+--   4. Header absent / invalid → user's default_namespace_id, but only if
+--      they still have an active membership in it (kicked/suspended users
+--      whose settings pointer is stale must not still get access).
+--   5. Nothing resolves → 0 (matches legacy behavior for global reads).
+--
+-- Returns (namespace_id, err). err is nil on success. Call sites that want
+-- to enforce the deny should use denyNamespace(self) when err is truthy.
+-- pcall-wrapped query — the ONLY primitive this helper uses so a DB blip
+-- (transient connection error, schema drift, permissions) never bubbles
+-- up as a bare-exception 500 out of a namespace-resolution path that is
+-- called from every profile-builder read/write. On failure we log and
+-- return nil so the caller falls through to the safe-default branch.
+local function safe_query(sql, ...)
+    local ok, rows = pcall(db.query, sql, ...)
+    if not ok then
+        ngx.log(ngx.ERR, "[ProfileBuilder] safe_query failed: ", tostring(rows), " sql=", sql)
+        return nil
+    end
+    return rows
+end
+
 local function getNamespaceId(self)
+    local user = self.current_user
+    if not user then return 0 end
+    local user_uuid = user.uuid or user.id
+
+    local urows = safe_query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+    if not urows or #urows == 0 then return 0 end
+    local user_id = urows[1].id
+
+    -- Platform-admin bypass, same roles NamespaceMiddleware honors.
+    local admin_rows = safe_query([[
+        SELECT 1 FROM user__roles ur
+        JOIN roles r ON ur.role_id = r.id
+        WHERE ur.user_id = ?
+          AND r.role_name IN ('administrative','tax_admin')
+        LIMIT 1
+    ]], user_id)
+    local is_platform_admin = admin_rows and #admin_rows > 0
+
     local ns_header = ngx.req.get_headers()["x-namespace-id"]
     if ns_header and ns_header ~= "" then
         local n = tonumber(ns_header)
-        if n then return n end
-    end
-    local user = self.current_user
-    if user then
-        local user_uuid = user.uuid or user.id
-        -- Try user_namespace_settings first (correct table)
-        local ok, rows = pcall(db.query, [[
-            SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = (
-                SELECT id FROM users WHERE uuid = ? LIMIT 1
-            ) LIMIT 1
-        ]], user_uuid)
-        if ok and rows and #rows > 0 and rows[1].default_namespace_id then
-            return tonumber(rows[1].default_namespace_id)
+        if n then
+            if is_platform_admin then return n end
+            local m = safe_query([[
+                SELECT 1 FROM namespace_members
+                WHERE user_id = ? AND namespace_id = ? AND status = 'active'
+                LIMIT 1
+            ]], user_id, n)
+            if m and #m > 0 then
+                return n
+            end
+            return nil, "forbidden_namespace"
         end
     end
-    return 0 -- Default namespace
+
+    -- Default from user_namespace_settings, but only when the pointer still
+    -- corresponds to an active membership (JOIN guards against stale settings).
+    local rows = safe_query([[
+        SELECT uns.default_namespace_id
+        FROM user_namespace_settings uns
+        JOIN namespace_members nm
+          ON nm.user_id = uns.user_id
+         AND nm.namespace_id = uns.default_namespace_id
+         AND nm.status = 'active'
+        WHERE uns.user_id = ?
+        LIMIT 1
+    ]], user_id)
+    if rows and #rows > 0 and rows[1].default_namespace_id then
+        return tonumber(rows[1].default_namespace_id)
+    end
+    return 0
+end
+
+-- Standard 403 response used when getNamespaceId returns (nil, err).
+-- Kept identical shape to make the guard at every call site a one-liner.
+local function denyNamespace(self)
+    self.res.status = 403
+    return {
+        status = 403,
+        json = {
+            error = "forbidden_namespace",
+            message = "You are not a member of the requested namespace",
+        }
+    }
 end
 
 -- Resolve a user UUID to internal integer ID (cached per request via ngx.ctx)
@@ -701,7 +783,8 @@ return function(app)
 
         local user_uuid = user.uuid or user.id
         local user_id = getUserIdByUuid(user_uuid)
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Contexted schemas: ?context=rental_business|property|dividends
         -- returns ONLY categories flagged with that context
@@ -1154,7 +1237,8 @@ return function(app)
         if not user_id then
             return { status = 401, json = { error = "User not found" } }
         end
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Build the same namespace filter the schema endpoint uses so
         -- visibility is computed against EXACTLY the questions the user
@@ -1560,7 +1644,8 @@ return function(app)
             return { status = 404, json = { error = "User not found" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Include global categories (namespace_id = 0) and user's namespace categories
         local ns_filter = ""
@@ -1800,7 +1885,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local include_archived = self.params.include_archived == "true"
         local parent_id = self.params.parent_id
 
@@ -1902,7 +1988,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local admin_uuid = admin.uuid or admin.id
         local admin_id = resolveUserId(admin_uuid)
 
@@ -2298,7 +2385,21 @@ return function(app)
         end
         local category = cat_rows[1]
 
-        local namespace_id = category.namespace_id or getNamespaceId(self)
+        -- Prefer the category's own tenant (safer — inherit from the target
+        -- row we've already loaded). Only fall back to the caller's namespace
+        -- when the category is genuinely global (namespace_id NULL/0). Use
+        -- an explicit two-step check because Lua's `or` truncates a
+        -- multi-return to its first value, which would silently discard the
+        -- `forbidden_namespace` error signal from getNamespaceId and let a
+        -- non-member land writes on the target tenant.
+        local namespace_id
+        if category.namespace_id and category.namespace_id ~= 0 then
+            namespace_id = category.namespace_id
+        else
+            local caller_ns, ns_err = getNamespaceId(self)
+            if ns_err then return denyNamespace(self) end
+            namespace_id = caller_ns
+        end
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
 
@@ -3054,7 +3155,8 @@ return function(app)
             entity_type = ent_rows[1].entity_type
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local saved = 0
         local errors = {}
         local affected_category_ids = {}
@@ -3469,7 +3571,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local where_clause = "is_active = true"
         local vals = {}
         if namespace_id and namespace_id > 0 then
@@ -3503,7 +3606,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
 
@@ -3864,7 +3968,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local where_clause = "is_active = true"
         local vals = {}
         if namespace_id and namespace_id > 0 then
@@ -3898,7 +4003,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         local ok, result = pcall(db.query, [[
             INSERT INTO profile_lookup_tables (uuid, namespace_id, name, slug, description, is_active, created_at, updated_at)
@@ -4087,7 +4193,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local where_clause = "is_active = true"
         local vals = {}
         if namespace_id and namespace_id > 0 then
@@ -4121,7 +4228,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local admin_uuid = admin.uuid or admin.id
 
         local ok, result = pcall(db.query, [[
@@ -4455,7 +4563,8 @@ return function(app)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Build WHERE clause
         local where_parts = { "1=1" }
@@ -4718,7 +4827,8 @@ return function(app)
             table.insert(where_vals, self.params.to_date)
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         if namespace_id and namespace_id > 0 then
             table.insert(where_parts, "(pal.namespace_id = ? OR pal.namespace_id = 0)")
             table.insert(where_vals, namespace_id)

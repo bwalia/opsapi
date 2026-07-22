@@ -97,6 +97,20 @@ return function(app)
         POST = function(self)
             local params = self.params
 
+            -- Tenant hint from the browser: NEXT_PUBLIC_PROJECT_CODE is baked
+            -- into the frontend build per env and rides on every auth call as
+            -- X-Project-Code. Preferred over the pod's PROJECT_CODE env var
+            -- because it's request-scoped and survives the two overlapping
+            -- opsapi releases the int cluster runs (which can silently drift
+            -- on their env-var config). Passed down into UserQueries.create
+            -- AND NamespaceAssignment so both resolve the same tenant.
+            local hdrs = self.req.headers or {}
+            local project_code = hdrs["x-project-code"] or hdrs["X-Project-Code"]
+            if project_code then
+                project_code = tostring(project_code):gsub("^%s+", ""):gsub("%s+$", "")
+                if project_code == "" then project_code = nil end
+            end
+
             -- Accept common registration roles; default to "member" if not provided
             local allowed_roles = {
                 member = true, buyer = true, seller = true,
@@ -185,11 +199,70 @@ return function(app)
                     user_create_params[k] = v
                 end
             end
-            local user = UserQueries.create(user_create_params)
-            user.password = nil
+            -- Pass project_code so UserQueries.create's internal namespace
+            -- resolver uses the same value as NamespaceAssignment below —
+            -- otherwise the two paths could pick different tenants on a
+            -- pod whose PROJECT_CODE env differs from the request header.
+            user_create_params.project_code = project_code
 
-            -- Auto-assign to project namespace (member role + default namespace)
-            NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
+            -- Atomic: user INSERT + namespace assignment run in one transaction
+            -- so a failed assignment rolls back the user row. Without this
+            -- wrap, an assignment failure leaves an orphan `users` row that
+            -- (a) permanently blocks retry (findByEmail returns AUTH_EMAIL_TAKEN)
+            -- and (b) is invisible in the failure envelope. Assignment throws
+            -- (via `error(...)`) rather than returning `(nil, reason)` so the
+            -- transaction rolls back — Lapis' db.transaction commits on
+            -- normal return, aborts on any raised error.
+            local user, ns_id, ns_reason
+            local tx_ok, tx_err = pcall(function()
+                db.query("BEGIN")
+                user = UserQueries.create(user_create_params)
+                user.password = nil
+                local id, reason = NamespaceAssignment.assignUserToProjectNamespace(
+                    user.id, user.uuid, project_code
+                )
+                if not id then
+                    ns_reason = reason
+                    error({ kind = "assignment_failed", reason = reason })
+                end
+                ns_id = id
+                db.query("COMMIT")
+            end)
+            if not tx_ok then
+                pcall(db.query, "ROLLBACK")
+                -- tx_err is either the structured table we raised on
+                -- assignment failure, or a raw string from an unexpected
+                -- exception (validation, DB constraint, etc).
+                local kind = type(tx_err) == "table" and tx_err.kind or "internal_error"
+                local reason = type(tx_err) == "table" and tx_err.reason or tostring(tx_err)
+                ngx.log(ngx.ERR, "[Register] Transaction rolled back for ",
+                    tostring(params.email), " kind=", kind, " reason=", reason)
+
+                if kind == "assignment_failed"
+                   and reason
+                   and not reason:find("^internal_error:") then
+                    -- Genuinely client-actionable: they gave us a project_code
+                    -- that doesn't exist, or omitted it AND the pod has no
+                    -- PROJECT_CODE env. Public 400 shape carries the reason
+                    -- code but NOT the raw provided value (that becomes an
+                    -- enumeration oracle for valid project_codes).
+                    return Errors.response(self, "VALIDATION_400", {
+                        context = {
+                            field = "project_code",
+                            reason = "namespace_unresolvable",
+                            detail = reason,
+                        },
+                    })
+                end
+                -- Everything else — internal_error from pcall on a DB fault,
+                -- validation exception, constraint violation — is a server
+                -- problem. Raw pcall text (may contain Postgres schema detail,
+                -- stack fragments, bcrypt errors) is logged, NOT surfaced to
+                -- the client.
+                return Errors.response(self, "SYSTEM_500", {
+                    cause = "user_registration_failed",
+                })
+            end
 
             -- Persist the validated profile key onto tax_user_profiles.
             -- Runs after assignUserToNamespace so the profile row's
