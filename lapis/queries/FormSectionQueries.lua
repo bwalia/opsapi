@@ -422,20 +422,24 @@ end
 
 -- All-years per-type totals for the /my-income overview cards, restricted
 -- to rows whose section is still active (matching summary()'s rule).
+-- Starts from the SECTIONS side so every sectioned type appears even with
+-- zero rows — the card needs to know "this type uses the engine" to show
+-- the right call-to-action before anything is recorded.
 function FormSectionQueries.card_summary(user)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
     local rows = db.query([[
-        SELECT i.income_type_key,
+        SELECT s.income_type_key,
                COALESCE(SUM(i.amount), 0) AS total,
-               COUNT(*)                   AS row_count
-        FROM tax_form_items i
-        JOIN tax_form_sections s
-          ON s.income_type_key = i.income_type_key
-         AND s.section_key = i.section_key
-         AND s.is_active = true
-        WHERE i.user_id = ? AND i.is_archived = false
-        GROUP BY i.income_type_key
+               COUNT(i.id)                AS row_count
+        FROM tax_form_sections s
+        LEFT JOIN tax_form_items i
+          ON i.income_type_key = s.income_type_key
+         AND i.section_key = s.section_key
+         AND i.user_id = ?
+         AND i.is_archived = false
+        WHERE s.is_active = true
+        GROUP BY s.income_type_key
     ]], internal_user_id) or {}
     local out = {}
     for _, r in ipairs(rows) do
