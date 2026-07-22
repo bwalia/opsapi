@@ -66,23 +66,33 @@ function FormSectionQueries.decode_config(config_json)
     return config
 end
 
--- Set of checkbox keys a section's config defines.
+-- Set of checkbox keys a section's config defines. checkboxes may be the
+-- cjson.empty_array sentinel (lightuserdata, set by present_section for
+-- clean JSON) — ipairs would error on it, so type-guard first.
 function FormSectionQueries.checkbox_keys(config)
     local set = {}
-    for _, c in ipairs(config.checkboxes or {}) do
+    local boxes = config and config.checkboxes
+    if type(boxes) ~= "table" then return set end
+    for _, c in ipairs(boxes) do
         if type(c) == "table" and type(c.key) == "string" then set[c.key] = true end
     end
     return set
 end
 
 local function present_section(r)
+    local config = FormSectionQueries.decode_config(r.config_json)
+    -- An EMPTY decoded array re-encodes as {} (object) through cjson,
+    -- which crashes frontend .map()/for..of consumers — substitute the
+    -- empty-array sentinel so the wire always carries "checkboxes":[].
+    -- (checkbox_keys type-guards against the sentinel.)
+    if #config.checkboxes == 0 then config.checkboxes = cjson.empty_array end
     return {
         key = r.section_key,
         income_type_key = r.income_type_key,
         label = r.label,
         description = r.description,
         hmrc_mapping = r.hmrc_mapping,
-        config = FormSectionQueries.decode_config(r.config_json),
+        config = config,
         display_order = r.display_order,
         is_active = r.is_active == true,
         uuid = r.uuid,
