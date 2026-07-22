@@ -97,6 +97,20 @@ return function(app)
         POST = function(self)
             local params = self.params
 
+            -- Tenant hint from the browser: NEXT_PUBLIC_PROJECT_CODE is baked
+            -- into the frontend build per env and rides on every auth call as
+            -- X-Project-Code. Preferred over the pod's PROJECT_CODE env var
+            -- because it's request-scoped and survives the two overlapping
+            -- opsapi releases the int cluster runs (which can silently drift
+            -- on their env-var config). Passed down into UserQueries.create
+            -- AND NamespaceAssignment so both resolve the same tenant.
+            local hdrs = self.req.headers or {}
+            local project_code = hdrs["x-project-code"] or hdrs["X-Project-Code"]
+            if project_code then
+                project_code = tostring(project_code):gsub("^%s+", ""):gsub("%s+$", "")
+                if project_code == "" then project_code = nil end
+            end
+
             -- Accept common registration roles; default to "member" if not provided
             local allowed_roles = {
                 member = true, buyer = true, seller = true,
@@ -185,11 +199,34 @@ return function(app)
                     user_create_params[k] = v
                 end
             end
+            -- Pass project_code so UserQueries.create's internal namespace
+            -- resolver uses the same value as NamespaceAssignment below —
+            -- otherwise the two paths could pick different tenants on a
+            -- pod whose PROJECT_CODE env differs from the request header.
+            user_create_params.project_code = project_code
             local user = UserQueries.create(user_create_params)
             user.password = nil
 
-            -- Auto-assign to project namespace (member role + default namespace)
-            NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
+            -- Auto-assign to project namespace (member role + default namespace).
+            -- Hard-fail 400 if unresolvable: the previous silent fallback into
+            -- slug='system' was exactly what mis-routed self-registered users
+            -- on int.
+            local ns_id, ns_reason = NamespaceAssignment.assignUserToProjectNamespace(
+                user.id, user.uuid, project_code
+            )
+            if not ns_id then
+                ngx.log(ngx.ERR, "[Register] Namespace resolution failed for ",
+                    tostring(user.uuid), " project_code=", tostring(project_code),
+                    " reason=", tostring(ns_reason))
+                return Errors.response(self, "VALIDATION_400", {
+                    context = {
+                        field = "project_code",
+                        reason = "namespace_unresolvable",
+                        provided = project_code,
+                        detail = ns_reason,
+                    },
+                })
+            end
 
             -- Persist the validated profile key onto tax_user_profiles.
             -- Runs after assignUserToNamespace so the profile row's

@@ -16,10 +16,16 @@ function UserQueries.create(params)
     local role = params.role
     local namespace_id = params.namespace_id  -- Optional: specific namespace to add user to
     local namespace_role = params.namespace_role  -- Optional: role within namespace
+    -- Per-request tenant hint (from X-Project-Code header at register.lua).
+    -- When present, drives the same namespace lookup NamespaceAssignment
+    -- uses, keeping the two paths in agreement on which tenant the user
+    -- gets seeded into.
+    local override_project_code = params.project_code
     -- Remove fields that are not columns in the users table
     userData.role = nil
     userData.namespace_id = nil
     userData.namespace_role = nil
+    userData.project_code = nil
     userData.created_by = nil  -- Not a column in users table
     if userData.uuid == nil then
         userData.uuid = Global.generateUUID()
@@ -40,31 +46,36 @@ function UserQueries.create(params)
     -- Add global role (legacy system)
     UserRolesQueries.addRole(user.id, role)
 
-    -- Auto-add user to a namespace
+    -- Auto-add user to a namespace.
+    --
+    -- Resolution order:
+    --   1. Explicit `params.namespace_id` (admin user-create; server-side
+    --      seeders). Always wins — the caller already knows the tenant.
+    --   2. Per-request `params.project_code` (from X-Project-Code header on
+    --      register.lua). Matches on `namespaces.project_code` — the SAME
+    --      column NamespaceAssignment uses, so both writes hit one tenant.
+    --   3. Pod-level `PROJECT_CODE` env var. Legacy fallback for server-side
+    --      user creation that doesn't ride HTTP (CLI, background jobs).
+    --
+    -- No `slug='system'` fallback. No "first active namespace" fallback.
+    -- If none of the above resolves, we leave `target_namespace_id` nil
+    -- and skip the membership INSERT entirely — the caller (register.lua)
+    -- performs a second, authoritative resolution via NamespaceAssignment
+    -- and returns HTTP 400 when that also fails. This turns the previous
+    -- silent mis-routing into a loud failure.
     local target_namespace_id = namespace_id
     if not target_namespace_id then
-        -- Find the default namespace:
-        -- 1. By PROJECT_CODE (matches the deployment's namespace)
-        -- 2. By well-known slug "system" (legacy fallback)
-        -- 3. First active namespace (last resort)
-        local project_code = os.getenv("PROJECT_CODE")
+        local project_code = override_project_code
+        if not project_code or project_code == "" then
+            project_code = os.getenv("PROJECT_CODE")
+        end
         if project_code and project_code ~= "" and project_code ~= "all" then
-            local project_slug = project_code:gsub("_", "-")
-            local project_ns = db.select("id FROM namespaces WHERE slug = ? AND status = 'active'", project_slug)
+            local project_ns = db.select(
+                "id FROM namespaces WHERE project_code = ? AND status = 'active' ORDER BY id ASC LIMIT 1",
+                project_code
+            )
             if project_ns and #project_ns > 0 then
                 target_namespace_id = project_ns[1].id
-            end
-        end
-        if not target_namespace_id then
-            local system_ns = db.select("id FROM namespaces WHERE slug = 'system' AND status = 'active'")
-            if system_ns and #system_ns > 0 then
-                target_namespace_id = system_ns[1].id
-            end
-        end
-        if not target_namespace_id then
-            local any_ns = db.select("id FROM namespaces WHERE status = 'active' ORDER BY id ASC LIMIT 1")
-            if any_ns and #any_ns > 0 then
-                target_namespace_id = any_ns[1].id
             end
         end
     end
