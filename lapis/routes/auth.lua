@@ -686,11 +686,22 @@ return function(app)
 
         local redirect_from = self.params.from or "/"
         local frontend_url = self.params.frontend_url
+        -- Tenant hint (`NEXT_PUBLIC_PROJECT_CODE` on the browser side).
+        -- Header can't survive Google's redirect back, so the frontend
+        -- passes it as a query param on the initial /auth/google request
+        -- and we ride it inside the OAuth `state` back to the callback.
+        local project_code = self.params.project_code
 
-        -- Encode state as JSON if frontend_url is provided, otherwise plain string for backward compatibility
+        -- Encode state as JSON if any structured field is set; keep the
+        -- plain-string legacy shape only when NOTHING extra needs to
+        -- survive the round-trip.
         local state
-        if frontend_url then
-            state = cJson.encode({ from = redirect_from, frontend_url = frontend_url })
+        if frontend_url or project_code then
+            state = cJson.encode({
+                from = redirect_from,
+                frontend_url = frontend_url,
+                project_code = project_code,
+            })
         else
             state = redirect_from
         end
@@ -713,10 +724,12 @@ return function(app)
         -- Decode state: may be JSON (new format) or plain string (legacy)
         local redirect_from = "/"
         local state_frontend_url = nil
+        local state_project_code = nil
         local ok_state, state_data = pcall(cJson.decode, raw_state)
         if ok_state and type(state_data) == "table" then
             redirect_from = state_data.from or "/"
             state_frontend_url = state_data.frontend_url
+            state_project_code = state_data.project_code
         else
             redirect_from = raw_state
         end
@@ -831,8 +844,21 @@ return function(app)
             -- frontend's billing / settings pages 4xx with "Namespace not
             -- found". Only runs on first-time sign-up — returning Google
             -- users hit the early `if not user` branch and skip this.
+            --
+            -- `state_project_code` came from the initial /auth/google request
+            -- (browser passed NEXT_PUBLIC_PROJECT_CODE as ?project_code=),
+            -- rode inside the OAuth `state` back here, and pins the tenant
+            -- the user actually signed up under. If it's missing we fall
+            -- through to the pod's PROJECT_CODE env var inside the helper.
             if user then
-                NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
+                local ns_id, ns_reason = NamespaceAssignment.assignUserToProjectNamespace(
+                    user.id, user.uuid, state_project_code
+                )
+                if not ns_id then
+                    ngx.log(ngx.ERR, "[OAuth/Google/callback] Namespace resolution failed for ",
+                        tostring(user.uuid), " project_code=", tostring(state_project_code),
+                        " reason=", tostring(ns_reason))
+                end
             end
         end
 
@@ -1115,7 +1141,25 @@ return function(app)
                 -- must be added to the project namespace and given a default,
                 -- or the frontend's billing / settings pages 4xx with
                 -- "Namespace not found". Only on first-time sign-up.
-                NamespaceAssignment.assignUserToProjectNamespace(user.id, user.uuid)
+                --
+                -- Direct POST (no redirect round-trip) so the browser CAN
+                -- send X-Project-Code and we prefer it. Falls back to the
+                -- pod's PROJECT_CODE env inside the helper if the header is
+                -- absent (older frontend still works).
+                local hdrs = self.req.headers or {}
+                local pc = hdrs["x-project-code"] or hdrs["X-Project-Code"]
+                if pc then
+                    pc = tostring(pc):gsub("^%s+", ""):gsub("%s+$", "")
+                    if pc == "" then pc = nil end
+                end
+                local ns_id, ns_reason = NamespaceAssignment.assignUserToProjectNamespace(
+                    user.id, user.uuid, pc
+                )
+                if not ns_id then
+                    ngx.log(ngx.ERR, "[OAuth/validate] Namespace resolution failed for ",
+                        tostring(user.uuid), " project_code=", tostring(pc),
+                        " reason=", tostring(ns_reason))
+                end
             end
 
             -- Get user with roles
