@@ -80,9 +80,80 @@ end
 
 local KEY_PATTERN = "^%l[%l%d_]*$"
 
+-- Field types a record-mode section may declare. Fixed whitelist — the
+-- user route validates submitted values by exactly these.
+local FIELD_TYPES = {
+    money = true, number = true, text = true,
+    textarea = true, date = true, boolean = true,
+}
+
+-- Validate + normalise config.fields (record mode). Returns list|nil, err.
+local function build_fields(fields)
+    if type(fields) ~= "table" then return nil, "fields must be an array" end
+    local seen, list = {}, {}
+    for i, f in ipairs(fields) do
+        if type(f) ~= "table" then return nil, "fields[" .. i .. "] must be an object" end
+        if type(f.key) ~= "string" or not f.key:match(KEY_PATTERN) or #f.key > 40 then
+            return nil, "field keys must be snake_case (a-z, 0-9, _), 40 characters or fewer"
+        end
+        if seen[f.key] then return nil, "duplicate field key: " .. f.key end
+        seen[f.key] = true
+        if type(f.label) ~= "string" or f.label == "" or #f.label > 200 then
+            return nil, "each field needs a label of 200 characters or fewer"
+        end
+        if not FIELD_TYPES[f.type] then
+            return nil, "field type must be one of: money, number, text, textarea, date, boolean"
+        end
+        if f.help ~= nil and (type(f.help) ~= "string" or #f.help > 300) then
+            return nil, "field help must be a string of 300 characters or fewer"
+        end
+        if f.placeholder ~= nil and (type(f.placeholder) ~= "string" or #f.placeholder > 200) then
+            return nil, "field placeholder must be a string of 200 characters or fewer"
+        end
+        if f.box ~= nil and (type(f.box) ~= "string" or #f.box > 40) then
+            return nil, "field box must be a string of 40 characters or fewer"
+        end
+        if f.format ~= nil and f.format ~= "" then
+            if f.type ~= "text" or not FormSectionQueries.FORMAT_NAMES[f.format] then
+                return nil, "field format is only valid on text fields (supported: paye_reference)"
+            end
+        end
+        local show_if
+        if f.show_if ~= nil and (type(f.show_if) ~= "table" or f.show_if.field == nil) then
+            return nil, "show_if must be an object like {\"field\":\"is_director\"}"
+        end
+        if type(f.show_if) == "table" and f.show_if.field ~= nil then
+            local dep = f.show_if.field
+            if type(dep) ~= "string" or not dep:match(KEY_PATTERN) or #dep > 40 then
+                return nil, "show_if.field must be a snake_case field key"
+            end
+            -- The frontend drops hidden fields on save while required is
+            -- enforced unconditionally server-side — the combination would
+            -- make every record unsavable while the condition is unticked.
+            if f.required == true then
+                return nil, "a conditionally-shown field (show_if) cannot be required"
+            end
+            show_if = { field = dep }
+        end
+        list[#list + 1] = {
+            key = f.key,
+            label = f.label,
+            type = f.type,
+            help = (f.help ~= "" and f.help or nil),
+            placeholder = (f.placeholder ~= "" and f.placeholder or nil),
+            box = (f.box ~= "" and f.box or nil),
+            format = (f.format ~= "" and f.format or nil),
+            required = f.required == true or nil,
+            summary = (f.type == "money" and f.summary == true) or nil,
+            show_if = show_if,
+        }
+    end
+    return list
+end
+
 -- Validate + normalise the `config` object into a config_json string.
--- Returns encoded_json|nil, err. Unknown top-level fields are stripped so
--- the stored config is exactly what the engine understands.
+-- Returns encoded_json|nil, err, has_fields. Unknown top-level fields are
+-- stripped so the stored config is exactly what the engine understands.
 local function build_config_json(config)
     if config == nil then return nil end
     if type(config) ~= "table" then return nil, "config must be an object" end
@@ -119,7 +190,66 @@ local function build_config_json(config)
     else
         out.checkboxes = cjson.empty_array
     end
-    return cjson.encode(out)
+
+    local has_fields = false
+    if config.fields ~= nil then
+        local list, ferr = build_fields(config.fields)
+        if not list then return nil, ferr end
+        has_fields = #list > 0
+        out.fields = has_fields and list or cjson.empty_array
+    else
+        out.fields = cjson.empty_array
+    end
+    -- One paradigm per section: repeating rows (checkboxes optional) OR a
+    -- fixed field-form — the user page renders one or the other.
+    if has_fields and type(out.checkboxes) == "table" and #out.checkboxes > 0 then
+        return nil, "a section cannot define both checkboxes (row mode) and fields (record mode)"
+    end
+
+    -- Record-mode presentation settings (noun + list card fields). Stored
+    -- on any section; the engine uses the first active section (by
+    -- display_order) that carries one.
+    if config.record ~= nil then
+        local r = config.record
+        if type(r) ~= "table" then return nil, "record must be an object" end
+        local rec = {}
+        if r.noun ~= nil and r.noun ~= "" then
+            if type(r.noun) ~= "string" or #r.noun > 60 then
+                return nil, "record.noun must be a string of 60 characters or fewer"
+            end
+            rec.noun = r.noun
+        end
+        for _, k in ipairs({ "title_field", "subtitle_field" }) do
+            local v = r[k]
+            if v ~= nil and v ~= "" then
+                if type(v) ~= "string" or not v:match(KEY_PATTERN) or #v > 40 then
+                    return nil, "record." .. k .. " must be a snake_case field key"
+                end
+                rec[k] = v
+            end
+        end
+        if next(rec) then out.record = rec end
+    end
+
+    return cjson.encode(out), nil, has_fields
+end
+
+-- Mixing paradigms across one type's ACTIVE sections would render half a
+-- page: the user surface is either a rows page or a records page. Returns
+-- an error string when the new/updated section disagrees with siblings.
+local function mode_conflict(income_type_key, new_has_fields, exclude_uuid)
+    for _, s in ipairs(FormSectionQueries.admin_list({ income_type = income_type_key })) do
+        if s.uuid ~= exclude_uuid then
+            local sibling_has_fields = #FormSectionQueries.field_defs(s.config) > 0
+            if sibling_has_fields ~= new_has_fields then
+                if new_has_fields then
+                    return "this income type already has repeating-row sections — one type can't mix rows and field-form sections"
+                end
+                return "this income type already has field-form (record) sections — one type can't mix rows and field-form sections"
+            end
+        end
+    end
+    return nil
 end
 
 -- hmrc_mapping arrives as an object (preferred) or a pre-encoded string;
@@ -167,10 +297,12 @@ return function(app)
         if body.description ~= nil and (type(body.description) ~= "string" or #body.description > 1000) then
             return { json = { error = "description must be a string of 1000 characters or fewer" }, status = 400 }
         end
-        local config_json, cerr = build_config_json(body.config or {})
+        local config_json, cerr, has_fields = build_config_json(body.config or {})
         if not config_json then
             return { json = { error = cerr or "invalid config" }, status = 400 }
         end
+        local mode_err = mode_conflict(body.income_type_key, has_fields == true, nil)
+        if mode_err then return { json = { error = mode_err }, status = 400 } end
         local hmrc, herr = build_hmrc_mapping(body.hmrc_mapping)
         if herr then return { json = { error = herr }, status = 400 } end
 
@@ -211,15 +343,41 @@ return function(app)
             if herr then return { json = { error = herr }, status = 400 } end
             data.hmrc_mapping = hmrc
         end
+        local new_has_fields -- nil = config untouched by this request
         if body.config ~= nil then
-            local config_json, cerr = build_config_json(body.config)
+            local config_json, cerr, has_fields = build_config_json(body.config)
             if not config_json then
                 return { json = { error = cerr or "invalid config" }, status = 400 }
             end
             data.config_json = config_json
+            new_has_fields = has_fields == true
         end
         if body.display_order ~= nil then data.display_order = body.display_order end
         if body.is_active ~= nil then data.is_active = body.is_active == true end
+
+        -- Guard the type's single paradigm when this edit could change it:
+        -- a config rewrite, or re-enabling a section into a type that may
+        -- have switched modes since it was disabled. Only sections that
+        -- will be ACTIVE after the edit participate in the mode.
+        if new_has_fields ~= nil or data.is_active == true then
+            local rows = db.query(
+                "SELECT income_type_key, config_json, is_active FROM tax_form_sections WHERE uuid = ? LIMIT 1",
+                tostring(self.params.uuid))
+            if rows and #rows > 0 then
+                local will_be_active = data.is_active
+                if will_be_active == nil then will_be_active = rows[1].is_active == true end
+                if will_be_active then
+                    local has_fields = new_has_fields
+                    if has_fields == nil then
+                        local stored = FormSectionQueries.decode_config(rows[1].config_json)
+                        has_fields = #FormSectionQueries.field_defs(stored) > 0
+                    end
+                    local mode_err = mode_conflict(rows[1].income_type_key, has_fields,
+                        tostring(self.params.uuid))
+                    if mode_err then return { json = { error = mode_err }, status = 400 } end
+                end
+            end
+        end
 
         local row = FormSectionQueries.admin_update(tostring(self.params.uuid), data)
         if not row then return { json = { error = "Section not found" }, status = 404 } end
