@@ -14,6 +14,16 @@
       GET    /api/v2/tax/form-summary?income_type=&tax_year=
       GET    /api/v2/tax/form-card-summary                 all-years per-type totals (overview cards)
 
+    RECORD MODE (types whose sections define config.fields — SA102
+    employment shape: repeating records, each a fixed field-form):
+      GET    /api/v2/tax/form-records?income_type=&tax_year=
+      POST   /api/v2/tax/form-records                      { income_type_key, tax_year, data }
+      PUT    /api/v2/tax/form-records/:uuid                { data }   (full-document replace)
+      DELETE /api/v2/tax/form-records/:uuid                soft archive
+    `data` is validated against the type's field catalogue: unknown keys
+    dropped, typed per field def, required fields enforced. A record's
+    income type / tax year are immutable — delete + re-add to move.
+
     `extra` is the checkbox values object. It is validated against the
     TARGET section's config: only configured keys persist (true-only,
     false is absence), unknown keys are stripped, and rows whose section
@@ -195,6 +205,70 @@ return function(app)
         local ok = FormSectionQueries.archive_item(tostring(self.params.uuid), self.current_user)
         if not ok then return { json = { error = "Entry not found" }, status = 404 } end
         return { json = { message = "Entry removed" }, status = 200 }
+    end))
+
+    -- ── Records (record mode) ───────────────────────────────────────────────
+    app:get("/api/v2/tax/form-records", AuthMiddleware.requireAuth(function(self)
+        local result, err = FormSectionQueries.records(self.params, self.current_user)
+        if not result then
+            return { json = { error = err or "Failed to list records" }, status = 400 }
+        end
+        if #result.data == 0 then result.data = cjson.empty_array end
+        return { json = result, status = 200 }
+    end))
+
+    app:post("/api/v2/tax/form-records", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+        if type(self.params.income_type_key) ~= "string" or self.params.income_type_key == "" then
+            return { json = { error = "income_type_key is required" }, status = 400 }
+        end
+        if not valid_tax_year(self.params.tax_year) then
+            return { json = { error = "tax_year must be YYYY-YY (e.g. 2026-27)" }, status = 400 }
+        end
+        local defs = FormSectionQueries.collect_fields(self.params.income_type_key)
+        if #defs == 0 then
+            return { json = { error = "This income type does not take records" }, status = 400 }
+        end
+        -- Second return is the error on failure, the summary total on success.
+        local validated, total = FormSectionQueries.validate_record_data(defs, self.params.data)
+        if not validated then return { json = { error = total }, status = 400 } end
+        local row, err = FormSectionQueries.create_record({
+            income_type_key = self.params.income_type_key,
+            tax_year = self.params.tax_year,
+            data_json = cjson.encode(validated),
+            total = total,
+        }, self.current_user)
+        if not row then return { json = { error = err or "Failed to save" }, status = 400 } end
+        return { json = { data = row }, status = 201 }
+    end))
+
+    app:put("/api/v2/tax/form-records/:uuid", AuthMiddleware.requireAuth(function(self)
+        merge_params(self)
+        local existing = FormSectionQueries.show_record(tostring(self.params.uuid), self.current_user)
+        if not existing then return { json = { error = "Record not found" }, status = 404 } end
+        -- Full-document replace against the record's OWN type; the field
+        -- catalogue is read live so admin edits apply to the next save.
+        local defs = FormSectionQueries.collect_fields(existing.income_type_key)
+        if #defs == 0 then
+            -- Type retired from record mode since — freeze rather than
+            -- wiping the document against an empty catalogue.
+            return { json = { error = "This income type no longer takes records" }, status = 400 }
+        end
+        -- Second return is the error on failure, the summary total on success.
+        local validated, total = FormSectionQueries.validate_record_data(defs, self.params.data)
+        if not validated then return { json = { error = total }, status = 400 } end
+        local row, err = FormSectionQueries.update_record(tostring(self.params.uuid), {
+            data_json = cjson.encode(validated),
+            total = total,
+        }, self.current_user)
+        if not row then return { json = { error = err or "Record not found" }, status = err and 400 or 404 } end
+        return { json = { data = row }, status = 200 }
+    end))
+
+    app:delete("/api/v2/tax/form-records/:uuid", AuthMiddleware.requireAuth(function(self)
+        local ok = FormSectionQueries.archive_record(tostring(self.params.uuid), self.current_user)
+        if not ok then return { json = { error = "Record not found" }, status = 404 } end
+        return { json = { message = "Record removed" }, status = 200 }
     end))
 
     -- ── Summaries (read-only, derived) ──────────────────────────────────────

@@ -24,6 +24,13 @@
   hubs (rental/self-employment/overseas — user_profile_entities) and
   fixed-box grids (SA103 business_line_values). Different paradigms.
 
+  RECORD MODE (second engine shape, added for SA102 employment):
+  a section may define config_json.fields — a fixed set of typed inputs
+  (money/number/text/textarea/date/boolean) — instead of repeating rows.
+  A type whose sections carry fields renders as a list of RECORDS (one
+  per employment/etc.), each record being the full field-form across all
+  sections, stored as one tax_form_records row with a JSON document.
+
   Only executed when PROJECT_CODE includes 'tax_copilot'.
 ]]
 
@@ -178,5 +185,34 @@ return {
                 it.archived_by or db.NULL, it.created_at, it.updated_at)
         end
         print("[Form Sections] Ported pension payments: " .. #cats .. " sections, " .. #items .. " items")
+    end,
+
+    -- =========================================================================
+    -- 4. tax_form_records — record mode. One row per record (e.g. one
+    --    employment); every field value lives in data_json, validated by the
+    --    route layer against the type's admin-defined field catalogue.
+    --    `total` is denormalised on write (sum of the record's money fields
+    --    flagged summary:true) so the overview-card query stays a plain SUM.
+    -- =========================================================================
+    [4] = function()
+        schema.create_table("tax_form_records", {
+            { "id",              types.serial },
+            { "uuid",            types.varchar({ unique = true }) },
+            { "user_id",         types.integer },
+            { "namespace_id",    types.integer({ null = true }) },
+            { "income_type_key", types.varchar },
+            { "tax_year",        types.varchar },                 -- YYYY-YY e.g. "2026-27"
+            { "data_json",       types.text({ null = true }) },   -- JSON {field_key: value, ...}
+            { "total",           "numeric(15,2) NOT NULL DEFAULT 0" },
+            { "is_archived",     types.boolean({ default = false }) },
+            { "archived_at",     types.time({ null = true }) },
+            { "archived_by",     types.integer({ null = true }) },
+            { "created_at",      types.time({ default = db.raw("NOW()") }) },
+            { "updated_at",      types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)"
+        })
+        schema.create_index("tax_form_records", "user_id")
+        schema.create_index("tax_form_records", "user_id", "income_type_key", "tax_year", "is_archived")
+        print("[Form Sections] Created tax_form_records table")
     end,
 }
