@@ -80,6 +80,18 @@ local JOINT_OWNERS_CONFIG = {
     add_button_label = "Add another joint owner",
     min_items = 1,
     max_items = 5,
+    -- Live confirmation of the taxpayer's own share. When the user enters
+    -- a co-owner at 50%, the widget renders
+    --   "Others' share total: 50. Your own share works out to 50."
+    -- next to the group, so the user sees their own derived share
+    -- without having to enter it separately. The taxpayer's share is
+    -- authoritative-derived from this sum on the backend downstream.
+    sum = {
+        field = "share_pct",
+        target = 100,
+        label = "share",
+        derived_label = "your own share",
+    },
 }
 
 -- Small local helper — the property-income seed's own upsert helper is
