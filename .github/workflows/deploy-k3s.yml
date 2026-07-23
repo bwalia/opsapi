@@ -101,6 +101,10 @@ jobs:
       # than :latest — otherwise a concurrent run that pushes :latest in
       # between build and smoke means we smoke-test someone else's commit.
       image_ref: ${{ steps.version.outputs.IMAGE_REF }}
+      # The bare tag (no registry/repo prefix) — this is the string Ring
+      # Promoter promotes as the diytaxreturn-opsapi "version", so the
+      # seed-ring-promoter job below needs it on its own.
+      image_tag: ${{ steps.version.outputs.IMAGE_TAG }}
     steps:
       - name: Clean up Workspace
         run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
@@ -529,3 +533,89 @@ jobs:
             [ "$CODE" = "200" ] && { echo "Public health OK."; break; }
             sleep 5
           done
+
+  # =========================================================================
+  # 6. SEED RING PROMOTER
+  # =========================================================================
+  # Hands the freshly-built, immutable image tag to Ring Promoter's
+  # `diytaxreturn-opsapi` app and starts an int deploy of it.
+  #
+  # This is the entry point of the diytaxreturn release train for opsapi:
+  #
+  #   merge to opsapi main
+  #     -> build job pushes bwalia/opsapi:<git-describe>-<run_number>
+  #     -> THIS job seeds that tag into Ring Promoter's int ring
+  #     -> Ring Promoter dispatches diy-tax-return-uk deploy-lapis.yml,
+  #        which helm-upgrades diytaxreturn-lapis in `int` pinned to that tag
+  #     -> you promote int -> test -> acc by hand in the Ring Promoter UI
+  #
+  # Note what is deliberately NOT automated: only int is seeded. Promotion
+  # stays a human act, matching the `auto_promote: false` declared on every
+  # diytaxreturn-opsapi ring in diy-tax-return-uk's ring-promoter ConfigMap.
+  #
+  # SEPARATE from the `deploy` job above. That one rolls the
+  # `workstation-opsapi` release on *.workstation.co.uk; this one hands the tag
+  # to the pipeline that owns `diytaxreturn-lapis` on *.diytaxreturn.co.uk.
+  # They share an image and nothing else, so this job needs neither.
+  #
+  # Requires repo secret RING_PROMOTER_TOKEN — the Ring Promoter API bearer
+  # token (the RP_API_TOKEN value from the ring-system Secret).
+  seed-ring-promoter:
+    name: Seed Ring Promoter (diytaxreturn-opsapi → int)
+    needs: [build, smoke-test]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    # Only on a merge to main, and only when this run actually built and smoked
+    # an image. A manual deploy-only dispatch has no new tag to seed, and a
+    # manual build-only dispatch is an experiment the release train shouldn't
+    # pick up.
+    if: >-
+      ${{ github.event_name == 'push'
+          && needs.build.result == 'success'
+          && needs.smoke-test.result == 'success' }}
+    steps:
+      - name: Seed int with the tag this run built
+        env:
+          RP_BASE: https://ring-promoter.diytaxreturn.co.uk
+          RP_TOKEN: ${{ secrets.RING_PROMOTER_TOKEN }}
+          TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RP_TOKEN:-}" ]; then
+            echo "::error::Secret RING_PROMOTER_TOKEN is missing. Add the Ring Promoter API bearer token (RP_API_TOKEN from the ring-system Secret) as this repo's Actions secret RING_PROMOTER_TOKEN. Until then a merge here will NOT start an int deploy of opsapi."
+            exit 1
+          fi
+          if [ -z "${TAG:-}" ]; then
+            echo "::error::build job produced no image_tag output — nothing to seed."
+            exit 1
+          fi
+
+          echo "Seeding diytaxreturn-opsapi int with ${TAG}"
+          # async=true returns 202 + a job id immediately instead of holding the
+          # connection open for the whole helm upgrade (the lapis migrate hook
+          # alone budgets 20m — far past any sane HTTP timeout). Ring Promoter
+          # still validates the ring/version/gates synchronously and 4xxs here
+          # if the seed could never succeed, so a bad tag fails this step rather
+          # than silently spawning a doomed job.
+          BODY=$(mktemp)
+          CODE=$(curl -sS --max-time 60 -o "$BODY" -w "%{http_code}" \
+            -X POST "${RP_BASE}/api/apps/diytaxreturn-opsapi/seed?async=true" \
+            -H "Authorization: Bearer ${RP_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"ring\":\"int\",\"version\":\"${TAG}\"}" || echo 000)
+
+          echo "HTTP $CODE"
+          cat "$BODY"; echo
+          case "$CODE" in
+            200|202)
+              echo "::notice::Ring Promoter accepted opsapi ${TAG} for int. Watch it at ${RP_BASE}"
+              ;;
+            000)
+              echo "::error::could not reach ${RP_BASE} — opsapi ${TAG} is pushed but NOT deploying. Seed it by hand in the Ring Promoter UI."
+              exit 1
+              ;;
+            *)
+              echo "::error::Ring Promoter rejected the seed (HTTP $CODE). The image ${TAG} is pushed and safe to seed manually once the cause above is fixed."
+              exit 1
+              ;;
+          esac
