@@ -164,6 +164,13 @@ return function(app)
         if not section then
             return { json = { error = "section_key is not an active section of this income type" }, status = 400 }
         end
+        -- Record-mode sections take records, not row items. Without this
+        -- guard a stale client (old bundle, boolean engine probe) could
+        -- write items that inflate card_summary while being invisible on
+        -- the records page.
+        if #FormSectionQueries.field_defs(section.config) > 0 then
+            return { json = { error = "This section is part of a record form — use form-records" }, status = 400 }
+        end
         if not valid_tax_year(self.params.tax_year) then
             return { json = { error = "tax_year must be YYYY-YY (e.g. 2026-27)" }, status = 400 }
         end

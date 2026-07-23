@@ -203,6 +203,11 @@ function FormSectionQueries.validate_record_data(defs, data)
             return nil, f.label .. " is required"
         end
     end
+    -- Each amount is bounded above, but their SUM lands in a
+    -- numeric(15,2) column too — without this it overflows to a 500.
+    if total > MAX_AMOUNT then
+        return nil, "the amounts add up to a total that is too large"
+    end
     return out, total
 end
 
