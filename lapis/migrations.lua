@@ -185,6 +185,11 @@ local pension_payments_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_C
 -- ends per-screen Lua work for this screen family
 local form_sections_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.form-sections-system") or {}
 
+-- Salary / Employment (SA102) — content-only: seeds the record-mode
+-- section/field catalogue for the existing 'salary' income type and
+-- ports legacy flat entries. The engine work lives in form-sections.
+local salary_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-employment-system") or {}
+
 -- Dynamic answer scope — moves the "how are these answers scoped?"
 -- decision from a hardcoded map in routes/profile-builder.lua into two
 -- new columns on profile_categories (answer_scope + entity_type) and a
@@ -1975,6 +1980,11 @@ local _migrations = {
     ['752_create_tax_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 1),
     ['753_create_tax_form_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 2),
     ['754_port_pension_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 3),
+    -- 755 adds RECORD MODE to the engine (fixed field-forms per repeating
+    -- record — the SA102 employment shape); 756/757 are salary content.
+    ['755_create_tax_form_records'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 4),
+    ['756_seed_salary_sa102_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 1),
+    ['757_port_flat_salary_entries'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so

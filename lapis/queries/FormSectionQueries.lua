@@ -53,9 +53,9 @@ local function resolveNamespaceId(internal_user_id)
     return nil
 end
 
--- Decode a section row's config_json into a table with a guaranteed
--- checkboxes array. Malformed/absent JSON degrades to an empty config
--- rather than erroring a read path.
+-- Decode a section row's config_json into a table with guaranteed
+-- checkboxes + fields arrays. Malformed/absent JSON degrades to an empty
+-- config rather than erroring a read path.
 function FormSectionQueries.decode_config(config_json)
     local config = {}
     if type(config_json) == "string" and config_json ~= "" then
@@ -63,6 +63,7 @@ function FormSectionQueries.decode_config(config_json)
         if ok and type(decoded) == "table" then config = decoded end
     end
     if type(config.checkboxes) ~= "table" then config.checkboxes = {} end
+    if type(config.fields) ~= "table" then config.fields = {} end
     return config
 end
 
@@ -79,13 +80,146 @@ function FormSectionQueries.checkbox_keys(config)
     return set
 end
 
+-- Typed field definitions of a section's config (record mode). Same
+-- sentinel guard as checkbox_keys.
+function FormSectionQueries.field_defs(config)
+    local out = {}
+    local fields = config and config.fields
+    if type(fields) ~= "table" then return out end
+    for _, f in ipairs(fields) do
+        if type(f) == "table" and type(f.key) == "string" then out[#out + 1] = f end
+    end
+    return out
+end
+
+-- All field definitions across a type's ACTIVE sections, in section
+-- order — the validation catalogue for one record's data document.
+-- Empty result ⇒ the type is not in record mode.
+function FormSectionQueries.collect_fields(income_type_key)
+    local defs = {}
+    for _, s in ipairs(FormSectionQueries.sections_for_type(income_type_key)) do
+        for _, f in ipairs(FormSectionQueries.field_defs(s.config)) do
+            defs[#defs + 1] = f
+        end
+    end
+    return defs
+end
+
+-- Truthy-boolean normalisation shared with the routes: JSON bodies carry
+-- real booleans, form bodies carry strings ("on" is a bare HTML checkbox).
+local function truthy(v)
+    return v == true or v == "true" or v == "1" or v == 1 or v == "on"
+end
+
+local function valid_iso_date(s)
+    if type(s) ~= "string" then return false end
+    local y, m, d = s:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return false end
+    m, d = tonumber(m), tonumber(d)
+    return m >= 1 and m <= 12 and d >= 1 and d <= 31
+end
+
+-- Named formats an admin can attach to a text field. Deliberately a
+-- fixed whitelist — free-form admin regexes are a footgun (Lua patterns
+-- aren't PCRE, and a bad one would 500 every save).
+local FORMAT_CHECKS = {
+    paye_reference = {
+        check = function(v) return #v <= 14 and v:match("^%d%d%d/%w+$") ~= nil end,
+        message = "must look like 123/AB456 (three digits, a slash, then letters/numbers)",
+    },
+}
+FormSectionQueries.FORMAT_NAMES = { paye_reference = true }
+
+-- Validate one record's submitted `data` object against the type's field
+-- catalogue. Unknown keys are dropped; empty/zero/false values are
+-- dropped (absence == not filled in); required fields must survive.
+-- Returns validated_table, total (sum of money fields flagged
+-- summary:true) — or nil, err.
+function FormSectionQueries.validate_record_data(defs, data)
+    if type(data) ~= "table" then
+        return nil, "data must be an object of field values"
+    end
+    local out, total = {}, 0
+    for _, f in ipairs(defs) do
+        local v = data[f.key]
+        -- Body parsing only strips cjson.null at the TOP level of the
+        -- request body; inside the nested data object a JSON null must
+        -- also read as "not set", not as a bad value.
+        if v == cjson.null then v = nil end
+        if v ~= nil then
+            if f.type == "money" or f.type == "number" then
+                -- Skip blanks; a blank input submits "" and means "not set".
+                if v ~= "" then
+                    local n = tonumber(v)
+                    if not n or n ~= n or n < 0 then
+                        return nil, f.label .. " must be a number of 0 or more"
+                    end
+                    if n > MAX_AMOUNT then
+                        return nil, f.label .. " is too large"
+                    end
+                    if n > 0 then
+                        out[f.key] = n
+                        if f.type == "money" and f.summary == true then
+                            total = total + n
+                        end
+                    end
+                end
+            elseif f.type == "boolean" then
+                if truthy(v) then out[f.key] = true end
+            elseif f.type == "date" then
+                if v ~= "" then
+                    if not valid_iso_date(v) then
+                        return nil, f.label .. " must be a date (YYYY-MM-DD)"
+                    end
+                    out[f.key] = v
+                end
+            elseif f.type == "textarea" then
+                if type(v) ~= "string" then
+                    return nil, f.label .. " must be text"
+                end
+                if #v > 2000 then
+                    return nil, f.label .. " must be 2000 characters or fewer"
+                end
+                if v ~= "" then out[f.key] = v end
+            else -- text
+                if type(v) ~= "string" then
+                    return nil, f.label .. " must be text"
+                end
+                if #v > 200 then
+                    return nil, f.label .. " must be 200 characters or fewer"
+                end
+                if v ~= "" then
+                    local fmt = f.format and FORMAT_CHECKS[f.format]
+                    if fmt and not fmt.check(v) then
+                        return nil, f.label .. " " .. fmt.message
+                    end
+                    out[f.key] = v
+                end
+            end
+        end
+    end
+    for _, f in ipairs(defs) do
+        if f.required == true and out[f.key] == nil then
+            return nil, f.label .. " is required"
+        end
+    end
+    -- Each amount is bounded above, but their SUM lands in a
+    -- numeric(15,2) column too — without this it overflows to a 500.
+    if total > MAX_AMOUNT then
+        return nil, "the amounts add up to a total that is too large"
+    end
+    return out, total
+end
+
 local function present_section(r)
     local config = FormSectionQueries.decode_config(r.config_json)
     -- An EMPTY decoded array re-encodes as {} (object) through cjson,
     -- which crashes frontend .map()/for..of consumers — substitute the
-    -- empty-array sentinel so the wire always carries "checkboxes":[].
-    -- (checkbox_keys type-guards against the sentinel.)
+    -- empty-array sentinel so the wire always carries "checkboxes":[]
+    -- and "fields":[]. (The *_keys/field helpers type-guard against the
+    -- sentinel, which is lightuserdata.)
     if #config.checkboxes == 0 then config.checkboxes = cjson.empty_array end
+    if #config.fields == 0 then config.fields = cjson.empty_array end
     return {
         key = r.section_key,
         income_type_key = r.income_type_key,
@@ -390,6 +524,156 @@ function FormSectionQueries.archive_item(item_uuid, user)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- Records (record mode) — one row per record (e.g. one employment), the
+-- whole field-form stored as a JSON document validated by the route.
+-- Same archived-rows-are-immutable convention as items.
+-- ────────────────────────────────────────────────────────────────────────────
+local function present_record(row)
+    row.id = row.uuid
+    row.user_id = nil
+    local data = {}
+    if type(row.data_json) == "string" and row.data_json ~= "" then
+        local ok, decoded = pcall(cjson.decode, row.data_json)
+        if ok and type(decoded) == "table" then data = decoded end
+    end
+    -- data is a MAP — an empty one correctly encodes as {} (object).
+    row.data = data
+    row.data_json = nil
+    row.total = tonumber(row.total) or 0
+    return row
+end
+
+-- params: { income_type?, tax_year?, include_archived? }
+function FormSectionQueries.records(params, user)
+    local internal_user_id, err = resolveUserId(user)
+    if not internal_user_id then return nil, err end
+
+    local where = { "user_id = ?" }
+    local args = { internal_user_id }
+    if type(params.income_type) == "string" and params.income_type ~= "" then
+        table.insert(where, "income_type_key = ?"); table.insert(args, params.income_type)
+    end
+    if type(params.tax_year) == "string" and params.tax_year ~= "" then
+        table.insert(where, "tax_year = ?"); table.insert(args, params.tax_year)
+    end
+    if params.include_archived ~= "true" and params.include_archived ~= true then
+        table.insert(where, "is_archived = false")
+    end
+
+    local rows = db.query(
+        "SELECT * FROM tax_form_records WHERE " .. table.concat(where, " AND ")
+        .. " ORDER BY created_at ASC",
+        unpack(args)) or {}
+    for _, r in ipairs(rows) do present_record(r) end
+    return { data = rows, total = #rows }
+end
+
+-- data: { income_type_key, tax_year, data_json, total } — the route has
+-- already validated the document against the field catalogue.
+function FormSectionQueries.create_record(data, user)
+    local internal_user_id, err = resolveUserId(user)
+    if not internal_user_id then return nil, err end
+
+    local uuid = Global.generateUUID()
+    db.query([[
+        INSERT INTO tax_form_records
+            (uuid, user_id, namespace_id, income_type_key, tax_year,
+             data_json, total, is_archived, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, false, NOW(), NOW())
+    ]],
+        uuid,
+        internal_user_id,
+        resolveNamespaceId(internal_user_id) or db.NULL,
+        data.income_type_key,
+        data.tax_year,
+        data.data_json,
+        data.total or 0
+    )
+    local row = db.query("SELECT * FROM tax_form_records WHERE uuid = ? LIMIT 1", uuid)[1]
+
+    TaxAuditLogQueries.log({
+        user_id = internal_user_id,
+        user_email = user.email,
+        entity_type = "FORM_RECORD",
+        entity_id = uuid,
+        action = "CREATE",
+        new_values = cjson.encode(row),
+    })
+    return present_record(row)
+end
+
+function FormSectionQueries.show_record(record_uuid, user)
+    local internal_user_id, err = resolveUserId(user)
+    if not internal_user_id then return nil, err end
+    local rows = db.query([[
+        SELECT * FROM tax_form_records
+        WHERE uuid = ? AND user_id = ? AND is_archived = false LIMIT 1
+    ]], record_uuid, internal_user_id)
+    if not rows or #rows == 0 then return nil end
+    return present_record(rows[1])
+end
+
+-- PUT is a full-document replace: { data_json, total }. income_type_key
+-- and tax_year are immutable (delete + re-add to move a record).
+function FormSectionQueries.update_record(record_uuid, data, user)
+    local internal_user_id, err = resolveUserId(user)
+    if not internal_user_id then return nil, err end
+
+    local existing = db.query([[
+        SELECT * FROM tax_form_records
+        WHERE uuid = ? AND user_id = ? AND is_archived = false LIMIT 1
+    ]], record_uuid, internal_user_id)
+    if not existing or #existing == 0 then return nil end
+    local old = existing[1]
+
+    db.query([[
+        UPDATE tax_form_records
+           SET data_json = ?, total = ?, updated_at = NOW()
+         WHERE uuid = ? AND user_id = ?
+    ]], data.data_json, data.total or 0, record_uuid, internal_user_id)
+
+    local refreshed = db.query("SELECT * FROM tax_form_records WHERE uuid = ? LIMIT 1", record_uuid)[1]
+
+    TaxAuditLogQueries.log({
+        user_id = internal_user_id,
+        user_email = user.email,
+        entity_type = "FORM_RECORD",
+        entity_id = record_uuid,
+        action = "UPDATE",
+        old_values = cjson.encode(old),
+        new_values = cjson.encode(refreshed),
+    })
+    return present_record(refreshed)
+end
+
+function FormSectionQueries.archive_record(record_uuid, user)
+    local internal_user_id, err = resolveUserId(user)
+    if not internal_user_id then return nil, err end
+
+    local existing = db.query([[
+        SELECT * FROM tax_form_records
+        WHERE uuid = ? AND user_id = ? AND is_archived = false LIMIT 1
+    ]], record_uuid, internal_user_id)
+    if not existing or #existing == 0 then return nil end
+
+    db.query([[
+        UPDATE tax_form_records
+           SET is_archived = true, archived_at = NOW(), archived_by = ?, updated_at = NOW()
+         WHERE uuid = ? AND user_id = ?
+    ]], internal_user_id, record_uuid, internal_user_id)
+
+    TaxAuditLogQueries.log({
+        user_id = internal_user_id,
+        user_email = user.email,
+        entity_type = "FORM_RECORD",
+        entity_id = record_uuid,
+        action = "DELETE",
+        old_values = cjson.encode(existing[1]),
+    })
+    return true
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Summaries — derived, read-only. Only ACTIVE sections count; rows in a
 -- retired section stay listed via items() but drop out of these numbers.
 -- ────────────────────────────────────────────────────────────────────────────
@@ -451,13 +735,37 @@ function FormSectionQueries.card_summary(user)
         WHERE s.is_active = true
         GROUP BY s.income_type_key
     ]], internal_user_id) or {}
-    local out = {}
+    local out, by_type = {}, {}
     for _, r in ipairs(rows) do
-        out[#out + 1] = {
+        local entry = {
             income_type_key = r.income_type_key,
             total = tonumber(r.total) or 0,
             row_count = tonumber(r.row_count) or 0,
         }
+        out[#out + 1] = entry
+        by_type[entry.income_type_key] = entry
+    end
+
+    -- Record-mode types: fold in the records' denormalised totals. Their
+    -- section side contributes the zero-row presence (needed for the CTA),
+    -- items contribute 0, so plain addition is correct either way.
+    local recs = db.query([[
+        SELECT income_type_key,
+               COALESCE(SUM(total), 0) AS total,
+               COUNT(id)               AS row_count
+        FROM tax_form_records
+        WHERE user_id = ? AND is_archived = false
+        GROUP BY income_type_key
+    ]], internal_user_id) or {}
+    for _, r in ipairs(recs) do
+        local entry = by_type[r.income_type_key]
+        if not entry then
+            entry = { income_type_key = r.income_type_key, total = 0, row_count = 0 }
+            out[#out + 1] = entry
+            by_type[r.income_type_key] = entry
+        end
+        entry.total = entry.total + (tonumber(r.total) or 0)
+        entry.row_count = entry.row_count + (tonumber(r.row_count) or 0)
     end
     return out
 end
