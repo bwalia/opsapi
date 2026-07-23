@@ -916,7 +916,13 @@ return function(app)
         -- wrong tenant on OAuth login even when they'd explicitly selected
         -- tax_copilot as their default via the UI. Also write back
         -- last_active_namespace_id so a subsequent /auth/login stays sticky.
-        local default_namespace = NamespaceQueries.getUserDefaultNamespace(userWithRoles.id)
+        --
+        -- Use `internal_id` (integer PK), NOT `.id` (UserQueries.show
+        -- reassigns `.id = .uuid` on return, and getUserDefaultNamespace's
+        -- SQL bind is `WHERE user_id = ?` against an INTEGER column — a
+        -- UUID string there throws "invalid input syntax for type integer").
+        local user_int_id = userWithRoles.internal_id or user.id
+        local default_namespace = NamespaceQueries.getUserDefaultNamespace(user_int_id)
         local namespace_membership = nil
         if default_namespace then
             namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
@@ -924,7 +930,7 @@ return function(app)
                 default_namespace.id
             )
             pcall(NamespaceQueries.updateLastActiveNamespace,
-                userWithRoles.id, default_namespace.id)
+                user_int_id, default_namespace.id)
         end
 
         -- Generate JWT token with namespace context
@@ -1220,8 +1226,11 @@ return function(app)
             -- Namespace selection — see /auth/google/callback for the full
             -- rationale. Same fix: honor user_namespace_settings via
             -- getUserDefaultNamespace so a multi-namespace user lands in
-            -- the tenant they picked, not whichever ordered first.
-            local default_namespace = NamespaceQueries.getUserDefaultNamespace(userWithRoles.id)
+            -- the tenant they picked, not whichever ordered first. Use
+            -- `internal_id` (integer PK); `.id` was reassigned to `.uuid`
+            -- by UserQueries.show.
+            local user_int_id = userWithRoles.internal_id or user.id
+            local default_namespace = NamespaceQueries.getUserDefaultNamespace(user_int_id)
             local namespace_membership = nil
             if default_namespace then
                 namespace_membership = NamespaceMemberQueries.findByUserAndNamespace(
@@ -1229,7 +1238,7 @@ return function(app)
                     default_namespace.id
                 )
                 pcall(NamespaceQueries.updateLastActiveNamespace,
-                    userWithRoles.id, default_namespace.id)
+                    user_int_id, default_namespace.id)
             end
 
             -- Generate JWT token
