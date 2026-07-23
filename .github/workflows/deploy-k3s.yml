@@ -89,13 +89,90 @@ env:
 
 jobs:
   # =========================================================================
+  # 0. AUTO-TAG MAIN
+  # =========================================================================
+  # Cuts the next semver tag on this commit BEFORE the build reads
+  # `git describe`. Without it the build describes a commit hundreds of
+  # commits past the last tag and produces an image tag like
+  # `1.0.8-205-gf513aed-231`; with it, `1.0.9-231`. Since that tag is the
+  # version Ring Promoter promotes int -> test -> acc, this is the difference
+  # between a release train you can read and one you have to decode.
+  #
+  # The tagging itself runs as a Kubernetes Job via Ring Promoter's
+  # `opsapi-autotag` app (see diy-tax-return-uk devops/ring-promoter/
+  # configmap.yaml) rather than as steps here — same reason the deploy moved
+  # there: one place owns "what happened to opsapi and when", with the job log
+  # and history in the Ring Promoter UI.
+  #
+  # `patch@<sha>` pins the exact commit this run is building, so a merge
+  # landing while this run is in flight cannot make us tag the wrong commit.
+  # Manual minor/major bumps: seed opsapi-autotag by hand with `minor`,
+  # `major`, or an explicit `X.Y.Z`.
+  #
+  # Push-only: a workflow_dispatch is a rebuild/redeploy of existing code and
+  # must not mint a version. The build job below tolerates this job being
+  # skipped, but NOT it failing — an untagged build would silently reintroduce
+  # the ugly describe-based tag, so a tagging failure stops the merge.
+  autotag:
+    name: Auto-tag main (Ring Promoter k8s Job)
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Cut the next semver tag on this commit
+        env:
+          RP_BASE: https://ring-promoter.diytaxreturn.co.uk
+          RP_TOKEN: ${{ secrets.RING_PROMOTER_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RP_TOKEN:-}" ]; then
+            echo "::error::Secret RING_PROMOTER_TOKEN is missing. Add the Ring Promoter API bearer token (RP_API_TOKEN from the ring-system Secret) as this repo's Actions secret RING_PROMOTER_TOKEN."
+            exit 1
+          fi
+
+          echo "Requesting patch tag on ${SHA}"
+          # SYNCHRONOUS on purpose (no async=true): the build job runs
+          # `git describe`, so the tag must exist before it starts. The k8s Job
+          # caps itself at 10m; 15m here leaves room for pod scheduling without
+          # hanging the runner indefinitely.
+          BODY=$(mktemp)
+          CODE=$(curl -sS --max-time 900 -o "$BODY" -w "%{http_code}" \
+            -X POST "${RP_BASE}/api/apps/opsapi-autotag/seed" \
+            -H "Authorization: Bearer ${RP_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"ring\":\"int\",\"version\":\"patch@${SHA}\"}" || echo 000)
+
+          echo "HTTP $CODE"
+          cat "$BODY"; echo
+          case "$CODE" in
+            200)
+              echo "::notice::opsapi tagged — the build below will describe a clean version"
+              ;;
+            000)
+              echo "::error::could not reach ${RP_BASE}. Not building: an untagged build would ship a describe-based image tag."
+              exit 1
+              ;;
+            *)
+              echo "::error::auto-tag failed (HTTP $CODE). See the opsapi-autotag job log in Ring Promoter."
+              exit 1
+              ;;
+          esac
+
+  # =========================================================================
   # 1. BUILD AND PUSH DOCKER IMAGE
   # =========================================================================
   build:
     name: Build OpsAPI Image
     runs-on: [self-hosted, Linux, X64]
+    needs: [autotag]
     # Skip the build job on a deploy-only dispatch (image already exists).
-    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
+    # `always()` + the explicit result check is what lets a workflow_dispatch
+    # (where autotag is skipped) still build, while a FAILED autotag stops here.
+    if: >-
+      ${{ always()
+          && (needs.autotag.result == 'success' || needs.autotag.result == 'skipped')
+          && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
     outputs:
       # The immutable tag this run produced. The smoke test pulls THIS rather
       # than :latest — otherwise a concurrent run that pushes :latest in
