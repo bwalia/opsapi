@@ -200,6 +200,14 @@ local dynamic_answer_scope_migrations = load_if_enabled(ProjectConfig.FEATURES.T
 -- /admin/profile-builder/*.
 local sa100_dividend_questions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa100-dividend-questions") or {}
 
+-- Rental joint-owner details — first consumer of the config-driven
+-- repeating_group widget contract. Adds ONE question
+-- (`rb_joint_owners`) whose config_json defines the name/relation/share%
+-- subfield schema the frontend widget renders. Every future repeating
+-- question (children, shareholders, foreign properties…) is another
+-- seed migration in the same shape with zero widget changes.
+local rental_joint_owner_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.rental-joint-owner-questions") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -1963,6 +1971,16 @@ local _migrations = {
     -- older revision of step 750 inserted it without the column.
     ['750a_force_sa100_dividends_year_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 2),
     ['751_seed_sa100_dividends_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 3),
+
+    -- Rental joint-owner details — first consumer of the config-driven
+    -- repeating_group widget contract. See
+    -- lapis/migrations/rental-joint-owner-questions.lua for the config
+    -- schema and the widget contract, and frontend
+    -- src/components/profile/RepeatingGroupField.tsx for the renderer.
+    -- Runs AFTER 700* (property-income-system) so the rental-business
+    -- category and rb_jointly_let question exist.
+    ['755_seed_rental_joint_owners'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, rental_joint_owner_migrations, 1),
+    ['756_seed_rental_joint_owners_visibility'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, rental_joint_owner_migrations, 2),
 
     -- ─────────────────────────────────────────────────────────────────────
     -- FORM SECTIONS ENGINE — generic "sections with sub-form rows" pages.
