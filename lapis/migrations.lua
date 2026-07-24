@@ -228,6 +228,16 @@ local rental_joint_owner_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX
 local salary_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-catalog") or {}
 local salary_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-backfill") or {}
 
+-- Phase 2 pension migration (see docs/PROFILE_BUILDER_UNIFICATION_PLAN.md
+-- §5-6 in the diy-tax-return-uk repo) — three catalog entries and one
+-- aggregating backfill. Same shape as the Phase 1 salary pair but the
+-- data model differs: year-scoped answers (answer_scope='year', no
+-- entities) each holding an aggregated JSON array of payment rows via
+-- the repeating_group question type. See catalog file's docstring
+-- for the SA100 TR4 mapping.
+local pension_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-catalog") or {}
+local pension_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-backfill") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2037,6 +2047,20 @@ local _migrations = {
     -- 760/761 as no-ops.
     ['760_reseed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 2),
     ['761_rebackfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 2),
+    -- 762/763 — Phase 2 profile-builder unification for pension_payments.
+    -- Catalog MUST run before backfill (backfill looks up question_id
+    -- by question_key). Both are idempotent + reversible per the design
+    -- doc. Feature-flag flip on the frontend is separate (env var).
+    -- Data model note: pension is year-scoped (no user_profile_entities
+    -- rows) with one aggregated JSON array per (user, year, section) —
+    -- differs from salary's per-entity + typed-column shape.
+    ['762_seed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 1),
+    ['763_backfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 1),
+    -- 764/765 — safety-net re-run for pension (same pattern as
+    -- 760/761 for salary). Idempotent — a fresh env where 762/763
+    -- already fully succeeded treats these as no-ops.
+    ['764_reseed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 2),
+    ['765_rebackfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
