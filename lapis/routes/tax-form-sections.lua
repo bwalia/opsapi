@@ -43,6 +43,7 @@ local AuthMiddleware = require("middleware.auth")
 -- shadow writes. See docs/PROFILE_BUILDER_UNIFICATION_PLAN.md §4-5 in
 -- the diy-tax-return-uk repo.
 local SalaryFork = require("helper.salary-profile-builder-fork")
+local PensionFork = require("helper.pension-profile-builder-fork")
 
 -- YYYY-YY (e.g. 2026-27) — same contract as my-incomes / tax-properties.
 local function valid_tax_year(s)
@@ -188,6 +189,15 @@ return function(app)
         self.params.extra_json = encode_extra(self.params.extra, section)
         local row, err = FormSectionQueries.create_item(self.params, self.current_user)
         if not row then return { json = { error = err or "Failed to save the entry" }, status = 400 } end
+        -- Fork write. No-op when the pension_payments flag is off (default)
+        -- or when this row is a different income type. Any failure is
+        -- pcall-swallowed inside the helper — primary create stays
+        -- authoritative. Passes the identifying triple; the helper
+        -- reads current bucket state itself so we don't have to
+        -- serialise the row here.
+        if row.income_type_key == "pension_payments" then
+            PensionFork.on_change(row.user_id, row.tax_year, row.section_key)
+        end
         return { json = { data = row }, status = 201 }
     end))
 
@@ -214,12 +224,24 @@ return function(app)
         end
         local row, err = FormSectionQueries.update_item(tostring(self.params.uuid), data, self.current_user)
         if not row then return { json = { error = err or "Entry not found" }, status = err and 400 or 404 } end
+        if row.income_type_key == "pension_payments" then
+            PensionFork.on_change(row.user_id, row.tax_year, row.section_key)
+        end
         return { json = { data = row }, status = 200 }
     end))
 
     app:delete("/api/v2/tax/form-items/:uuid", AuthMiddleware.requireAuth(function(self)
+        -- Look up before archiving so the fork's on_change has the row's
+        -- bucket identity (user + year + section) — the row itself is
+        -- about to become is_archived=true and rebuild_bucket filters
+        -- those out. show_item enforces user-owned-only, same guard
+        -- archive_item runs; nil here means archive would also 404.
+        local existing = FormSectionQueries.show_item(tostring(self.params.uuid), self.current_user)
         local ok = FormSectionQueries.archive_item(tostring(self.params.uuid), self.current_user)
         if not ok then return { json = { error = "Entry not found" }, status = 404 } end
+        if existing and existing.income_type_key == "pension_payments" then
+            PensionFork.on_change(existing.user_id, existing.tax_year, existing.section_key)
+        end
         return { json = { message = "Entry removed" }, status = 200 }
     end))
 
