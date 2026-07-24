@@ -519,6 +519,11 @@ load_if("tax_copilot", "routes.tax-businesses")
 -- Overseas property hub ("Land and property abroad", SA106): same engine as
 -- tax-properties with entity_type='overseas_property' + overseas catalogue.
 load_if("tax_copilot", "routes.tax-overseas-properties")
+-- Employment hub (Salary via Profile Builder — Phase 1 of the profile-builder
+-- unification plan). Entity CRUD over user_profile_entities of entity_type
+-- 'employment'; questions come from routes.profile-builder scoped by that
+-- entity, so admins add / edit fields without shipping code.
+load_if("tax_copilot", "routes.tax-employments")
 -- Form Sections engine: generic admin-defined sections + sub-form rows
 -- (pension payments and every future screen of that shape). The admin
 -- surface is what lets new screens ship without code changes.
