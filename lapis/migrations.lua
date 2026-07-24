@@ -246,6 +246,12 @@ local pension_profile_builder_backfill_migrations = load_if_enabled(ProjectConfi
 -- questions via /admin/profile-builder without a code deploy).
 local sa110_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa110-tax-calculation-summary") or {}
 
+-- SA108 Capital Gains Tax summary — every box on the form (pages CG1-CG4)
+-- as profile-builder questions, context='capital_gains', answer_scope='year'.
+-- Same pattern as the SA100 dividends seed; greenfield (no legacy store),
+-- so there is no backfill/fork pair. Gated on TAX_COPILOT.
+local sa108_capital_gains_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa108-capital-gains-questions") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2075,6 +2081,15 @@ local _migrations = {
     -- re-run pass (same convention as 760 / 764).
     ['766_seed_sa110_tax_calculation_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa110_migrations, 1),
     ['767_reseed_sa110_tax_calculation_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa110_migrations, 2),
+
+    -- 768/769 — SA108 Capital Gains Tax summary on the profile builder
+    -- (context='capital_gains', answer_scope='year'). Renumbered from
+    -- 766/767 when the SA110 seed claimed those slots. Categories MUST
+    -- run before questions (questions resolve category_id by slug).
+    -- Both idempotent; INSERT-only, so admin edits are never clobbered.
+    -- No backfill step: capital gains never had a legacy engine store.
+    ['768_seed_sa108_capital_gains_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa108_capital_gains_migrations, 1),
+    ['769_seed_sa108_capital_gains_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa108_capital_gains_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
