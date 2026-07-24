@@ -252,6 +252,15 @@ local sa110_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "mi
 -- so there is no backfill/fork pair. Gated on TAX_COPILOT.
 local sa108_capital_gains_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa108-capital-gains-questions") or {}
 
+-- Adds admin-configurable linked-form metadata columns to income_types
+-- (linked_form_title / linked_form_description / linked_form_weblink)
+-- so the "SA100 boxes — {year}" card header on /my-income/[type] stops
+-- being hardcoded and starts naming the actual reference form the
+-- admin has associated with the type. Step 1 = ALTER TABLE, step 2 =
+-- seed sensible defaults for the 8 known income types (COALESCE — never
+-- overwrites admin edits).
+local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-linked-form-metadata") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2090,6 +2099,11 @@ local _migrations = {
     -- No backfill step: capital gains never had a legacy engine store.
     ['768_seed_sa108_capital_gains_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa108_capital_gains_migrations, 1),
     ['769_seed_sa108_capital_gains_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa108_capital_gains_migrations, 2),
+    -- 770/771 — linked-form metadata columns on income_types + seed
+    -- defaults for the 8 known types. Retires the hardcoded
+    -- "SA100 boxes" card header on /my-income/[type]. Both idempotent.
+    ['770_add_income_types_linked_form_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 1),
+    ['771_seed_income_types_linked_form_defaults'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
