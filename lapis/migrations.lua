@@ -213,6 +213,21 @@ local sa100_dividend_questions_migrations = load_if_enabled(ProjectConfig.FEATUR
 -- seed migration in the same shape with zero widget changes.
 local rental_joint_owner_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.rental-joint-owner-questions") or {}
 
+-- Phase 1 of the profile-builder unification (see the diy-tax-return-uk
+-- repo's docs/PROFILE_BUILDER_UNIFICATION_PLAN.md). Ports the salary
+-- income type from tax_form_sections onto the unified Profile Builder
+-- store:
+--   - catalog: seed 7 profile_categories + 42 profile_questions +
+--     4 visibility rules under entity_type='employment' (mirrors the
+--     salary-employment-system.lua field catalog)
+--   - backfill: walk every non-archived tax_form_records salary row,
+--     upsert into user_profile_entities + user_profile_answers with
+--     a deterministic-hashed entity UUID (idempotent + reversible)
+-- The two are separate step files so a re-run of one doesn't force
+-- the other. Both are gated on TAX_COPILOT.
+local salary_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-catalog") or {}
+local salary_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-backfill") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2003,6 +2018,12 @@ local _migrations = {
     ['755_create_tax_form_records'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 4),
     ['756_seed_salary_sa102_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 1),
     ['757_port_flat_salary_entries'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 2),
+    -- 758/759 — Phase 1 profile-builder unification for salary. Catalog
+    -- MUST run before backfill (backfill looks up question_id by
+    -- question_key). Both are idempotent + reversible per the design
+    -- doc. Feature-flag flip on the frontend is separate (env var).
+    ['758_seed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 1),
+    ['759_backfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 1),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
