@@ -58,10 +58,31 @@ local function present(row)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
--- List — used by the hub. tax_year is accepted for API symmetry with the
--- other hubs but is ignored today: employments carry no per-year derived
--- totals (all figures are Profile Builder answers, not line-item sums).
+-- List — used by the hub.
+--
+-- When `params.tax_year` is provided (YYYY-YY), each row is decorated
+-- with derived totals for the employment:
+--
+--   pay_total     SUM of emp_pay_before_tax + emp_tips_not_on_p60
+--                 (matches salary-employment-system.lua's `summary=true`
+--                 flag on those two SA102 boxes — the classic "salary
+--                 income" figure the /my-income overview cares about).
+--   benefits_total  SUM of every emp_ben_* field (BIK on P11D)
+--   expenses_total  SUM of every emp_exp_* field
+--   income_total  pay + benefits (the taxable side of the employment)
+--   net_total     income_total - expenses_total  (what actually gets
+--                 taxed for this employment after allowable expenses)
+--
+-- One aggregated SQL query pulls every relevant row for every listed
+-- employment in a single round-trip; no N+1 per employment. Rows are
+-- keyed on (entity_uuid, question_key) so the frontend can also
+-- render a per-employment card without a second call.
+--
+-- If tax_year is omitted, totals are omitted too — some callers only
+-- want the identifiers.
 -- ────────────────────────────────────────────────────────────────────────────
+local SALARY_PAY_KEYS = { "emp_pay_before_tax", "emp_tips_not_on_p60" }
+
 function EmploymentQueries.all(params, user)
     local internal_user_id, err = resolveUserId(user)
     if not internal_user_id then return nil, err end
@@ -77,8 +98,112 @@ function EmploymentQueries.all(params, user)
         .. " ORDER BY display_order ASC, created_at ASC",
         unpack(args)) or {}
 
-    for _, r in ipairs(rows) do present(r) end
+    -- Zero out the totals slot on every row up-front so the frontend
+    -- doesn't have to distinguish "not requested" from "requested but
+    -- empty". Whether we populate them depends on tax_year being set.
+    for _, r in ipairs(rows) do
+        r.pay_total = 0
+        r.benefits_total = 0
+        r.expenses_total = 0
+        r.income_total = 0
+        r.net_total = 0
+        present(r)
+    end
+
+    -- Derived totals only when a tax_year is requested. Some scopes on
+    -- the employment questions are per-entity (evergreen — e.g. employer
+    -- name), others are per-entity per-year (e.g. pay figures) — the
+    -- year-scoped ones are the ones that sum to a total. We filter the
+    -- answer set on (entity_uuid IN listed, question_key LIKE 'emp_%')
+    -- and let PostgreSQL do the grouping.
+    if params.tax_year and params.tax_year ~= "" and #rows > 0 then
+        local uuid_list = {}
+        for _, r in ipairs(rows) do uuid_list[#uuid_list + 1] = r.uuid end
+        local ans = db.query([[
+            SELECT a.entity_uuid, q.question_key,
+                   COALESCE(a.answer_number, 0) AS amount
+            FROM user_profile_answers a
+            JOIN profile_questions q ON q.id = a.question_id
+            WHERE a.user_id = ?
+              AND a.entity_uuid = ANY(?)
+              AND (a.tax_year = ? OR a.tax_year IS NULL)
+              AND (q.question_key LIKE 'emp_pay_%'
+                   OR q.question_key = 'emp_tips_not_on_p60'
+                   OR q.question_key LIKE 'emp_ben_%'
+                   OR q.question_key LIKE 'emp_exp_%')
+              AND a.answer_number IS NOT NULL
+        ]], internal_user_id, db.array(uuid_list), params.tax_year) or {}
+
+        local by_uuid = {}
+        for _, r in ipairs(rows) do by_uuid[r.uuid] = r end
+
+        for _, a in ipairs(ans) do
+            local entity = by_uuid[a.entity_uuid]
+            if entity then
+                local amount = tonumber(a.amount) or 0
+                local qk = a.question_key
+                if qk == "emp_pay_before_tax" or qk == "emp_tips_not_on_p60" then
+                    entity.pay_total = entity.pay_total + amount
+                elseif qk:sub(1, 8) == "emp_ben_" then
+                    entity.benefits_total = entity.benefits_total + amount
+                elseif qk:sub(1, 8) == "emp_exp_" then
+                    entity.expenses_total = entity.expenses_total + amount
+                end
+            end
+        end
+
+        for _, r in ipairs(rows) do
+            r.income_total = r.pay_total + r.benefits_total
+            r.net_total = r.income_total - r.expenses_total
+        end
+    end
+
     return { data = rows, total = #rows }
+end
+
+-- Aggregate across every non-archived employment for a user + tax year.
+-- Used by /my-income to swap the legacy tax_form_records-based salary
+-- total with the profile-builder-sourced one for migrated envs. Same
+-- key set as EmploymentQueries.all's total decoration — kept in step
+-- via SALARY_PAY_KEYS + the emp_ben_/emp_exp_ prefixes below.
+function EmploymentQueries.aggregate_income_total(user, tax_year)
+    local internal_user_id, err = resolveUserId(user)
+    if not internal_user_id then return nil, err end
+
+    -- Two SUMs: pay (pay_before_tax + tips) and benefits (emp_ben_*).
+    -- Matches the "summary=true" fields in the legacy salary-employment-
+    -- system.lua catalog + BIK. Expenses are DEDUCTIONS, tracked
+    -- separately so /my-income can show gross income (matches the
+    -- pre-Phase-1 card total).
+    local pay_placeholders = "'" .. table.concat(SALARY_PAY_KEYS, "','") .. "'"
+    local rows = db.query([[
+        SELECT
+          COALESCE(SUM(CASE
+            WHEN q.question_key IN (]] .. pay_placeholders .. [[)
+            THEN a.answer_number ELSE 0 END), 0) AS pay_total,
+          COALESCE(SUM(CASE
+            WHEN q.question_key LIKE 'emp_ben_%'
+            THEN a.answer_number ELSE 0 END), 0) AS benefits_total,
+          COUNT(DISTINCT a.entity_uuid) AS employment_count
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        JOIN user_profile_entities e ON e.uuid = a.entity_uuid
+        WHERE a.user_id = ?
+          AND e.entity_type = ?
+          AND e.is_archived = false
+          AND (a.tax_year = ? OR a.tax_year IS NULL)
+          AND a.answer_number IS NOT NULL
+    ]], internal_user_id, ENTITY_TYPE, tax_year or "") or {}
+
+    local r = rows[1] or {}
+    local pay = tonumber(r.pay_total) or 0
+    local benefits = tonumber(r.benefits_total) or 0
+    return {
+        pay_total = pay,
+        benefits_total = benefits,
+        income_total = pay + benefits,
+        employment_count = tonumber(r.employment_count) or 0,
+    }
 end
 
 function EmploymentQueries.show(employment_uuid, user)

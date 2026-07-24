@@ -767,6 +767,75 @@ function FormSectionQueries.card_summary(user)
         entry.total = entry.total + (tonumber(r.total) or 0)
         entry.row_count = entry.row_count + (tonumber(r.row_count) or 0)
     end
+
+    -- Migrated types (salary, pension_payments) — REPLACE the tax_form_*
+    -- total with the profile-builder-sourced total. After the Phase 1/2
+    -- default flip, new writes for these types land only in
+    -- user_profile_answers, so continuing to read from tax_form_records/
+    -- tax_form_items would silently under-count them on the /my-income
+    -- overview. The row_count from the tax_form_* side is kept so the
+    -- overview card still knows the type "has data" (Phase 3 will drop
+    -- the tax_form_* rows entirely and this branch becomes the only
+    -- source).
+    --
+    -- Kept in this function rather than the route so every caller of
+    -- card_summary (route, future scheduled jobs, integration tests)
+    -- gets consistent totals — one source of truth for the aggregate.
+    local salary_row = db.query([[
+        SELECT
+          COALESCE(SUM(CASE
+            WHEN q.question_key IN ('emp_pay_before_tax','emp_tips_not_on_p60')
+              OR q.question_key LIKE 'emp_ben_%'
+            THEN a.answer_number ELSE 0 END), 0) AS total
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        JOIN user_profile_entities e ON e.uuid = a.entity_uuid
+        WHERE a.user_id = ?
+          AND e.entity_type = 'employment'
+          AND e.is_archived = false
+          AND a.answer_number IS NOT NULL
+    ]], internal_user_id)
+    if salary_row and salary_row[1] then
+        local salary_entry = by_type["salary"]
+        if not salary_entry then
+            salary_entry = { income_type_key = "salary", total = 0, row_count = 0 }
+            out[#out + 1] = salary_entry
+            by_type["salary"] = salary_entry
+        end
+        salary_entry.total = tonumber(salary_row[1].total) or 0
+    end
+
+    -- Pension: SUM the `amount` field across every element of every
+    -- answer_json array for the three pp_*_payments questions. JSON
+    -- aggregation happens in-database via jsonb_array_elements — one
+    -- round-trip regardless of how many rows the user has entered.
+    -- jsonb_typeof guard: other question types can store objects in
+    -- answer_json (e.g. multi-select choices as {selected: [...]}),
+    -- and jsonb_array_elements throws on non-arrays. Filtering out
+    -- non-arrays at the WHERE stage keeps this SUM safe if pension
+    -- question_keys ever collide with a non-array-shaped question.
+    local pension_row = db.query([[
+        SELECT COALESCE(SUM((elem->>'amount')::numeric), 0) AS total
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        CROSS JOIN LATERAL jsonb_array_elements(a.answer_json::jsonb) elem
+        WHERE a.user_id = ?
+          AND q.question_key IN
+              ('pp_registered_payments','pp_employer_payments','pp_overseas_payments')
+          AND a.answer_json IS NOT NULL
+          AND a.answer_json <> ''
+          AND jsonb_typeof(a.answer_json::jsonb) = 'array'
+    ]], internal_user_id)
+    if pension_row and pension_row[1] then
+        local pension_entry = by_type["pension_payments"]
+        if not pension_entry then
+            pension_entry = { income_type_key = "pension_payments", total = 0, row_count = 0 }
+            out[#out + 1] = pension_entry
+            by_type["pension_payments"] = pension_entry
+        end
+        pension_entry.total = tonumber(pension_row[1].total) or 0
+    end
+
     return out
 end
 

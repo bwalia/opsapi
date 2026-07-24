@@ -66,6 +66,10 @@ end
 
 return function(app)
     app:get("/api/v2/tax/employments", AuthMiddleware.requireAuth(function(self)
+        -- tax_year is optional. When present it decorates every row
+        -- with pay/benefits/expenses/income/net totals derived from
+        -- user_profile_answers — see EmploymentQueries.all's docstring
+        -- for the key-set and grouping.
         local result, err = EmploymentQueries.all(self.params, self.current_user)
         if not result then
             return { json = { error = err or "Failed to list employments" }, status = 400 }
