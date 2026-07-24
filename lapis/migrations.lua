@@ -2024,6 +2024,19 @@ local _migrations = {
     -- doc. Feature-flag flip on the frontend is separate (env var).
     ['758_seed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 1),
     ['759_backfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 1),
+    -- 760/761 — re-run pass. In an earlier iteration the catalog seed
+    -- passed nil to db.query for the categories with no description
+    -- (close-company / foreign / notes); Lua truncates varargs at the
+    -- first nil, so the SQL fired with unfilled placeholders and the
+    -- whole seed aborted after "Employment details". Envs that ran the
+    -- buggy 758 have only 1 of the 7 employment categories. 760 re-runs
+    -- the (now fixed) seed and 761 re-runs the backfill so any answers
+    -- that were silently dropped (because their question_id didn't yet
+    -- exist) get their user_profile_answers row this time. Both are
+    -- idempotent — a fresh env where 758/759 already succeeded treats
+    -- 760/761 as no-ops.
+    ['760_reseed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 2),
+    ['761_rebackfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so

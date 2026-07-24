@@ -65,14 +65,14 @@
 local db = require("lapis.db")
 local MigrationUtils = require "helper.migration-utils"
 
-return {
-    -- =========================================================================
-    -- 1. Seed the 7 employment categories + ~42 questions + visibility rules.
-    --    Structured as one step so a re-run either succeeds fully or leaves
-    --    the DB unchanged (each ensure_* is idempotent, but the whole set
-    --    is a package).
-    -- =========================================================================
-    [1] = function()
+-- Seed body extracted to module scope so multiple migration steps can
+-- call it. Step [1] is the original run; step [2] is the re-run pass
+-- that catches up envs where step [1] hit the varargs bug (nil
+-- description silently truncating params, aborting mid-way through the
+-- 7 categories). Every ensure_* helper inside is idempotent, so on
+-- envs where the first pass fully succeeded the re-run is a no-op —
+-- only labels/ordering get UPDATEd, no duplicate rows appear.
+local function seed_salary_catalog()
         -- Same helpers as property-income-system.lua [7] and
         -- self-employment-system.lua [6]. Duplicated here (not extracted)
         -- because each seed migration is self-contained — future refactor
@@ -83,7 +83,15 @@ return {
         -- dynamic-answer-scope.lua [5]'s backfill which only knows about
         -- the older contexts; new contexts (like employment) must set
         -- the columns themselves at seed time.
+        -- Coerce nils to db.NULL BEFORE the db.query call. Lua truncates
+        -- varargs at the first nil (`{...}` stops there), which would drop
+        -- every parameter after description for categories that pass a nil
+        -- description — leaving the SQL with unfilled placeholders and
+        -- erroring the whole migration mid-way through. Categories 2
+        -- (close-company), 6 (foreign) and 7 (notes) all pass nil here.
         local function ensure_category(slug, name, description, icon, display_order, context)
+            local desc = description ~= nil and description or db.NULL
+            local ico  = icon        ~= nil and icon        or db.NULL
             local exists = db.select("id FROM profile_categories WHERE slug = ?", slug)
             if exists and #exists > 0 then
                 db.query([[
@@ -92,7 +100,7 @@ return {
                            context = ?, answer_scope = 'entity', entity_type = 'employment',
                            is_active = true, is_archived = false, updated_at = NOW()
                      WHERE slug = ?
-                ]], name, description, icon, display_order, context, slug)
+                ]], name, desc, ico, display_order, context, slug)
                 return exists[1].id
             end
             db.query([[
@@ -102,7 +110,7 @@ return {
                      is_active, is_archived, created_at, updated_at)
                 VALUES (?, 0, ?, ?, ?, ?, ?, ?, 'entity', 'employment',
                         true, false, NOW(), NOW())
-            ]], MigrationUtils.generateUUID(), name, slug, description, icon,
+            ]], MigrationUtils.generateUUID(), name, slug, desc, ico,
                 display_order, context)
             local row = db.select("id FROM profile_categories WHERE slug = ?", slug)
             return row and row[1] and row[1].id or nil
@@ -313,5 +321,25 @@ return {
         end
 
         print("[Salary → Profile Builder] Seeded 7 categories, 42 questions, 4 visibility rules under entity_type='employment'")
-    end,
+end
+
+return {
+    -- =========================================================================
+    -- 1. Original seed pass. Registered as 758 in migrations.lua.
+    -- =========================================================================
+    [1] = seed_salary_catalog,
+
+    -- =========================================================================
+    -- 2. Re-run pass. Registered as 760 in migrations.lua.
+    --    Rationale: step [1] in an early iteration passed nil to db.query
+    --    for categories with no description (close-company / foreign /
+    --    notes), and Lua truncates varargs at the first nil — so the SQL
+    --    fired with unfilled placeholders and the whole seed aborted
+    --    after category 1. Envs that ran the buggy [1] have only
+    --    "Employment details" in profile_categories under
+    --    context='employment'. This step re-executes the (now fixed)
+    --    seed to catch them up. Fresh envs where [1] already succeeded
+    --    treat [2] as a harmless idempotent no-op.
+    -- =========================================================================
+    [2] = seed_salary_catalog,
 }

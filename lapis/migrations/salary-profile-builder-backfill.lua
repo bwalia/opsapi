@@ -160,11 +160,15 @@ local function coerce(field_type, raw)
     return nil, "unknown field type"
 end
 
-return {
-    -- =========================================================================
-    -- 1. Walk every non-archived salary record → insert entity + answers.
-    -- =========================================================================
-    [1] = function()
+-- Backfill body extracted to module scope so multiple migration steps
+-- can call it. Step [1] is the original run; step [2] is the re-run
+-- pass that catches up any answers the first pass silently skipped
+-- because the catalog seed (see salary-profile-builder-catalog.lua)
+-- hadn't yet inserted the profile_questions rows for those fields.
+-- Idempotent: ON CONFLICT DO NOTHING on both the entity insert
+-- (deterministic md5 UUID) and the answer inserts, so re-runs never
+-- overwrite a user's later profile-builder-side edit.
+local function backfill_salary()
         local rows = db.query([[
             SELECT id, uuid, user_id, namespace_id, tax_year, data_json,
                    created_at, updated_at
@@ -289,5 +293,23 @@ return {
             "[Salary backfill] Ported %d entities + %d answers. Skipped %d rows, %d unknown fields.",
             stats.entities, stats.answers, stats.skipped_rows, stats.skipped_fields
         ))
-    end,
+end
+
+return {
+    -- =========================================================================
+    -- 1. Original backfill pass. Registered as 759 in migrations.lua.
+    -- =========================================================================
+    [1] = backfill_salary,
+
+    -- =========================================================================
+    -- 2. Re-run pass. Registered as 761 in migrations.lua.
+    --    Runs AFTER the catalog re-seed (760) so the profile_questions
+    --    rows for the previously-missing categories (close-company,
+    --    foreign, notes) now exist. The lookup batch in this function
+    --    reads them via SELECT ... WHERE question_key = ANY(...), so
+    --    once seeded the same source data_json produces answers on the
+    --    previously-skipped question_ids. ON CONFLICT DO NOTHING keeps
+    --    already-backfilled answers untouched.
+    -- =========================================================================
+    [2] = backfill_salary,
 }
