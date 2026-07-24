@@ -238,6 +238,14 @@ local salary_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig
 local pension_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-catalog") or {}
 local pension_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-backfill") or {}
 
+-- SA110 Tax Calculation Summary — one seed file, no backfill (no
+-- legacy Form Sections rows to port). Ships as an income_types row +
+-- 6 profile_categories + 17 profile_questions under context='sa110',
+-- answer_scope='year'. Once merged and applied, /my-income/sa110
+-- becomes admin-configurable end-to-end (add / rename / reorder
+-- questions via /admin/profile-builder without a code deploy).
+local sa110_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa110-tax-calculation-summary") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2061,6 +2069,12 @@ local _migrations = {
     -- already fully succeeded treats these as no-ops.
     ['764_reseed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 2),
     ['765_rebackfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 2),
+    -- 766/767 — SA110 Tax Calculation Summary catalog. income_types
+    -- row + 6 profile_categories + 17 profile_questions under
+    -- context='sa110', answer_scope='year'. 767 is the safety-net
+    -- re-run pass (same convention as 760 / 764).
+    ['766_seed_sa110_tax_calculation_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa110_migrations, 1),
+    ['767_reseed_sa110_tax_calculation_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa110_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
