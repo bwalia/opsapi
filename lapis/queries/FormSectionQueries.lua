@@ -890,6 +890,13 @@ function FormSectionQueries.card_summary(user)
     --   summed by employment_type) or be zero for pension (numeric
     --   values live in answer_json, not answer_number).
     --
+    --   capital_gains — handled by the explicit branch below. The
+    --   generic sum-every-numeric-answer is wrong for SA108: it
+    --   would add disposal proceeds, allowable costs, losses,
+    --   tax-already-paid and disposal counts into one meaningless
+    --   figure. Its branch sums only the six "gains in the year,
+    --   before losses" boxes.
+    --
     --   Per-entity contexts (property, business, overseas_property,
     --   rental_business, employment) — these DON'T correspond 1:1 to
     --   an income_type_key (rental hub is 'rental', not
@@ -910,7 +917,7 @@ function FormSectionQueries.card_summary(user)
         JOIN profile_categories c ON c.id = q.category_id
         JOIN income_types it      ON it.income_type_key = c.context
         WHERE a.user_id = ?
-          AND it.income_type_key NOT IN ('salary', 'pension_payments')
+          AND it.income_type_key NOT IN ('salary', 'pension_payments', 'capital_gains')
           AND c.is_active = true
           AND c.is_archived = false
           AND it.is_active = true
@@ -926,6 +933,62 @@ function FormSectionQueries.card_summary(user)
         end
         entry.total = tonumber(r.total) or 0
         entry.row_count = tonumber(r.row_count) or 0
+    end
+
+    -- ── Capital gains ───────────────────────────────────────────────
+    -- SA108 boxes, year-scoped, rendered by the profile-builder panel
+    -- like dividends. Excluded from the generic branch above because
+    -- summing every numeric answer would add proceeds, allowable
+    -- costs, losses and tax-already-paid into one meaningless number.
+    --
+    -- Total = SUM of the six "gains in the year, before losses" boxes
+    -- (SA108 boxes 6, 13B, 13.4, 17, 26, 34 — disjoint asset classes;
+    -- box 6 explicitly excludes the carried interest counted by 13B).
+    -- The seed marks these with config_json.card_total=true, but the
+    -- SQL matches on question_key like the salary branch does:
+    -- config_json is a text column an admin can free-edit, and a
+    -- malformed-JSON ::jsonb cast would 500 every /my-income load.
+    -- Keep this list in step with the card_total flags in
+    -- migrations/sa108-capital-gains-questions.lua.
+    --
+    -- Count = number of SA108 boxes with ANY answer (text, number,
+    -- boolean, date or json) — box 54 free text alone still counts as
+    -- "something recorded", flipping the card off "Nothing recorded
+    -- yet". The number itself isn't user-surfaced beyond hasEntries.
+    local capital_gains_row = db.query([[
+        SELECT
+          COALESCE(SUM(CASE
+            WHEN q.question_key IN
+                ('sa108_res_gains_before_losses',
+                 'sa108_ci_gains_in_year',
+                 'sa108_crypto_gains_before_losses',
+                 'sa108_other_gains_before_losses',
+                 'sa108_listed_gains_before_losses',
+                 'sa108_unlisted_gains_before_losses')
+            THEN a.answer_number ELSE 0 END), 0) AS total,
+          COUNT(a.id)                            AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q  ON q.id = a.question_id
+        JOIN profile_categories c ON c.id = q.category_id
+        WHERE a.user_id = ?
+          AND c.context = 'capital_gains'
+          AND c.is_active = true
+          AND c.is_archived = false
+          AND (COALESCE(a.answer_text, '') <> ''
+               OR a.answer_number IS NOT NULL
+               OR a.answer_boolean IS NOT NULL
+               OR a.answer_date IS NOT NULL
+               OR COALESCE(a.answer_json, '') <> '')
+    ]], internal_user_id)
+    if capital_gains_row and capital_gains_row[1] then
+        local cg_entry = by_type["capital_gains"]
+        if not cg_entry then
+            cg_entry = { income_type_key = "capital_gains", total = 0, row_count = 0 }
+            out[#out + 1] = cg_entry
+            by_type["capital_gains"] = cg_entry
+        end
+        cg_entry.total = tonumber(capital_gains_row[1].total) or 0
+        cg_entry.row_count = tonumber(capital_gains_row[1].row_count) or 0
     end
 
     return out
