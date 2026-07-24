@@ -119,6 +119,12 @@ return function(app)
             data[#data + 1] = {
                 key = r.income_type_key,
                 label = r.display_name,
+                -- Admin-configured plain-English description shown under the
+                -- H1 on the income type's page. Optional in the schema (text
+                -- null=true) — pass through as-is, incl. the empty string,
+                -- so the frontend can distinguish "admin left it blank" from
+                -- "backend forgot to send it".
+                description = r.description,
                 required_documents = docs,
                 allows_manual_entry = r.allows_manual_entry,
             }
