@@ -40,10 +40,26 @@ local PROFILE_BUILDER = "profile_builder"
 M.FORM_SECTIONS = FORM_SECTIONS
 M.PROFILE_BUILDER = PROFILE_BUILDER
 
+-- Income types whose migration to Profile Builder has shipped end-to-
+-- end (catalog seed + backfill + dual-write fork + hub page + admin
+-- support). Their DEFAULT engine is `profile_builder`; env-var still
+-- wins in either direction. Keep in step with MIGRATED_TYPES on the
+-- frontend (lib/income-engine.ts) — a divergence would put the two
+-- pods on different engines for the same type, which the fork was
+-- specifically designed to avoid.
+local MIGRATED_TYPES = {
+    salary = true,
+    pension_payments = true,
+}
+
 --- Returns the engine that should serve the given income type key in
---- this env. Falls back to "form_sections" (current-behaviour default)
---- for missing / empty / unknown values — a new income type never
---- accidentally opts into the unfinished engine.
+--- this env.
+---
+--- Precedence (highest wins):
+---   1. INCOME_ENGINE_<TYPE> env-var override (either direction)
+---   2. `profile_builder` if the type is in MIGRATED_TYPES
+---   3. `form_sections` (safe default for un-migrated types)
+---
 --- @param income_type_key string  e.g. "salary", "pension_payments"
 --- @return string                 "form_sections" | "profile_builder"
 function M.mode(income_type_key)
@@ -53,6 +69,8 @@ function M.mode(income_type_key)
     local env_name = "INCOME_ENGINE_" .. income_type_key:upper()
     local val = os.getenv(env_name)
     if val == PROFILE_BUILDER then return PROFILE_BUILDER end
+    if val == FORM_SECTIONS then return FORM_SECTIONS end
+    if MIGRATED_TYPES[income_type_key:lower()] then return PROFILE_BUILDER end
     return FORM_SECTIONS
 end
 

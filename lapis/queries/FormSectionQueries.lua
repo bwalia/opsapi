@@ -767,6 +767,137 @@ function FormSectionQueries.card_summary(user)
         entry.total = entry.total + (tonumber(r.total) or 0)
         entry.row_count = entry.row_count + (tonumber(r.row_count) or 0)
     end
+
+    -- Profile-builder-sourced totals for types whose data lives in
+    -- user_profile_answers rather than tax_form_*. Three cases today:
+    --
+    --   salary            entity-scoped answers under emp_pay_*,
+    --                     emp_tips_*, emp_ben_*  (Phase 1 migration)
+    --   pension_payments  year-scoped repeating_group JSON arrays
+    --                     (Phase 2 migration)
+    --   dividends         year-scoped currency answers (never used the
+    --                     Form Sections engine — always inline via the
+    --                     [type]/page.tsx PROFILE_BUILDER_CONTEXTS
+    --                     map, so card_summary never saw them until
+    --                     this branch existed).
+    --
+    -- Both `total` AND `row_count` need to be set — the /my-income
+    -- overview card renders "Nothing recorded yet" when row_count = 0
+    -- regardless of what total says. Post-cutover for salary/pension
+    -- there are no tax_form_* rows to source row_count from, so
+    -- reading it from the pb store's natural row concept (entities
+    -- for salary, array-element count for pension, answered-question
+    -- count for dividends) is the only way to make hasEntries true.
+    --
+    -- Kept in this function rather than the route so every caller of
+    -- card_summary (route, future scheduled jobs, integration tests)
+    -- gets consistent totals — one source of truth for the aggregate.
+
+    -- ── Salary ──────────────────────────────────────────────────────
+    -- Total = pay + tips + benefits across every non-archived
+    -- employment. Count = number of employments (matches the
+    -- "N entries" concept from the legacy FormRecordsPage — one
+    -- record was one employment there too).
+    local salary_row = db.query([[
+        SELECT
+          COALESCE(SUM(CASE
+            WHEN q.question_key IN ('emp_pay_before_tax','emp_tips_not_on_p60')
+              OR q.question_key LIKE 'emp_ben_%'
+            THEN a.answer_number ELSE 0 END), 0) AS total
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        JOIN user_profile_entities e ON e.uuid = a.entity_uuid
+        WHERE a.user_id = ?
+          AND e.entity_type = 'employment'
+          AND e.is_archived = false
+          AND a.answer_number IS NOT NULL
+    ]], internal_user_id)
+    local salary_count = db.query([[
+        SELECT COUNT(*) AS n FROM user_profile_entities
+        WHERE user_id = ? AND entity_type = 'employment' AND is_archived = false
+    ]], internal_user_id)
+    if salary_row and salary_row[1] then
+        local salary_entry = by_type["salary"]
+        if not salary_entry then
+            salary_entry = { income_type_key = "salary", total = 0, row_count = 0 }
+            out[#out + 1] = salary_entry
+            by_type["salary"] = salary_entry
+        end
+        salary_entry.total = tonumber(salary_row[1].total) or 0
+        salary_entry.row_count = tonumber((salary_count[1] or {}).n) or 0
+    end
+
+    -- ── Pension payments ────────────────────────────────────────────
+    -- Total = SUM amount across every element of every answer_json
+    -- array for the three pp_*_payments questions.
+    -- Count = total number of individual payment rows the user has
+    -- entered (SUM of array lengths across all 3 sections × all years).
+    -- jsonb_typeof guard: other question types can store objects in
+    -- answer_json; jsonb_array_elements throws on non-arrays.
+    local pension_row = db.query([[
+        SELECT
+          COALESCE(SUM((elem->>'amount')::numeric), 0) AS total,
+          COUNT(*)                                    AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        CROSS JOIN LATERAL jsonb_array_elements(a.answer_json::jsonb) elem
+        WHERE a.user_id = ?
+          AND q.question_key IN
+              ('pp_registered_payments','pp_employer_payments','pp_overseas_payments')
+          AND a.answer_json IS NOT NULL
+          AND a.answer_json <> ''
+          AND jsonb_typeof(a.answer_json::jsonb) = 'array'
+    ]], internal_user_id)
+    if pension_row and pension_row[1] then
+        local pension_entry = by_type["pension_payments"]
+        if not pension_entry then
+            pension_entry = { income_type_key = "pension_payments", total = 0, row_count = 0 }
+            out[#out + 1] = pension_entry
+            by_type["pension_payments"] = pension_entry
+        end
+        pension_entry.total = tonumber(pension_row[1].total) or 0
+        pension_entry.row_count = tonumber(pension_row[1].row_count) or 0
+    end
+
+    -- ── Dividends ───────────────────────────────────────────────────
+    -- Dividends never had tax_form_* rows — it's inline in the
+    -- /my-income/[type] dispatcher's PROFILE_BUILDER_CONTEXTS map, so
+    -- card_summary NEVER surfaced it before this branch existed. Users
+    -- had figures on /my-income/dividends but /my-income showed
+    -- "Nothing recorded yet" for the type — exactly the same symptom
+    -- salary just hit.
+    --
+    -- Total = SUM currency answers for questions in category
+    -- context='dividends' (avoids hardcoding the sa100_* question_key
+    -- list — admin can add a new dividends field via the admin UI and
+    -- the total picks it up next call).
+    -- Count = number of question_keys with a non-null numeric answer.
+    -- One row means "this type has SOMETHING recorded"; the number
+    -- itself isn't user-surfaced beyond the hasEntries threshold.
+    local dividends_row = db.query([[
+        SELECT
+          COALESCE(SUM(a.answer_number), 0) AS total,
+          COUNT(a.id)                       AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q  ON q.id = a.question_id
+        JOIN profile_categories c ON c.id = q.category_id
+        WHERE a.user_id = ?
+          AND c.context = 'dividends'
+          AND c.is_active = true
+          AND c.is_archived = false
+          AND a.answer_number IS NOT NULL
+    ]], internal_user_id)
+    if dividends_row and dividends_row[1] then
+        local dividends_entry = by_type["dividends"]
+        if not dividends_entry then
+            dividends_entry = { income_type_key = "dividends", total = 0, row_count = 0 }
+            out[#out + 1] = dividends_entry
+            by_type["dividends"] = dividends_entry
+        end
+        dividends_entry.total = tonumber(dividends_row[1].total) or 0
+        dividends_entry.row_count = tonumber(dividends_row[1].row_count) or 0
+    end
+
     return out
 end
 

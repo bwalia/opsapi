@@ -213,6 +213,31 @@ local sa100_dividend_questions_migrations = load_if_enabled(ProjectConfig.FEATUR
 -- seed migration in the same shape with zero widget changes.
 local rental_joint_owner_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.rental-joint-owner-questions") or {}
 
+-- Phase 1 of the profile-builder unification (see the diy-tax-return-uk
+-- repo's docs/PROFILE_BUILDER_UNIFICATION_PLAN.md). Ports the salary
+-- income type from tax_form_sections onto the unified Profile Builder
+-- store:
+--   - catalog: seed 7 profile_categories + 42 profile_questions +
+--     4 visibility rules under entity_type='employment' (mirrors the
+--     salary-employment-system.lua field catalog)
+--   - backfill: walk every non-archived tax_form_records salary row,
+--     upsert into user_profile_entities + user_profile_answers with
+--     a deterministic-hashed entity UUID (idempotent + reversible)
+-- The two are separate step files so a re-run of one doesn't force
+-- the other. Both are gated on TAX_COPILOT.
+local salary_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-catalog") or {}
+local salary_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-backfill") or {}
+
+-- Phase 2 pension migration (see docs/PROFILE_BUILDER_UNIFICATION_PLAN.md
+-- §5-6 in the diy-tax-return-uk repo) — three catalog entries and one
+-- aggregating backfill. Same shape as the Phase 1 salary pair but the
+-- data model differs: year-scoped answers (answer_scope='year', no
+-- entities) each holding an aggregated JSON array of payment rows via
+-- the repeating_group question type. See catalog file's docstring
+-- for the SA100 TR4 mapping.
+local pension_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-catalog") or {}
+local pension_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-backfill") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2003,6 +2028,39 @@ local _migrations = {
     ['755_create_tax_form_records'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 4),
     ['756_seed_salary_sa102_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 1),
     ['757_port_flat_salary_entries'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 2),
+    -- 758/759 — Phase 1 profile-builder unification for salary. Catalog
+    -- MUST run before backfill (backfill looks up question_id by
+    -- question_key). Both are idempotent + reversible per the design
+    -- doc. Feature-flag flip on the frontend is separate (env var).
+    ['758_seed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 1),
+    ['759_backfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 1),
+    -- 760/761 — re-run pass. In an earlier iteration the catalog seed
+    -- passed nil to db.query for the categories with no description
+    -- (close-company / foreign / notes); Lua truncates varargs at the
+    -- first nil, so the SQL fired with unfilled placeholders and the
+    -- whole seed aborted after "Employment details". Envs that ran the
+    -- buggy 758 have only 1 of the 7 employment categories. 760 re-runs
+    -- the (now fixed) seed and 761 re-runs the backfill so any answers
+    -- that were silently dropped (because their question_id didn't yet
+    -- exist) get their user_profile_answers row this time. Both are
+    -- idempotent — a fresh env where 758/759 already succeeded treats
+    -- 760/761 as no-ops.
+    ['760_reseed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 2),
+    ['761_rebackfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 2),
+    -- 762/763 — Phase 2 profile-builder unification for pension_payments.
+    -- Catalog MUST run before backfill (backfill looks up question_id
+    -- by question_key). Both are idempotent + reversible per the design
+    -- doc. Feature-flag flip on the frontend is separate (env var).
+    -- Data model note: pension is year-scoped (no user_profile_entities
+    -- rows) with one aggregated JSON array per (user, year, section) —
+    -- differs from salary's per-entity + typed-column shape.
+    ['762_seed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 1),
+    ['763_backfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 1),
+    -- 764/765 — safety-net re-run for pension (same pattern as
+    -- 760/761 for salary). Idempotent — a fresh env where 762/763
+    -- already fully succeeded treats these as no-ops.
+    ['764_reseed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 2),
+    ['765_rebackfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
