@@ -859,43 +859,73 @@ function FormSectionQueries.card_summary(user)
         pension_entry.row_count = tonumber(pension_row[1].row_count) or 0
     end
 
-    -- ── Dividends ───────────────────────────────────────────────────
-    -- Dividends never had tax_form_* rows — it's inline in the
-    -- /my-income/[type] dispatcher's PROFILE_BUILDER_CONTEXTS map, so
-    -- card_summary NEVER surfaced it before this branch existed. Users
-    -- had figures on /my-income/dividends but /my-income showed
-    -- "Nothing recorded yet" for the type — exactly the same symptom
-    -- salary just hit.
+    -- ── Generic profile-builder totals (dividends, SA110, and any
+    --    future admin-added income type) ─────────────────────────────
+    -- Previously this was a hardcoded per-type branch: dividends
+    -- explicit, plus a comment "add SA110 here later, etc". That
+    -- broke the "admin adds a section and it ships" promise the
+    -- frontend just delivered via auto-discovery (feat/sa110-...
+    -- retired PROFILE_BUILDER_CONTEXTS). This is the backend
+    -- companion — one query that covers every income_type whose key
+    -- matches a profile_categories.context, so a new type + category
+    -- combination lands on /my-income overview automatically.
     --
-    -- Total = SUM currency answers for questions in category
-    -- context='dividends' (avoids hardcoding the sa100_* question_key
-    -- list — admin can add a new dividends field via the admin UI and
-    -- the total picks it up next call).
-    -- Count = number of question_keys with a non-null numeric answer.
-    -- One row means "this type has SOMETHING recorded"; the number
-    -- itself isn't user-surfaced beyond the hasEntries threshold.
-    local dividends_row = db.query([[
-        SELECT
-          COALESCE(SUM(a.answer_number), 0) AS total,
-          COUNT(a.id)                       AS row_count
+    -- What's summed
+    --   total     SUM(answer_number) — every numeric answer under
+    --             the type's categories. Adminstrictly-numeric
+    --             questions (currency / number / percentage) are the
+    --             only ones with answer_number populated; text /
+    --             boolean / date answers are naturally excluded.
+    --   row_count number of distinct question_ids with a non-null
+    --             numeric answer. Value isn't user-surfaced beyond
+    --             the hasEntries threshold; 1 or more means "this
+    --             type has data".
+    --
+    -- What's excluded
+    --   salary + pension_payments — handled by explicit branches
+    --   above with type-specific sum logic (entity-scoped for
+    --   salary, aggregated JSON arrays for pension). Skipped in the
+    --   NOT IN filter so their pb totals aren't overwritten by this
+    --   generic sum, which would double-count for salary (already
+    --   summed by employment_type) or be zero for pension (numeric
+    --   values live in answer_json, not answer_number).
+    --
+    --   Per-entity contexts (property, business, overseas_property,
+    --   rental_business, employment) — these DON'T correspond 1:1 to
+    --   an income_type_key (rental hub is 'rental', not
+    --   'rental_business'; self-employment hub is 'self_employment',
+    --   not 'business'; etc.). They're joined via the entity's own
+    --   income type, not the context string. Filter by requiring
+    --   the join on income_types to succeed.
+    --
+    -- Categories with no matching income_types row are skipped by
+    -- the JOIN — admin creating a profile_categories.context that
+    -- doesn't match an income_type_key won't leak orphan rows here.
+    local generic_rows = db.query([[
+        SELECT it.income_type_key,
+               COALESCE(SUM(a.answer_number), 0) AS total,
+               COUNT(DISTINCT a.question_id)    AS row_count
         FROM user_profile_answers a
         JOIN profile_questions q  ON q.id = a.question_id
         JOIN profile_categories c ON c.id = q.category_id
+        JOIN income_types it      ON it.income_type_key = c.context
         WHERE a.user_id = ?
-          AND c.context = 'dividends'
+          AND it.income_type_key NOT IN ('salary', 'pension_payments')
           AND c.is_active = true
           AND c.is_archived = false
+          AND it.is_active = true
           AND a.answer_number IS NOT NULL
-    ]], internal_user_id)
-    if dividends_row and dividends_row[1] then
-        local dividends_entry = by_type["dividends"]
-        if not dividends_entry then
-            dividends_entry = { income_type_key = "dividends", total = 0, row_count = 0 }
-            out[#out + 1] = dividends_entry
-            by_type["dividends"] = dividends_entry
+        GROUP BY it.income_type_key
+    ]], internal_user_id) or {}
+    for _, r in ipairs(generic_rows) do
+        local entry = by_type[r.income_type_key]
+        if not entry then
+            entry = { income_type_key = r.income_type_key, total = 0, row_count = 0 }
+            out[#out + 1] = entry
+            by_type[r.income_type_key] = entry
         end
-        dividends_entry.total = tonumber(dividends_row[1].total) or 0
-        dividends_entry.row_count = tonumber(dividends_row[1].row_count) or 0
+        entry.total = tonumber(r.total) or 0
+        entry.row_count = tonumber(r.row_count) or 0
     end
 
     return out
