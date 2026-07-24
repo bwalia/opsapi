@@ -897,6 +897,12 @@ function FormSectionQueries.card_summary(user)
     --   figure. Its branch sums only the six "gains in the year,
     --   before losses" boxes.
     --
+    --   other — same reasoning for SA101 (Additional information):
+    --   the generic sum would add tax reliefs, deductions,
+    --   tax-taken-off, pension charges and policy-years counts into
+    --   the "other income" headline. Its explicit branch below sums
+    --   only the income boxes.
+    --
     --   Per-entity contexts (property, business, overseas_property,
     --   rental_business, employment) — these DON'T correspond 1:1 to
     --   an income_type_key (rental hub is 'rental', not
@@ -917,7 +923,7 @@ function FormSectionQueries.card_summary(user)
         JOIN profile_categories c ON c.id = q.category_id
         JOIN income_types it      ON it.income_type_key = c.context
         WHERE a.user_id = ?
-          AND it.income_type_key NOT IN ('salary', 'pension_payments', 'capital_gains')
+          AND it.income_type_key NOT IN ('salary', 'pension_payments', 'capital_gains', 'other')
           AND c.is_active = true
           AND c.is_archived = false
           AND it.is_active = true
@@ -989,6 +995,63 @@ function FormSectionQueries.card_summary(user)
         end
         cg_entry.total = tonumber(capital_gains_row[1].total) or 0
         cg_entry.row_count = tonumber(capital_gains_row[1].row_count) or 0
+    end
+
+    -- ── Other income (SA101 Additional information) ─────────────────
+    -- Same shape as the capital_gains branch above, same reason to be
+    -- excluded from the generic sum: SA101 mixes income with tax
+    -- reliefs, deductions, tax-taken-off, MCA, losses and pension
+    -- charges. Total = SUM of the INCOME boxes only (flagged
+    -- config_json.card_total in the seed; keys hardcoded here for the
+    -- same malformed-config_json reason): gilt gross interest (box 3),
+    -- life policy gains (4, 6, 8), stock dividends (12), bonus issues
+    -- (13), close company loans written off (13.1), business receipts
+    -- (14), and the employment-section income boxes (1, 3, 4, 5).
+    -- Keep this list in step with the card_total flags in
+    -- migrations/sa101-additional-information-questions.lua.
+    -- Count = number of SA101 boxes with ANY answer, so a
+    -- reliefs-only or MCA-only entry still flips the card off
+    -- "Nothing recorded yet".
+    local other_row = db.query([[
+        SELECT
+          COALESCE(SUM(CASE
+            WHEN q.question_key IN
+                ('sa101_gilt_gross_before_tax',
+                 'sa101_lip_gains_tax_treated_paid',
+                 'sa101_lip_gains_no_tax_treated',
+                 'sa101_lip_gains_voided_isas',
+                 'sa101_sd_stock_dividends',
+                 'sa101_sd_bonus_issues',
+                 'sa101_sd_close_company_loans',
+                 'sa101_bri_amount',
+                 'sa101_emp_share_schemes',
+                 'sa101_emp_taxable_lump_sums',
+                 'sa101_emp_efrbs_lump_sums',
+                 'sa101_emp_redundancy_above_30k')
+            THEN a.answer_number ELSE 0 END), 0) AS total,
+          COUNT(a.id)                            AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q  ON q.id = a.question_id
+        JOIN profile_categories c ON c.id = q.category_id
+        WHERE a.user_id = ?
+          AND c.context = 'other'
+          AND c.is_active = true
+          AND c.is_archived = false
+          AND (COALESCE(a.answer_text, '') <> ''
+               OR a.answer_number IS NOT NULL
+               OR a.answer_boolean IS NOT NULL
+               OR a.answer_date IS NOT NULL
+               OR COALESCE(a.answer_json, '') <> '')
+    ]], internal_user_id)
+    if other_row and other_row[1] then
+        local other_entry = by_type["other"]
+        if not other_entry then
+            other_entry = { income_type_key = "other", total = 0, row_count = 0 }
+            out[#out + 1] = other_entry
+            by_type["other"] = other_entry
+        end
+        other_entry.total = tonumber(other_row[1].total) or 0
+        other_entry.row_count = tonumber(other_row[1].row_count) or 0
     end
 
     return out
