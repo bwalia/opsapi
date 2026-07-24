@@ -127,6 +127,16 @@ return function(app)
                 description = r.description,
                 required_documents = docs,
                 allows_manual_entry = r.allows_manual_entry,
+                -- Admin-configured "linked HMRC form" metadata (SA100 /
+                -- SA110 / SA108 / etc). Rendered as a small reference card
+                -- above the profile-builder ContextSections on
+                -- /my-income/[type]. All three optional — omit or blank
+                -- either field and the frontend renders the fallback layout.
+                -- See migration income-types-linked-form-metadata for the
+                -- column semantics + initial seed defaults.
+                linked_form_title = r.linked_form_title,
+                linked_form_description = r.linked_form_description,
+                linked_form_weblink = r.linked_form_weblink,
             }
         end
         -- Force [] (not {}) when empty so JSON consumers that do
