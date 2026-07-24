@@ -261,6 +261,12 @@ local sa108_capital_gains_migrations = load_if_enabled(ProjectConfig.FEATURES.TA
 -- overwrites admin edits).
 local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-linked-form-metadata") or {}
 
+-- SA101 Additional information — every box on the form (pages Ai1-Ai4)
+-- as profile-builder questions for the "Other income" panel
+-- (context='other', answer_scope='year'). Same greenfield pattern as
+-- SA108: no backfill/fork pair. Gated on TAX_COPILOT.
+local sa101_additional_information_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa101-additional-information-questions") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2104,6 +2110,25 @@ local _migrations = {
     -- "SA100 boxes" card header on /my-income/[type]. Both idempotent.
     ['770_add_income_types_linked_form_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 1),
     ['771_seed_income_types_linked_form_defaults'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 2),
+
+    -- 772/773 — SA101 Additional information ("Other income" panel) on
+    -- the profile builder (context='other', answer_scope='year').
+    -- Renumbered from 770/771 when the linked-form-metadata migration
+    -- claimed those slots. Categories MUST run before questions
+    -- (questions resolve category_id by slug). Both idempotent;
+    -- INSERT-only, so admin edits are never clobbered. No backfill
+    -- step: the 'other' type's flat my_incomes rows stay untouched
+    -- (calc still reads them).
+    ['772_seed_sa101_additional_information_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 1),
+    ['773_seed_sa101_additional_information_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 2),
+    -- 774 — linked-form defaults for the types migration 771 missed:
+    -- 'other' (SA101, new in this branch) and 'capital_gains' (771
+    -- seeded it under the key 'sa108', which matches no income_types
+    -- row — UPDATE silently no-ops — so the CGT panel never got its
+    -- reference-form card). COALESCE, same non-clobber contract as 771;
+    -- a new step rather than editing 771 because 771 is already
+    -- tracked as run in envs (the dividends-750a precedent).
+    ['774_seed_linked_form_defaults_other_and_capital_gains'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 3),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
