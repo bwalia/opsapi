@@ -267,6 +267,13 @@ local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATUR
 -- SA108: no backfill/fork pair. Gated on TAX_COPILOT.
 local sa101_additional_information_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa101-additional-information-questions") or {}
 
+-- SA105 UK Property completion — tax-adjustment + loss boxes (32-48)
+-- that the earlier property-income-system seed didn't cover. Adds 2
+-- year-scoped profile categories under context='rental' (portfolio-
+-- wide totals, not per-property) plus 1 new property_line_categories
+-- row (replacement_domestic_items, boxes 39-40).
+local sa105_property_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa105-property-completion-questions") or {}
+
 -- SA109 Residence, remittance basis etc. — NEW income type. Closes
 -- the HIGH-priority audit gap: expats / split-year / RBC filers had
 -- no way to file. Seeds income_types row + linked_form metadata + 5
@@ -2150,10 +2157,19 @@ local _migrations = {
     -- a new step rather than editing 771 because 771 is already
     -- tracked as run in envs (the dividends-750a precedent).
     ['774_seed_linked_form_defaults_other_and_capital_gains'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 3),
-    -- 785-790 — SA10x completion PRs (numbers picked to leave a gap
-    -- for the pending SA105 completion PR that uses 775/776, so
-    -- either PR can merge first without collision).
+    -- 775-790 — SA10x completion round. One PR shipping four seeds
+    -- together: SA105 (portfolio-wide rental adjustments + losses),
+    -- SA109 (residence/remittance basis), SA106 non-property
+    -- (foreign interest/dividends/pensions/FTCR), and SA103F
+    -- (Class 4 NIC + basis-reform + loss-offset). All INSERT-only
+    -- + two-step (safety-net re-run). Supersedes the earlier
+    -- feat/sa105-property-completion-year-scoped branch (folded in
+    -- so the four migrations ship as one PR per the "one PR per
+    -- repo" contract).
     --
+    -- 775/776 — SA105 UK Property completion.
+    ['775_seed_sa105_property_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa105_property_completion_migrations, 1),
+    ['776_reseed_sa105_property_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa105_property_completion_migrations, 2),
     -- 785/786 — SA109 Residence, remittance basis etc. NEW income
     -- type. Auto-discovery renders /my-income/sa109 with zero
     -- frontend code.
