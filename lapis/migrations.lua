@@ -267,6 +267,16 @@ local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATUR
 -- SA108: no backfill/fork pair. Gated on TAX_COPILOT.
 local sa101_additional_information_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa101-additional-information-questions") or {}
 
+-- SA105 UK Property — completion of the tax-adjustment + loss boxes
+-- (32-48) that the earlier property-income-system seed didn't cover.
+-- Adds 2 year-scoped profile categories under context='rental'
+-- (SA105 is one form per taxpayer per year — these are portfolio-wide
+-- totals, not per-property) plus one new property_line_categories
+-- row for "replacement of domestic items" (SA105 boxes 39-40).
+-- See the migration file header for the box-by-box mapping + the
+-- rationale for year-scoping.
+local sa105_property_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa105-property-completion-questions") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2129,6 +2139,14 @@ local _migrations = {
     -- a new step rather than editing 771 because 771 is already
     -- tracked as run in envs (the dividends-750a precedent).
     ['774_seed_linked_form_defaults_other_and_capital_gains'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 3),
+    -- 775/776 — SA105 UK Property completion. Adds the missing tax-
+    -- adjustment + loss boxes (32-48) as year-scoped profile
+    -- questions under context='rental', plus 1 new expense line
+    -- category (replacement_domestic_items, SA105 39-40).
+    -- INSERT-only + idempotent on both steps. 776 is the safety-net
+    -- re-run (same convention as sa110's 767).
+    ['775_seed_sa105_property_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa105_property_completion_migrations, 1),
+    ['776_reseed_sa105_property_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa105_property_completion_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
