@@ -267,6 +267,27 @@ local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATUR
 -- SA108: no backfill/fork pair. Gated on TAX_COPILOT.
 local sa101_additional_information_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa101-additional-information-questions") or {}
 
+-- SA109 Residence, remittance basis etc. — NEW income type. Closes
+-- the HIGH-priority audit gap: expats / split-year / RBC filers had
+-- no way to file. Seeds income_types row + linked_form metadata + 5
+-- year-scoped categories (~21 questions). Auto-discovery renders
+-- /my-income/sa109 with zero frontend code.
+local sa109_residence_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa109-residence-domicile-questions") or {}
+
+-- SA106 Foreign income NON-property — NEW income type foreign_income.
+-- Closes another HIGH-priority audit gap: foreign savings interest,
+-- dividends above the £500 SA100 threshold, overseas pensions,
+-- Foreign Tax Credit Relief. Existing overseas_property covers only
+-- foreign PROPERTY; this covers the other SA106 sections.
+local sa106_foreign_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa106-foreign-income-questions") or {}
+
+-- SA103F Self-employment completion — Class 4 NIC exemption /
+-- adjustment (boxes 100-102), basis-period reform electives, and
+-- loss-offset options (boxes 77-79). Adds 3 year-scoped categories
+-- under context='self_employment' (extending the existing type).
+-- Companion frontend PR renders them on the SE hub.
+local sa103f_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa103f-completion-questions") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2129,6 +2150,27 @@ local _migrations = {
     -- a new step rather than editing 771 because 771 is already
     -- tracked as run in envs (the dividends-750a precedent).
     ['774_seed_linked_form_defaults_other_and_capital_gains'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 3),
+    -- 785-790 — SA10x completion PRs (numbers picked to leave a gap
+    -- for the pending SA105 completion PR that uses 775/776, so
+    -- either PR can merge first without collision).
+    --
+    -- 785/786 — SA109 Residence, remittance basis etc. NEW income
+    -- type. Auto-discovery renders /my-income/sa109 with zero
+    -- frontend code.
+    ['785_seed_sa109_residence_domicile'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa109_residence_migrations, 1),
+    ['786_reseed_sa109_residence_domicile'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa109_residence_migrations, 2),
+    -- 787/788 — SA106 Foreign income (non-property). NEW income type
+    -- foreign_income. Distinct from the existing overseas_property
+    -- type (foreign PROPERTY only) — both reference SA106 (different
+    -- sections).
+    ['787_seed_sa106_foreign_income'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa106_foreign_income_migrations, 1),
+    ['788_reseed_sa106_foreign_income'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa106_foreign_income_migrations, 2),
+    -- 789/790 — SA103F Self-employment completion. Extends existing
+    -- 'self_employment' type with Class 4 NIC + basis-reform +
+    -- loss-offset categories. Frontend renders via a new
+    -- ContextSections block on the SE hub.
+    ['789_seed_sa103f_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa103f_completion_migrations, 1),
+    ['790_reseed_sa103f_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa103f_completion_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
