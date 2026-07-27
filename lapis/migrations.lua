@@ -2203,6 +2203,8 @@ local _migrations = {
     -- progress migrations and 819/820/821 are tax identity-lock — distinct features,
     -- but 822 is free everywhere, avoiding any numeric-prefix dedup in the `all` preset.
     ['822_seed_academy_namespace'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 6),
+    -- Admin-approval gate: widen the course status CHECK to allow pending_review.
+    ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
     -- Academy sidebar menu item + RBAC module ("courses") + role grants
     ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
     ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),

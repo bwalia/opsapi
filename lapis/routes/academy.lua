@@ -37,7 +37,11 @@ local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 
 local LEVELS = { beginner = true, intermediate = true, advanced = true }
-local COURSE_STATUS = { draft = true, published = true, archived = true }
+-- pending_review is the admin-approval gate: an instructor submits a course into
+-- it, and only an admin can move it on to `published`. The public endpoints
+-- already show ONLY `published`, so a pending_review course is invisible to
+-- learners for free — the gate is entirely about who may set `published`.
+local COURSE_STATUS = { draft = true, pending_review = true, published = true, archived = true }
 local LESSON_STATUS = { draft = true, published = true }
 
 -- The single academy tenant. Instructors are a ROLE inside this one namespace —
@@ -228,6 +232,21 @@ return function(app)
         return self.is_platform_admin == true or self.is_namespace_owner == true
     end
 
+    -- The admin-approval gate. Only an admin (platform admin / namespace owner)
+    -- may put a course live. An instructor asking for `published` gets
+    -- `pending_review` instead — their submission, awaiting approval — rather than
+    -- an error, so the dashboard's "publish" button becomes "submit for review"
+    -- with no client change. Admins pass through unchanged.
+    --
+    -- Returns the status to actually persist. Applied on BOTH create and update,
+    -- because either can carry status=published.
+    local function gate_publish(self, requested)
+        if requested == "published" and not can_manage_all(self) then
+            return "pending_review"
+        end
+        return requested
+    end
+
     -- Owner filter to hand CourseQueries.list: nil for admins/owners (see all),
     -- else the caller's uuid so instructors see only their own courses.
     local function owner_scope(self)
@@ -312,8 +331,10 @@ return function(app)
             end
             local status = body.status or "draft"
             if not COURSE_STATUS[status] then
-                return api_response(400, nil, "Invalid status (draft|published|archived)")
+                return api_response(400, nil, "Invalid status (draft|pending_review|published|archived)")
             end
+            -- An instructor cannot self-publish: publish requires admin approval.
+            status = gate_publish(self, status)
 
             local is_free = to_bool(body.is_free, true)
             local price = tonumber(body.price) or 0
@@ -362,6 +383,9 @@ return function(app)
             if body.status and not COURSE_STATUS[body.status] then
                 return api_response(400, nil, "Invalid status")
             end
+            -- Same gate as create: an instructor editing status to `published`
+            -- gets `pending_review` instead. Only approve/reject (admin) sets live.
+            if body.status then body.status = gate_publish(self, body.status) end
 
             local fields = {}
             for _, k in ipairs({ "title", "slug", "description", "instructor", "thumbnail_url",
@@ -407,6 +431,60 @@ return function(app)
             local ok = CourseQueries.softDelete(self.namespace.id, self.params.uuid)
             if not ok then return api_response(404, nil, "Course not found") end
             return api_response(200, { deleted = true })
+        end)))
+
+    ---------------------------------------------------------------------------
+    -- ADMIN: COURSE REVIEW (approval gate)
+    --
+    -- Instructors submit into `pending_review` (they cannot self-publish — see
+    -- gate_publish). These two endpoints are the ONLY way a course reaches
+    -- `published`, and both are restricted to an admin (platform admin /
+    -- namespace owner) via can_manage_all — the RBAC "courses" permission an
+    -- instructor holds is NOT enough. That is the whole point of the gate: the
+    -- people who can author are deliberately not the people who can publish.
+    ---------------------------------------------------------------------------
+
+    -- Everything awaiting approval, for the admin's review queue.
+    -- NOT under /courses/:uuid — that route would capture "pending" as a uuid and
+    -- 404. A distinct path sidesteps the collision regardless of router ordering.
+    app:get("/api/v2/academy/pending-courses", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "read", function(self)
+            if not can_manage_all(self) then
+                return api_response(403, nil, "Only an admin can review course submissions")
+            end
+            local res = CourseQueries.list(self.namespace.id, { status = "pending_review", perPage = 200 })
+            return api_response(200, res)
+        end)))
+
+    app:post("/api/v2/academy/courses/:uuid/approve", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "update", function(self)
+            if not can_manage_all(self) then
+                return api_response(403, nil, "Only an admin can approve a course")
+            end
+            local course = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
+            if not course then return api_response(404, nil, "Course not found") end
+            -- Approving a course that is not awaiting review is a no-op mistake
+            -- worth naming, so the admin knows nothing changed.
+            if course.status ~= "pending_review" then
+                return api_response(409, nil, "Course is not pending review (status: " .. tostring(course.status) .. ")")
+            end
+            local updated = CourseQueries.update(self.namespace.id, self.params.uuid, { status = "published" })
+            if not updated then return api_response(404, nil, "Course not found") end
+            return api_response(200, updated)
+        end)))
+
+    app:post("/api/v2/academy/courses/:uuid/reject", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "update", function(self)
+            if not can_manage_all(self) then
+                return api_response(403, nil, "Only an admin can reject a course")
+            end
+            local course = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
+            if not course then return api_response(404, nil, "Course not found") end
+            -- Rejection sends it back to draft so the instructor can revise and
+            -- resubmit — a rejected course is not archived, it is "not yet good".
+            local updated = CourseQueries.update(self.namespace.id, self.params.uuid, { status = "draft" })
+            if not updated then return api_response(404, nil, "Course not found") end
+            return api_response(200, updated)
         end)))
 
     ---------------------------------------------------------------------------
