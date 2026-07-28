@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User, X } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -42,6 +42,7 @@ const EMPTY_FORM: CourseInput = {
   instructor: '',
   thumbnail_url: '',
   category: 'general',
+  tags: [],
   level: 'beginner',
   is_free: true,
   price: 0,
@@ -63,6 +64,8 @@ interface CourseModalProps {
 const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSuccess }) => {
   const [form, setForm] = useState<CourseInput>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState('');
 
   useEffect(() => {
     if (course) {
@@ -73,6 +76,7 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
         instructor: course.instructor ?? '',
         thumbnail_url: course.thumbnail_url ?? '',
         category: course.category ?? 'general',
+        tags: course.tags ?? [],
         level: course.level,
         is_free: course.is_free,
         // Stored in minor units (pence/cents); edit in major units.
@@ -83,10 +87,49 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
     } else {
       setForm(EMPTY_FORM);
     }
+    setTagDraft('');
   }, [course, isOpen]);
+
+  // Fetch the existing category values whenever the modal opens, so the
+  // create-or-select control can offer them (falls back to none on error).
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    academyService
+      .getCategories()
+      .then((cats) => { if (active) setCategories(cats); })
+      .catch(() => { if (active) setCategories([]); });
+    return () => { active = false; };
+  }, [isOpen]);
 
   const set = <K extends keyof CourseInput>(key: K, value: CourseInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Tag chips: add on Enter or comma, de-duped case-insensitively, capped and
+  // trimmed to match the backend (max 20 tags, <= 40 chars each).
+  const addTag = (raw: string) => {
+    const value = raw.trim().slice(0, 40);
+    if (!value) return;
+    setForm((prev) => {
+      const existing = prev.tags ?? [];
+      if (existing.length >= 20) return prev;
+      if (existing.some((t) => t.toLowerCase() === value.toLowerCase())) return prev;
+      return { ...prev, tags: [...existing, value] };
+    });
+    setTagDraft('');
+  };
+
+  const removeTag = (tag: string) =>
+    setForm((prev) => ({ ...prev, tags: (prev.tags ?? []).filter((t) => t !== tag) }));
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(tagDraft);
+    } else if (e.key === 'Backspace' && tagDraft === '' && (form.tags ?? []).length > 0) {
+      removeTag((form.tags ?? [])[(form.tags ?? []).length - 1]);
+    }
+  };
 
   const inputClass =
     'w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500';
@@ -139,7 +182,19 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Category</label>
-            <input className={inputClass} value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. programming" />
+            {/* Create-or-select: pick an existing category or type a brand-new one. */}
+            <input
+              className={inputClass}
+              list="course-category-options"
+              value={form.category}
+              onChange={(e) => set('category', e.target.value)}
+              placeholder="Pick existing or type a new one"
+            />
+            <datalist id="course-category-options">
+              {categories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Level</label>
@@ -160,6 +215,36 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
           <div className="col-span-2">
             <label className="block text-sm font-medium text-secondary-700 mb-1">Thumbnail URL</label>
             <input className={inputClass} value={form.thumbnail_url} onChange={(e) => set('thumbnail_url', e.target.value)} placeholder="https://…/thumb.jpg" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Tags</label>
+            <div className={`${inputClass} flex flex-wrap items-center gap-1.5 min-h-[42px] h-auto`}>
+              {(form.tags ?? []).map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 text-xs font-medium"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    className="text-primary-500 hover:text-primary-700"
+                    aria-label={`Remove ${tag}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              <input
+                className="flex-1 min-w-[8rem] border-none outline-none bg-transparent text-sm p-0 focus:ring-0"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={handleTagKeyDown}
+                onBlur={() => addTag(tagDraft)}
+                placeholder={(form.tags ?? []).length === 0 ? 'Add tags (Enter or comma)…' : ''}
+              />
+            </div>
+            <p className="mt-1 text-xs text-secondary-500">Press Enter or comma to add. Used for sorting and filtering. Up to 20 tags.</p>
           </div>
           <div className="col-span-2 flex items-center gap-3">
             <input id="is_free" type="checkbox" checked={form.is_free} onChange={(e) => set('is_free', e.target.checked)} className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500" />

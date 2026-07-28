@@ -2205,6 +2205,8 @@ local _migrations = {
     ['822_seed_academy_namespace'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 6),
     -- Admin-approval gate: widen the course status CHECK to allow pending_review.
     ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
+    -- Add a jsonb `tags` array to courses (create-or-select category + multi-tags).
+    ['824_academy_course_tags'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 8),
     -- Academy sidebar menu item + RBAC module ("courses") + role grants
     ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
     ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),

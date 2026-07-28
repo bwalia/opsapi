@@ -400,4 +400,26 @@ return {
             ]])
         end)
     end,
+
+    -- ========================================================================
+    -- [8] Add a free-form `tags` array to courses.
+    --
+    -- A course already carries one `category` string; `tags` is the multi-value
+    -- counterpart (stored as a jsonb array of strings) so the catalogue can be
+    -- sorted/filtered by tag as well as category. Defaults to an empty array and
+    -- is NOT NULL, so every existing row gets `[]` and the filter (tags @> ...)
+    -- never trips over a null.
+    --
+    -- Idempotent (ADD COLUMN IF NOT EXISTS) and wrapped in pcall like the other
+    -- ALTERs above, so a re-run — or a column that somehow already exists — is a
+    -- no-op rather than an error. Academy-feature-gated in migrations.lua.
+    -- ========================================================================
+    [8] = function()
+        pcall(function()
+            db.query([[
+                ALTER TABLE academy_courses
+                ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]'::jsonb
+            ]])
+        end)
+    end,
 }

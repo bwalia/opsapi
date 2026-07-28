@@ -114,6 +114,66 @@ return function(app)
         return s == "true" or s == "1" or s == "yes"
     end
 
+    -- Tags come in three shapes depending on the transport: a JSON body sends a
+    -- real array; a form body sends either a single string (one tag) or, if the
+    -- client JSON-stringified the list, a JSON-array string. coerce_tags accepts
+    -- all three and returns a clean Lua array: each tag trimmed, capped at 40
+    -- chars, empties dropped, case-insensitively de-duped, at most 20 total.
+    -- Returns nil ONLY when the field was absent, so update can tell "clear the
+    -- tags" (an explicit []) apart from "leave them untouched" (omitted).
+    local MAX_TAGS, MAX_TAG_LEN = 20, 40
+    local function coerce_tags(raw)
+        if raw == nil then return nil end
+        local list = raw
+        if type(raw) == "string" then
+            local ok, decoded = pcall(cJson.decode, raw)
+            if ok and type(decoded) == "table" then
+                list = decoded
+            else
+                list = { raw }
+            end
+        end
+        if type(list) ~= "table" then return {} end
+        local seen, out = {}, {}
+        for _, v in ipairs(list) do
+            if type(v) == "string" or type(v) == "number" then
+                local s = tostring(v):gsub("^%s+", ""):gsub("%s+$", "")
+                if #s > MAX_TAG_LEN then s = s:sub(1, MAX_TAG_LEN) end
+                local key = s:lower()
+                if s ~= "" and not seen[key] then
+                    seen[key] = true
+                    out[#out + 1] = s
+                    if #out >= MAX_TAGS then break end
+                end
+            end
+        end
+        return out
+    end
+
+    -- Postgres returns a jsonb column to us as its TEXT form, so a course row's
+    -- `tags` arrives as the string '["a","b"]'. Decode it to an array for output
+    -- (empty → the JSON `[]` sentinel, so it never serializes as `{}`). Tolerant
+    -- of an already-decoded table and of a null/blank column.
+    local function tags_out(v)
+        local arr
+        if type(v) == "table" then
+            arr = v
+        elseif type(v) == "string" and v ~= "" then
+            local ok, decoded = pcall(cJson.decode, v)
+            arr = (ok and type(decoded) == "table") and decoded or {}
+        else
+            arr = {}
+        end
+        return #arr > 0 and arr or cJson.empty_array
+    end
+
+    -- Attach the decoded `tags` to an admin course row/model in place, so the
+    -- admin course shape returns tags as an array (matching public_course).
+    local function with_tags(course)
+        if course then course.tags = tags_out(course.tags) end
+        return course
+    end
+
     -- Postgres booleans reach us either as a real boolean or as the string "t",
     -- depending on the driver path — EntitlementQueries.hasCourseAccess checks
     -- for both, which is why this cannot use to_bool(): that maps "t" to FALSE
@@ -208,6 +268,7 @@ return function(app)
             instructor_id = (instructor_info and instructor_info.id) or row.owner_user_uuid,
             thumbnail_url = row.thumbnail_url,
             category = row.category,
+            tags = tags_out(row.tags),
             level = row.level,
             is_free = row.is_free,
             price = row.price,
@@ -294,10 +355,12 @@ return function(app)
                 perPage = self.params.perPage,
                 status = self.params.status,
                 category = self.params.category,
+                tag = self.params.tag,
                 level = self.params.level,
                 search = self.params.search,
                 owner_user_uuid = owner_scope(self),
             })
+            for _, row in ipairs(result.data) do with_tags(row) end
             return {
                 status = 200,
                 json = {
@@ -306,6 +369,17 @@ return function(app)
                     pagination = { page = result.page, perPage = result.perPage, total = result.total },
                 }
             }
+        end)))
+
+    -- Distinct category strings used in this namespace, for the dashboard's
+    -- "create or select" category control. There is no categories table — this
+    -- just returns the existing values so the teacher can pick one or type a new.
+    app:get("/api/v2/academy/categories", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("courses", "read", function(self)
+            local categories = CourseQueries.distinctCategories(self.namespace.id)
+            return api_response(200, {
+                categories = #categories > 0 and categories or cJson.empty_array,
+            })
         end)))
 
     -- A paid course with no price cannot be bought: Stripe rejects a zero amount,
@@ -348,6 +422,7 @@ return function(app)
                 instructor = body.instructor,
                 thumbnail_url = body.thumbnail_url,
                 category = body.category or "general",
+                tags = coerce_tags(body.tags) or {},
                 level = level,
                 is_free = is_free,
                 price = price,
@@ -359,7 +434,7 @@ return function(app)
                 ngx.log(ngx.ERR, "[academy] create course failed: ", tostring(course_or_err))
                 return api_response(409, nil, "Could not create course (slug may already exist)")
             end
-            return api_response(201, course_or_err)
+            return api_response(201, with_tags(course_or_err))
         end)))
 
     app:get("/api/v2/academy/courses/:uuid", AuthMiddleware.requireAuth(
@@ -370,7 +445,7 @@ return function(app)
                 return api_response(403, nil, "You can only view your own courses")
             end
             local lessons = LessonQueries.listByCourse(course.id, { published_only = false })
-            local data = { course = course, lessons = lessons }
+            local data = { course = with_tags(course), lessons = lessons }
             return api_response(200, data)
         end)))
 
@@ -394,6 +469,8 @@ return function(app)
             end
             if body.is_free ~= nil then fields.is_free = to_bool(body.is_free, true) end
             if body.price ~= nil then fields.price = tonumber(body.price) or 0 end
+            -- Present-but-empty ([]) clears the tags; absent leaves them untouched.
+            if body.tags ~= nil then fields.tags = coerce_tags(body.tags) end
 
             local existing = CourseQueries.getByUuid(self.namespace.id, self.params.uuid)
             if not existing then return api_response(404, nil, "Course not found") end
@@ -416,7 +493,7 @@ return function(app)
 
             local updated = CourseQueries.update(self.namespace.id, self.params.uuid, fields)
             if not updated then return api_response(404, nil, "Course not found") end
-            return api_response(200, updated)
+            return api_response(200, with_tags(updated))
         end)))
 
     app:delete("/api/v2/academy/courses/:uuid", AuthMiddleware.requireAuth(
