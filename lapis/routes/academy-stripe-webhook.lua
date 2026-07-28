@@ -21,16 +21,40 @@ local PayoutQueries = require("queries.PayoutQueries")
 local CourseQueries = require("queries.CourseQueries")
 
 return function(app)
-    -- Idempotency: true if already handled. Inserts the marker; a unique-violation
-    -- race also counts as "already processed".
-    local function already_processed(event_id, etype)
+    -- Idempotency, part 1 (read-only): has this event already been fully
+    -- processed and committed? The marker is written LAST, inside the same
+    -- transaction as the side effects (see below), so its presence guarantees
+    -- the side effects landed. A missing marker means genuine reprocessing is
+    -- safe — which is exactly what we want after a mid-handler failure.
+    local function is_processed(event_id)
         local rows = db.query("SELECT 1 FROM processed_stripe_events WHERE event_id = ? LIMIT 1", event_id)
-        if rows and #rows > 0 then return true end
-        local ok = pcall(function()
-            db.query("INSERT INTO processed_stripe_events (event_id, type, created_at) VALUES (?, ?, NOW())",
-                event_id, etype)
-        end)
-        return not ok
+        return rows ~= nil and #rows > 0
+    end
+
+    -- Idempotency, part 2 (write): mark the event processed. Called as the FINAL
+    -- statement inside the side-effect transaction. The unique index on event_id
+    -- doubles as the concurrency guard: if two deliveries of the same event race,
+    -- one INSERT blocks then raises a unique violation, aborting that whole
+    -- transaction (rolling back its partial side effects) — so a duplicate can
+    -- never write the ledger twice.
+    local function mark_processed(event_id, etype)
+        db.query("INSERT INTO processed_stripe_events (event_id, type, created_at) VALUES (?, ?, NOW())",
+            event_id, etype)
+    end
+
+    -- Run fn inside a DB transaction. Any error (from a side effect OR the marker
+    -- INSERT) rolls back EVERYTHING — including the idempotency marker — so the
+    -- event stays un-marked and Stripe's retry genuinely reprocesses it. Returns
+    -- (true) on commit, or (false, err) on rollback.
+    local function in_transaction(fn)
+        db.query("BEGIN")
+        local ok, err = pcall(fn)
+        if ok then
+            db.query("COMMIT")
+            return true
+        end
+        pcall(function() db.query("ROLLBACK") end)
+        return false, err
     end
 
     local function raw_body()
@@ -59,61 +83,95 @@ return function(app)
             return { status = 400, json = { error = "invalid signature" } }
         end
 
-        if already_processed(event.id, event.type) then
+        -- Genuine duplicate (already committed) — short-circuit. A missing marker
+        -- after an earlier failure is NOT a duplicate: we fall through and reprocess.
+        if is_processed(event.id) then
             return { status = 200, json = { received = true, duplicate = true } }
         end
 
         local obj = (event.data and event.data.object) or {}
         local t = event.type
 
-        if t == "checkout.session.completed" then
-            local md = obj.metadata or {}
-            local ns_id = tonumber(md.namespace_id)
-            if md.kind == "course" and ns_id and tonumber(md.course_id) and md.user_uuid then
-                pcall(EnrollmentQueries.enroll, ns_id, tonumber(md.course_id), md.user_uuid)
-                -- Attribute the sale to the course owner (the instructor). Legacy /
-                -- admin-owned courses may have no owner -> platform revenue.
-                local course = CourseQueries.findById(ns_id, tonumber(md.course_id))
-                PayoutQueries.recordSale({
-                    user_uuid = md.user_uuid, namespace_id = ns_id, course_id = tonumber(md.course_id),
-                    seller_user_uuid = course and course.owner_user_uuid or nil,
-                    kind = "course", stripe_ref = obj.payment_intent, amount = obj.amount_total, currency = obj.currency,
-                })
-            elseif md.kind == "subscription" and ns_id and md.user_uuid and obj.subscription then
-                local subobj = Stripe.new():retrieve_subscription(obj.subscription)
-                SubscriptionQueries.upsert({
-                    user_uuid = md.user_uuid, namespace_id = ns_id,
-                    stripe_subscription_id = obj.subscription, stripe_customer_id = obj.customer,
-                    status = subobj and subobj.status or "active",
-                    current_period_end_unix = subobj and subobj.current_period_end or nil,
-                })
-                -- First payment: record the ledger entry here (renewals come via invoice.paid).
-                PayoutQueries.recordSale({
-                    user_uuid = md.user_uuid, namespace_id = ns_id, kind = "subscription",
-                    stripe_ref = obj.subscription, amount = obj.amount_total, currency = obj.currency,
-                })
-            end
+        -- Fetch any external Stripe data BEFORE opening the transaction: a Stripe
+        -- HTTP round-trip must not hold a DB transaction (and its row locks) open.
+        -- A failed fetch here just means the sub object stays nil; we degrade the
+        -- same way the original code did (default status "active", no period end).
+        local subobj = nil
+        local need_sub =
+            (t == "checkout.session.completed" and (obj.metadata or {}).kind == "subscription" and obj.subscription) or
+            (t == "invoice.paid" and obj.subscription)
+        if need_sub then
+            local ok_fetch, res = pcall(function() return Stripe.new():retrieve_subscription(obj.subscription) end)
+            if ok_fetch then subobj = res end
+        end
 
-        elseif t == "invoice.paid" then
-            if obj.subscription then
-                local subobj = Stripe.new():retrieve_subscription(obj.subscription)
-                if subobj then
-                    SubscriptionQueries.updateStatusByStripeId(obj.subscription, subobj.status, subobj.current_period_end)
+        -- All persistent side effects run inside ONE transaction, and the
+        -- idempotency marker is written as its LAST statement. Any failure rolls
+        -- back the marker together with the partial side effects, so nothing is
+        -- half-written and Stripe's retry reprocesses the whole event cleanly.
+        local ok, err = in_transaction(function()
+            if t == "checkout.session.completed" then
+                local md = obj.metadata or {}
+                local ns_id = tonumber(md.namespace_id)
+                if md.kind == "course" and ns_id and tonumber(md.course_id) and md.user_uuid then
+                    -- Enroll + ledger are now atomic: if the ledger write fails the
+                    -- enrollment rolls back too, so the buyer is never granted access
+                    -- without the instructor's earnings row being recorded.
+                    EnrollmentQueries.enroll(ns_id, tonumber(md.course_id), md.user_uuid)
+                    -- Attribute the sale to the course owner (the instructor). Legacy /
+                    -- admin-owned courses may have no owner -> platform revenue.
+                    local course = CourseQueries.findById(ns_id, tonumber(md.course_id))
+                    PayoutQueries.recordSale({
+                        user_uuid = md.user_uuid, namespace_id = ns_id, course_id = tonumber(md.course_id),
+                        seller_user_uuid = course and course.owner_user_uuid or nil,
+                        kind = "course", stripe_ref = obj.payment_intent, amount = obj.amount_total, currency = obj.currency,
+                    })
+                elseif md.kind == "subscription" and ns_id and md.user_uuid and obj.subscription then
+                    SubscriptionQueries.upsert({
+                        user_uuid = md.user_uuid, namespace_id = ns_id,
+                        stripe_subscription_id = obj.subscription, stripe_customer_id = obj.customer,
+                        status = subobj and subobj.status or "active",
+                        current_period_end_unix = subobj and subobj.current_period_end or nil,
+                    })
+                    -- First payment: record the ledger entry here (renewals come via invoice.paid).
+                    PayoutQueries.recordSale({
+                        user_uuid = md.user_uuid, namespace_id = ns_id, kind = "subscription",
+                        stripe_ref = obj.subscription, amount = obj.amount_total, currency = obj.currency,
+                    })
                 end
-                -- Renewals only — the first invoice is already recorded at checkout.
-                if obj.billing_reason == "subscription_cycle" then
-                    local sub = SubscriptionQueries.findByStripeId(obj.subscription)
-                    if sub then
-                        PayoutQueries.recordSale({
-                            user_uuid = sub.user_uuid, namespace_id = sub.namespace_id, kind = "subscription",
-                            stripe_ref = obj.id, amount = obj.amount_paid or obj.amount_due, currency = obj.currency,
-                        })
+
+            elseif t == "invoice.paid" then
+                if obj.subscription then
+                    if subobj then
+                        SubscriptionQueries.updateStatusByStripeId(obj.subscription, subobj.status, subobj.current_period_end)
+                    end
+                    -- Renewals only — the first invoice is already recorded at checkout.
+                    if obj.billing_reason == "subscription_cycle" then
+                        local sub = SubscriptionQueries.findByStripeId(obj.subscription)
+                        if sub then
+                            PayoutQueries.recordSale({
+                                user_uuid = sub.user_uuid, namespace_id = sub.namespace_id, kind = "subscription",
+                                stripe_ref = obj.id, amount = obj.amount_paid or obj.amount_due, currency = obj.currency,
+                            })
+                        end
                     end
                 end
+
+            elseif t == "customer.subscription.updated" or t == "customer.subscription.deleted" then
+                SubscriptionQueries.updateStatusByStripeId(obj.id, obj.status, obj.current_period_end)
             end
 
-        elseif t == "customer.subscription.updated" or t == "customer.subscription.deleted" then
-            SubscriptionQueries.updateStatusByStripeId(obj.id, obj.status, obj.current_period_end)
+            -- Idempotency marker LAST — same transaction as the side effects above.
+            mark_processed(event.id, t)
+        end)
+
+        if not ok then
+            -- Marker was rolled back with the side effects: return non-2xx so Stripe
+            -- retries and genuinely reprocesses (no silent revenue loss).
+            ngx.log(ngx.ERR, "[academy webhook] processing FAILED for event " ..
+                tostring(event.id) .. " (" .. tostring(t) .. "): " .. tostring(err) ..
+                " — marker NOT written, Stripe will retry")
+            return { status = 500, json = { error = "processing failed" } }
         end
 
         return { status = 200, json = { received = true } }

@@ -64,10 +64,22 @@ local BANK_OUT_FIELDS = {
 }
 
 return function(app)
+    -- Parse a JSON or form-encoded body into a table.
+    -- get_post_args() parses ANY body as urlencoded, which turns a JSON body into
+    -- a single bogus key (silently dropping the real fields). Only take the form
+    -- fast path when the client didn't declare JSON. Large bodies spill to a temp
+    -- file, so we fall back to reading the body file and parsing it ourselves.
     local function parse_body()
         ngx.req.read_body()
-        local post_args = ngx.req.get_post_args()
-        if post_args and next(post_args) then return post_args end
+
+        local ctype = ngx.var.content_type or ""
+        local is_json = ctype:find("application/json", 1, true) ~= nil
+
+        if not is_json then
+            local post_args = ngx.req.get_post_args()
+            if post_args and next(post_args) then return post_args end
+        end
+
         local body = ngx.req.get_body_data()
         if not body or body == "" then
             local path = ngx.req.get_body_file()
@@ -77,8 +89,10 @@ return function(app)
             end
         end
         if not body or body == "" then return {} end
+
         local ok, decoded = pcall(cJson.decode, body)
         if ok and type(decoded) == "table" then return decoded end
+
         local args = ngx.decode_args(body)
         return type(args) == "table" and args or {}
     end

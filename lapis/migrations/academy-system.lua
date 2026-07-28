@@ -372,4 +372,32 @@ return {
             end
         end
     end,
+
+    -- ========================================================================
+    -- [7] Admin-approval gate: allow the `pending_review` course status.
+    --
+    -- Instructors submit into pending_review and only an admin can move a course
+    -- on to `published` (enforced in routes/academy.lua). The public endpoints
+    -- already show only `published`, so this state is invisible to learners.
+    --
+    -- The original CHECK constraint (created in [1]) forbids the new value, so it
+    -- must be dropped and recreated. Idempotent and safe to re-run: DROP uses IF
+    -- EXISTS, the constraint name is stable, and it only WIDENS the allowed set,
+    -- never rewriting a row.
+    -- ========================================================================
+    [7] = function()
+        pcall(function()
+            db.query([[
+                ALTER TABLE academy_courses
+                DROP CONSTRAINT IF EXISTS academy_courses_status_check
+            ]])
+        end)
+        pcall(function()
+            db.query([[
+                ALTER TABLE academy_courses
+                ADD CONSTRAINT academy_courses_status_check
+                CHECK (status IN ('draft', 'pending_review', 'published', 'archived'))
+            ]])
+        end)
+    end,
 }
