@@ -16,6 +16,7 @@ export interface AcademyCourse {
   instructor?: string;
   thumbnail_url?: string;
   category?: string;
+  tags?: string[];
   level: CourseLevel;
   is_free: boolean;
   price: number;
@@ -123,6 +124,7 @@ export interface CourseInput {
   instructor?: string;
   thumbnail_url?: string;
   category?: string;
+  tags?: string[];
   level?: CourseLevel;
   is_free?: boolean;
   price?: number;
@@ -201,6 +203,15 @@ function unwrap<T>(response: { data: unknown }): T {
   return (d?.data ?? d) as T;
 }
 
+// Serialize a course payload for the form-encoded body. `tags` is JSON-encoded
+// into a single field (rather than repeated keys) so an empty list travels as
+// "[]" and clears the tags server-side; the backend accepts the JSON string.
+function serializeCourse(data: Partial<CourseInput>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...data };
+  if (data.tags !== undefined) out.tags = JSON.stringify(data.tags ?? []);
+  return out;
+}
+
 function buildCourseParams(params: CourseListParams): Record<string, unknown> {
   const q: Record<string, unknown> = {};
   if (params.page) q.page = params.page;
@@ -244,7 +255,7 @@ export const academyService = {
   async createCourse(data: CourseInput): Promise<AcademyCourse> {
     const response = await apiClient.post(
       '/api/v2/academy/courses',
-      toFormData(data as unknown as Record<string, unknown>)
+      toFormData(serializeCourse(data))
     );
     return unwrap<AcademyCourse>(response);
   },
@@ -252,9 +263,19 @@ export const academyService = {
   async updateCourse(uuid: string, data: Partial<CourseInput>): Promise<AcademyCourse> {
     const response = await apiClient.put(
       `/api/v2/academy/courses/${uuid}`,
-      toFormData(data as unknown as Record<string, unknown>)
+      toFormData(serializeCourse(data))
     );
     return unwrap<AcademyCourse>(response);
+  },
+
+  // Distinct category strings used in this namespace, for the create-or-select
+  // category control. Returns [] if the backend is unreachable or empty.
+  async getCategories(): Promise<string[]> {
+    const response = await apiClient.get('/api/v2/academy/categories');
+    const body = response.data as Record<string, unknown>;
+    const inner = (body?.data ?? body) as Record<string, unknown>;
+    const cats = inner?.categories;
+    return Array.isArray(cats) ? (cats as string[]) : [];
   },
 
   async deleteCourse(uuid: string): Promise<void> {

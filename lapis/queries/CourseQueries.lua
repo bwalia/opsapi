@@ -7,6 +7,7 @@
 local AcademyCourseModel = require "models.AcademyCourseModel"
 local Global = require "helper.global"
 local db = require("lapis.db")
+local cjson = require("cjson")
 
 local CourseQueries = {}
 
@@ -15,6 +16,20 @@ local function slugify(text)
     return (text:lower():gsub("%s+", "-"):gsub("[^%w%-]", ""):gsub("%-+", "-"):gsub("^%-", ""):gsub("%-$", ""))
 end
 CourseQueries.slugify = slugify
+
+-- Convert a Lua array of tag strings into a db.raw jsonb literal for the
+-- `tags` column. The value is JSON-encoded and cast with an explicit ?::jsonb
+-- (via interpolate_query, so the payload is escaped) — this mirrors
+-- IncomeTypeQueries and never relies on an implicit text→jsonb coercion. An
+-- empty/nil list becomes the `[]` literal, matching the column default.
+local function tags_to_jsonb(tags)
+    local arr = {}
+    if type(tags) == "table" then
+        for _, v in ipairs(tags) do arr[#arr + 1] = v end
+    end
+    local json = #arr > 0 and cjson.encode(arr) or "[]"
+    return db.raw(db.interpolate_query("?::jsonb", json))
+end
 
 --- Find a single non-deleted course scoped to a namespace.
 local function findScoped(namespace_id, uuid)
@@ -31,6 +46,9 @@ function CourseQueries.create(namespace_id, params)
     if (not params.slug or params.slug == "") and params.title then
         params.slug = slugify(params.title)
     end
+    -- The route hands us an already-coerced Lua array; encode it for the jsonb
+    -- column. When omitted, the column default ('[]') applies.
+    if params.tags ~= nil then params.tags = tags_to_jsonb(params.tags) end
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
     return AcademyCourseModel:create(params, { returning = "*" })
@@ -54,6 +72,12 @@ function CourseQueries.list(namespace_id, params)
     end
     if params.level and params.level ~= "" then
         table.insert(where, "level = ?"); table.insert(values, params.level)
+    end
+    -- Filter by a single tag via jsonb containment: tags @> '["<t>"]'. The tag is
+    -- embedded as a JSON array literal (quotes stripped) and cast to jsonb.
+    if params.tag and params.tag ~= "" then
+        table.insert(where, "tags @> ?::jsonb")
+        table.insert(values, '["' .. tostring(params.tag):gsub('"', '') .. '"]')
     end
     if params.is_free ~= nil then
         table.insert(where, "is_free = ?"); table.insert(values, params.is_free)
@@ -93,6 +117,22 @@ function CourseQueries.getByUuid(namespace_id, uuid)
     return findScoped(namespace_id, uuid)
 end
 
+--- Distinct, non-empty, sorted `category` values in a namespace (excluding
+--- soft-deleted courses). There is no categories table — a "category" is just
+--- the string on a course, so the create-or-select control offers the existing
+--- distinct values while still letting the teacher type a brand-new one.
+function CourseQueries.distinctCategories(namespace_id)
+    local rows = db.query([[
+        SELECT DISTINCT category FROM academy_courses
+        WHERE namespace_id = ? AND deleted_at IS NULL
+          AND category IS NOT NULL AND category <> ''
+        ORDER BY category ASC
+    ]], namespace_id)
+    local out = {}
+    for _, r in ipairs(rows or {}) do out[#out + 1] = r.category end
+    return out
+end
+
 --- Find a non-deleted course by numeric id, scoped to a namespace.
 -- Used for lesson ownership checks (lessons reference course_id, not uuid).
 function CourseQueries.findById(namespace_id, id)
@@ -115,9 +155,13 @@ function CourseQueries.update(namespace_id, uuid, params)
     params.namespace_id = nil   -- never allow reassigning tenant
     params.id = nil
     params.uuid = nil
+    if params.tags ~= nil then params.tags = tags_to_jsonb(params.tags) end
     params.updated_at = db.raw("NOW()")
     course:update(params)
-    return course
+    -- Re-read: fields written via db.raw (the jsonb `tags`, NOW()) are left on the
+    -- model as raw SQL fragments after :update, so a fresh find returns the actual
+    -- stored values for the response shape.
+    return findScoped(namespace_id, uuid)
 end
 
 function CourseQueries.softDelete(namespace_id, uuid)
