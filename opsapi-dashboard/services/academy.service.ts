@@ -5,7 +5,10 @@ import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
 // ============================================================
 
 export type CourseLevel = 'beginner' | 'intermediate' | 'advanced';
-export type CourseStatus = 'draft' | 'published' | 'archived';
+// `pending_review` is the admin-approval gate: an instructor who submits
+// `published` is downgraded to `pending_review` server-side (gate_publish) and
+// the course stays invisible on the public site until an admin approves it.
+export type CourseStatus = 'draft' | 'pending_review' | 'published' | 'archived';
 export type LessonStatus = 'draft' | 'published';
 
 export interface AcademyCourse {
@@ -283,6 +286,33 @@ export const academyService = {
   },
 
   // ----------------------------------------------------------
+  // Admin course-approval gate (platform admin / namespace owner only).
+  // These are the only way a course reaches `published`: an instructor's
+  // publish attempt lands in `pending_review`, and a reviewer approves or
+  // rejects it here. 403 for anyone who is not an admin.
+  // ----------------------------------------------------------
+
+  // Every course awaiting approval, for the reviewer's queue.
+  async getPendingCourses(): Promise<AcademyCourse[]> {
+    const response = await apiClient.get('/api/v2/academy/pending-courses');
+    const data = unwrap<{ data?: AcademyCourse[] } | AcademyCourse[]>(response);
+    if (Array.isArray(data)) return data;
+    return Array.isArray(data?.data) ? data.data : [];
+  },
+
+  // Approve → the course goes live (`published`).
+  async approveCourse(uuid: string): Promise<AcademyCourse> {
+    const response = await apiClient.post(`/api/v2/academy/courses/${uuid}/approve`);
+    return unwrap<AcademyCourse>(response);
+  },
+
+  // Reject → back to `draft` so the instructor can revise and resubmit.
+  async rejectCourse(uuid: string): Promise<AcademyCourse> {
+    const response = await apiClient.post(`/api/v2/academy/courses/${uuid}/reject`);
+    return unwrap<AcademyCourse>(response);
+  },
+
+  // ----------------------------------------------------------
   // Lessons
   // ----------------------------------------------------------
 
@@ -436,15 +466,42 @@ export const academyService = {
 
 export function getCourseStatusVariant(
   status: CourseStatus
-): 'success' | 'warning' | 'secondary' {
+): 'success' | 'warning' | 'info' | 'secondary' {
   switch (status) {
     case 'published':
       return 'success';
-    case 'draft':
+    case 'pending_review':
+      // Amber "awaiting action" — distinct from the neutral draft state.
       return 'warning';
+    case 'draft':
+      return 'info';
     default:
       return 'secondary';
   }
+}
+
+// Human label for a course status. Critically maps `pending_review` to a clean
+// "Pending review" rather than the raw, underscored enum value.
+export function getCourseStatusLabel(status: CourseStatus): string {
+  switch (status) {
+    case 'pending_review':
+      return 'Pending review';
+    case 'published':
+      return 'Published';
+    case 'archived':
+      return 'Archived';
+    case 'draft':
+    default:
+      return 'Draft';
+  }
+}
+
+// Pull the backend's `{ error }` message out of an axios error so toasts show the
+// real reason (e.g. "Course is not pending review") instead of a generic string.
+export function academyErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { response?: { data?: { error?: string } } } | undefined;
+  const msg = e?.response?.data?.error;
+  return typeof msg === 'string' && msg.trim() !== '' ? msg : fallback;
 }
 
 export function formatCourseDuration(minutes?: number): string {
