@@ -295,6 +295,14 @@ local sa106_foreign_income_migrations = load_if_enabled(ProjectConfig.FEATURES.T
 -- Companion frontend PR renders them on the SE hub.
 local sa103f_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa103f-completion-questions") or {}
 
+-- Dividend panels — splits dividends into THREE income-type tabs
+-- (dividends / foreign_dividends / other_dividends), each an itemised
+-- table rendered by the repeating_group widget's table layout. Retires
+-- the 7 flat boxes the old single "Dividends and interest" category
+-- held. SA106 foreign_income is untouched. Companion frontend PR ships
+-- the table layout mode.
+local dividend_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dividend-panels") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2187,6 +2195,16 @@ local _migrations = {
     -- ContextSections block on the SE hub.
     ['789_seed_sa103f_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa103f_completion_migrations, 1),
     ['790_reseed_sa103f_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa103f_completion_migrations, 2),
+
+    -- 791/792 — Dividend panels. Seeds the foreign_dividends +
+    -- other_dividends income types, three itemised-table categories
+    -- (one per tab), and deactivates the old flat dividend boxes.
+    -- Must run AFTER 750/751 (which seeded those boxes) so the
+    -- retirement step has something to deactivate — key order
+    -- guarantees it. 792 is the re-run safety net (convention: 760 /
+    -- 764 / 767).
+    ['791_seed_dividend_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dividend_panels_migrations, 1),
+    ['792_reseed_dividend_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dividend_panels_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
