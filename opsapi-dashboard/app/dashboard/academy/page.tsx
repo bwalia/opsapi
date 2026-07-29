@@ -2,13 +2,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User, X, ClipboardCheck, CheckCircle2, XCircle } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import {
   academyService,
   getCourseStatusVariant,
+  getCourseStatusLabel,
+  academyErrorMessage,
   formatCourseDuration,
   type AcademyCourse,
   type CourseInput,
@@ -31,6 +33,7 @@ const LEVEL_OPTIONS: { value: string; label: string }[] = [
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'all', label: 'All Status' },
   { value: 'draft', label: 'Draft' },
+  { value: 'pending_review', label: 'Pending review' },
   { value: 'published', label: 'Published' },
   { value: 'archived', label: 'Archived' },
 ];
@@ -42,6 +45,7 @@ const EMPTY_FORM: CourseInput = {
   instructor: '',
   thumbnail_url: '',
   category: 'general',
+  tags: [],
   level: 'beginner',
   is_free: true,
   price: 0,
@@ -56,13 +60,18 @@ const EMPTY_FORM: CourseInput = {
 interface CourseModalProps {
   isOpen: boolean;
   course: AcademyCourse | null;
+  // Reviewers (platform admin / namespace owner) may publish directly; everyone
+  // else can only submit for review, so the status control adapts to the role.
+  canPublishDirectly: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSuccess }) => {
+const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDirectly, onClose, onSuccess }) => {
   const [form, setForm] = useState<CourseInput>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState('');
 
   useEffect(() => {
     if (course) {
@@ -73,6 +82,7 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
         instructor: course.instructor ?? '',
         thumbnail_url: course.thumbnail_url ?? '',
         category: course.category ?? 'general',
+        tags: course.tags ?? [],
         level: course.level,
         is_free: course.is_free,
         // Stored in minor units (pence/cents); edit in major units.
@@ -83,10 +93,49 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
     } else {
       setForm(EMPTY_FORM);
     }
+    setTagDraft('');
   }, [course, isOpen]);
+
+  // Fetch the existing category values whenever the modal opens, so the
+  // create-or-select control can offer them (falls back to none on error).
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    academyService
+      .getCategories()
+      .then((cats) => { if (active) setCategories(cats); })
+      .catch(() => { if (active) setCategories([]); });
+    return () => { active = false; };
+  }, [isOpen]);
 
   const set = <K extends keyof CourseInput>(key: K, value: CourseInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Tag chips: add on Enter or comma, de-duped case-insensitively, capped and
+  // trimmed to match the backend (max 20 tags, <= 40 chars each).
+  const addTag = (raw: string) => {
+    const value = raw.trim().slice(0, 40);
+    if (!value) return;
+    setForm((prev) => {
+      const existing = prev.tags ?? [];
+      if (existing.length >= 20) return prev;
+      if (existing.some((t) => t.toLowerCase() === value.toLowerCase())) return prev;
+      return { ...prev, tags: [...existing, value] };
+    });
+    setTagDraft('');
+  };
+
+  const removeTag = (tag: string) =>
+    setForm((prev) => ({ ...prev, tags: (prev.tags ?? []).filter((t) => t !== tag) }));
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(tagDraft);
+    } else if (e.key === 'Backspace' && tagDraft === '' && (form.tags ?? []).length > 0) {
+      removeTag((form.tags ?? [])[(form.tags ?? []).length - 1]);
+    }
+  };
 
   const inputClass =
     'w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500';
@@ -104,18 +153,22 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
         // Convert major units (what the user typed) back to minor units for the API.
         price: form.is_free ? 0 : Math.round((Number(form.price) || 0) * 100),
       };
-      if (course) {
-        await academyService.updateCourse(course.uuid, payload);
-        toast.success('Course updated');
+      const saved = course
+        ? await academyService.updateCourse(course.uuid, payload)
+        : await academyService.createCourse(payload);
+      // The backend gate silently turns an instructor's `published` into
+      // `pending_review`. Tell the truth: if that happened, say it's awaiting
+      // review, not that it was published.
+      if (saved.status === 'pending_review') {
+        toast.success('Submitted for review — an admin will approve it before it goes live');
       } else {
-        await academyService.createCourse(payload);
-        toast.success('Course created');
+        toast.success(course ? 'Course updated' : 'Course created');
       }
       onSuccess();
       onClose();
     } catch (err) {
       console.error('Save course failed:', err);
-      toast.error('Failed to save course');
+      toast.error(academyErrorMessage(err, 'Failed to save course'));
     } finally {
       setSubmitting(false);
     }
@@ -139,7 +192,19 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Category</label>
-            <input className={inputClass} value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. programming" />
+            {/* Create-or-select: pick an existing category or type a brand-new one. */}
+            <input
+              className={inputClass}
+              list="course-category-options"
+              value={form.category}
+              onChange={(e) => set('category', e.target.value)}
+              placeholder="Pick existing or type a new one"
+            />
+            <datalist id="course-category-options">
+              {categories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Level</label>
@@ -151,15 +216,70 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Status</label>
-            <select className={inputClass} value={form.status} onChange={(e) => set('status', e.target.value as CourseStatus)}>
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="archived">Archived</option>
-            </select>
+            {canPublishDirectly ? (
+              // Reviewers (admin / owner) publish directly.
+              <select className={inputClass} value={form.status} onChange={(e) => set('status', e.target.value as CourseStatus)}>
+                <option value="draft">Draft</option>
+                {form.status === 'pending_review' && <option value="pending_review">Pending review</option>}
+                <option value="published">Published</option>
+                <option value="archived">Archived</option>
+              </select>
+            ) : (
+              // Instructors cannot self-publish. The publish choice is honestly
+              // labelled "Submit for review" and carries value `published`, which
+              // the backend gate converts to `pending_review`. A course already
+              // pending review maps onto this same option so it reads truthfully.
+              <>
+                <select
+                  className={inputClass}
+                  value={form.status === 'pending_review' ? 'published' : form.status}
+                  onChange={(e) => set('status', e.target.value as CourseStatus)}
+                >
+                  <option value="draft">Save as draft</option>
+                  <option value="published">Submit for review</option>
+                  <option value="archived">Archived</option>
+                </select>
+                {form.status === 'pending_review' ? (
+                  <p className="mt-1 text-xs text-warning-600">Awaiting admin review. Resubmitting keeps it in the queue.</p>
+                ) : form.status === 'published' ? (
+                  <p className="mt-1 text-xs text-secondary-500">An admin approves it before it appears on the public site.</p>
+                ) : null}
+              </>
+            )}
           </div>
           <div className="col-span-2">
             <label className="block text-sm font-medium text-secondary-700 mb-1">Thumbnail URL</label>
             <input className={inputClass} value={form.thumbnail_url} onChange={(e) => set('thumbnail_url', e.target.value)} placeholder="https://…/thumb.jpg" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-secondary-700 mb-1">Tags</label>
+            <div className={`${inputClass} flex flex-wrap items-center gap-1.5 min-h-[42px] h-auto`}>
+              {(form.tags ?? []).map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 text-xs font-medium"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    className="text-primary-500 hover:text-primary-700"
+                    aria-label={`Remove ${tag}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              <input
+                className="flex-1 min-w-[8rem] border-none outline-none bg-transparent text-sm p-0 focus:ring-0"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={handleTagKeyDown}
+                onBlur={() => addTag(tagDraft)}
+                placeholder={(form.tags ?? []).length === 0 ? 'Add tags (Enter or comma)…' : ''}
+              />
+            </div>
+            <p className="mt-1 text-xs text-secondary-500">Press Enter or comma to add. Used for sorting and filtering. Up to 20 tags.</p>
           </div>
           <div className="col-span-2 flex items-center gap-3">
             <input id="is_free" type="checkbox" checked={form.is_free} onChange={(e) => set('is_free', e.target.checked)} className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500" />
@@ -194,6 +314,139 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, onClose, onSu
 };
 
 // ============================================================
+// Admin review queue — the approval gate's front end.
+// Only rendered for reviewers (platform admin / namespace owner). Lists every
+// course an instructor submitted, with Approve (→ published) and Reject
+// (→ draft) actions, each confirmed before it fires.
+// ============================================================
+
+interface PendingReviewPanelProps {
+  // Bumped by the parent whenever the main list changes, to keep the queue fresh
+  // (e.g. after a course is edited into pending_review elsewhere).
+  refreshKey: number;
+  onReviewed: () => void;
+}
+
+type ReviewAction = { course: AcademyCourse; kind: 'approve' | 'reject' };
+
+const PendingReviewPanel: React.FC<PendingReviewPanelProps> = ({ refreshKey, onReviewed }) => {
+  const router = useRouter();
+  const [pending, setPending] = useState<AcademyCourse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [action, setAction] = useState<ReviewAction | null>(null);
+  const [working, setWorking] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setPending(await academyService.getPendingCourses());
+    } catch (err) {
+      console.error('Load pending courses failed:', err);
+      toast.error(academyErrorMessage(err, 'Failed to load pending courses'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load, refreshKey]);
+
+  const runAction = async () => {
+    if (!action) return;
+    setWorking(true);
+    try {
+      if (action.kind === 'approve') {
+        await academyService.approveCourse(action.course.uuid);
+        toast.success(`"${action.course.title}" approved and published`);
+      } else {
+        await academyService.rejectCourse(action.course.uuid);
+        toast.success(`"${action.course.title}" sent back to the instructor as a draft`);
+      }
+      setAction(null);
+      await load();
+      onReviewed();
+    } catch (err) {
+      console.error('Review action failed:', err);
+      toast.error(academyErrorMessage(err, 'Failed to update course'));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface rounded-xl border border-warning-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-secondary-200 bg-warning-500/5">
+        <ClipboardCheck size={18} className="text-warning-600" />
+        <h2 className="text-sm font-semibold text-secondary-800">Pending review</h2>
+        {!loading && (
+          <Badge variant="warning">{pending.length}</Badge>
+        )}
+        <span className="text-xs text-secondary-500 ml-1">Courses instructors submitted, awaiting your approval.</span>
+      </div>
+
+      {loading ? (
+        <div className="p-4"><div className="h-16 animate-pulse rounded bg-secondary-100" /></div>
+      ) : pending.length === 0 ? (
+        <p className="px-4 py-6 text-sm text-secondary-500">Nothing waiting for review right now.</p>
+      ) : (
+        <ul className="divide-y divide-secondary-100">
+          {pending.map((c) => (
+            <li key={c.uuid} className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <button
+                  onClick={() => router.push(`/dashboard/academy/${c.uuid}`)}
+                  className="font-medium text-secondary-900 truncate hover:text-primary-600 text-left"
+                >
+                  {c.title}
+                </button>
+                <p className="text-xs text-secondary-500 truncate">
+                  /{c.slug}
+                  {c.instructor ? ` · ${c.instructor}` : ''}
+                  {` · ${c.lesson_count ?? 0} lesson${(c.lesson_count ?? 0) === 1 ? '' : 's'}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  leftIcon={<XCircle size={16} />}
+                  onClick={() => setAction({ course: c, kind: 'reject' })}
+                >
+                  Reject
+                </Button>
+                <Button
+                  size="sm"
+                  leftIcon={<CheckCircle2 size={16} />}
+                  onClick={() => setAction({ course: c, kind: 'approve' })}
+                >
+                  Approve
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ConfirmDialog
+        isOpen={!!action}
+        onClose={() => setAction(null)}
+        onConfirm={runAction}
+        title={action?.kind === 'approve' ? 'Approve course' : 'Reject course'}
+        message={
+          action?.kind === 'approve'
+            ? `Publish "${action?.course.title}"? It will become visible on the public site immediately.`
+            : `Send "${action?.course.title}" back to draft? The instructor can revise and resubmit it.`
+        }
+        confirmText={action?.kind === 'approve' ? 'Approve & publish' : 'Reject'}
+        variant={action?.kind === 'approve' ? 'info' : 'danger'}
+        isLoading={working}
+      />
+    </div>
+  );
+};
+
+// ============================================================
 // Page
 // ============================================================
 
@@ -213,6 +466,22 @@ function AcademyCoursesPage() {
   const [editing, setEditing] = useState<AcademyCourse | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AcademyCourse | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // A reviewer (platform admin OR namespace owner) may publish directly and sees
+  // the approval queue. `isAdmin` covers the platform admin; ownership comes from
+  // the instructor-status endpoint, mirroring the backend's can_manage_all.
+  const [isOwner, setIsOwner] = useState(false);
+  const [reviewRefresh, setReviewRefresh] = useState(0);
+  const isReviewer = isAdmin || isOwner;
+
+  useEffect(() => {
+    let active = true;
+    academyService
+      .getInstructorStatus()
+      .then((s) => { if (active) setIsOwner(!!s.is_owner); })
+      .catch(() => { if (active) setIsOwner(false); });
+    return () => { active = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -298,7 +567,7 @@ function AcademyCoursesPage() {
     {
       key: 'status',
       header: 'Status',
-      render: (c) => <Badge variant={getCourseStatusVariant(c.status)} className="capitalize">{c.status}</Badge>,
+      render: (c) => <Badge variant={getCourseStatusVariant(c.status)}>{getCourseStatusLabel(c.status)}</Badge>,
     },
     {
       key: 'updated_at',
@@ -376,6 +645,14 @@ function AcademyCoursesPage() {
         </div>
       </div>
 
+      {/* Approval queue — reviewers only (platform admin / namespace owner) */}
+      {isReviewer && (
+        <PendingReviewPanel
+          refreshKey={reviewRefresh}
+          onReviewed={load}
+        />
+      )}
+
       {/* Table */}
       <div className="bg-surface rounded-xl border border-secondary-200 overflow-hidden">
         <Table
@@ -396,8 +673,9 @@ function AcademyCoursesPage() {
       <CourseModal
         isOpen={modalOpen}
         course={editing}
+        canPublishDirectly={isReviewer}
         onClose={() => setModalOpen(false)}
-        onSuccess={load}
+        onSuccess={() => { load(); setReviewRefresh((n) => n + 1); }}
       />
 
       <ConfirmDialog
