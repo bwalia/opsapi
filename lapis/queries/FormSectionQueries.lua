@@ -29,6 +29,37 @@ local FormSectionQueries = {}
 local MAX_AMOUNT = 9999999999999.99
 FormSectionQueries.MAX_AMOUNT = MAX_AMOUNT
 
+-- SQL fragment reading one money column out of a repeating-group row
+-- (`elem`, from jsonb_array_elements) as a numeric, defaulting to 0.
+--
+-- Why not a bare `(elem->>'key')::numeric`: in Postgres that is a hard
+-- ERROR on anything non-numeric, not a NULL. card_summary runs on every
+-- /my-income load, so one bad cell anywhere in one user's answers takes
+-- their whole hub down with a 500. Two ways a cell gets here
+-- non-numeric — the widget stores an untouched money cell as "" (empty
+-- string distinguishes "not entered" from a deliberate 0), and an admin
+-- retyping a column from currency to short_text in the profile-builder
+-- panel leaves free text behind in rows already saved.
+--
+-- Numbers stored as JSON numbers take the first branch; the regex
+-- catches values written as numeric STRINGS by other paths (AI
+-- extraction, backfills, the iOS client) so those still count rather
+-- than being silently dropped.
+--
+-- `{0,1}` not `?`: lapis counts every '?' in a query string as a bind
+-- placeholder, so a '?' inside a regex literal would shift every
+-- parameter after it.
+local function money_cell(key)
+    return string.format([[
+                 CASE
+                   WHEN jsonb_typeof(elem->'%s') = 'number'
+                     THEN (elem->>'%s')::numeric
+                   WHEN elem->>'%s' ~ '^-{0,1}[0-9]+(\.[0-9]+){0,1}$'
+                     THEN (elem->>'%s')::numeric
+                   ELSE 0
+                 END]], key, key, key, key)
+end
+
 local function resolveUserId(user)
     if not user then return nil, "User not authenticated" end
     local user_uuid = user.uuid or user.id
@@ -908,6 +939,12 @@ function FormSectionQueries.card_summary(user)
     --   answer_number, so the generic sum reads zero for them. Their
     --   branch below sums the array elements (same shape as pension).
     --
+    --   interest / foreign_interest — same shape, same reason (see
+    --   migration interest-panels.lua). Excluded here rather than
+    --   left to the generic sum because their panels ALSO hold
+    --   non-array numeric answers in future admin-added questions;
+    --   the branch below is the single source of their totals.
+    --
     --   Per-entity contexts (property, business, overseas_property,
     --   rental_business, employment) — these DON'T correspond 1:1 to
     --   an income_type_key (rental hub is 'rental', not
@@ -929,7 +966,8 @@ function FormSectionQueries.card_summary(user)
         JOIN income_types it      ON it.income_type_key = c.context
         WHERE a.user_id = ?
           AND it.income_type_key NOT IN ('salary', 'pension_payments', 'capital_gains', 'other',
-                                         'dividends', 'foreign_dividends', 'other_dividends')
+                                         'dividends', 'foreign_dividends', 'other_dividends',
+                                         'interest', 'foreign_interest')
           AND c.is_active = true
           AND c.is_archived = false
           AND it.is_active = true
@@ -966,21 +1004,19 @@ function FormSectionQueries.card_summary(user)
     -- admin panel, but its key is the stable contract the seed and
     -- this query share. jsonb_typeof guard keeps a non-array answer
     -- (possible if an admin retypes the question) from throwing.
-    local dividend_rows = db.query([[
+    local dividend_rows = db.query(string.format([[
         SELECT CASE q.question_key
                  WHEN 'div_uk_dividends'  THEN 'dividends'
                  WHEN 'fdiv_dividends'    THEN 'foreign_dividends'
                  WHEN 'odiv_dividends'    THEN 'other_dividends'
                END                                    AS income_type_key,
-               -- NULLIF: the widget stores an untouched money cell as
-               -- "" (empty string distinguishes "not entered" from a
-               -- deliberate 0), and ''::numeric is a hard error — a
-               -- row where only the description is filled in would
-               -- 500 every /my-income load without this.
+               -- money_cell casts only what is certainly a number —
+               -- see the helper for why a bare ::numeric here is a
+               -- whole-hub outage waiting to happen.
                COALESCE(SUM(CASE q.question_key
-                 WHEN 'div_uk_dividends' THEN NULLIF(elem->>'dividend', '')::numeric
-                 WHEN 'fdiv_dividends'   THEN NULLIF(elem->>'gross_income', '')::numeric
-                 WHEN 'odiv_dividends'   THEN NULLIF(elem->>'dividend_received', '')::numeric
+                 WHEN 'div_uk_dividends' THEN %s
+                 WHEN 'fdiv_dividends'   THEN %s
+                 WHEN 'odiv_dividends'   THEN %s
                END), 0)                               AS total,
                COUNT(*)                               AS row_count
         FROM user_profile_answers a
@@ -992,8 +1028,59 @@ function FormSectionQueries.card_summary(user)
           AND a.answer_json <> ''
           AND jsonb_typeof(a.answer_json::jsonb) = 'array'
         GROUP BY 1
-    ]], internal_user_id) or {}
+    ]], money_cell("dividend"), money_cell("gross_income"),
+        money_cell("dividend_received")), internal_user_id) or {}
     for _, r in ipairs(dividend_rows) do
+        local entry = by_type[r.income_type_key]
+        if not entry then
+            entry = { income_type_key = r.income_type_key, total = 0, row_count = 0 }
+            out[#out + 1] = entry
+            by_type[r.income_type_key] = entry
+        end
+        entry.total = tonumber(r.total) or 0
+        entry.row_count = tonumber(r.row_count) or 0
+    end
+
+    -- ── Interest tabs ───────────────────────────────────────────────
+    -- Two income types, itemised tables (see migration
+    -- interest-panels.lua). Identical shape to the dividend branch
+    -- above — amounts live inside an answer_json array of row
+    -- objects, one row per account, so the generic answer_number sum
+    -- sees nothing and both /my-income cards would read "Nothing
+    -- recorded yet".
+    --
+    -- Total = SUM of the money column that IS that tab's headline
+    -- figure. Note 'interest' draws from TWO questions: untaxed
+    -- interest is the `amount` column, taxed interest is the `net`
+    -- column (its `tax` column is what the bank deducted, so adding
+    -- it would inflate the income figure). GROUP BY the mapped
+    -- income type folds both into one card total.
+    -- Count = number of account rows across every tax year, matching
+    -- the pension / dividend convention.
+    local interest_rows = db.query(string.format([[
+        SELECT CASE q.question_key
+                 WHEN 'int_untaxed_uk'        THEN 'interest'
+                 WHEN 'int_taxed_uk'          THEN 'interest'
+                 WHEN 'fint_savings_interest' THEN 'foreign_interest'
+               END                                    AS income_type_key,
+               COALESCE(SUM(CASE q.question_key
+                 WHEN 'int_untaxed_uk'        THEN %s
+                 WHEN 'int_taxed_uk'          THEN %s
+                 WHEN 'fint_savings_interest' THEN %s
+               END), 0)                               AS total,
+               COUNT(*)                               AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        CROSS JOIN LATERAL jsonb_array_elements(a.answer_json::jsonb) elem
+        WHERE a.user_id = ?
+          AND q.question_key IN ('int_untaxed_uk', 'int_taxed_uk', 'fint_savings_interest')
+          AND a.answer_json IS NOT NULL
+          AND a.answer_json <> ''
+          AND jsonb_typeof(a.answer_json::jsonb) = 'array'
+        GROUP BY 1
+    ]], money_cell("amount"), money_cell("net"),
+        money_cell("gross_income")), internal_user_id) or {}
+    for _, r in ipairs(interest_rows) do
         local entry = by_type[r.income_type_key]
         if not entry then
             entry = { income_type_key = r.income_type_key, total = 0, row_count = 0 }
