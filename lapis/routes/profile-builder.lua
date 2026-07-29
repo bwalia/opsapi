@@ -3175,6 +3175,7 @@ return function(app)
             else
                 local ok_q, q_rows = pcall(db.query, [[
                     SELECT pq.id, pq.version, pq.category_id, pq.question_key,
+                           pq.validation_json,
                            pc.context AS category_context,
                            pc.answer_scope AS category_answer_scope,
                            pc.entity_type AS category_entity_type
@@ -3310,6 +3311,17 @@ return function(app)
                     local lock_field = LOCK_FIELD_BY_QUESTION_KEY[question.question_key]
                     -- lock_action: nil=normal path, "noop"=skip write+count saved, "reject"=skip write+error already recorded
                     local lock_action = nil
+                    -- Idempotency check FIRST — before format validation.
+                    -- Same-value re-submits on a locked field must be a
+                    -- clean no-op regardless of whether the stored value
+                    -- passes today's format rules. A tenant that stamps
+                    -- new NINO validation rules retroactively must not
+                    -- lock users out of unrelated saves just because their
+                    -- pre-validation stored value fails the new pattern —
+                    -- format rejection is for CHANGES, not for echoes of
+                    -- history. Normalisation strips whitespace and
+                    -- uppercases both sides so "QQ 12 34 56 C" ==
+                    -- "qq123456c" — matches how saveNino stores canonical.
                     if lock_field then
                         local function normalize_identity(s)
                             if s == nil or s == cjson.null then return nil end
@@ -3323,35 +3335,108 @@ return function(app)
                         local state = IdentityLock.getState(user_uuid, namespace_id or 0)
                         local locked_at_field = (lock_field == "nino") and "nino_locked_at" or "utr_locked_at"
                         local current_lock = state and state[locked_at_field]
-                        if current_lock then
-                            if not submitted or submitted == stored then
-                                lock_action = "noop"
-                            else
-                                local pretty_field = (lock_field == "nino")
-                                    and "National Insurance Number (NINO)"
-                                    or "UTR (Unique Taxpayer Reference)"
+                        if current_lock and (not submitted or submitted == stored) then
+                            lock_action = "noop"
+                        end
+                        -- Note: the "lock stamped AND value differs"
+                        -- rejection is deferred until AFTER format
+                        -- validation runs, so a garbage new value gets
+                        -- the fixable "invalid format" error, not the
+                        -- scary "field is locked" one.
+                    end
+
+                    -- ─── Format validation (question.validation_json) ─────────
+                    -- Skipped when we've already decided this answer is
+                    -- a same-value no-op — validating a locked historical
+                    -- value against today's pattern is not the caller's
+                    -- problem to fix. Otherwise applies min/max_length,
+                    -- pattern (Lua match), and numeric min/max — same
+                    -- validators the /answers/validate endpoint runs.
+                    -- Duplicated inline rather than extracted into a
+                    -- helper module for a five-field switch; collapse
+                    -- into one once a third caller appears.
+                    local validation_failed = false
+                    if lock_action ~= "noop"
+                       and question.validation_json
+                       and question.validation_json ~= "" then
+                        local ok_parse, validation = pcall(cjson.decode, question.validation_json)
+                        if ok_parse and type(validation) == "table" then
+                            local msgs = {}
+                            local text = ans.answer_text
+                            if type(text) == "string" and text ~= "" then
+                                if validation.min_length and #text < validation.min_length then
+                                    table.insert(msgs, "Minimum length is " .. tostring(validation.min_length))
+                                end
+                                if validation.max_length and #text > validation.max_length then
+                                    table.insert(msgs, "Maximum length is " .. tostring(validation.max_length))
+                                end
+                                if validation.pattern and not text:match(validation.pattern) then
+                                    table.insert(msgs, validation.pattern_message or "Invalid format")
+                                end
+                            end
+                            if ans.answer_number and validation.min then
+                                if tonumber(ans.answer_number) < validation.min then
+                                    table.insert(msgs, "Minimum value is " .. tostring(validation.min))
+                                end
+                            end
+                            if ans.answer_number and validation.max then
+                                if tonumber(ans.answer_number) > validation.max then
+                                    table.insert(msgs, "Maximum value is " .. tostring(validation.max))
+                                end
+                            end
+                            if #msgs > 0 then
                                 table.insert(errors, {
                                     index         = i,
                                     question_uuid = ans.question_uuid,
-                                    code          = "IDENTITY_LOCK_ACTIVE",
-                                    field         = lock_field,
-                                    locked_at     = tostring(current_lock),
-                                    support_url   = "/support",
-                                    support_email = "support@diytaxreturn.co.uk",
-                                    error         = string.format(
-                                        "Your %s is on file and cannot be changed. To correct it, please chat with support (/support) or email support@diytaxreturn.co.uk.",
-                                        pretty_field
-                                    ),
+                                    question_key  = question.question_key,
+                                    code          = "VALIDATION_FAILED",
+                                    error         = table.concat(msgs, "; "),
                                 })
-                                lock_action = "reject"
+                                validation_failed = true
                             end
+                        end
+                    end
+
+                    -- ─── Lock-change rejection ─────────────────────────────────
+                    -- Deferred to here so a lock_field submission that
+                    -- failed format validation reports the format error
+                    -- (fixable by the user) instead of the lock error
+                    -- (fixable only by support). Runs only when: this is
+                    -- a lock_field question, format passed, and it's not
+                    -- already flagged as a no-op.
+                    if lock_field and not validation_failed and lock_action == nil then
+                        local state = IdentityLock.getState(user_uuid, namespace_id or 0)
+                        local locked_at_field = (lock_field == "nino") and "nino_locked_at" or "utr_locked_at"
+                        local current_lock = state and state[locked_at_field]
+                        if current_lock then
+                            local pretty_field = (lock_field == "nino")
+                                and "National Insurance Number (NINO)"
+                                or "UTR (Unique Taxpayer Reference)"
+                            table.insert(errors, {
+                                index         = i,
+                                question_uuid = ans.question_uuid,
+                                code          = "IDENTITY_LOCK_ACTIVE",
+                                field         = lock_field,
+                                locked_at     = tostring(current_lock),
+                                support_url   = "/support",
+                                support_email = "support@diytaxreturn.co.uk",
+                                error         = string.format(
+                                    "Your %s is on file and cannot be changed. To correct it, please chat with support (/support) or email support@diytaxreturn.co.uk.",
+                                    pretty_field
+                                ),
+                            })
+                            lock_action = "reject"
                         end
                         -- else: lock not stamped — fall through to the
                         -- normal upsert path, which stamps the lock on
                         -- first successful write via stampLock() below.
                     end
 
-                    if lock_action == "reject" then
+                    if validation_failed then
+                        -- Format check failed; per-answer error already
+                        -- pushed. Skip the write and the lock guard
+                        -- (nothing to lock if the input is malformed).
+                    elseif lock_action == "reject" then
                         -- Per-answer error already pushed; skip the write
                         -- entirely (don't upsert, don't increment saved).
                     elseif lock_action == "noop" then
