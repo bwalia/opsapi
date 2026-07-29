@@ -152,6 +152,11 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
 
+-- Personal Details cleanup — NINO validation + soft-delete of duplicate
+-- surname / ni_number questions the wizard-tree seed had left behind on
+-- top of the earlier last_name / nino questions.
+local personal_details_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.personal-details-cleanup") or {}
+
 -- My Income (tax_copilot feature) — manually-entered income source-of-truth
 local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
 
@@ -310,8 +315,14 @@ local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COP
 
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
-local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
 local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
+
+-- Leads are a CORE capability: the crm_leads table is created for EVERY
+-- PROJECT_CODE (lead capture is generic), so this module loads unconditionally.
+-- Steps [1]/[2] run as core migrations; step [3] (FKs to crm_contacts/crm_deals)
+-- is gated on the CRM feature since those tables only exist there. See the
+-- registry entries 510/511 (core) and 512 (CRM) below.
+local crm_leads_migrations = require("migrations.crm-leads")
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
@@ -1697,9 +1708,16 @@ local _migrations = {
     ['503_crm_create_deals'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 4),
     ['504_crm_create_activities'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 5),
 
-    -- CRM Leads (510-511)
-    ['510_crm_create_leads'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 1),
-    ['511_crm_leads_enquiry_link'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 2),
+    -- CRM Leads (510-512)
+    -- CORE: the crm_leads table + enquiry link run for EVERY project (lead
+    -- capture is generic — not gated on the CRM feature). Kept at keys 510/511
+    -- so they still sort after namespaces/enquiries; the module is idempotent
+    -- (guards on table_exists) so existing CRM databases just no-op on re-run.
+    ['510_crm_create_leads'] = function() return crm_leads_migrations[1]() end,
+    ['511_crm_leads_enquiry_link'] = function() return crm_leads_migrations[2]() end,
+    -- CRM-only: attach converted_contact_id/converted_deal_id foreign keys.
+    -- Sorts after 501-504 (crm_contacts/crm_deals) so the FK targets exist.
+    ['512_crm_leads_crm_fks'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 3),
 
     -- CRM menu items (720-723): surface CRM in the backend-driven sidebar
     ['720_seed_crm_menu_items'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 1),
@@ -2222,6 +2240,19 @@ local _migrations = {
     -- but 822 is free everywhere, avoiding any numeric-prefix dedup in the `all` preset.
     ['822_seed_academy_namespace'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 6),
     -- Admin-approval gate: widen the course status CHECK to allow pending_review.
+    -- =========================================================================
+    -- PERSONAL DETAILS CLEANUP — NINO validation + duplicate-question soft-delete
+    -- Undoes the schema-level ambiguity that caused the 2026-07-29
+    -- IDENTITY_LOCK_ACTIVE outage on /profile (profile-builder.lua also
+    -- got a defence-in-depth per-answer error path in the same PR).
+    -- =========================================================================
+    ['825_profile_nino_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 1),
+    ['826_profile_deactivate_surname'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 2),
+    ['827_profile_migrate_ni_number_to_nino'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 3),
+    ['828_profile_deactivate_ni_number'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 4),
+    ['829_profile_utr_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 5),
+    ['830_profile_migrate_lua_patterns_to_pcre'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 6),
+
     ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
     -- Add a jsonb `tags` array to courses (create-or-select category + multi-tags).
     ['824_academy_course_tags'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 8),

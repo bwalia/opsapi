@@ -1056,8 +1056,13 @@ return {
                 placeholder = "e.g. British, Irish"
             },
             {
+                -- Format validation + required flag also seeded on
+                -- upgraded envs via
+                -- migrations/personal-details-cleanup.lua [1]. Keep the
+                -- two in sync — fresh installs read from here, existing
+                -- installs read from the cleanup migration's UPDATE.
                 question_key = "nino", label = "National Insurance Number (NINO)",
-                question_type = "short_text", is_required = false, display_order = 9,
+                question_type = "short_text", is_required = true, display_order = 9,
                 help_text = "Format: AA 12 34 56 A. Required for HMRC submissions.",
                 placeholder = "e.g. QQ 12 34 56 C"
             },
@@ -1705,13 +1710,20 @@ return {
         if personal_id then
             ensure_question(personal_id, { question_key = "first_name", label = "What is your first name?", question_type = "short_text", is_required = true, display_order = 1 })
             ensure_question(personal_id, { question_key = "middle_name", label = "What is your middle name?", question_type = "short_text", is_required = false, display_order = 2 })
-            ensure_question(personal_id, { question_key = "surname", label = "What is your surname?", question_type = "short_text", is_required = true, display_order = 3 })
+            -- `surname` and `ni_number` were previously seeded here but they
+            -- duplicate the earlier seed's `last_name` and `nino` (same
+            -- category, same semantics, different key). See
+            -- migrations/personal-details-cleanup.lua for the soft-delete
+            -- of any existing rows on upgraded envs, and PR #509 for the
+            -- IDENTITY_LOCK_ACTIVE bug the duplication caused. Do NOT
+            -- re-add without also removing `last_name` / `nino` from the
+            -- earlier seed [28] — ensure_question's UPDATE branch would
+            -- otherwise re-activate the duplicate on every migrate run.
             ensure_question(personal_id, { question_key = "address", label = "What is your address?", question_type = "address", is_required = true, display_order = 4 })
-            ensure_question(personal_id, { question_key = "ni_number", label = "What is your NI number?", question_type = "short_text", is_required = true, display_order = 5, help_text = "Your National Insurance number (e.g. QQ 123456 C)", placeholder = "QQ 123456 C" })
             ensure_question(personal_id, { question_key = "utr_number", label = "What is your UTR number?", question_type = "short_text", is_required = true, display_order = 6, help_text = "Your Unique Taxpayer Reference (10 digits)", placeholder = "1234567890" })
             ensure_question(personal_id, { question_key = "profession", label = "What is your profession?", question_type = "short_text", is_required = true, display_order = 7 })
         end
-        print("[Profile] Seeded Personal Details: 7 questions")
+        print("[Profile] Seeded Personal Details: 5 questions (surname + ni_number moved to canonical last_name + nino)")
 
         -- ── 2. Employment Income ─────────────────────────────────────────────
         local employment_id = ensure_category("employment-income", "Employment Income", "Your salary and benefits", "briefcase", 2)
