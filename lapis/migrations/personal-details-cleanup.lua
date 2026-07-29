@@ -56,18 +56,26 @@
 local db = require "lapis.db"
 local cjson = require "cjson"
 
--- UK NINO format. Applied by the profile-builder /answers/validate
--- endpoint via Lua's string.match, so this is a LUA pattern (not a
--- PCRE regex). Accepts either the compact "QQ123456C" or the spaced
--- forms HMRC's own site suggests ("QQ 12 34 56 C" / "QQ 123456 C").
--- Case-insensitive by construction ([A-Za-z] covers both).
+-- Patterns are stored as PCRE (JavaScript-compatible) regexes so ONE
+-- string works on both sides of the wire: the server enforces via
+-- `ngx.re.match` (OpenResty PCRE) and the frontend renders inline
+-- errors via `new RegExp`. Older Profile Builder validation entries
+-- used Lua-style patterns (`%d`, `%s`) — the profile-builder POST and
+-- validate handlers were updated in the same PR to prefer ngx.re.match
+-- so both syntaxes still work, but new seeds should be PCRE.
 --
--- Deliberately does NOT enforce the tighter HMRC rules (excluded
--- prefixes like DFIQUV / trailing letter restricted to A/B/C/D) —
--- those change over time and are safer left to admin tightening than
--- baked into the seed. Format-shape rejection catches the actual
--- garbage users have been submitting.
-local NINO_PATTERN = "^%s*[A-Za-z][A-Za-z]%s*%d%s*%d%s*%d%s*%d%s*%d%s*%d%s*[A-Za-z]%s*$"
+-- Deliberately do NOT enforce the tighter HMRC-side rules (excluded
+-- NINO prefixes like DFIQUV, trailing letter restricted to A/B/C/D,
+-- reserved UTR ranges) — those change over time and are safer left to
+-- admin tightening via the profile-builder admin UI than baked into
+-- the seed. Format-shape rejection catches the actual garbage users
+-- have been submitting.
+
+-- UK National Insurance Number. Two letters + six digits + one letter,
+-- with optional whitespace anywhere so users can paste either the
+-- compact "QQ123456C" or the spaced "QQ 12 34 56 C" HMRC recommends.
+-- Case-insensitive at match time via ngx.re flags / RegExp flag.
+local NINO_PATTERN = "^\\s*[A-Za-z]\\s*[A-Za-z]\\s*\\d\\s*\\d\\s*\\d\\s*\\d\\s*\\d\\s*\\d\\s*[A-Za-z]\\s*$"
 
 local NINO_VALIDATION = cjson.encode({
     pattern         = NINO_PATTERN,
@@ -76,6 +84,18 @@ local NINO_VALIDATION = cjson.encode({
     -- HMRC's own formatting.
     min_length      = 9,
     max_length      = 13,
+})
+
+-- UK Unique Taxpayer Reference. Exactly 10 digits. Same tolerance for
+-- interior whitespace as NINO — HMRC letters often print UTRs as
+-- "1234 567890" or "12345 67890", so users cut-and-paste with spaces.
+local UTR_PATTERN = "^\\s*(?:\\d\\s*){10}$"
+
+local UTR_VALIDATION = cjson.encode({
+    pattern         = UTR_PATTERN,
+    pattern_message = "Please enter a valid Unique Taxpayer Reference (10 digits, e.g. 1234567890).",
+    min_length      = 10,
+    max_length      = 14,
 })
 
 return {
@@ -180,5 +200,49 @@ return {
               AND (is_active = true OR is_archived = false)
         ]])
         print("[Personal Details] Deactivated redundant `ni_number` question (nino is canonical)")
+    end,
+
+    -- =========================================================================
+    -- 5. Backfill validation + required flag on `utr_number`. Same
+    --    treatment as [1] for nino: only writes where validation_json
+    --    is currently NULL/'' so admin tightening survives.
+    -- =========================================================================
+    [5] = function()
+        db.query([[
+            UPDATE profile_questions
+            SET validation_json = ?,
+                is_required     = true,
+                updated_at      = NOW()
+            WHERE question_key = 'utr_number'
+              AND (validation_json IS NULL OR validation_json = '')
+        ]], UTR_VALIDATION)
+        print("[Personal Details] Backfilled UTR format validation on `utr_number` question")
+    end,
+
+    -- =========================================================================
+    -- 6. Convert any older Lua-syntax pattern (%s, %d, %a) on
+    --    nino / utr_number to the new PCRE form. Runs unconditionally
+    --    for those two keys, but only when the stored pattern still
+    --    contains Lua-only tokens — a PCRE pattern from a fresh install
+    --    or an admin edit is left alone. Guards against a mid-rollout
+    --    env that picked up an earlier revision of this migration
+    --    where step [1] wrote the Lua form.
+    -- =========================================================================
+    [6] = function()
+        db.query([[
+            UPDATE profile_questions
+            SET validation_json = ?, updated_at = NOW()
+            WHERE question_key = 'nino'
+              AND validation_json IS NOT NULL
+              AND validation_json LIKE '%%s%'
+        ]], NINO_VALIDATION)
+        db.query([[
+            UPDATE profile_questions
+            SET validation_json = ?, updated_at = NOW()
+            WHERE question_key = 'utr_number'
+              AND validation_json IS NOT NULL
+              AND validation_json LIKE '%%s%'
+        ]], UTR_VALIDATION)
+        print("[Personal Details] Migrated any legacy Lua-syntax NINO/UTR patterns to PCRE")
     end,
 }

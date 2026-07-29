@@ -30,6 +30,42 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
     utr_number  = "utr",
 }
 
+-- Answer-value pattern matcher used by both /answers POST and
+-- /answers/validate. Handles the two syntaxes we've had stored in
+-- profile_questions.validation_json:
+--
+--   * PCRE (JS-compatible) — the new canonical, matched via
+--     ngx.re.match with case-insensitive + JIT-cached flags. Same
+--     string can be handed to the frontend as `new RegExp(pattern)`
+--     so client and server validate identically.
+--
+--   * Lua patterns (legacy — `%d`, `%s`, `%a`) — matched via
+--     string.match. Kept for any admin-authored pattern that pre-dates
+--     the PCRE switch.
+--
+-- Detection is syntactic: `\` or `{` in the pattern → PCRE (neither
+-- appears in Lua's pattern grammar). Anything else falls through to
+-- string.match. An invalid PCRE regex (admin typo) logs a warning and
+-- fails OPEN — validation being disabled is the same as no
+-- validation, and rejecting every user's write for a config typo is
+-- the worse outcome.
+local function matches_pattern(text, pattern)
+    if not text or text == "" or not pattern or pattern == "" then
+        return true
+    end
+    if pattern:find("\\", 1, true) or pattern:find("{", 1, true) then
+        local matched, err = ngx.re.match(text, pattern, "ijo")
+        if err then
+            ngx.log(ngx.WARN,
+                "[ProfileBuilder] invalid PCRE pattern in validation_json, treating as no-op: ",
+                tostring(err))
+            return true
+        end
+        return matched ~= nil
+    end
+    return text:match(pattern) ~= nil
+end
+
 -- NOTE: the old PER_ENTITY_CONTEXTS map that hardcoded which contexts
 -- were per-entity is GONE. Scope routing is now database-driven via
 -- `profile_categories.answer_scope` + `profile_categories.entity_type`
@@ -3370,7 +3406,7 @@ return function(app)
                                 if validation.max_length and #text > validation.max_length then
                                     table.insert(msgs, "Maximum length is " .. tostring(validation.max_length))
                                 end
-                                if validation.pattern and not text:match(validation.pattern) then
+                                if validation.pattern and not matches_pattern(text, validation.pattern) then
                                     table.insert(msgs, validation.pattern_message or "Invalid format")
                                 end
                             end
@@ -3659,7 +3695,7 @@ return function(app)
                                 end
                             end
                             if validation.pattern and ans.answer_text then
-                                if not ans.answer_text:match(validation.pattern) then
+                                if not matches_pattern(ans.answer_text, validation.pattern) then
                                     result.valid = false
                                     table.insert(result.errors, validation.pattern_message or "Invalid format")
                                 end
