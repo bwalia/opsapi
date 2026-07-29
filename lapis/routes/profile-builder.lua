@@ -3276,33 +3276,40 @@ return function(app)
 
                     -- ─── Identity-lock guard for NINO / UTR back-door ─────────
                     -- For nino / ni_number / utr_number question_keys, the
-                    -- lock rule is: once first-saved, the field is frozen
-                    -- (anti-fraud) — a subsequent CHANGE must be rejected
-                    -- with the catalog 403. Same rule the dedicated /nino
-                    -- endpoints enforce.
+                    -- lock rule is anti-fraud: once first-saved, the value
+                    -- is frozen and any change attempt must be rejected.
                     --
-                    -- Idempotency escape hatch. If the submitted value equals
-                    -- the currently stored one, the caller is re-sending an
-                    -- unchanged locked field (autosave loops on web / iOS
-                    -- and any client that ships the full answer set every
-                    -- save). Treat that as a no-op success instead of
-                    -- raising 403 — otherwise ONE untouched locked field
-                    -- poisons the WHOLE batch and the user can't edit any
-                    -- of their address / name / other profile fields.
-                    -- The client-side delta filter in the frontend's
-                    -- collectAnswersToSave() (commit dd528689) solves the
-                    -- same class of bug one client at a time; this
-                    -- server-side check makes it defence-in-depth so the
-                    -- next mobile / CLI / integration doesn't reintroduce
-                    -- the crash. Different value → still 403 (the anti-
-                    -- fraud rule we're actually enforcing).
+                    -- Four cases the guard has to distinguish, because the
+                    -- old blanket assertNotLocked() call raised a catalog
+                    -- 403 via Errors.raise for every one of them and
+                    -- poisoned the whole batch — one locked NINO in the
+                    -- payload stopped the user saving their address:
                     --
-                    -- assertNotLocked raises a catalog 403 via Errors.raise,
-                    -- which the app-level error middleware catches and turns
-                    -- into the standard error envelope with support_url etc.
-                    -- No need to trap here — letting it bubble is correct.
+                    --   1. Lock stamped AND submitted value == stored
+                    --      value for THIS question_key   → no-op success
+                    --   2. Lock stamped AND submitted value is empty/nil
+                    --      (frontend re-sends the locked question with a
+                    --      cleared value — happens when the schema has
+                    --      BOTH the legacy `nino` question and the newer
+                    --      `ni_number` question active, and only one
+                    --      carries the canonical value)  → no-op success
+                    --   3. Lock stamped AND submitted differs from stored
+                    --      → REJECT THIS ANSWER only. Push a structured
+                    --      per-answer entry into errors[] (same pattern
+                    --      as scope-mismatch failures above) so the rest
+                    --      of the batch can proceed. Response is still
+                    --      200 with errors[]. The client renders the
+                    --      IDENTITY_LOCK_ACTIVE message next to the field
+                    --      without every other unrelated answer failing.
+                    --   4. Lock NOT stamped                → normal path
+                    --      (upsert; stampLock() fires below as before)
+                    --
+                    -- Normalisation strips whitespace and uppercases both
+                    -- sides so "QQ 12 34 56 C" == "qq123456c" — matches
+                    -- how saveNino stores the canonical form.
                     local lock_field = LOCK_FIELD_BY_QUESTION_KEY[question.question_key]
-                    local is_locked_noop = false
+                    -- lock_action: nil=normal path, "noop"=skip write+count saved, "reject"=skip write+error already recorded
+                    local lock_action = nil
                     if lock_field then
                         local function normalize_identity(s)
                             if s == nil or s == cjson.null then return nil end
@@ -3310,19 +3317,48 @@ return function(app)
                         end
                         local submitted = normalize_identity(ans.answer_text)
                         local stored    = old_answer and normalize_identity(old_answer.answer_text) or nil
-                        if submitted and stored and submitted == stored then
-                            is_locked_noop = true
-                        else
-                            IdentityLock.assertNotLocked(user_uuid, namespace_id or 0, lock_field)
+                        -- Read the lock state directly (assertNotLocked
+                        -- raises via Errors.raise — we need to make a
+                        -- per-answer decision here, not abort the batch).
+                        local state = IdentityLock.getState(user_uuid, namespace_id or 0)
+                        local locked_at_field = (lock_field == "nino") and "nino_locked_at" or "utr_locked_at"
+                        local current_lock = state and state[locked_at_field]
+                        if current_lock then
+                            if not submitted or submitted == stored then
+                                lock_action = "noop"
+                            else
+                                local pretty_field = (lock_field == "nino")
+                                    and "National Insurance Number (NINO)"
+                                    or "UTR (Unique Taxpayer Reference)"
+                                table.insert(errors, {
+                                    index         = i,
+                                    question_uuid = ans.question_uuid,
+                                    code          = "IDENTITY_LOCK_ACTIVE",
+                                    field         = lock_field,
+                                    locked_at     = tostring(current_lock),
+                                    support_url   = "/support",
+                                    support_email = "support@diytaxreturn.co.uk",
+                                    error         = string.format(
+                                        "Your %s is on file and cannot be changed. To correct it, please chat with support (/support) or email support@diytaxreturn.co.uk.",
+                                        pretty_field
+                                    ),
+                                })
+                                lock_action = "reject"
+                            end
                         end
+                        -- else: lock not stamped — fall through to the
+                        -- normal upsert path, which stamps the lock on
+                        -- first successful write via stampLock() below.
                     end
 
-                    if is_locked_noop then
-                        -- Same value as before on an already-locked field.
+                    if lock_action == "reject" then
+                        -- Per-answer error already pushed; skip the write
+                        -- entirely (don't upsert, don't increment saved).
+                    elseif lock_action == "noop" then
+                        -- Same/empty value on an already-locked field.
                         -- Nothing to write; lock is already stamped; no
                         -- history row needed (nothing changed). Count as
-                        -- saved so the client's saved/total math matches
-                        -- and the batch response reads as clean success.
+                        -- saved so the client's saved/total math matches.
                         saved = saved + 1
                     else
 
@@ -3431,7 +3467,7 @@ return function(app)
                             )
                         end
                     end
-                    end  -- if is_locked_noop / else
+                    end  -- if lock_action == "reject" / elseif "noop" / else
                 end
             end
         end
