@@ -903,6 +903,11 @@ function FormSectionQueries.card_summary(user)
     --   the "other income" headline. Its explicit branch below sums
     --   only the income boxes.
     --
+    --   dividends / foreign_dividends / other_dividends — itemised
+    --   tables whose amounts live in answer_json arrays, not
+    --   answer_number, so the generic sum reads zero for them. Their
+    --   branch below sums the array elements (same shape as pension).
+    --
     --   Per-entity contexts (property, business, overseas_property,
     --   rental_business, employment) — these DON'T correspond 1:1 to
     --   an income_type_key (rental hub is 'rental', not
@@ -923,7 +928,8 @@ function FormSectionQueries.card_summary(user)
         JOIN profile_categories c ON c.id = q.category_id
         JOIN income_types it      ON it.income_type_key = c.context
         WHERE a.user_id = ?
-          AND it.income_type_key NOT IN ('salary', 'pension_payments', 'capital_gains', 'other')
+          AND it.income_type_key NOT IN ('salary', 'pension_payments', 'capital_gains', 'other',
+                                         'dividends', 'foreign_dividends', 'other_dividends')
           AND c.is_active = true
           AND c.is_archived = false
           AND it.is_active = true
@@ -931,6 +937,63 @@ function FormSectionQueries.card_summary(user)
         GROUP BY it.income_type_key
     ]], internal_user_id) or {}
     for _, r in ipairs(generic_rows) do
+        local entry = by_type[r.income_type_key]
+        if not entry then
+            entry = { income_type_key = r.income_type_key, total = 0, row_count = 0 }
+            out[#out + 1] = entry
+            by_type[r.income_type_key] = entry
+        end
+        entry.total = tonumber(r.total) or 0
+        entry.row_count = tonumber(r.row_count) or 0
+    end
+
+    -- ── Dividend tabs ───────────────────────────────────────────────
+    -- Three income types, one itemised table each (see migration
+    -- dividend-panels.lua). Every amount lives inside an answer_json
+    -- array of row objects — one row per holding — so the generic
+    -- answer_number sum above sees nothing and the /my-income cards
+    -- would all read "Nothing recorded yet".
+    --
+    -- Total = SUM of the money column that IS that tab's headline
+    -- figure: the dividend received per row for the two UK tabs, the
+    -- gross income arising for the foreign one (its other columns are
+    -- tax and reliefs, which would make the sum meaningless).
+    -- Count = number of rows the user has entered across every tax
+    -- year — the array-element count, matching pension's convention.
+    --
+    -- Question keys drive the mapping rather than the category
+    -- context: a question can be moved between categories from the
+    -- admin panel, but its key is the stable contract the seed and
+    -- this query share. jsonb_typeof guard keeps a non-array answer
+    -- (possible if an admin retypes the question) from throwing.
+    local dividend_rows = db.query([[
+        SELECT CASE q.question_key
+                 WHEN 'div_uk_dividends'  THEN 'dividends'
+                 WHEN 'fdiv_dividends'    THEN 'foreign_dividends'
+                 WHEN 'odiv_dividends'    THEN 'other_dividends'
+               END                                    AS income_type_key,
+               -- NULLIF: the widget stores an untouched money cell as
+               -- "" (empty string distinguishes "not entered" from a
+               -- deliberate 0), and ''::numeric is a hard error — a
+               -- row where only the description is filled in would
+               -- 500 every /my-income load without this.
+               COALESCE(SUM(CASE q.question_key
+                 WHEN 'div_uk_dividends' THEN NULLIF(elem->>'dividend', '')::numeric
+                 WHEN 'fdiv_dividends'   THEN NULLIF(elem->>'gross_income', '')::numeric
+                 WHEN 'odiv_dividends'   THEN NULLIF(elem->>'dividend_received', '')::numeric
+               END), 0)                               AS total,
+               COUNT(*)                               AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        CROSS JOIN LATERAL jsonb_array_elements(a.answer_json::jsonb) elem
+        WHERE a.user_id = ?
+          AND q.question_key IN ('div_uk_dividends', 'fdiv_dividends', 'odiv_dividends')
+          AND a.answer_json IS NOT NULL
+          AND a.answer_json <> ''
+          AND jsonb_typeof(a.answer_json::jsonb) = 'array'
+        GROUP BY 1
+    ]], internal_user_id) or {}
+    for _, r in ipairs(dividend_rows) do
         local entry = by_type[r.income_type_key]
         if not entry then
             entry = { income_type_key = r.income_type_key, total = 0, row_count = 0 }
