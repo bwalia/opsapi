@@ -308,6 +308,14 @@ local sa103f_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_
 -- the table layout mode.
 local dividend_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dividend-panels") or {}
 
+-- Interest panels: /my-income/interest (UK banks, untaxed + taxed
+-- tables) and a new foreign_interest income type, each an itemised
+-- table rendered by the repeating_group widget's table layout. The
+-- follow-on dividend-panels.lua flagged: the flat interest boxes it
+-- deactivated (old boxes 1-3) get their itemised home here. SA106
+-- foreign_income is untouched.
+local interest_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.interest-panels") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -2223,6 +2231,17 @@ local _migrations = {
     -- 764 / 767).
     ['791_seed_dividend_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dividend_panels_migrations, 1),
     ['792_reseed_dividend_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dividend_panels_migrations, 2),
+
+    -- 793/794 — Interest panels. Seeds the foreign_interest income
+    -- type and four itemised categories: untaxed UK / taxed UK /
+    -- notes under context='interest', and foreign savings interest
+    -- under context='foreign_interest'. Adding a context to
+    -- 'interest' also switches /my-income/interest out of flat-entry
+    -- mode (my_incomes rows stay in the DB, the Add-income surface
+    -- stops rendering) — same trade 791 made for dividends. 794 is
+    -- the re-run safety net (convention: 760 / 764 / 767 / 792).
+    ['793_seed_interest_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, interest_panels_migrations, 1),
+    ['794_reseed_interest_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, interest_panels_migrations, 2),
 
     -- =========================================================================
     -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
