@@ -3245,23 +3245,11 @@ return function(app)
                         affected_category_ids[question.category_id] = true
                     end
 
-                    -- ─── Identity-lock guard for NINO / UTR back-door ─────────
-                    -- If this question_key is one of the identity fields
-                    -- (nino / ni_number / utr_number) AND the user's lock is
-                    -- already stamped, the write must be rejected — same rule
-                    -- the dedicated /nino endpoints enforce.
-                    -- assertNotLocked raises a catalog 403 via Errors.raise,
-                    -- which the app-level error middleware catches and turns
-                    -- into the standard error envelope with support_url etc.
-                    -- No need to trap here — letting it bubble is correct.
-                    local lock_field = LOCK_FIELD_BY_QUESTION_KEY[question.question_key]
-                    if lock_field then
-                        IdentityLock.assertNotLocked(user_uuid, namespace_id or 0, lock_field)
-                    end
-
-                    -- Get existing answer for history (scoped to this batch's
-                    -- entity/year — the three scopes live as distinct rows
-                    -- under the three partial unique indexes).
+                    -- Fetch the existing answer for THIS question first — we
+                    -- need it for the identity-lock idempotency check below
+                    -- AND for the history record after the upsert. Scoped to
+                    -- this batch's entity/year — the three scopes live as
+                    -- distinct rows under the three partial unique indexes.
                     local old_answer = nil
                     local ok_old, old_rows
                     if entity_uuid then
@@ -3285,6 +3273,58 @@ return function(app)
                     if ok_old and old_rows and #old_rows > 0 then
                         old_answer = old_rows[1]
                     end
+
+                    -- ─── Identity-lock guard for NINO / UTR back-door ─────────
+                    -- For nino / ni_number / utr_number question_keys, the
+                    -- lock rule is: once first-saved, the field is frozen
+                    -- (anti-fraud) — a subsequent CHANGE must be rejected
+                    -- with the catalog 403. Same rule the dedicated /nino
+                    -- endpoints enforce.
+                    --
+                    -- Idempotency escape hatch. If the submitted value equals
+                    -- the currently stored one, the caller is re-sending an
+                    -- unchanged locked field (autosave loops on web / iOS
+                    -- and any client that ships the full answer set every
+                    -- save). Treat that as a no-op success instead of
+                    -- raising 403 — otherwise ONE untouched locked field
+                    -- poisons the WHOLE batch and the user can't edit any
+                    -- of their address / name / other profile fields.
+                    -- The client-side delta filter in the frontend's
+                    -- collectAnswersToSave() (commit dd528689) solves the
+                    -- same class of bug one client at a time; this
+                    -- server-side check makes it defence-in-depth so the
+                    -- next mobile / CLI / integration doesn't reintroduce
+                    -- the crash. Different value → still 403 (the anti-
+                    -- fraud rule we're actually enforcing).
+                    --
+                    -- assertNotLocked raises a catalog 403 via Errors.raise,
+                    -- which the app-level error middleware catches and turns
+                    -- into the standard error envelope with support_url etc.
+                    -- No need to trap here — letting it bubble is correct.
+                    local lock_field = LOCK_FIELD_BY_QUESTION_KEY[question.question_key]
+                    local is_locked_noop = false
+                    if lock_field then
+                        local function normalize_identity(s)
+                            if s == nil or s == cjson.null then return nil end
+                            return tostring(s):upper():gsub("%s+", "")
+                        end
+                        local submitted = normalize_identity(ans.answer_text)
+                        local stored    = old_answer and normalize_identity(old_answer.answer_text) or nil
+                        if submitted and stored and submitted == stored then
+                            is_locked_noop = true
+                        else
+                            IdentityLock.assertNotLocked(user_uuid, namespace_id or 0, lock_field)
+                        end
+                    end
+
+                    if is_locked_noop then
+                        -- Same value as before on an already-locked field.
+                        -- Nothing to write; lock is already stamped; no
+                        -- history row needed (nothing changed). Count as
+                        -- saved so the client's saved/total math matches
+                        -- and the batch response reads as clean success.
+                        saved = saved + 1
+                    else
 
                     -- The unique indexes are partial (see migrations
                     -- property-income-system + dynamic-answer-scope), so
@@ -3391,6 +3431,7 @@ return function(app)
                             )
                         end
                     end
+                    end  -- if is_locked_noop / else
                 end
             end
         end
