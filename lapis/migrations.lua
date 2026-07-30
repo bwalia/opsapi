@@ -204,11 +204,12 @@ local salary_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_
 -- profile-builder-driven feature depends on this.
 local dynamic_answer_scope_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-answer-scope") or {}
 
--- SA100 dividends & interest — first consumer of answer_scope='year'.
--- Seeds a category + 7 boxes as `currency` questions so admins can
--- rename / reorder / add rules / add new boxes via
--- /admin/profile-builder/*.
-local sa100_dividend_questions_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa100-dividend-questions") or {}
+-- SA100 dividend & interest questions: extracted to the consumer repo
+-- as tax_copilot_app plugin migrations 20260801_001..003 (Phase 3
+-- slice 1 of the migration-decoupling plan). The source .lua file is
+-- retained here for one release cycle for rollback safety; the
+-- consumer's reconcile hook seeds project_migrations on envs where
+-- opsapi already applied 750/750a/751.
 
 -- Rental joint-owner details — first consumer of the config-driven
 -- repeating_group widget contract. Adds ONE question
@@ -243,19 +244,12 @@ local salary_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig
 local pension_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-catalog") or {}
 local pension_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-backfill") or {}
 
--- SA110 Tax Calculation Summary — one seed file, no backfill (no
--- legacy Form Sections rows to port). Ships as an income_types row +
--- 6 profile_categories + 17 profile_questions under context='sa110',
--- answer_scope='year'. Once merged and applied, /my-income/sa110
--- becomes admin-configurable end-to-end (add / rename / reorder
--- questions via /admin/profile-builder without a code deploy).
-local sa110_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa110-tax-calculation-summary") or {}
-
--- SA108 Capital Gains Tax summary — every box on the form (pages CG1-CG4)
--- as profile-builder questions, context='capital_gains', answer_scope='year'.
--- Same pattern as the SA100 dividends seed; greenfield (no legacy store),
--- so there is no backfill/fork pair. Gated on TAX_COPILOT.
-local sa108_capital_gains_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa108-capital-gains-questions") or {}
+-- SA110 Tax Calculation Summary + SA108 Capital Gains Tax questions:
+-- extracted to the consumer repo as tax_copilot_app plugin migrations
+-- 20260801_004..007 (Phase 3 slice 1). Source .lua files retained for
+-- one release cycle for rollback safety; the consumer's reconcile hook
+-- seeds project_migrations on envs where opsapi already applied
+-- 766/767/768/769.
 
 -- Adds admin-configurable linked-form metadata columns to income_types
 -- (linked_form_title / linked_form_description / linked_form_weblink)
@@ -266,39 +260,14 @@ local sa108_capital_gains_migrations = load_if_enabled(ProjectConfig.FEATURES.TA
 -- overwrites admin edits).
 local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-linked-form-metadata") or {}
 
--- SA101 Additional information — every box on the form (pages Ai1-Ai4)
--- as profile-builder questions for the "Other income" panel
--- (context='other', answer_scope='year'). Same greenfield pattern as
--- SA108: no backfill/fork pair. Gated on TAX_COPILOT.
-local sa101_additional_information_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa101-additional-information-questions") or {}
-
--- SA105 UK Property completion — tax-adjustment + loss boxes (32-48)
--- that the earlier property-income-system seed didn't cover. Adds 2
--- year-scoped profile categories under context='rental' (portfolio-
--- wide totals, not per-property) plus 1 new property_line_categories
--- row (replacement_domestic_items, boxes 39-40).
-local sa105_property_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa105-property-completion-questions") or {}
-
--- SA109 Residence, remittance basis etc. — NEW income type. Closes
--- the HIGH-priority audit gap: expats / split-year / RBC filers had
--- no way to file. Seeds income_types row + linked_form metadata + 5
--- year-scoped categories (~21 questions). Auto-discovery renders
--- /my-income/sa109 with zero frontend code.
-local sa109_residence_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa109-residence-domicile-questions") or {}
-
--- SA106 Foreign income NON-property — NEW income type foreign_income.
--- Closes another HIGH-priority audit gap: foreign savings interest,
--- dividends above the £500 SA100 threshold, overseas pensions,
--- Foreign Tax Credit Relief. Existing overseas_property covers only
--- foreign PROPERTY; this covers the other SA106 sections.
-local sa106_foreign_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa106-foreign-income-questions") or {}
-
--- SA103F Self-employment completion — Class 4 NIC exemption /
--- adjustment (boxes 100-102), basis-period reform electives, and
--- loss-offset options (boxes 77-79). Adds 3 year-scoped categories
--- under context='self_employment' (extending the existing type).
--- Companion frontend PR renders them on the SE hub.
-local sa103f_completion_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.sa103f-completion-questions") or {}
+-- SA101 Additional information + linked-form defaults, and the
+-- SA10x completion round (SA105 property, SA109 residence, SA106
+-- foreign income, SA103F self-employment): all extracted to the
+-- consumer repo as tax_copilot_app plugin migrations 20260801_008..018
+-- (Phase 3 slice 1). Source .lua files retained for one release cycle
+-- for rollback safety; the consumer's reconcile hook seeds
+-- project_migrations on envs where opsapi already applied
+-- 772/773/774/775/776/785/786/787/788/789/790.
 
 -- Dividend panels — splits dividends into THREE income-type tabs
 -- (dividends / foreign_dividends / other_dividends), each an itemised
@@ -2082,16 +2051,10 @@ local _migrations = {
     ['748c_add_year_scope_unique_index'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 4),
     ['749_backfill_answer_scope_from_context'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 5),
 
-    -- SA100 dividends & interest — first consumer of answer_scope='year'.
-    -- Seeds a category + 7 boxes as `currency` questions so admins can
-    -- rename / reorder / add rules / add new boxes via
-    -- /admin/profile-builder/*. Must run AFTER 748* so the answer_scope
-    -- column exists.
-    ['750_seed_sa100_dividends_category'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 1),
-    -- Self-heals the answer_scope on the dividends category if an
-    -- older revision of step 750 inserted it without the column.
-    ['750a_force_sa100_dividends_year_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 2),
-    ['751_seed_sa100_dividends_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa100_dividend_questions_migrations, 3),
+    -- SA100 dividends & interest (keys 750, 750a, 751): EXTRACTED to
+    -- diy-tax-return-uk consumer repo as tax_copilot_app plugin
+    -- migrations 20260801_001..003. Phase 3 slice 1 of the
+    -- migration-decoupling plan.
 
     -- Rental joint-owner details — first consumer of the config-driven
     -- repeating_group widget contract. See
@@ -2152,75 +2115,22 @@ local _migrations = {
     -- already fully succeeded treats these as no-ops.
     ['764_reseed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 2),
     ['765_rebackfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 2),
-    -- 766/767 — SA110 Tax Calculation Summary catalog. income_types
-    -- row + 6 profile_categories + 17 profile_questions under
-    -- context='sa110', answer_scope='year'. 767 is the safety-net
-    -- re-run pass (same convention as 760 / 764).
-    ['766_seed_sa110_tax_calculation_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa110_migrations, 1),
-    ['767_reseed_sa110_tax_calculation_summary'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa110_migrations, 2),
-
-    -- 768/769 — SA108 Capital Gains Tax summary on the profile builder
-    -- (context='capital_gains', answer_scope='year'). Renumbered from
-    -- 766/767 when the SA110 seed claimed those slots. Categories MUST
-    -- run before questions (questions resolve category_id by slug).
-    -- Both idempotent; INSERT-only, so admin edits are never clobbered.
-    -- No backfill step: capital gains never had a legacy engine store.
-    ['768_seed_sa108_capital_gains_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa108_capital_gains_migrations, 1),
-    ['769_seed_sa108_capital_gains_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa108_capital_gains_migrations, 2),
+    -- SA110 Tax Calculation Summary + SA108 Capital Gains Tax (keys
+    -- 766, 767, 768, 769): EXTRACTED to diy-tax-return-uk consumer
+    -- repo as tax_copilot_app plugin migrations 20260801_004..007.
+    -- Phase 3 slice 1.
     -- 770/771 — linked-form metadata columns on income_types + seed
     -- defaults for the 8 known types. Retires the hardcoded
     -- "SA100 boxes" card header on /my-income/[type]. Both idempotent.
     ['770_add_income_types_linked_form_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 1),
     ['771_seed_income_types_linked_form_defaults'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 2),
 
-    -- 772/773 — SA101 Additional information ("Other income" panel) on
-    -- the profile builder (context='other', answer_scope='year').
-    -- Renumbered from 770/771 when the linked-form-metadata migration
-    -- claimed those slots. Categories MUST run before questions
-    -- (questions resolve category_id by slug). Both idempotent;
-    -- INSERT-only, so admin edits are never clobbered. No backfill
-    -- step: the 'other' type's flat my_incomes rows stay untouched
-    -- (calc still reads them).
-    ['772_seed_sa101_additional_information_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 1),
-    ['773_seed_sa101_additional_information_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 2),
-    -- 774 — linked-form defaults for the types migration 771 missed:
-    -- 'other' (SA101, new in this branch) and 'capital_gains' (771
-    -- seeded it under the key 'sa108', which matches no income_types
-    -- row — UPDATE silently no-ops — so the CGT panel never got its
-    -- reference-form card). COALESCE, same non-clobber contract as 771;
-    -- a new step rather than editing 771 because 771 is already
-    -- tracked as run in envs (the dividends-750a precedent).
-    ['774_seed_linked_form_defaults_other_and_capital_gains'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa101_additional_information_migrations, 3),
-    -- 775-790 — SA10x completion round. One PR shipping four seeds
-    -- together: SA105 (portfolio-wide rental adjustments + losses),
-    -- SA109 (residence/remittance basis), SA106 non-property
-    -- (foreign interest/dividends/pensions/FTCR), and SA103F
-    -- (Class 4 NIC + basis-reform + loss-offset). All INSERT-only
-    -- + two-step (safety-net re-run). Supersedes the earlier
-    -- feat/sa105-property-completion-year-scoped branch (folded in
-    -- so the four migrations ship as one PR per the "one PR per
-    -- repo" contract).
-    --
-    -- 775/776 — SA105 UK Property completion.
-    ['775_seed_sa105_property_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa105_property_completion_migrations, 1),
-    ['776_reseed_sa105_property_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa105_property_completion_migrations, 2),
-    -- 785/786 — SA109 Residence, remittance basis etc. NEW income
-    -- type. Auto-discovery renders /my-income/sa109 with zero
-    -- frontend code.
-    ['785_seed_sa109_residence_domicile'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa109_residence_migrations, 1),
-    ['786_reseed_sa109_residence_domicile'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa109_residence_migrations, 2),
-    -- 787/788 — SA106 Foreign income (non-property). NEW income type
-    -- foreign_income. Distinct from the existing overseas_property
-    -- type (foreign PROPERTY only) — both reference SA106 (different
-    -- sections).
-    ['787_seed_sa106_foreign_income'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa106_foreign_income_migrations, 1),
-    ['788_reseed_sa106_foreign_income'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa106_foreign_income_migrations, 2),
-    -- 789/790 — SA103F Self-employment completion. Extends existing
-    -- 'self_employment' type with Class 4 NIC + basis-reform +
-    -- loss-offset categories. Frontend renders via a new
-    -- ContextSections block on the SE hub.
-    ['789_seed_sa103f_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa103f_completion_migrations, 1),
-    ['790_reseed_sa103f_completion'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, sa103f_completion_migrations, 2),
+    -- SA101 Additional information + linked-form defaults + the SA10x
+    -- completion round (SA105 property, SA109 residence, SA106 foreign
+    -- income, SA103F self-employment) — keys 772, 773, 774, 775, 776,
+    -- 785, 786, 787, 788, 789, 790: EXTRACTED to diy-tax-return-uk
+    -- consumer repo as tax_copilot_app plugin migrations
+    -- 20260801_008..018. Phase 3 slice 1.
 
     -- 791/792 — Dividend panels. Seeds the foreign_dividends +
     -- other_dividends income types, three itemised-table categories
