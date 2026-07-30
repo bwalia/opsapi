@@ -2271,6 +2271,7 @@ local _migrations = {
     ['828_profile_deactivate_ni_number'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 4),
     ['829_profile_utr_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 5),
     ['830_profile_migrate_lua_patterns_to_pcre'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 6),
+    ['831_profile_heal_empty_identity_locks'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 7),
 
     ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
     -- Add a jsonb `tags` array to courses (create-or-select category + multi-tags).

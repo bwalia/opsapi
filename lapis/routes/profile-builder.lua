@@ -3359,9 +3359,21 @@ return function(app)
                     -- uppercases both sides so "QQ 12 34 56 C" ==
                     -- "qq123456c" — matches how saveNino stores canonical.
                     if lock_field then
+                        -- Returns nil for anything that carries no
+                        -- meaningful identity value: JSON null, missing
+                        -- field, plain empty string, or a string of
+                        -- pure whitespace. Callers rely on the nil
+                        -- return to short-circuit — this is the ONLY
+                        -- reason the function exists in this scope. A
+                        -- previous version returned "" here and the
+                        -- Lua `not submitted` check silently failed
+                        -- (empty string is truthy in Lua), letting an
+                        -- empty NINO through to stamp the lock on ''.
                         local function normalize_identity(s)
                             if s == nil or s == cjson.null then return nil end
-                            return tostring(s):upper():gsub("%s+", "")
+                            local out = tostring(s):upper():gsub("%s+", "")
+                            if out == "" then return nil end
+                            return out
                         end
                         local submitted = normalize_identity(ans.answer_text)
                         local stored    = old_answer and normalize_identity(old_answer.answer_text) or nil
@@ -3371,7 +3383,28 @@ return function(app)
                         local state = IdentityLock.getState(user_uuid, namespace_id or 0)
                         local locked_at_field = (lock_field == "nino") and "nino_locked_at" or "utr_locked_at"
                         local current_lock = state and state[locked_at_field]
-                        if current_lock and (not submitted or submitted == stored) then
+
+                        -- Empty submission on a lock_field is ALWAYS a
+                        -- no-op — never write, never stamp. Reason: a
+                        -- successful upsert of a lock_field question
+                        -- stamps the anti-fraud lock (via stampLock()
+                        -- below), and stamping the lock on an empty
+                        -- string means the user is FROZEN to the empty
+                        -- value forever: any subsequent real submission
+                        -- differs from stored '' and hits the "change
+                        -- attempt" reject branch. That was the failure
+                        -- mode in the reported 2026-07-30 curl —
+                        -- frontend autosave shipped '' before the user
+                        -- had typed the NINO, we wrote and stamped, and
+                        -- the real "AA 12 34 56 A" attempt 9 seconds
+                        -- later got IDENTITY_LOCK_ACTIVE. An empty NINO
+                        -- has no anti-fraud value; treating it as no-op
+                        -- keeps the field open for the user's real
+                        -- first save while preserving the lock on any
+                        -- meaningful write.
+                        if not submitted then
+                            lock_action = "noop_empty"
+                        elseif current_lock and submitted == stored then
                             lock_action = "noop"
                         end
                         -- Note: the "lock stamped AND value differs"
@@ -3475,8 +3508,16 @@ return function(app)
                     elseif lock_action == "reject" then
                         -- Per-answer error already pushed; skip the write
                         -- entirely (don't upsert, don't increment saved).
+                    elseif lock_action == "noop_empty" then
+                        -- Empty submission on a lock_field question.
+                        -- Skip the write entirely so we don't stamp the
+                        -- anti-fraud lock on nothing (see the block
+                        -- above). Don't count it as saved either —
+                        -- there is nothing to acknowledge as persisted,
+                        -- and counting a no-write toward `saved` would
+                        -- lie to the client about what landed.
                     elseif lock_action == "noop" then
-                        -- Same/empty value on an already-locked field.
+                        -- Same value on an already-locked field.
                         -- Nothing to write; lock is already stamped; no
                         -- history row needed (nothing changed). Count as
                         -- saved so the client's saved/total math matches.

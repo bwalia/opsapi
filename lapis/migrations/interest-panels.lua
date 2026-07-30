@@ -191,6 +191,21 @@ local function seed_interest_panels()
     end
 
     local function ensure_year_category(context, slug, name, description, icon, display_order)
+        -- Fail loudly on missing args. Previously a dropped positional
+        -- argument left display_order = nil, which propagated into
+        -- `db.query` and blew up as "db.interpolate_query: missing
+        -- replacement 6" — a message that told you which placeholder
+        -- was starved but not which parameter, so the caller wasn't
+        -- obviously the culprit. Assert here surfaces the caller in
+        -- the traceback and names the missing field.
+        assert(context ~= nil and context ~= "",
+            "ensure_year_category: `context` is required (used for /my-income/<type> auto-discovery)")
+        assert(slug ~= nil and slug ~= "",
+            "ensure_year_category: `slug` is required (used for the profile_categories key)")
+        assert(name ~= nil and name ~= "",
+            "ensure_year_category: `name` is required (rendered in the section header)")
+        assert(display_order ~= nil,
+            "ensure_year_category: `display_order` is required (integer, drives left-to-right order)")
         local exists = db.select("id FROM profile_categories WHERE slug = ?", slug)
         if exists and #exists > 0 then
             db.query([[
@@ -282,7 +297,13 @@ local function seed_interest_panels()
     -- ── Tab 1, section 1: Untaxed UK interest ───────────────────────
     -- Interest paid gross. Since April 2016 that is nearly every UK
     -- bank and building society account, so this table leads.
+    --
+    -- `context = "interest"` matches the income_type_key so
+    -- app/my-income/[type]/page.tsx auto-discovers this category when
+    -- the URL is /my-income/interest — that's the header's
+    -- "income_type_key IS the profile-builder context" contract.
     local untaxed_id = ensure_year_category(
+        "interest",
         "interest-untaxed-uk",
         "Untaxed UK interest",
         "Interest paid without tax taken off — most UK bank and building society accounts since April 2016. One row per account.",
@@ -304,6 +325,7 @@ local function seed_interest_panels()
     -- Rarer post-2016 but still real: some annuities, PPI interest,
     -- compensation payments and trust income arrive net of tax.
     local taxed_id = ensure_year_category(
+        "interest",
         "interest-taxed-uk",
         "Taxed UK interest",
         "Interest that already had UK tax taken off before it reached you. Enter what you received and the tax deducted — both are on the certificate.",
@@ -327,6 +349,7 @@ local function seed_interest_panels()
     -- obvious rather than making it look like a footnote to the
     -- taxed table.
     local notes_id = ensure_year_category(
+        "interest",
         "interest-notes",
         "Additional information",
         "Anything you want to explain to HMRC about your interest.",
@@ -343,7 +366,11 @@ local function seed_interest_panels()
     end
 
     -- ── Tab 2: Foreign interest ─────────────────────────────────────
+    -- `context = "foreign_interest"` matches the NEW income_type_key
+    -- seeded above so /my-income/foreign_interest picks up this
+    -- category. Same convention as the interest tab above.
     local fi_id = ensure_year_category(
+        "foreign_interest",
         "foreign-savings-interest",
         "Foreign savings interest",
         "One row per overseas account. Amounts in sterling — convert at the rate on the date you were paid.",
