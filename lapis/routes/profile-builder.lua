@@ -3359,9 +3359,21 @@ return function(app)
                     -- uppercases both sides so "QQ 12 34 56 C" ==
                     -- "qq123456c" — matches how saveNino stores canonical.
                     if lock_field then
+                        -- Returns nil for anything that carries no
+                        -- meaningful identity value: JSON null, missing
+                        -- field, plain empty string, or a string of
+                        -- pure whitespace. Callers rely on the nil
+                        -- return to short-circuit — this is the ONLY
+                        -- reason the function exists in this scope. A
+                        -- previous version returned "" here and the
+                        -- Lua `not submitted` check silently failed
+                        -- (empty string is truthy in Lua), letting an
+                        -- empty NINO through to stamp the lock on ''.
                         local function normalize_identity(s)
                             if s == nil or s == cjson.null then return nil end
-                            return tostring(s):upper():gsub("%s+", "")
+                            local out = tostring(s):upper():gsub("%s+", "")
+                            if out == "" then return nil end
+                            return out
                         end
                         local submitted = normalize_identity(ans.answer_text)
                         local stored    = old_answer and normalize_identity(old_answer.answer_text) or nil
