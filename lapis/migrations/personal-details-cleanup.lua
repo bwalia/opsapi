@@ -245,4 +245,88 @@ return {
         ]], UTR_VALIDATION)
         print("[Personal Details] Migrated any legacy Lua-syntax NINO/UTR patterns to PCRE")
     end,
+
+    -- =========================================================================
+    -- 7. Heal users stuck with a stamped nino_locked_at / utr_locked_at
+    --    but no meaningful stored value.
+    --
+    --    Root cause (fixed in routes/profile-builder.lua same PR): the
+    --    old write path stamped the anti-fraud lock on ANY successful
+    --    upsert of a lock_field question, including empty-string
+    --    submissions the frontend autosave shipped before the user
+    --    had typed the field. Users landed with nino_locked_at set,
+    --    an empty user_profile_answers row, and no way to save a real
+    --    NINO — every real submission differed from stored '' and got
+    --    IDENTITY_LOCK_ACTIVE.
+    --
+    --    Heal:
+    --      1. DELETE the empty lock_field answer rows (they shouldn't
+    --         exist and they are what make the lock guard's idempotency
+    --         check compare against '' instead of nil).
+    --      2. UNSET the lock timestamp on any user whose only stored
+    --         answer for that lock_field is empty (or absent) — the
+    --         lock was never legitimately earned, so return them to
+    --         "first save open".
+    --      3. Wipe the ancillary lock-only columns on tax_user_profiles
+    --         (has_nino, nino_last4, nino_hash, nino_encrypted) so the
+    --         profile GET reads a clean "no NINO on file" state.
+    --
+    --    Guarded: never touches a user whose stored answer_text is a
+    --    real (non-empty) value — those locks were legitimately earned
+    --    and stay in place.
+    -- =========================================================================
+    [7] = function()
+        -- Step 1: drop empty lock_field answer rows. These are the
+        -- ghost rows that confuse the /answers idempotency check.
+        db.query([[
+            DELETE FROM user_profile_answers upa
+            USING profile_questions pq
+            WHERE pq.id = upa.question_id
+              AND pq.question_key IN ('nino', 'ni_number', 'utr_number')
+              AND (upa.answer_text IS NULL OR upa.answer_text = '')
+        ]])
+
+        -- Step 2a: unlock NINO for any user whose remaining
+        -- nino/ni_number answers are all empty or absent. Uses NOT
+        -- EXISTS so a user with even one non-empty NINO answer keeps
+        -- their legitimate lock.
+        db.query([[
+            UPDATE tax_user_profiles tup
+            SET nino_locked_at = NULL,
+                has_nino       = false,
+                nino_last4     = NULL,
+                nino_hash      = NULL,
+                nino_encrypted = NULL,
+                updated_at     = NOW()
+            WHERE tup.nino_locked_at IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM user_profile_answers upa
+                JOIN profile_questions pq ON pq.id = upa.question_id
+                WHERE upa.user_uuid = tup.user_uuid
+                  AND pq.question_key IN ('nino', 'ni_number')
+                  AND upa.answer_text IS NOT NULL
+                  AND upa.answer_text <> ''
+              )
+        ]])
+
+        -- Step 2b: same treatment for UTR.
+        db.query([[
+            UPDATE tax_user_profiles tup
+            SET utr_locked_at = NULL,
+                updated_at    = NOW()
+            WHERE tup.utr_locked_at IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM user_profile_answers upa
+                JOIN profile_questions pq ON pq.id = upa.question_id
+                WHERE upa.user_uuid = tup.user_uuid
+                  AND pq.question_key = 'utr_number'
+                  AND upa.answer_text IS NOT NULL
+                  AND upa.answer_text <> ''
+              )
+        ]])
+
+        print("[Personal Details] Healed users with empty-value NINO/UTR locks (bogus locks cleared, empty answer rows removed)")
+    end,
 }
