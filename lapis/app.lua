@@ -543,8 +543,16 @@ load_if("crm", "routes.crm-accounts")
 load_if("crm", "routes.crm-contacts")
 load_if("crm", "routes.crm-deals")
 load_if("crm", "routes.crm-activities")
-load_if("crm", "routes.crm-leads")
-load_if("crm", "routes.crm-leads-public")
+-- Leads are core: capture (public submit + manual CRUD) works for every
+-- project regardless of whether the full CRM feature (accounts, contacts,
+-- deals, pipelines) is enabled. A lead is inbound raw contact info — most
+-- projects need a way to receive it even if they don't run the pipeline
+-- side of CRM. The convert-to-contact/deal endpoint inside crm-leads
+-- self-gates on the CRM feature (it needs crm_contacts + crm_deals), so
+-- the "core"-ness only exposes capture + list + edit + archive, never the
+-- convert path.
+safe_load_routes("routes.crm-leads")
+safe_load_routes("routes.crm-leads-public")
 
 -- ============================================
 -- TIMESHEETS (Time tracking and approval)
