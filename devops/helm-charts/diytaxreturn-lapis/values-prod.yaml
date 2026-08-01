@@ -20,6 +20,25 @@ projectCode: tax_copilot
 frontendUrl: "https://app.diytaxreturn.co.uk"
 # passwordResetAllowedOrigins: ""
 
+# ─── Browser CORS allow-list ──────────────────────────────────────────
+# Read by lapis/middleware/cors.lua. The bare domain matches the apex and
+# every subdomain (www./app./…), http or https, with or without a port —
+# so this single entry covers https://diytaxreturn.co.uk,
+# https://www.diytaxreturn.co.uk and https://app.diytaxreturn.co.uk.
+#
+# Needed for the public marketing-site form posting to
+# POST /api/v2/public/leads/tax-copilot: before this, prod answered the
+# preflight with 204 + `Vary: Origin` but no Access-Control-Allow-Origin,
+# so the browser blocked every submission.
+#
+# NOTE: setting this here means git — not Vault — owns the prod
+# allow-list (the env entry overrides the ExternalSecret's envFrom value).
+corsAllowedDomains: "diytaxreturn.co.uk"
+# Exact origins that are NOT under an allowed domain above. The two
+# public site origins are listed explicitly as well so the allow-list is
+# greppable and survives any future narrowing of corsAllowedDomains.
+corsAllowedOrigins: "https://diytaxreturn.co.uk,https://www.diytaxreturn.co.uk"
+
 image:
   repository: bwalia/opsapi
   tag: latest
