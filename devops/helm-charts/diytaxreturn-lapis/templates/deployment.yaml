@@ -132,6 +132,32 @@ spec:
             - name: PASSWORD_RESET_ALLOWED_ORIGINS
               value: {{ .Values.passwordResetAllowedOrigins | quote }}
             {{- end }}
+            # ── Browser CORS allow-list ────────────────────────────────────
+            # Consumed by lapis/middleware/cors.lua. Without a match the
+            # middleware sets NO Access-Control-Allow-Origin and the browser
+            # blocks the call — this is what broke public marketing-site form
+            # posts to /api/v2/public/leads/:namespace_slug from
+            # https://diytaxreturn.co.uk (prod returned 204 + Vary: Origin
+            # but no ACAO header).
+            #
+            # ``corsAllowedDomains``  = comma-separated bare domains. Each one
+            # matches the apex AND every subdomain, http or https, any port
+            # (so "diytaxreturn.co.uk" also covers www./app./acc.).
+            # ``corsAllowedOrigins``  = comma-separated exact origins, for
+            # hosts that aren't under an allowed domain (e.g. a preview URL).
+            #
+            # Both are OPTIONAL here: when unset, whatever Vault ships in the
+            # ExternalSecret (envFrom above) still applies. When set, this
+            # env entry WINS over envFrom for that key — so only set them in
+            # values-*.yaml for envs where git should own the allow-list.
+            {{- if .Values.corsAllowedDomains }}
+            - name: CORS_ALLOWED_DOMAINS
+              value: {{ .Values.corsAllowedDomains | quote }}
+            {{- end }}
+            {{- if .Values.corsAllowedOrigins }}
+            - name: CORS_ALLOWED_ORIGINS
+              value: {{ .Values.corsAllowedOrigins | quote }}
+            {{- end }}
       volumes:
         - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
           configMap:
