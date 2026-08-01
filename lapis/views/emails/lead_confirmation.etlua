@@ -1,0 +1,18 @@
+<h2>Thank you<% if first_name and first_name ~= "" then %>, <%= first_name %><% end %>!</h2>
+
+<p>We've received your enquiry and one of our team will get back to you shortly. This email confirms your submission — no action is required from you right now.</p>
+
+<% if company_name and company_name ~= "" then %>
+  <p><strong>Company:</strong> <%= company_name %></p>
+<% end %>
+
+<% if notes and notes ~= "" then %>
+  <p><strong>Your message:</strong></p>
+  <div class="info-box">
+    <%= notes %>
+  </div>
+<% end %>
+
+<p>If any of the details above look wrong, or you'd like to add anything, just reply to this email and we'll pick it up.</p>
+
+<p>Thanks,<br>The <%= app_name %> Team</p>
