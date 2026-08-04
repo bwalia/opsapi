@@ -213,6 +213,16 @@ function IncomeTypeQueries.update(uuid, body)
         table.insert(sets, "is_active = " ..
             db.interpolate_query("?", body.is_active and true or false))
     end
+    -- Admin-controlled opt-in for the /file-my-tax local tax preview
+    -- (see backend/app/api/my_income_tax.py in the consumer repo).
+    -- Column is added by consumer migration
+    -- 20260804_002_income_types_include_in_tax_preview.lua with a
+    -- default of FALSE — the preview only sums income types an admin
+    -- has explicitly ticked here.
+    if body.include_in_tax_preview ~= nil then
+        table.insert(sets, "include_in_tax_preview = " ..
+            db.interpolate_query("?", body.include_in_tax_preview and true or false))
+    end
     table.insert(sets, "updated_at = NOW()")
 
     db.query("UPDATE income_types SET " .. table.concat(sets, ", ") .. " WHERE uuid = ?", uuid)
