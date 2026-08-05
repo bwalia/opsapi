@@ -11,6 +11,174 @@
 
 local db = require("lapis.db")
 local cjson = require("cjson")
+local IdentityLock = require("lib.identity_lock")
+local Global = require("helper.global")
+
+-- ─── Locked-field guard for the generic answers endpoint ──────────────────
+-- The profile-builder /answers endpoint is the historical back-door for
+-- NINO/UTR writes: users' Personal Details wizard writes `question_key`
+-- values 'nino', 'ni_number', and 'utr_number' straight into
+-- user_profile_answers, bypassing the dedicated NINO endpoints. Without
+-- this guard the whole anti-fraud lock is a paper tiger.
+--
+-- Mapping (question_key → lock field):
+--   'nino'         → nino   (older seed, still in flight for some tenants)
+--   'ni_number'    → nino   (newer wizard-tree seed — see dynamic-profile-builder.lua:1710)
+--   'utr_number'   → utr    (Personal Details, is_required=true)
+local LOCK_FIELD_BY_QUESTION_KEY = {
+    nino        = "nino",
+    ni_number   = "nino",
+    utr_number  = "utr",
+}
+
+-- ─── NINO mirror into tax_user_profiles ──────────────────────────────────
+-- The /settings HMRC tab + tax-hmrc-filing.lua both read from
+-- tax_user_profiles.nino_encrypted / has_nino / nino_last4. This helper
+-- upserts those columns from a plaintext NINO answer that came in via
+-- POST /api/v2/profile-builder/answers, using the same AES-128-CBC
+-- encryption (Global.encryptSecret) that POST /api/v2/hmrc/nino uses,
+-- so the two write paths become interchangeable at rest.
+--
+-- Called from BOTH the fresh-write branch AND the noop-same-value branch
+-- of the answers endpoint. The noop case matters for users whose lock
+-- was stamped before the mirror existed (nino_locked_at IS NOT NULL
+-- while has_nino=false): re-saving the same NINO on /profile hits the
+-- noop branch, and without the mirror there their tax_user_profiles
+-- row would never catch up.
+--
+-- Best-effort: any failure (encryption unavailable, DB write blocked
+-- by another advisory lock, etc.) is logged and swallowed. The
+-- user_profile_answers write is authoritative — a failed mirror
+-- doesn't roll back the caller's answer save, and a subsequent
+-- profile visit will re-attempt.
+local function mirror_nino_to_tax_user_profile(user_id, user_uuid, namespace_id, raw_value)
+    -- Guard rails logged loudly rather than silently returning — the
+    -- silent-return path masked a call-site arity bug for the first
+    -- 24 hours of this helper's life (2026-08-05: PR #523 updated the
+    -- signature to add user_uuid but only reached one of the two call
+    -- sites via `replace_all`, so the other passed 3 args → raw_value
+    -- resolved to nil → this function noop'd invisibly). If any call
+    -- site ever passes something unusable we want it visible in
+    -- ngx.log(ngx.ERR), not silent.
+    if raw_value == nil or raw_value == cjson.null then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror skipped: raw_value is nil ",
+            "(user_id=", tostring(user_id), " user_uuid=", tostring(user_uuid),
+            " namespace_id=", tostring(namespace_id), ")")
+        return
+    end
+    local canonical = tostring(raw_value):upper():gsub("%s+", "")
+    if canonical == "" then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror skipped: canonical value is empty ",
+            "(user_id=", tostring(user_id), " raw=", tostring(raw_value), ")")
+        return
+    end
+    if not user_uuid or user_uuid == "" then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror skipped: user_uuid is missing ",
+            "(user_id=", tostring(user_id), ") — INSERT branch would violate NOT NULL")
+        return
+    end
+
+    local ok_enc, enc = pcall(Global.encryptSecret, canonical)
+    if not ok_enc or not enc then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror encrypt failed for user_id=",
+            tostring(user_id), ": ", tostring(enc))
+        return
+    end
+
+    local last4 = canonical:sub(-4)
+    local existing = db.select(
+        "id FROM tax_user_profiles WHERE user_id = ? LIMIT 1",
+        user_id
+    )
+    if existing and #existing > 0 then
+        local ok_upd, upd_err = pcall(db.update, "tax_user_profiles", {
+            nino_encrypted = enc,
+            nino_last4     = last4,
+            has_nino       = true,
+            updated_at     = db.raw("NOW()"),
+        }, { user_id = user_id })
+        if not ok_upd then
+            ngx.log(ngx.ERR,
+                "[ProfileBuilder] NINO mirror update failed for user_id=",
+                tostring(user_id), ": ", tostring(upd_err))
+        end
+    else
+        -- ``user_uuid`` is a NOT NULL column on tax_user_profiles — omitting
+        -- it fails the fresh-user INSERT branch (which is the exact case
+        -- this helper's INSERT branch exists for). saveNino in
+        -- tax-hmrc-data.lua has the same missing-column bug but has been
+        -- masked in practice because established users usually already
+        -- have a row from another flow, so it takes the UPDATE path;
+        -- a truly fresh user routing NINO through the profile-builder
+        -- path hits this INSERT and needs the uuid populated.
+        local ok_ins, ins_err = pcall(db.insert, "tax_user_profiles", {
+            uuid           = Global.generateStaticUUID
+                                 and Global.generateStaticUUID()
+                                 or nil,
+            user_id        = user_id,
+            user_uuid      = user_uuid,
+            namespace_id   = namespace_id or 0,
+            nino_encrypted = enc,
+            nino_last4     = last4,
+            has_nino       = true,
+            created_at     = db.raw("NOW()"),
+            updated_at     = db.raw("NOW()"),
+        })
+        if not ok_ins then
+            ngx.log(ngx.ERR,
+                "[ProfileBuilder] NINO mirror insert failed for user_id=",
+                tostring(user_id), ": ", tostring(ins_err))
+        end
+    end
+end
+
+-- Answer-value pattern matcher used by both /answers POST and
+-- /answers/validate. Handles the two syntaxes we've had stored in
+-- profile_questions.validation_json:
+--
+--   * PCRE (JS-compatible) — the new canonical, matched via
+--     ngx.re.match with case-insensitive + JIT-cached flags. Same
+--     string can be handed to the frontend as `new RegExp(pattern)`
+--     so client and server validate identically.
+--
+--   * Lua patterns (legacy — `%d`, `%s`, `%a`) — matched via
+--     string.match. Kept for any admin-authored pattern that pre-dates
+--     the PCRE switch.
+--
+-- Detection is syntactic: `\` or `{` in the pattern → PCRE (neither
+-- appears in Lua's pattern grammar). Anything else falls through to
+-- string.match. An invalid PCRE regex (admin typo) logs a warning and
+-- fails OPEN — validation being disabled is the same as no
+-- validation, and rejecting every user's write for a config typo is
+-- the worse outcome.
+local function matches_pattern(text, pattern)
+    if not text or text == "" or not pattern or pattern == "" then
+        return true
+    end
+    if pattern:find("\\", 1, true) or pattern:find("{", 1, true) then
+        local matched, err = ngx.re.match(text, pattern, "ijo")
+        if err then
+            ngx.log(ngx.WARN,
+                "[ProfileBuilder] invalid PCRE pattern in validation_json, treating as no-op: ",
+                tostring(err))
+            return true
+        end
+        return matched ~= nil
+    end
+    return text:match(pattern) ~= nil
+end
+
+-- NOTE: the old PER_ENTITY_CONTEXTS map that hardcoded which contexts
+-- were per-entity is GONE. Scope routing is now database-driven via
+-- `profile_categories.answer_scope` + `profile_categories.entity_type`
+-- (see migration dynamic-answer-scope.lua). Admins define new form
+-- sections — SA100 income boxes, US 1040 sections, any future region —
+-- without a code deploy. See the /schema and /answers endpoints for
+-- the read/write paths.
 
 -- =========================================================================
 -- Helper Functions
@@ -63,26 +231,108 @@ local function requireAdmin(self)
     return nil, "forbidden"
 end
 
+-- Membership-gated namespace resolution for the profile-builder surface.
+--
+-- Previously trusted `X-Namespace-Id` unconditionally: a logged-in user of
+-- tenant A could send `X-Namespace-Id: <tenant B>` and read/write tenant B's
+-- profile-builder data, because none of these routes wrap themselves in
+-- NamespaceMiddleware.requireNamespace (which DOES check membership).
+--
+-- Now:
+--   1. Header present + user is an active member of that ns → allow.
+--   2. Header present + user is platform admin (administrative/tax_admin)
+--      → allow (mirrors NamespaceMiddleware's platform-admin bypass at
+--      middleware/namespace.lua:116-131 so cross-tenant support flows work).
+--   3. Header present + user is NOT a member and NOT a platform admin
+--      → return nil, "forbidden_namespace". Caller MUST 403 rather than
+--      silently falling back to the user's default (silent fallback would
+--      let attackers probe tenant existence without a signal).
+--   4. Header absent / invalid → user's default_namespace_id, but only if
+--      they still have an active membership in it (kicked/suspended users
+--      whose settings pointer is stale must not still get access).
+--   5. Nothing resolves → 0 (matches legacy behavior for global reads).
+--
+-- Returns (namespace_id, err). err is nil on success. Call sites that want
+-- to enforce the deny should use denyNamespace(self) when err is truthy.
+-- pcall-wrapped query — the ONLY primitive this helper uses so a DB blip
+-- (transient connection error, schema drift, permissions) never bubbles
+-- up as a bare-exception 500 out of a namespace-resolution path that is
+-- called from every profile-builder read/write. On failure we log and
+-- return nil so the caller falls through to the safe-default branch.
+local function safe_query(sql, ...)
+    local ok, rows = pcall(db.query, sql, ...)
+    if not ok then
+        ngx.log(ngx.ERR, "[ProfileBuilder] safe_query failed: ", tostring(rows), " sql=", sql)
+        return nil
+    end
+    return rows
+end
+
 local function getNamespaceId(self)
+    local user = self.current_user
+    if not user then return 0 end
+    local user_uuid = user.uuid or user.id
+
+    local urows = safe_query("SELECT id FROM users WHERE uuid = ? LIMIT 1", user_uuid)
+    if not urows or #urows == 0 then return 0 end
+    local user_id = urows[1].id
+
+    -- Platform-admin bypass, same roles NamespaceMiddleware honors.
+    local admin_rows = safe_query([[
+        SELECT 1 FROM user__roles ur
+        JOIN roles r ON ur.role_id = r.id
+        WHERE ur.user_id = ?
+          AND r.role_name IN ('administrative','tax_admin')
+        LIMIT 1
+    ]], user_id)
+    local is_platform_admin = admin_rows and #admin_rows > 0
+
     local ns_header = ngx.req.get_headers()["x-namespace-id"]
     if ns_header and ns_header ~= "" then
         local n = tonumber(ns_header)
-        if n then return n end
-    end
-    local user = self.current_user
-    if user then
-        local user_uuid = user.uuid or user.id
-        -- Try user_namespace_settings first (correct table)
-        local ok, rows = pcall(db.query, [[
-            SELECT default_namespace_id FROM user_namespace_settings WHERE user_id = (
-                SELECT id FROM users WHERE uuid = ? LIMIT 1
-            ) LIMIT 1
-        ]], user_uuid)
-        if ok and rows and #rows > 0 and rows[1].default_namespace_id then
-            return tonumber(rows[1].default_namespace_id)
+        if n then
+            if is_platform_admin then return n end
+            local m = safe_query([[
+                SELECT 1 FROM namespace_members
+                WHERE user_id = ? AND namespace_id = ? AND status = 'active'
+                LIMIT 1
+            ]], user_id, n)
+            if m and #m > 0 then
+                return n
+            end
+            return nil, "forbidden_namespace"
         end
     end
-    return 0 -- Default namespace
+
+    -- Default from user_namespace_settings, but only when the pointer still
+    -- corresponds to an active membership (JOIN guards against stale settings).
+    local rows = safe_query([[
+        SELECT uns.default_namespace_id
+        FROM user_namespace_settings uns
+        JOIN namespace_members nm
+          ON nm.user_id = uns.user_id
+         AND nm.namespace_id = uns.default_namespace_id
+         AND nm.status = 'active'
+        WHERE uns.user_id = ?
+        LIMIT 1
+    ]], user_id)
+    if rows and #rows > 0 and rows[1].default_namespace_id then
+        return tonumber(rows[1].default_namespace_id)
+    end
+    return 0
+end
+
+-- Standard 403 response used when getNamespaceId returns (nil, err).
+-- Kept identical shape to make the guard at every call site a one-liner.
+local function denyNamespace(self)
+    self.res.status = 403
+    return {
+        status = 403,
+        json = {
+            error = "forbidden_namespace",
+            message = "You are not a member of the requested namespace",
+        }
+    }
 end
 
 -- Resolve a user UUID to internal integer ID (cached per request via ngx.ctx)
@@ -157,12 +407,15 @@ local function recalculateCompletion(user_id, user_uuid, category_id)
 
         -- Pre-load the user's answers once; ipairs(questions) iterates
         -- over the SAME data the evaluators need.
+        -- entity_uuid IS NULL: per-entity (property) rows must not shadow
+        -- classic answers — with several entities there can be many rows per
+        -- question_id and the map would keep whichever came back last.
         local answer_map = {}
         local ok_ans, ans_rows = pcall(db.query, [[
             SELECT question_id, answer_text, answer_number, answer_boolean,
                    answer_date, answer_json, is_draft
             FROM user_profile_answers
-            WHERE user_id = ?
+            WHERE user_id = ? AND entity_uuid IS NULL
         ]], user_id)
         if ok_ans and ans_rows then
             for _, a in ipairs(ans_rows) do
@@ -248,12 +501,15 @@ local function evaluateTagRules(user_id, user_uuid)
         ]])
         if not rules or #rules == 0 then return end
 
-        -- Get user's current answers indexed by question_id (include drafts for visibility)
+        -- Get user's current answers indexed by question_id (include drafts for
+        -- visibility). entity_uuid IS NULL: tag rules evaluate against the
+        -- classic answer set only — per-property rows would collide on
+        -- question_id and make tag assignment depend on row order.
         local answer_map = {}
         local answers = db.query([[
             SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
             FROM user_profile_answers
-            WHERE user_id = ?
+            WHERE user_id = ? AND entity_uuid IS NULL
         ]], user_id)
         for _, a in ipairs(answers or {}) do
             answer_map[a.question_id] = a
@@ -669,7 +925,86 @@ return function(app)
 
         local user_uuid = user.uuid or user.id
         local user_id = getUserIdByUuid(user_uuid)
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
+
+        -- Contexted schemas: ?context=rental_business|property|dividends
+        -- returns ONLY categories flagged with that context
+        -- (profile_categories.context). Without the param only classic
+        -- NULL-context categories are served, so the /profile
+        -- questionnaire and its completion gate never see hub /
+        -- per-property / SA100 sections.
+        --
+        -- Scope routing is DB-driven (see migration dynamic-answer-scope.lua):
+        --   answer_scope='user'   → one answer per user (classic + rental_business)
+        --   answer_scope='entity' → one answer per user per entity of `entity_type`
+        --   answer_scope='year'   → one answer per user per tax year
+        -- The `?entity=<uuid>` and `?tax_year=YYYY-YY` params carry the
+        -- extra scope key; missing / mismatched params return a 400 so
+        -- clients that skip a required param fail loud instead of silently
+        -- reading the wrong answer set.
+        local schema_context = self.params.context
+        if schema_context == "" then schema_context = nil end
+        local entity_uuid = self.params.entity
+        if entity_uuid == "" then entity_uuid = nil end
+        local tax_year = self.params.tax_year
+        if tax_year == "" then tax_year = nil end
+
+        -- Resolve the scope of this context from the DB. Convention: all
+        -- categories under one context share the same (answer_scope,
+        -- entity_type) — enforced by the admin category editor's UI.
+        -- If the context has no categories yet, the scope defaults to
+        -- 'user' (harmless — the schema will just return no rows).
+        local answer_scope = "user"
+        local required_entity_type = nil
+        if schema_context then
+            local ok_sc, sc_rows = pcall(db.query, [[
+                SELECT answer_scope, entity_type
+                FROM profile_categories
+                WHERE context = ? AND is_active = true AND is_archived = false
+                LIMIT 1
+            ]], schema_context)
+            if ok_sc and sc_rows and #sc_rows > 0 then
+                answer_scope = sc_rows[1].answer_scope or "user"
+                required_entity_type = sc_rows[1].entity_type
+                if required_entity_type == cjson.null or required_entity_type == "" then
+                    required_entity_type = nil
+                end
+            end
+        end
+
+        -- Validate required scope params. 400 (bad request) rather than
+        -- 404 so clients get a clear "you forgot the tax_year" message.
+        if answer_scope == "entity" and not entity_uuid then
+            return { status = 400, json = { error = "entity is required for entity-scoped context" } }
+        elseif answer_scope == "year" then
+            if not tax_year or not tax_year:match("^%d%d%d%d%-%d%d$") then
+                return { status = 400, json = { error = "tax_year is required in YYYY-YY format for year-scoped context" } }
+            end
+        end
+
+        if entity_uuid then
+            local ok_ent, ent_rows = pcall(db.query, [[
+                SELECT id, entity_type FROM user_profile_entities
+                WHERE uuid = ? AND user_id = ? AND is_archived = false
+                LIMIT 1
+            ]], entity_uuid, user_id or -1)
+            if not ok_ent or not ent_rows or #ent_rows == 0 then
+                return { status = 404, json = { error = "Entity not found" } }
+            end
+            -- A per-entity context may only be served against an entity of
+            -- its own type — otherwise ?context=business&entity=<property>
+            -- would merge a property's answer rows into the business schema.
+            if required_entity_type and ent_rows[1].entity_type ~= required_entity_type then
+                return { status = 404, json = { error = "Entity not found" } }
+            end
+        end
+        local ctx_filter
+        if schema_context then
+            ctx_filter = " AND context = " .. db.escape_literal(schema_context)
+        else
+            ctx_filter = " AND context IS NULL"
+        end
 
         -- Include global categories (namespace_id = 0) and user's namespace categories
         local ns_filter = ""
@@ -679,7 +1014,7 @@ return function(app)
         local ok_cats, categories = pcall(db.query, [[
             SELECT * FROM profile_categories
             WHERE is_active = true AND is_archived = false
-            ]] .. ns_filter .. [[
+            ]] .. ns_filter .. ctx_filter .. [[
             ORDER BY display_order ASC, name ASC
         ]])
         if not ok_cats then
@@ -687,14 +1022,37 @@ return function(app)
             return { status = 500, json = { error = "Failed to load schema" } }
         end
 
-        -- Pre-load all user answers indexed by question_id (include drafts for visibility/completion)
+        -- Pre-load all user answers indexed by question_id (include drafts for
+        -- visibility/completion). Scoping keeps the map unambiguous:
+        --   classic         → entity_uuid IS NULL AND tax_year IS NULL
+        --   per-entity      → entity_uuid = ?                       (rules eval
+        --                                                              against
+        --                                                              THAT entity)
+        --   per-year        → tax_year = ? AND entity_uuid IS NULL  (rules eval
+        --                                                              against
+        --                                                              THAT year)
         local answer_map = {}
         if user_id then
-            local ok_all_ans, all_ans = pcall(db.query, [[
-                SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
-                FROM user_profile_answers
-                WHERE user_id = ?
-            ]], user_id)
+            local ok_all_ans, all_ans
+            if entity_uuid then
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid = ?
+                ]], user_id, entity_uuid)
+            elseif tax_year then
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid IS NULL AND tax_year = ?
+                ]], user_id, tax_year)
+            else
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid IS NULL AND tax_year IS NULL
+                ]], user_id)
+            end
             if ok_all_ans and all_ans then
                 for _, a in ipairs(all_ans) do
                     answer_map[a.question_id] = a
@@ -702,17 +1060,25 @@ return function(app)
             end
         end
 
-        -- Resolve the user's business profile (e.g. amazon_seller, landlord).
-        -- Used below to gate which questions appear in the schema: a question
-        -- whose business_profiles link set is non-empty only shows up if the
-        -- user's default_profile_key is in that set. Questions with NO links
-        -- apply to everyone. Falls through gracefully when the user has no
-        -- tax_user_profiles row yet (treated as "no profile chosen" → only
-        -- universal questions visible).
+        -- Resolve the user's business profile (e.g. amazon_seller, landlord)
+        -- AND their identity-lock state in the same query (one DB round-trip
+        -- instead of two).
+        --
+        -- Business profile is used below to gate which questions appear in
+        -- the schema. Lock state is used to render `is_locked_for_user` on
+        -- each NINO/UTR question so the FE can disable the field without
+        -- probing a write and catching a 403.
+        --
+        -- Both fields fall through gracefully when the user has no
+        -- tax_user_profiles row yet (new user → everything unlocked, no
+        -- profile-key gating).
         local user_profile_key = nil
+        local user_nino_locked_at = nil
+        local user_utr_locked_at = nil
         if user_id then
             local ok_up, up_rows = pcall(db.query, [[
-                SELECT default_profile_key FROM tax_user_profiles
+                SELECT default_profile_key, nino_locked_at, utr_locked_at
+                FROM tax_user_profiles
                 WHERE user_id = ? LIMIT 1
             ]], user_id)
             if ok_up and up_rows and #up_rows > 0 then
@@ -720,6 +1086,8 @@ return function(app)
                 if k and k ~= "" and k ~= cjson.null then
                     user_profile_key = k
                 end
+                user_nino_locked_at = up_rows[1].nino_locked_at
+                user_utr_locked_at  = up_rows[1].utr_locked_at
             end
         end
 
@@ -852,6 +1220,22 @@ return function(app)
                     end
                 end
 
+                -- Identity-lock per-user computed flag. For NINO/UTR
+                -- question_keys, resolves to true iff the user has already
+                -- saved that field once (nino_locked_at / utr_locked_at is
+                -- non-null on their tax_user_profiles row). Other questions
+                -- are always false — this flag is orthogonal to the
+                -- question-level `is_editable_by_user` admin flag.
+                -- FE reads (is_locked_for_user OR NOT is_editable_by_user)
+                -- to decide whether to disable the input.
+                local is_locked_for_user = false
+                local lock_field = LOCK_FIELD_BY_QUESTION_KEY[q.question_key]
+                if lock_field == "nino" and user_nino_locked_at then
+                    is_locked_for_user = true
+                elseif lock_field == "utr" and user_utr_locked_at then
+                    is_locked_for_user = true
+                end
+
                 table.insert(q_list, {
                     uuid = q.uuid,
                     question_key = q.question_key,
@@ -863,6 +1247,7 @@ return function(app)
                     is_required = q.is_required,
                     is_multi_value = q.is_multi_value,
                     is_editable_by_user = q.is_editable_by_user,
+                    is_locked_for_user = is_locked_for_user,
                     is_visible = is_visible,
                     display_order = q.display_order,
                     validation_json = q.validation_json,
@@ -913,6 +1298,12 @@ return function(app)
                 icon = cat.icon,
                 display_order = cat.display_order,
                 parent_id = cat.parent_id,
+                -- context lets clients VERIFY they got the surface they asked
+                -- for. ContextSections drops categories whose context doesn't
+                -- match its request, so a backend that ignores ?context=
+                -- (pre-migration deploys) can never render the classic
+                -- questionnaire inside the rental hub / property pages.
+                context = cat.context,
                 visibility_rule_json = cat.visibility_rule_json,
                 completion_rule_json = cat.completion_rule_json,
                 questions = q_list,
@@ -988,7 +1379,8 @@ return function(app)
         if not user_id then
             return { status = 401, json = { error = "User not found" } }
         end
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Build the same namespace filter the schema endpoint uses so
         -- visibility is computed against EXACTLY the questions the user
@@ -1011,12 +1403,16 @@ return function(app)
         -- what the user sees on the /profile UI — otherwise text-only
         -- categories sit at 0% on the server while showing 100% to
         -- the user, exactly the trap we just hit.
+        -- entity_uuid IS NULL: per-entity answers (rental properties) must
+        -- never leak into the profile gate — with several entities there can
+        -- be many rows per question_id and the map would become whichever
+        -- row happened to come back last.
         local answer_map = {}
         local ok_ans, ans_rows = pcall(db.query, [[
             SELECT question_id, answer_text, answer_number, answer_boolean,
                    answer_date, answer_json
             FROM user_profile_answers
-            WHERE user_id = ?
+            WHERE user_id = ? AND entity_uuid IS NULL
         ]], user_id)
         if ok_ans and ans_rows then
             for _, a in ipairs(ans_rows) do
@@ -1087,12 +1483,16 @@ return function(app)
               )]]
         end
 
+        -- pc.context IS NULL: contexted categories (rental hub / per-property
+        -- sections) are separate surfaces with their own client-side
+        -- completion — they must never gate the dashboard.
         local ok_qs, questions = pcall(db.query, [[
             SELECT pq.id, pq.question_key, pq.label, pq.is_required
             FROM profile_questions pq
             JOIN profile_categories pc ON pc.id = pq.category_id
             WHERE pq.is_active = true AND pq.is_archived = false
               AND pc.is_active = true AND pc.is_archived = false
+              AND pc.context IS NULL
             ]] .. ns_filter .. bp_filter, unpack(query_params))
         if not ok_qs then
             ngx.log(ngx.ERR, "[ProfileBuilder] completion-status questions query failed: ", tostring(questions))
@@ -1386,7 +1786,8 @@ return function(app)
             return { status = 404, json = { error = "User not found" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Include global categories (namespace_id = 0) and user's namespace categories
         local ns_filter = ""
@@ -1626,7 +2027,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local include_archived = self.params.include_archived == "true"
         local parent_id = self.params.parent_id
 
@@ -1728,13 +2130,20 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local admin_uuid = admin.uuid or admin.id
         local admin_id = resolveUserId(admin_uuid)
 
+        -- context: NULL = classic /profile section; 'rental_business' /
+        -- 'property' = contexted sections rendered on the rental hub /
+        -- per-property pages. Empty string normalises to NULL.
+        local context = params.context
+        if context == "" or context == cjson.null then context = nil end
+
         local ok, result = pcall(db.query, [[
-            INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, parent_id, is_active, is_archived, visibility_rule_json, completion_rule_json, created_by, updated_by, created_at, updated_at)
-            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, true, false, ?, ?, ?, ?, NOW(), NOW())
+            INSERT INTO profile_categories (uuid, namespace_id, name, slug, description, icon, display_order, parent_id, context, is_active, is_archived, visibility_rule_json, completion_rule_json, created_by, updated_by, created_at, updated_at)
+            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, true, false, ?, ?, ?, ?, NOW(), NOW())
             RETURNING *
         ]],
             namespace_id or 0,
@@ -1744,6 +2153,7 @@ return function(app)
             params.icon or db.NULL,
             params.display_order or 0,
             params.parent_id or db.NULL,
+            context or db.NULL,
             params.visibility_rule_json or db.NULL,
             params.completion_rule_json or db.NULL,
             admin_id,
@@ -1796,11 +2206,15 @@ return function(app)
 
         local set_parts = {}
         local set_vals = {}
-        local allowed = {"name", "slug", "description", "icon", "display_order", "parent_id", "is_active", "is_archived", "visibility_rule_json", "completion_rule_json"}
+        local allowed = {"name", "slug", "description", "icon", "display_order", "parent_id", "context", "is_active", "is_archived", "visibility_rule_json", "completion_rule_json"}
         for _, field in ipairs(allowed) do
             if params[field] ~= nil then
+                -- context: empty string from the admin form means "classic
+                -- profile section" → store NULL, not ''.
+                local v = params[field]
+                if field == "context" and (v == "" or v == cjson.null) then v = db.NULL end
                 table.insert(set_parts, db.escape_identifier(field) .. " = ?")
-                table.insert(set_vals, params[field])
+                table.insert(set_vals, v)
             end
         end
 
@@ -2113,7 +2527,21 @@ return function(app)
         end
         local category = cat_rows[1]
 
-        local namespace_id = category.namespace_id or getNamespaceId(self)
+        -- Prefer the category's own tenant (safer — inherit from the target
+        -- row we've already loaded). Only fall back to the caller's namespace
+        -- when the category is genuinely global (namespace_id NULL/0). Use
+        -- an explicit two-step check because Lua's `or` truncates a
+        -- multi-return to its first value, which would silently discard the
+        -- `forbidden_namespace` error signal from getNamespaceId and let a
+        -- non-member land writes on the target tenant.
+        local namespace_id
+        if category.namespace_id and category.namespace_id ~= 0 then
+            namespace_id = category.namespace_id
+        else
+            local caller_ns, ns_err = getNamespaceId(self)
+            if ns_err then return denyNamespace(self) end
+            namespace_id = caller_ns
+        end
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
 
@@ -2780,6 +3208,15 @@ return function(app)
 
         local category_slug = self.params.category_slug
 
+        -- ?entity=<uuid> returns that entity's answers (per-property scope);
+        -- default returns only classic questionnaire answers.
+        local entity_uuid = self.params.entity
+        if entity_uuid == "" then entity_uuid = nil end
+        local entity_filter = " AND upa.entity_uuid IS NULL"
+        if entity_uuid then
+            entity_filter = " AND upa.entity_uuid = " .. db.escape_literal(tostring(entity_uuid))
+        end
+
         local sql
         local vals = {user_id}
         if category_slug and category_slug ~= "" then
@@ -2789,7 +3226,7 @@ return function(app)
                 FROM user_profile_answers upa
                 JOIN profile_questions pq ON pq.id = upa.question_id
                 JOIN profile_categories pc ON pc.id = pq.category_id
-                WHERE upa.user_id = ? AND pc.slug = ?
+                WHERE upa.user_id = ? AND pc.slug = ?]] .. entity_filter .. [[
                 ORDER BY pq.display_order ASC
             ]]
             table.insert(vals, category_slug)
@@ -2798,7 +3235,7 @@ return function(app)
                 SELECT upa.*, pq.question_key, pq.label AS question_label, pq.uuid AS question_uuid
                 FROM user_profile_answers upa
                 JOIN profile_questions pq ON pq.id = upa.question_id
-                WHERE upa.user_id = ?
+                WHERE upa.user_id = ?]] .. entity_filter .. [[
                 ORDER BY pq.display_order ASC
             ]]
         end
@@ -2831,35 +3268,399 @@ return function(app)
             return { status = 400, json = { error = "answers array is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        -- Scope for the whole batch — mirrors the /schema endpoint's three
+        -- modes. Every question in the batch must be a category with a
+        -- matching scope, or the individual write is rejected below:
+        --   entity_uuid → per-entity save   (batch's `entity_uuid` param)
+        --   tax_year    → per-year save     (batch's `tax_year`    param)
+        --   neither     → classic per-user save
+        local entity_uuid = params.entity_uuid
+        if entity_uuid == "" or entity_uuid == cjson.null then entity_uuid = nil end
+        local tax_year = params.tax_year
+        if tax_year == "" or tax_year == cjson.null then tax_year = nil end
+        if tax_year and not tax_year:match("^%d%d%d%d%-%d%d$") then
+            return { status = 400, json = { error = "tax_year must be YYYY-YY format" } }
+        end
+        if entity_uuid and tax_year then
+            return { status = 400, json = { error = "entity_uuid and tax_year are mutually exclusive scopes" } }
+        end
+        local entity_type = nil
+        if entity_uuid then
+            local ok_ent, ent_rows = pcall(db.query, [[
+                SELECT id, entity_type FROM user_profile_entities
+                WHERE uuid = ? AND user_id = ? AND is_archived = false
+                LIMIT 1
+            ]], entity_uuid, user_id)
+            if not ok_ent or not ent_rows or #ent_rows == 0 then
+                return { status = 404, json = { error = "Entity not found" } }
+            end
+            entity_type = ent_rows[1].entity_type
+        end
+
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local saved = 0
         local errors = {}
         local affected_category_ids = {}
+
+        -- JSON null arrives as cjson.null (truthy lightuserdata); the DB
+        -- layer can't escape it. Map nil/cjson.null to db.NULL so clearing
+        -- an answer persists instead of failing the upsert.
+        local function scrub(v)
+            if v == nil or v == cjson.null then return db.NULL end
+            return v
+        end
 
         for i, ans in ipairs(answers) do
             if not ans.question_uuid or ans.question_uuid == "" then
                 table.insert(errors, { index = i, error = "question_uuid is required" })
             else
-                local ok_q, q_rows = pcall(db.query, "SELECT id, version, category_id FROM profile_questions WHERE uuid = ? AND is_active = true LIMIT 1", ans.question_uuid)
-                if not ok_q or not q_rows or #q_rows == 0 then
-                    table.insert(errors, { index = i, error = "Question not found: " .. ans.question_uuid })
-                else
-                    local question = q_rows[1]
-                    affected_category_ids[question.category_id] = true
+                local ok_q, q_rows = pcall(db.query, [[
+                    SELECT pq.id, pq.version, pq.category_id, pq.question_key,
+                           pq.validation_json,
+                           pc.context AS category_context,
+                           pc.answer_scope AS category_answer_scope,
+                           pc.entity_type AS category_entity_type
+                    FROM profile_questions pq
+                    JOIN profile_categories pc ON pc.id = pq.category_id
+                    WHERE pq.uuid = ? AND pq.is_active = true LIMIT 1
+                ]], ans.question_uuid)
+                local question = (ok_q and q_rows and q_rows[1]) or nil
 
-                    -- Get existing answer for history
+                -- Scope guard: the batch's scope params (entity_uuid,
+                -- tax_year, or neither) must match the question's
+                -- category answer_scope. Without this, answers land in a
+                -- scope no surface renders (shadow rows) — and an
+                -- entity-scoped save of an identity question would stamp
+                -- the NINO/UTR lock without ever writing the canonical
+                -- value. Scope + entity_type come from profile_categories
+                -- so admins can change them via the admin UI without a
+                -- code deploy.
+                local q_ctx = nil
+                local q_scope = "user"
+                local q_entity_type = nil
+                local reject = nil
+                if not question then
+                    reject = "Question not found: " .. ans.question_uuid
+                else
+                    q_ctx = question.category_context
+                    if q_ctx == cjson.null or q_ctx == "" then q_ctx = nil end
+                    q_scope = question.category_answer_scope or "user"
+                    q_entity_type = question.category_entity_type
+                    if q_entity_type == cjson.null or q_entity_type == "" then
+                        q_entity_type = nil
+                    end
+
+                    if q_scope == "entity" then
+                        if not entity_uuid then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is per-entity — entity_uuid is required"
+                        elseif q_entity_type and q_entity_type ~= entity_type then
+                            reject = "Question " .. ans.question_uuid
+                                .. " belongs to a '" .. tostring(q_entity_type)
+                                .. "' category — it cannot be saved against a '"
+                                .. tostring(entity_type) .. "' entity"
+                        end
+                    elseif q_scope == "year" then
+                        if not tax_year then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is per-year — tax_year is required"
+                        end
+                    else
+                        -- q_scope == "user" (or unrecognised → treat as user)
+                        if entity_uuid then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is not per-entity — save it without entity_uuid"
+                        elseif tax_year then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is not per-year — save it without tax_year"
+                        end
+                    end
+                end
+
+                if reject then
+                    table.insert(errors, { index = i, error = reject })
+                else
+                    -- Completion is a classic-profile concept; contexted
+                    -- (hub / per-property) categories are excluded from the
+                    -- gate, so never cache completion rows for them.
+                    if q_ctx == nil then
+                        affected_category_ids[question.category_id] = true
+                    end
+
+                    -- Fetch the existing answer for THIS question first — we
+                    -- need it for the identity-lock idempotency check below
+                    -- AND for the history record after the upsert. Scoped to
+                    -- this batch's entity/year — the three scopes live as
+                    -- distinct rows under the three partial unique indexes.
                     local old_answer = nil
-                    local ok_old, old_rows = pcall(db.query, [[
-                        SELECT * FROM user_profile_answers WHERE user_id = ? AND question_id = ? LIMIT 1
-                    ]], user_id, question.id)
+                    local ok_old, old_rows
+                    if entity_uuid then
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ? AND entity_uuid = ? LIMIT 1
+                        ]], user_id, question.id, entity_uuid)
+                    elseif tax_year then
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ?
+                              AND entity_uuid IS NULL AND tax_year = ? LIMIT 1
+                        ]], user_id, question.id, tax_year)
+                    else
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ?
+                              AND entity_uuid IS NULL AND tax_year IS NULL LIMIT 1
+                        ]], user_id, question.id)
+                    end
                     if ok_old and old_rows and #old_rows > 0 then
                         old_answer = old_rows[1]
                     end
 
+                    -- ─── Identity-lock guard for NINO / UTR back-door ─────────
+                    -- For nino / ni_number / utr_number question_keys, the
+                    -- lock rule is anti-fraud: once first-saved, the value
+                    -- is frozen and any change attempt must be rejected.
+                    --
+                    -- Four cases the guard has to distinguish, because the
+                    -- old blanket assertNotLocked() call raised a catalog
+                    -- 403 via Errors.raise for every one of them and
+                    -- poisoned the whole batch — one locked NINO in the
+                    -- payload stopped the user saving their address:
+                    --
+                    --   1. Lock stamped AND submitted value == stored
+                    --      value for THIS question_key   → no-op success
+                    --   2. Lock stamped AND submitted value is empty/nil
+                    --      (frontend re-sends the locked question with a
+                    --      cleared value — happens when the schema has
+                    --      BOTH the legacy `nino` question and the newer
+                    --      `ni_number` question active, and only one
+                    --      carries the canonical value)  → no-op success
+                    --   3. Lock stamped AND submitted differs from stored
+                    --      → REJECT THIS ANSWER only. Push a structured
+                    --      per-answer entry into errors[] (same pattern
+                    --      as scope-mismatch failures above) so the rest
+                    --      of the batch can proceed. Response is still
+                    --      200 with errors[]. The client renders the
+                    --      IDENTITY_LOCK_ACTIVE message next to the field
+                    --      without every other unrelated answer failing.
+                    --   4. Lock NOT stamped                → normal path
+                    --      (upsert; stampLock() fires below as before)
+                    --
+                    -- Normalisation strips whitespace and uppercases both
+                    -- sides so "QQ 12 34 56 C" == "qq123456c" — matches
+                    -- how saveNino stores the canonical form.
+                    local lock_field = LOCK_FIELD_BY_QUESTION_KEY[question.question_key]
+                    -- lock_action: nil=normal path, "noop"=skip write+count saved, "reject"=skip write+error already recorded
+                    local lock_action = nil
+                    -- Idempotency check FIRST — before format validation.
+                    -- Same-value re-submits on a locked field must be a
+                    -- clean no-op regardless of whether the stored value
+                    -- passes today's format rules. A tenant that stamps
+                    -- new NINO validation rules retroactively must not
+                    -- lock users out of unrelated saves just because their
+                    -- pre-validation stored value fails the new pattern —
+                    -- format rejection is for CHANGES, not for echoes of
+                    -- history. Normalisation strips whitespace and
+                    -- uppercases both sides so "QQ 12 34 56 C" ==
+                    -- "qq123456c" — matches how saveNino stores canonical.
+                    if lock_field then
+                        -- Returns nil for anything that carries no
+                        -- meaningful identity value: JSON null, missing
+                        -- field, plain empty string, or a string of
+                        -- pure whitespace. Callers rely on the nil
+                        -- return to short-circuit — this is the ONLY
+                        -- reason the function exists in this scope. A
+                        -- previous version returned "" here and the
+                        -- Lua `not submitted` check silently failed
+                        -- (empty string is truthy in Lua), letting an
+                        -- empty NINO through to stamp the lock on ''.
+                        local function normalize_identity(s)
+                            if s == nil or s == cjson.null then return nil end
+                            local out = tostring(s):upper():gsub("%s+", "")
+                            if out == "" then return nil end
+                            return out
+                        end
+                        local submitted = normalize_identity(ans.answer_text)
+                        local stored    = old_answer and normalize_identity(old_answer.answer_text) or nil
+                        -- Read the lock state directly (assertNotLocked
+                        -- raises via Errors.raise — we need to make a
+                        -- per-answer decision here, not abort the batch).
+                        local state = IdentityLock.getState(user_uuid, namespace_id or 0)
+                        local locked_at_field = (lock_field == "nino") and "nino_locked_at" or "utr_locked_at"
+                        local current_lock = state and state[locked_at_field]
+
+                        -- Empty submission on a lock_field is ALWAYS a
+                        -- no-op — never write, never stamp. Reason: a
+                        -- successful upsert of a lock_field question
+                        -- stamps the anti-fraud lock (via stampLock()
+                        -- below), and stamping the lock on an empty
+                        -- string means the user is FROZEN to the empty
+                        -- value forever: any subsequent real submission
+                        -- differs from stored '' and hits the "change
+                        -- attempt" reject branch. That was the failure
+                        -- mode in the reported 2026-07-30 curl —
+                        -- frontend autosave shipped '' before the user
+                        -- had typed the NINO, we wrote and stamped, and
+                        -- the real "AA 12 34 56 A" attempt 9 seconds
+                        -- later got IDENTITY_LOCK_ACTIVE. An empty NINO
+                        -- has no anti-fraud value; treating it as no-op
+                        -- keeps the field open for the user's real
+                        -- first save while preserving the lock on any
+                        -- meaningful write.
+                        if not submitted then
+                            lock_action = "noop_empty"
+                        elseif current_lock and submitted == stored then
+                            lock_action = "noop"
+                        end
+                        -- Note: the "lock stamped AND value differs"
+                        -- rejection is deferred until AFTER format
+                        -- validation runs, so a garbage new value gets
+                        -- the fixable "invalid format" error, not the
+                        -- scary "field is locked" one.
+                    end
+
+                    -- ─── Format validation (question.validation_json) ─────────
+                    -- Skipped when we've already decided this answer is
+                    -- a same-value no-op — validating a locked historical
+                    -- value against today's pattern is not the caller's
+                    -- problem to fix. Otherwise applies min/max_length,
+                    -- pattern (Lua match), and numeric min/max — same
+                    -- validators the /answers/validate endpoint runs.
+                    -- Duplicated inline rather than extracted into a
+                    -- helper module for a five-field switch; collapse
+                    -- into one once a third caller appears.
+                    local validation_failed = false
+                    if lock_action ~= "noop"
+                       and question.validation_json
+                       and question.validation_json ~= "" then
+                        local ok_parse, validation = pcall(cjson.decode, question.validation_json)
+                        if ok_parse and type(validation) == "table" then
+                            local msgs = {}
+                            local text = ans.answer_text
+                            if type(text) == "string" and text ~= "" then
+                                if validation.min_length and #text < validation.min_length then
+                                    table.insert(msgs, "Minimum length is " .. tostring(validation.min_length))
+                                end
+                                if validation.max_length and #text > validation.max_length then
+                                    table.insert(msgs, "Maximum length is " .. tostring(validation.max_length))
+                                end
+                                if validation.pattern and not matches_pattern(text, validation.pattern) then
+                                    table.insert(msgs, validation.pattern_message or "Invalid format")
+                                end
+                            end
+                            if ans.answer_number and validation.min then
+                                if tonumber(ans.answer_number) < validation.min then
+                                    table.insert(msgs, "Minimum value is " .. tostring(validation.min))
+                                end
+                            end
+                            if ans.answer_number and validation.max then
+                                if tonumber(ans.answer_number) > validation.max then
+                                    table.insert(msgs, "Maximum value is " .. tostring(validation.max))
+                                end
+                            end
+                            if #msgs > 0 then
+                                table.insert(errors, {
+                                    index         = i,
+                                    question_uuid = ans.question_uuid,
+                                    question_key  = question.question_key,
+                                    code          = "VALIDATION_FAILED",
+                                    error         = table.concat(msgs, "; "),
+                                })
+                                validation_failed = true
+                            end
+                        end
+                    end
+
+                    -- ─── Lock-change rejection ─────────────────────────────────
+                    -- Deferred to here so a lock_field submission that
+                    -- failed format validation reports the format error
+                    -- (fixable by the user) instead of the lock error
+                    -- (fixable only by support). Runs only when: this is
+                    -- a lock_field question, format passed, and it's not
+                    -- already flagged as a no-op.
+                    if lock_field and not validation_failed and lock_action == nil then
+                        local state = IdentityLock.getState(user_uuid, namespace_id or 0)
+                        local locked_at_field = (lock_field == "nino") and "nino_locked_at" or "utr_locked_at"
+                        local current_lock = state and state[locked_at_field]
+                        if current_lock then
+                            local pretty_field = (lock_field == "nino")
+                                and "National Insurance Number (NINO)"
+                                or "UTR (Unique Taxpayer Reference)"
+                            table.insert(errors, {
+                                index         = i,
+                                question_uuid = ans.question_uuid,
+                                code          = "IDENTITY_LOCK_ACTIVE",
+                                field         = lock_field,
+                                locked_at     = tostring(current_lock),
+                                support_url   = "/support",
+                                support_email = "support@diytaxreturn.co.uk",
+                                error         = string.format(
+                                    "Your %s is on file and cannot be changed. To correct it, please chat with support (/support) or email support@diytaxreturn.co.uk.",
+                                    pretty_field
+                                ),
+                            })
+                            lock_action = "reject"
+                        end
+                        -- else: lock not stamped — fall through to the
+                        -- normal upsert path, which stamps the lock on
+                        -- first successful write via stampLock() below.
+                    end
+
+                    if validation_failed then
+                        -- Format check failed; per-answer error already
+                        -- pushed. Skip the write and the lock guard
+                        -- (nothing to lock if the input is malformed).
+                    elseif lock_action == "reject" then
+                        -- Per-answer error already pushed; skip the write
+                        -- entirely (don't upsert, don't increment saved).
+                    elseif lock_action == "noop_empty" then
+                        -- Empty submission on a lock_field question.
+                        -- Skip the write entirely so we don't stamp the
+                        -- anti-fraud lock on nothing (see the block
+                        -- above). Don't count it as saved either —
+                        -- there is nothing to acknowledge as persisted,
+                        -- and counting a no-write toward `saved` would
+                        -- lie to the client about what landed.
+                    elseif lock_action == "noop" then
+                        -- Same value on an already-locked field.
+                        -- Nothing to write; lock is already stamped; no
+                        -- history row needed (nothing changed). Count as
+                        -- saved so the client's saved/total math matches.
+                        --
+                        -- Still fire the mirror so tax_user_profiles catches
+                        -- up if the user's lock was stamped before the
+                        -- mirror existed (nino_locked_at IS NOT NULL while
+                        -- has_nino=false). Without this, users stuck in that
+                        -- pre-mirror state could never unblock — every
+                        -- re-save would noop and never mirror.
+                        if lock_field == "nino"
+                           and not entity_uuid
+                           and not tax_year then
+                            mirror_nino_to_tax_user_profile(
+                                user_id, user_uuid, namespace_id, ans.answer_text
+                            )
+                        end
+                        saved = saved + 1
+                    else
+
+                    -- The unique indexes are partial (see migrations
+                    -- property-income-system + dynamic-answer-scope), so
+                    -- the conflict target must name the matching predicate
+                    -- exactly — Postgres won't infer the right partial
+                    -- index from the values alone.
+                    local conflict_clause
+                    if entity_uuid then
+                        conflict_clause = "ON CONFLICT (user_id, question_id, entity_uuid) WHERE entity_uuid IS NOT NULL DO UPDATE SET"
+                    elseif tax_year then
+                        conflict_clause = "ON CONFLICT (user_id, question_id, tax_year) WHERE entity_uuid IS NULL AND tax_year IS NOT NULL DO UPDATE SET"
+                    else
+                        conflict_clause = "ON CONFLICT (user_id, question_id) WHERE entity_uuid IS NULL AND tax_year IS NULL DO UPDATE SET"
+                    end
                     local ok_upsert, upsert_err = pcall(db.query, [[
-                        INSERT INTO user_profile_answers (uuid, user_id, user_uuid, namespace_id, question_id, question_version, answer_text, answer_number, answer_boolean, answer_date, answer_json, answer_file_url, is_draft, answered_at, updated_at)
-                        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-                        ON CONFLICT (user_id, question_id) DO UPDATE SET
+                        INSERT INTO user_profile_answers (uuid, user_id, user_uuid, namespace_id, question_id, entity_uuid, tax_year, question_version, answer_text, answer_number, answer_boolean, answer_date, answer_json, answer_file_url, is_draft, answered_at, updated_at)
+                        VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                        ]] .. conflict_clause .. [[
                             question_version = EXCLUDED.question_version,
                             answer_text = EXCLUDED.answer_text,
                             answer_number = EXCLUDED.answer_number,
@@ -2875,14 +3676,16 @@ return function(app)
                         user_uuid,
                         namespace_id or 0,
                         question.id,
+                        entity_uuid or db.NULL,
+                        tax_year or db.NULL,
                         question.version or 1,
-                        ans.answer_text or db.NULL,
-                        ans.answer_number or db.NULL,
-                        ans.answer_boolean == nil and db.NULL or ans.answer_boolean,
-                        ans.answer_date or db.NULL,
-                        ans.answer_json or db.NULL,
-                        ans.answer_file_url or db.NULL,
-                        ans.is_draft == nil and false or ans.is_draft
+                        scrub(ans.answer_text),
+                        scrub(ans.answer_number),
+                        scrub(ans.answer_boolean),
+                        scrub(ans.answer_date),
+                        scrub(ans.answer_json),
+                        scrub(ans.answer_file_url),
+                        (ans.is_draft == nil or ans.is_draft == cjson.null) and false or ans.is_draft
                     )
 
                     if not ok_upsert then
@@ -2890,6 +3693,47 @@ return function(app)
                         table.insert(errors, { index = i, error = "Failed to save answer for " .. ans.question_uuid })
                     else
                         saved = saved + 1
+
+                        -- ─── First-write auto-lock for NINO / UTR answers ─────
+                        -- Stamp the lock on this user's tax_user_profiles row
+                        -- once the answer is committed. Idempotent — repeat
+                        -- upserts of the same question_key just no-op the
+                        -- COALESCE(...) that preserves the original stamp.
+                        -- Also emits an audit row for the "first time this
+                        -- user wrote a locking answer" event.
+                        -- `not entity_uuid and not tax_year`: identity
+                        -- questions are classic user-scope only (the scope
+                        -- guard above enforces it via q_scope). The extra
+                        -- check keeps an entity-scoped OR year-scoped write
+                        -- from ever stamping the lock without the canonical
+                        -- value even if an admin mis-files an identity
+                        -- question into a per-entity or per-year category.
+                        if lock_field and not entity_uuid and not tax_year then
+                            -- Mirror NINO into tax_user_profiles so /settings
+                            -- HMRC + tax-hmrc-filing.lua see the value. See
+                            -- mirror_nino_to_tax_user_profile helper above
+                            -- for the full rationale. UTR mirror is not done
+                            -- here — tax_user_profiles has no utr_encrypted /
+                            -- has_utr / utr_last4 columns yet.
+                            if lock_field == "nino" then
+                                mirror_nino_to_tax_user_profile(
+                                    user_id, user_uuid, namespace_id, ans.answer_text
+                                )
+                            end
+
+                            IdentityLock.stampLock(user_uuid, namespace_id or 0, lock_field)
+                            IdentityLock.emitAuditRow({
+                                user_id      = user_id,
+                                namespace_id = namespace_id or 0,
+                                action       = (lock_field == "nino")
+                                    and "NINO_SAVED_AND_LOCKED"
+                                    or  "UTR_SAVED_AND_LOCKED",
+                                new_values   = {
+                                    question_key = question.question_key,
+                                    path         = "/api/v2/profile-builder/answers",
+                                },
+                            })
+                        end
 
                         -- Insert history record
                         if old_answer then
@@ -2906,28 +3750,35 @@ return function(app)
                                 old_answer.answer_boolean == nil and db.NULL or old_answer.answer_boolean,
                                 old_answer.answer_date or db.NULL,
                                 old_answer.answer_json or db.NULL,
-                                ans.answer_text or db.NULL,
-                                ans.answer_number or db.NULL,
-                                ans.answer_boolean == nil and db.NULL or ans.answer_boolean,
-                                ans.answer_date or db.NULL,
-                                ans.answer_json or db.NULL,
+                                scrub(ans.answer_text),
+                                scrub(ans.answer_number),
+                                scrub(ans.answer_boolean),
+                                scrub(ans.answer_date),
+                                scrub(ans.answer_json),
                                 user_id,
                                 "user",
-                                ans.change_reason or db.NULL
+                                scrub(ans.change_reason)
                             )
                         end
                     end
+                    end  -- if lock_action == "reject" / elseif "noop" / else
                 end
             end
         end
 
-        -- Recalculate completion for affected categories
-        for category_id, _ in pairs(affected_category_ids) do
-            recalculateCompletion(user_id, user_uuid, category_id)
-        end
+        -- Completion + auto-tag machinery is profile-global (it reads the
+        -- NULL-entity answer set); running it for a per-entity batch would
+        -- both waste work and mis-count. Entity saves return current tags
+        -- untouched.
+        if not entity_uuid then
+            -- Recalculate completion for affected categories
+            for category_id, _ in pairs(affected_category_ids) do
+                recalculateCompletion(user_id, user_uuid, category_id)
+            end
 
-        -- Evaluate auto-tag rules based on updated answers
-        evaluateTagRules(user_id, user_uuid)
+            -- Evaluate auto-tag rules based on updated answers
+            evaluateTagRules(user_id, user_uuid)
+        end
 
         -- Get updated tags to return to frontend
         local updated_tags = getUserTags(user_id)
@@ -3017,7 +3868,7 @@ return function(app)
                                 end
                             end
                             if validation.pattern and ans.answer_text then
-                                if not ans.answer_text:match(validation.pattern) then
+                                if not matches_pattern(ans.answer_text, validation.pattern) then
                                     result.valid = false
                                     table.insert(result.errors, validation.pattern_message or "Invalid format")
                                 end
@@ -3091,7 +3942,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local where_clause = "is_active = true"
         local vals = {}
         if namespace_id and namespace_id > 0 then
@@ -3125,7 +3977,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local admin_uuid = admin.uuid or admin.id
         local admin_int_id = resolveUserId(admin_uuid)
 
@@ -3486,7 +4339,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local where_clause = "is_active = true"
         local vals = {}
         if namespace_id and namespace_id > 0 then
@@ -3520,7 +4374,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         local ok, result = pcall(db.query, [[
             INSERT INTO profile_lookup_tables (uuid, namespace_id, name, slug, description, is_active, created_at, updated_at)
@@ -3709,7 +4564,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local where_clause = "is_active = true"
         local vals = {}
         if namespace_id and namespace_id > 0 then
@@ -3743,7 +4599,8 @@ return function(app)
             return { status = 400, json = { error = "slug is required" } }
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         local admin_uuid = admin.uuid or admin.id
 
         local ok, result = pcall(db.query, [[
@@ -4077,7 +4934,8 @@ return function(app)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
 
         -- Build WHERE clause
         local where_parts = { "1=1" }
@@ -4340,7 +5198,8 @@ return function(app)
             table.insert(where_vals, self.params.to_date)
         end
 
-        local namespace_id = getNamespaceId(self)
+        local namespace_id, ns_err = getNamespaceId(self)
+        if ns_err then return denyNamespace(self) end
         if namespace_id and namespace_id > 0 then
             table.insert(where_parts, "(pal.namespace_id = ? OR pal.namespace_id = 0)")
             table.insert(where_vals, namespace_id)

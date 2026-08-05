@@ -88,7 +88,7 @@ data:
       pg_dump -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -F c | gzip > "/tmp/$BACKUP_FILE"
 
       # Install MinIO Client
-      curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+      curl -fSL --retry 3 -o mc https://dl.min.io/client/mc/release/linux-amd64/mc
       chmod +x mc && mv mc /usr/local/bin/
 
       # Configure MinIO and upload backup

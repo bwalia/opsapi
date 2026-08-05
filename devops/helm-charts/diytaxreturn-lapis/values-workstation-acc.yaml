@@ -1,0 +1,58 @@
+# ── OpsAPI on workstation.co.uk — ACCEPTANCE ───────────────────────────────
+# Helm RELEASE: workstation-opsapi   Namespace: acc   Cluster: k3s1
+# Public host: https://acc-opsapi.workstation.co.uk
+#
+# Dedicated `workstation-opsapi` release (see values-workstation-int.yaml for
+# the full story). Separate from the legacy diytaxreturn-lapis release.
+env: acc
+app: workstation-opsapi
+
+# Single source of truth for the DNS + wslproxy jobs. MUST equal
+# ingress.hosts[0].host below.
+host: acc-opsapi.workstation.co.uk
+
+projectCode: tax_copilot
+
+frontendUrl: "https://acc.diytaxreturn.co.uk"
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Dedicated Ingress — className `wslproxy`, plain HTTP :80 (TLS at the edge,
+# no cert-manager on k3s1). See values-workstation-int.yaml.
+ingress:
+  enabled: true
+  className: wslproxy
+  annotations: {}
+  hosts:
+    - host: acc-opsapi.workstation.co.uk
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Empty map (NOT unset) so the ExternalSecret's `.Values.database.host` lookup
+# resolves to nil and falls back to Vault's POSTGRES_HOST. See -int for detail.
+database: {}
+
+externalSecret:
+  enabled: true
+
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80

@@ -20,6 +20,8 @@ local PUBLIC_ROUTES = {
     ["^/api/v2/stores$"] = true,
     ["^/api/v2/products$"] = true,
     ["^/api/v2/categories$"] = true,
+    -- Academy Stripe webhook (Stripe sends no JWT; verified by signature).
+    ["^/api/v2/public/academy/stripe/webhook$"] = true,
     -- ["^/auth/forgot_password$"] = true,
     -- ["^/auth/reset_password$"] = true
 }

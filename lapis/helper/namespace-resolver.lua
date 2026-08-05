@@ -33,23 +33,34 @@ local _M = {}
 -- @return number The namespace_id, or 0 if not found
 function _M.getByUuid(user_uuid)
     if not user_uuid or user_uuid == "" then return 0 end
-    -- Preferred source: user_namespace_settings.default_namespace_id (the
-    -- "currently active" namespace the user picked in the UI).
-    local row = db.select(
-        "default_namespace_id FROM user_namespace_settings " ..
-        "WHERE user_id = (SELECT id FROM users WHERE uuid = ? LIMIT 1) LIMIT 1",
-        user_uuid
-    )
+    -- Preferred source: user_namespace_settings.default_namespace_id, but
+    -- only when the pointer still corresponds to an ACTIVE membership.
+    -- Without the join a user who was removed from their default namespace
+    -- (nm.status='left'|'removed'|'suspended') would still have INSERTs
+    -- landing in that tenant via the settings pointer.
+    local row = db.query([[
+        SELECT uns.default_namespace_id
+        FROM user_namespace_settings uns
+        JOIN namespace_members nm
+          ON nm.user_id = uns.user_id
+         AND nm.namespace_id = uns.default_namespace_id
+         AND nm.status = 'active'
+        WHERE uns.user_id = (SELECT id FROM users WHERE uuid = ? LIMIT 1)
+        LIMIT 1
+    ]], user_uuid)
     if row and #row > 0 and row[1].default_namespace_id and row[1].default_namespace_id > 0 then
         return tonumber(row[1].default_namespace_id) or 0
     end
-    -- Fallback source: namespace_members (covers users whose settings row
-    -- hasn't been written yet but who are a member of at least one ns).
-    row = db.select(
-        "namespace_id FROM namespace_members " ..
-        "WHERE user_id = (SELECT id FROM users WHERE uuid = ? LIMIT 1) LIMIT 1",
-        user_uuid
-    )
+    -- Fallback source: first ACTIVE namespace_members row (covers users
+    -- whose settings row hasn't been written yet but who are a member of
+    -- at least one ns).
+    row = db.query([[
+        SELECT namespace_id FROM namespace_members
+        WHERE user_id = (SELECT id FROM users WHERE uuid = ? LIMIT 1)
+          AND status = 'active'
+        ORDER BY id ASC
+        LIMIT 1
+    ]], user_uuid)
     if row and #row > 0 and row[1].namespace_id and row[1].namespace_id > 0 then
         return tonumber(row[1].namespace_id) or 0
     end
@@ -77,17 +88,27 @@ function _M.resolve(user)
     end
     local user_id = user_row[1].id
 
-    -- Fast path: user already has namespace settings
-    local settings = db.select(
-        "default_namespace_id FROM user_namespace_settings WHERE user_id = ? LIMIT 1",
-        user_id
-    )
+    -- Fast path: user already has namespace settings AND is still an active
+    -- member of that namespace. The membership JOIN blocks a stale pointer
+    -- from silently keeping a removed user attached to the tenant they lost
+    -- access to; fall through to _assignDefaultNamespace in that case.
+    local settings = db.query([[
+        SELECT uns.default_namespace_id
+        FROM user_namespace_settings uns
+        JOIN namespace_members nm
+          ON nm.user_id = uns.user_id
+         AND nm.namespace_id = uns.default_namespace_id
+         AND nm.status = 'active'
+        WHERE uns.user_id = ?
+        LIMIT 1
+    ]], user_id)
     if settings and #settings > 0 and settings[1].default_namespace_id and settings[1].default_namespace_id > 0 then
         user.namespace_id = settings[1].default_namespace_id
         return user.namespace_id
     end
 
-    -- Slow path: first time — resolve the project's default namespace
+    -- Slow path: first time (or stale settings pointer) — resolve the
+    -- project's default namespace.
     local ok, ns_id = pcall(_M._assignDefaultNamespace, user_id, user.uuid)
     if ok and ns_id then
         user.namespace_id = ns_id

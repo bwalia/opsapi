@@ -2,63 +2,74 @@
     Namespace auto-assignment for newly created users
     ==================================================
 
-    Adds a freshly-created user to the active project namespace (configured
-    via the `PROJECT_CODE` env var, default `tax_copilot`) with the default
-    `member` role, and sets that namespace as their default in
+    Adds a freshly-created user to the tenant the request identified, with
+    the default `member` role, and sets that namespace as their default in
     `user_namespace_settings`. Without this step the user has no namespace
     context and the frontend's billing / settings pages 404 with "Namespace
     not found" because `NamespaceMiddleware.requireNamespace` rejects them.
+
+    Tenant resolution — the caller passes `project_code` (from the browser's
+    `X-Project-Code` header at register.lua, or a query param at the OAuth
+    callback). If the caller doesn't provide it, we fall back to the pod's
+    `PROJECT_CODE` env var. If BOTH are missing (or the value doesn't match
+    any active namespace) we return `nil, reason` and the caller MUST 400 —
+    we deliberately do NOT fall back to "first active tenant" any more, as
+    that was the exact silent-mis-routing behavior that put self-registered
+    tax-copilot users into the `system` namespace on int.
 
     Idempotent — every INSERT carries an `ON CONFLICT … DO NOTHING/UPDATE`
     clause, so repeating the call (e.g. after a partial earlier failure)
     leaves the user in the correct end state without dupes.
 
-    Error-tolerant — the whole body runs in `pcall` and any failure is logged
-    but never raised. Sign-up has already succeeded in creating the user
-    by the time this is called; rolling back the user just because we
-    couldn't add the membership row would be worse than the namespace
-    being temporarily absent (an operator can backfill).
+    Error-tolerant — the DB work runs in `pcall`. A hard failure returns
+    `nil, "internal_error:<err>"` so the caller can decide whether to roll
+    back the user or surface a 5xx. This is a stricter contract than the
+    previous fire-and-forget shape: silent success on a broken assignment
+    left the user unable to reach any namespace-scoped page.
 
     Callers:
       - routes/register.lua  (email/password sign-up)
       - routes/auth.lua      (Google OAuth sign-up — both GET callback and
                               the POST sign-in-with-token variant)
-
-    History: extracted from routes/register.lua after acc-2026-05-29 surfaced
-    a Google-OAuth-only "Namespace not found" bug — the email/password flow
-    auto-assigned correctly via the in-file helper; OAuth signup called
-    UserQueries.createOAuthUser and stopped, leaving the user with zero
-    membership rows.
 ]]
 
 local db = require("lapis.db")
 
 local M = {}
 
---- Auto-assign a newly-created user to the active project namespace.
+--- Auto-assign a newly-created user to the tenant identified by project_code.
 -- @param user_id integer  users.id of the freshly-created user
 -- @param user_uuid string users.uuid of the same user (for log breadcrumbs)
-function M.assignUserToProjectNamespace(user_id, user_uuid)
+-- @param project_code string|nil  per-request tenant hint (from X-Project-Code
+--                                 header, or OAuth query param). If nil or
+--                                 empty, falls back to the PROJECT_CODE env
+--                                 var. If both are missing / unresolvable,
+--                                 returns nil + reason and does NOT insert.
+-- @return integer|nil resolved namespace_id (nil on failure)
+-- @return string|nil reason ("no_project_code" / "project_code_not_found:<code>"
+--                             / "internal_error:<err>"), nil on success
+function M.assignUserToProjectNamespace(user_id, user_uuid, project_code)
+    local resolved_ns_id, resolved_reason
     local ok, err = pcall(function()
-        -- Resolve the target namespace by project_code, with a slug-based
-        -- fallback so an environment that hasn't set PROJECT_CODE still
-        -- gets the first non-system tenant.
-        local project_code = os.getenv("PROJECT_CODE") or "tax_copilot"
+        local effective_code = project_code
+        if not effective_code or effective_code == "" then
+            effective_code = os.getenv("PROJECT_CODE")
+        end
+        if not effective_code or effective_code == "" or effective_code == "all" then
+            resolved_reason = "no_project_code"
+            return
+        end
+
         local ns = db.query([[
             SELECT id FROM namespaces
             WHERE status = 'active' AND project_code = ?
             ORDER BY id ASC LIMIT 1
-        ]], project_code)
+        ]], effective_code)
 
         if not ns or #ns == 0 then
-            ns = db.query([[
-                SELECT id FROM namespaces
-                WHERE status = 'active' AND slug != 'system'
-                ORDER BY id ASC LIMIT 1
-            ]])
+            resolved_reason = "project_code_not_found:" .. tostring(effective_code)
+            return
         end
-
-        if not ns or #ns == 0 then return end
         local namespace_id = ns[1].id
 
         -- Membership (status = 'active', is_owner = false).
@@ -97,11 +108,16 @@ function M.assignUserToProjectNamespace(user_id, user_uuid)
                 updated_at = NOW()
         ]], user_id, namespace_id, namespace_id)
 
-        ngx.log(ngx.NOTICE, "[Namespace] Auto-assigned user ", user_uuid, " to namespace ", namespace_id)
+        resolved_ns_id = namespace_id
+        ngx.log(ngx.NOTICE, "[Namespace] Auto-assigned user ", user_uuid,
+            " to namespace ", namespace_id,
+            " (project_code=", tostring(effective_code), ")")
     end)
     if not ok then
         ngx.log(ngx.ERR, "[Namespace] Failed to assign user ", tostring(user_uuid), ": ", tostring(err))
+        return nil, "internal_error:" .. tostring(err)
     end
+    return resolved_ns_id, resolved_reason
 end
 
 return M

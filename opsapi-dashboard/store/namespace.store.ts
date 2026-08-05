@@ -169,10 +169,15 @@ export const useNamespaceStore = create<NamespaceStore>()(
         try {
           const response = await namespaceService.switchNamespace(namespaceId);
 
-          // Parse permissions if needed
+          // Parse permissions. The endpoint returns the combined permissions under
+          // membership.permissions; older/other shapes use a top-level field.
+          // Fall back so a non-owner member (e.g. an academy instructor) actually
+          // receives their module permissions instead of null (= no access).
           let permissions: NamespacePermissions | null = null;
           if (response.permissions) {
             permissions = namespaceService.parsePermissions(response.permissions);
+          } else if (response.membership?.permissions) {
+            permissions = namespaceService.parsePermissions(response.membership.permissions);
           }
 
           set({

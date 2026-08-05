@@ -75,11 +75,20 @@ end
 
 return function(app)
 
-    -- Ensure DB table exists on first load
-    local ok, err = pcall(HMRCTokenQueries.ensureTable)
-    if not ok then
-        ngx.log(ngx.ERR, "[HMRC] Failed to ensure hmrc_tokens table: ", tostring(err))
-    end
+    -- NOTE: do NOT touch the database here. app.lua loads every route module
+    -- inside `pcall(route_module, app)` (safe_load_routes), and this function
+    -- body runs during the first request that reaches a worker. A db.query()
+    -- yields on a cosocket, and yielding out of that nested pcall raises
+    -- "attempt to yield across C-call boundary" — which leaves the pgmoon
+    -- socket half-initialised and SIGSEGVs the worker on the way out. That
+    -- crash-loops the worker on every request and is what broke the CI smoke
+    -- test (deploy-k3s.yml) intermittently.
+    --
+    -- The previous `pcall(HMRCTokenQueries.ensureTable)` here never actually
+    -- created anything for that reason — it always errored and was swallowed.
+    -- hmrc_tokens is owned by migration 340_tax_create_hmrc_tokens
+    -- (migrations/tax-copilot-system.lua), which is the only place it should
+    -- be defined.
 
     -- -----------------------------------------------------------------------
     -- GET /auth/hmrc/initiate?statement_id=<uuid>

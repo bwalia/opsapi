@@ -103,11 +103,23 @@ return function(app)
                 uuid = profile.uuid,
                 has_nino = profile.has_nino,
                 nino_masked = nino_display,
+                -- Identity-lock state (anti-fraud). Non-null timestamp = user
+                -- has already saved this field once and cannot edit it. FE
+                -- reads these to render the locked card + support links
+                -- without probing a write and catching the 403. See PR
+                -- #464 / lib/identity_lock.lua for the enforcement logic.
+                nino_locked_at = profile.nino_locked_at,
+                utr_locked_at  = profile.utr_locked_at,
                 hmrc_connected = hmrc_connected,
                 hmrc_token_expires_at = hmrc_token and hmrc_token.expires_at or nil,
                 default_business_id = profile.default_business_id,
                 default_tax_year = profile.default_tax_year,
                 default_profile_key = profile.default_profile_key,
+                -- Making Tax Digital (MTD) enrolment. Drives filing pipeline
+                -- selection (SA100 legacy vs quarterly MTD updates) and the
+                -- HMRC OAuth scopes we request. See migration [91]. Boolean,
+                -- NOT NULL — default false on older rows.
+                mtd_enabled = profile.mtd_enabled and true or false,
                 businesses = business_list,
                 open_obligations_count = open_count,
                 created_at = profile.created_at,
@@ -138,6 +150,19 @@ return function(app)
         local ok_save, result, err = pcall(TaxUserProfileQueries.saveNino, user_uuid, nino)
 
         if not ok_save then
+            -- The identity-lock guards inside saveNino throw AppErrors
+            -- via Errors.raise() when a lock/uniqueness rule fires. Those
+            -- carry { __app_error = true, code = "IDENTITY_LOCK_ACTIVE"
+            -- | "NINO_ALREADY_REGISTERED", context = { ... } } and MUST
+            -- be re-thrown so app.lua's install_handler renders the
+            -- catalog envelope (proper 403/409 + support_url / user_message).
+            -- Without this the outer pcall silently converts a structured
+            -- 403 into a generic 500 "Failed to save NINO" — the bug
+            -- reported 2026-07-13 when saving a NINO on a fresh local
+            -- docker build with the identity-lock changes applied.
+            if type(result) == "table" and result.__app_error then
+                error(result)
+            end
             ngx.log(ngx.ERR, "[Tax Profile] saveNino error: ", tostring(result))
             return { status = 500, json = { error = "Failed to save NINO" } }
         end
@@ -205,6 +230,13 @@ return function(app)
         local user_uuid = user.uuid or user.id
         local ok_rm, rm_err = pcall(TaxUserProfileQueries.removeNino, user_uuid)
         if not ok_rm then
+            -- Re-raise identity-lock AppErrors so their 403 envelope
+            -- reaches the client — see the same pattern in POST above.
+            -- removeNino also calls IdentityLock.assertNotLocked, so a
+            -- locked-user delete attempt would 500 without this branch.
+            if type(rm_err) == "table" and rm_err.__app_error then
+                error(rm_err)
+            end
             ngx.log(ngx.ERR, "[Tax Profile] removeNino error: ", tostring(rm_err))
             return { status = 500, json = { error = "Failed to remove NINO" } }
         end
@@ -268,6 +300,18 @@ return function(app)
             if not ok_pk then
                 ngx.log(ngx.ERR, "[Tax Profile] setDefaultProfileKey error: ", tostring(pk_err))
                 return { status = 500, json = { error = "Failed to update business profile" } }
+            end
+        end
+
+        -- Making Tax Digital (MTD) enrolment toggle. Presence-based (not
+        -- truthy-based) so `{"mtd_enabled": false}` can turn it OFF —
+        -- if we gated on `if params.mtd_enabled` the false path would
+        -- silently drop through unchanged.
+        if params.mtd_enabled ~= nil then
+            local ok_mtd, mtd_err = pcall(TaxUserProfileQueries.setMtdEnabled, user_uuid, params.mtd_enabled)
+            if not ok_mtd then
+                ngx.log(ngx.ERR, "[Tax Profile] setMtdEnabled error: ", tostring(mtd_err))
+                return { status = 500, json = { error = "Failed to update MTD enrolment" } }
             end
         end
 

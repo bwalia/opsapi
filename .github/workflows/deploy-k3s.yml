@@ -1,58 +1,50 @@
 name: Build and Deploy OpsAPI to K3s
 
+# The ONE workflow that runs on a merge to main (argocd-sync-int, cypress, and
+# deploy-docker-self-hosted have been taken off push:main so nothing else
+# fires). Mirrors the monitoring-go (Beacon) deploy-k3s.yml pattern:
+#
+#   push to main    → build → smoke → dns → wslproxy → deploy to `int`
+#   manual dispatch → any env (int/test/acc/prod), any DEPLOYMENT_TYPE
+#
+# It deploys the `workstation-opsapi` Helm release to k3s1, serving the
+# *-opsapi.workstation.co.uk hosts (int-opsapi / test-opsapi / acc-opsapi /
+# opsapi). This is a SEPARATE release from the legacy `diytaxreturn-lapis`
+# one that still serves *.diytaxreturn.co.uk — nothing on the old domain is
+# touched. Cloudflare DNS + the WSL Proxy edge are wired by the dns/wslproxy
+# jobs before helm rolls the app.
 on:
-  # Auto-deploy rules:
-  #   push to `main`     → fans out to `dev` + `int` in parallel (low tiers)
-  #   push to `release`  → deploys to `acc` (single-tier promotion)
-  #   manual dispatch    → single env chosen via TARGET_ENV input
-  #
-  # `acc` is INTENTIONALLY excluded from main pushes — every commit
-  # landing on main used to redeploy acc and risk breaking it. The
-  # weekly-acc-release workflow still promotes main → acc on Fridays
-  # as a scheduled safety net; this workflow's on-demand acc path is
-  # now the `release` branch (cut from main when you want to promote).
-  # `prod` is never auto-deployed — manual dispatch only.
   push:
     branches:
       - main
-      - release
   workflow_dispatch:
     inputs:
       TARGET_ENV:
-        description: "Environment to deploy (dev, int, acc, prod)"
+        description: "Environment to deploy"
         required: true
-        default: "acc"
+        default: "int"
         type: choice
         options:
-          - dev
           - int
+          - test
           - acc
           - prod
-      SKIP_BUILD:
-        description: "Skip Docker build (deploy only)?"
-        type: boolean
-        default: false
-      SKIP_SMOKE_TEST:
-        description: "Skip smoke test?"
-        type: boolean
-        default: false
+      DEPLOYMENT_TYPE:
+        description: "Build only, deploy only, or both"
+        required: true
+        default: "build-and-deploy"
+        type: choice
+        options:
+          - build
+          - deploy
+          - build-and-deploy
+      IMAGE_TAG:
+        description: "Image tag to DEPLOY (deploy-only). Blank → this run's build tag / latest."
+        required: false
+        default: ""
+        type: string
       PROJECT_CODE:
-        description: "Override migration project code(s) — single (tax_copilot) or comma-separated (ecommerce,collaboration). Leave BLANK to use the env's values file (e.g. values-acc.yaml → tax_copilot)."
-        required: false
-        default: ""
-        type: string
-      ADMIN_EMAIL:
-        description: "Super admin email for namespace setup"
-        required: false
-        default: ""
-        type: string
-      ADMIN_PASSWORD:
-        description: "Super admin password for namespace setup"
-        required: false
-        default: ""
-        type: string
-      NAMESPACE_SLUG:
-        description: "Namespace slug (default: derived from project code)"
+        description: "Override migration project code(s). Leave BLANK to use the env's values file (tax_copilot)."
         required: false
         default: ""
         type: string
@@ -61,19 +53,135 @@ permissions:
   contents: read
   packages: write
 
+# There is exactly ONE self-hosted runner, and the smoke test binds a fixed
+# host port and a fixed set of container names. Two overlapping runs used to
+# stomp each other — the newer run's `docker rm` killed the older run's
+# smoke container mid-poll, which showed up as a spurious smoke-test failure.
+# Serialise instead. `cancel-in-progress: false` because a run that has
+# already reached the deploy job should be allowed to finish rather than be
+# torn down halfway through a helm upgrade.
+concurrency:
+  group: deploy-k3s-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   IMAGE_REGISTRY: bwalia
   IMAGE_NAME: opsapi
   HELM_CHART_PATH: ./devops/helm-charts/diytaxreturn-lapis
+  # Helm release name for the workstation.co.uk deployment. Distinct from the
+  # legacy `diytaxreturn-lapis` release so both can coexist in the same
+  # namespace on k3s1. Every rendered resource (Deployment, Service, Ingress,
+  # container, ExternalSecret) derives its name from this.
+  RELEASE_NAME: workstation-opsapi
+  # Push events carry no inputs, so these resolve the defaults: a merge to main
+  # is a build-and-deploy to int.
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+  # DNS: each host is a CNAME to the WSL Proxy edge, DNS-only (not proxied) —
+  # cert-manager is NOT on k3s1, so the edge terminates TLS and traefik serves
+  # plain HTTP behind it. The hostname itself is read from the env's values
+  # file (`host:`) so DNS can never drift from what the Ingress serves.
+  #   browser -> <host> --(Cloudflare CNAME)--> pop0.wslproxy.com (edge, TLS)
+  #           -> 13.42.188.136:80 (k3s1 traefik) -> workstation-opsapi pods
+  DNS_ZONE: workstation.co.uk
+  DNS_TARGET: pop0.wslproxy.com
+  DNS_PROXIED: "false"
 
 jobs:
+  # =========================================================================
+  # 0. AUTO-TAG MAIN
+  # =========================================================================
+  # Cuts the next semver tag on this commit BEFORE the build reads
+  # `git describe`. Without it the build describes a commit hundreds of
+  # commits past the last tag and produces an image tag like
+  # `1.0.8-205-gf513aed-231`; with it, `1.0.9-231`. Since that tag is the
+  # version Ring Promoter promotes int -> test -> acc, this is the difference
+  # between a release train you can read and one you have to decode.
+  #
+  # The tagging itself runs as a Kubernetes Job via Ring Promoter's
+  # `opsapi-autotag` app (see diy-tax-return-uk devops/ring-promoter/
+  # configmap.yaml) rather than as steps here — same reason the deploy moved
+  # there: one place owns "what happened to opsapi and when", with the job log
+  # and history in the Ring Promoter UI.
+  #
+  # `patch@<sha>` pins the exact commit this run is building, so a merge
+  # landing while this run is in flight cannot make us tag the wrong commit.
+  # Manual minor/major bumps: seed opsapi-autotag by hand with `minor`,
+  # `major`, or an explicit `X.Y.Z`.
+  #
+  # Push-only: a workflow_dispatch is a rebuild/redeploy of existing code and
+  # must not mint a version. The build job below tolerates this job being
+  # skipped, but NOT it failing — an untagged build would silently reintroduce
+  # the ugly describe-based tag, so a tagging failure stops the merge.
+  autotag:
+    name: Auto-tag main (Ring Promoter k8s Job)
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Cut the next semver tag on this commit
+        env:
+          RP_BASE: https://ring-promoter.diytaxreturn.co.uk
+          RP_TOKEN: ${{ secrets.RING_PROMOTER_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RP_TOKEN:-}" ]; then
+            echo "::error::Secret RING_PROMOTER_TOKEN is missing. Add the Ring Promoter API bearer token (RP_API_TOKEN from the ring-system Secret) as this repo's Actions secret RING_PROMOTER_TOKEN."
+            exit 1
+          fi
+
+          echo "Requesting patch tag on ${SHA}"
+          # SYNCHRONOUS on purpose (no async=true): the build job runs
+          # `git describe`, so the tag must exist before it starts. The k8s Job
+          # caps itself at 10m; 15m here leaves room for pod scheduling without
+          # hanging the runner indefinitely.
+          BODY=$(mktemp)
+          CODE=$(curl -sS --max-time 900 -o "$BODY" -w "%{http_code}" \
+            -X POST "${RP_BASE}/api/apps/opsapi-autotag/seed" \
+            -H "Authorization: Bearer ${RP_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"ring\":\"int\",\"version\":\"patch@${SHA}\"}" || echo 000)
+
+          echo "HTTP $CODE"
+          cat "$BODY"; echo
+          case "$CODE" in
+            200)
+              echo "::notice::opsapi tagged — the build below will describe a clean version"
+              ;;
+            000)
+              echo "::error::could not reach ${RP_BASE}. Not building: an untagged build would ship a describe-based image tag."
+              exit 1
+              ;;
+            *)
+              echo "::error::auto-tag failed (HTTP $CODE). See the opsapi-autotag job log in Ring Promoter."
+              exit 1
+              ;;
+          esac
+
   # =========================================================================
   # 1. BUILD AND PUSH DOCKER IMAGE
   # =========================================================================
   build:
     name: Build OpsAPI Image
     runs-on: [self-hosted, Linux, X64]
-    if: github.event.inputs.SKIP_BUILD != 'true'
+    needs: [autotag]
+    # Skip the build job on a deploy-only dispatch (image already exists).
+    # `always()` + the explicit result check is what lets a workflow_dispatch
+    # (where autotag is skipped) still build, while a FAILED autotag stops here.
+    if: >-
+      ${{ always()
+          && (needs.autotag.result == 'success' || needs.autotag.result == 'skipped')
+          && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
+    outputs:
+      # The immutable tag this run produced. The smoke test pulls THIS rather
+      # than :latest — otherwise a concurrent run that pushes :latest in
+      # between build and smoke means we smoke-test someone else's commit.
+      image_ref: ${{ steps.version.outputs.IMAGE_REF }}
+      # The bare tag (no registry/repo prefix) — this is the string Ring
+      # Promoter promotes as the diytaxreturn-opsapi "version", so the
+      # seed-ring-promoter job below needs it on its own.
+      image_tag: ${{ steps.version.outputs.IMAGE_TAG }}
     steps:
       - name: Clean up Workspace
         run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
@@ -81,6 +189,13 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Need full history + tags so `git describe --tags` resolves to the
+          # nearest annotated tag (e.g. v1.4.0-12-gabc1234) rather than
+          # falling back to the bare commit sha. The Determine build metadata
+          # step below depends on this; without fetch-depth: 0 you get a
+          # shallow clone with no tags and every image reports "dev".
+          fetch-depth: 0
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -91,16 +206,59 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Determine build metadata
+        id: version
+        run: |
+          # Mirrors the diytaxreturn-uk deploy-single-environment.yml step of
+          # the same name so opsapi + fastapi + frontend all report the same
+          # `git describe`-derived string when built from the same commit.
+          # This is the whole point of the "constant across environments"
+          # requirement — the version should reflect the CODE, not the env.
+          APP_VERSION=$(git describe --tags --always 2>/dev/null || echo 'dev')
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER:-local}"
+          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
+
+          # Immutable per-run tag. Docker tags allow [A-Za-z0-9_.-] only, so
+          # squash anything else out of the git-describe string.
+          SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
+          IMAGE_TAG="${SAFE_VERSION}-${BUILD_NUMBER}"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "IMAGE_REF=${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Build: v$APP_VERSION #$BUILD_NUMBER at $BUILD_TIME (tag: $IMAGE_TAG)"
+
       - name: Build and push OpsAPI
         uses: docker/build-push-action@v5
         with:
           context: ./lapis
           file: ./lapis/Dockerfile
           push: true
-          tags: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          build-args: TAG=latest
+          # Both tags point at the same image. :latest is what every
+          # environment pulls; the versioned tag is what the smoke test
+          # verifies and what you need to roll back to a known-good build.
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ steps.version.outputs.IMAGE_REF }}
+          # `TAG=latest` retained for existing consumers. New APP_VERSION /
+          # BUILD_NUMBER / BUILD_TIME args are what app.lua reads via
+          # os.getenv() so `/`, `/health`, `/metrics` surface the same
+          # version string in every environment.
+          build-args: |
+            TAG=latest
+            APP_VERSION=${{ steps.version.outputs.APP_VERSION }}
+            BUILD_NUMBER=${{ steps.version.outputs.BUILD_NUMBER }}
+            BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ignore-error: the GitHub Actions Cache export is a pure build-speed
+          # optimisation. When that service has a blip it returns an HTML error
+          # page instead of JSON, buildx fails to parse it, and the WHOLE build
+          # aborts (cancelling the already-successful image push) — which then
+          # skips smoke + deploy. A build whose image built and pushed fine must
+          # not fail because the cache backend was briefly unavailable, so make
+          # the export non-fatal: on error it logs a warning and continues.
+          cache-to: type=gha,mode=max,ignore-error=true
 
   # =========================================================================
   # 2. SMOKE TEST
@@ -109,7 +267,9 @@ jobs:
     name: Smoke Test OpsAPI
     needs: build
     runs-on: [self-hosted, Linux, X64]
-    if: always() && (needs.build.result == 'success' || github.event.inputs.SKIP_BUILD == 'true') && github.event.inputs.SKIP_SMOKE_TEST != 'true'
+    # Runs on build-and-deploy and build-only; skipped on deploy-only (no fresh
+    # image to smoke). Gates the deploy job below.
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'deploy' }}
     steps:
       - name: Identify Runner
         run: echo "Running on $(hostname)"
@@ -121,275 +281,418 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWD }}
 
       - name: Run smoke test container
+        env:
+          # image_ref is this run's immutable tag; :latest is only a fallback.
+          IMAGE_REF: ${{ needs.build.outputs.image_ref || format('{0}/{1}:latest', env.IMAGE_REGISTRY, env.IMAGE_NAME) }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          docker pull ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker stop opsapi-smoke-test || true
-          docker rm opsapi-smoke-test || true
-          docker run -d --name opsapi-smoke-test \
-            -p 34080:80 \
-            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          set -euo pipefail
+          echo "Smoke-testing image: $IMAGE_REF"
+          docker pull "$IMAGE_REF"
+
+          # Names/network are scoped to the run id so a stray container from a
+          # previous run can never be mistaken for this one's.
+          docker rm -f "opsapi-smoke-$RUN_ID" "opsapi-smoke-pg-$RUN_ID" >/dev/null 2>&1 || true
+          docker network rm "opsapi-smoke-net-$RUN_ID" >/dev/null 2>&1 || true
+          docker network create "opsapi-smoke-net-$RUN_ID"
+
+          # A real Postgres. Without one, config.lua falls back to a hardcoded
+          # 172.72.0.10 that nothing answers on — connects then blackhole for
+          # the full 60s socket timeout, which is what made this job flaky.
+          # pgvector/pgvector (NOT plain postgres): the migration gate runs
+          # every migration from zero, and tax-copilot-system creates a
+          # vector(384) column — production (Zalando Spilo) ships pgvector,
+          # so the gate database must too or it fails on a capability gap
+          # rather than a real migration bug.
+          docker run -d --name "opsapi-smoke-pg-$RUN_ID" \
+            --network "opsapi-smoke-net-$RUN_ID" \
+            -e POSTGRES_USER=pguser \
+            -e POSTGRES_PASSWORD=pgpassword \
+            -e POSTGRES_DB=opsapi \
+            pgvector/pgvector:pg14
+
+          echo "Waiting for Postgres..."
+          # Probe over TCP, not the unix socket: the official entrypoint runs
+          # a TEMPORARY socket-only server during first-boot init, then stops
+          # it and starts the real one. Socket pg_isready can pass during the
+          # temp phase, letting later psql calls land in the stop/restart gap
+          # (bit main run 29901977909). The temp server never listens on TCP, so a
+          # TCP probe only succeeds once the real server is up.
+          for i in $(seq 1 30); do
+            if docker exec "opsapi-smoke-pg-$RUN_ID" pg_isready -h 127.0.0.1 -U pguser -d opsapi >/dev/null 2>&1; then
+              echo "Postgres ready after ${i}s"; break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "::error::Postgres did not become ready in 30s"
+              docker logs "opsapi-smoke-pg-$RUN_ID" || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Port 0 lets Docker pick a free host port — no fixed-port collisions.
+          docker run -d --name "opsapi-smoke-$RUN_ID" \
+            --network "opsapi-smoke-net-$RUN_ID" \
+            -p 0:80 \
+            -e POSTGRES_HOST="opsapi-smoke-pg-$RUN_ID" \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=pguser \
+            -e POSTGRES_PASSWORD=pgpassword \
+            -e POSTGRES_DB=opsapi \
+            -e JWT_SECRET_KEY=smoke-test-not-a-real-secret \
+            "$IMAGE_REF"
+
+          PORT=$(docker port "opsapi-smoke-$RUN_ID" 80/tcp | head -1 | sed 's/.*://')
+          echo "SMOKE_PORT=$PORT" >> "$GITHUB_ENV"
+          echo "Container listening on host port $PORT"
+
+      # ── Migration gate ────────────────────────────────────────────────────
+      # Run EVERY migration from a zero-state database using the image this
+      # run just built — the exact invocation the helm pre-upgrade hook uses
+      # (migrate-job.yaml: LAPIS_ENVIRONMENT=production lapis migrate, from
+      # /app, pgcrypto pre-created). Migrations only execute the first time a
+      # database sees them, so static review/syntax checks can never prove
+      # them against real Postgres constraints — this step does. It would
+      # have caught both live incidents to date before they reached int:
+      # chk_question_type violation (#481) and fk_pqo_parent DEFAULT 0 (#476).
+      # A failure here fails smoke-test, which blocks every deploy job.
+      - name: Migration gate (fresh database)
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Belt and braces vs the init-restart race (see the readiness wait
+          # above): retry the first psql briefly rather than failing the whole
+          # gate on a connection gap that heals within seconds.
+          ok=""
+          for i in $(seq 1 10); do
+            if docker exec "opsapi-smoke-pg-$RUN_ID" \
+                psql -U pguser -d opsapi -c "CREATE EXTENSION IF NOT EXISTS pgcrypto"; then
+              ok=1; break
+            fi
+            echo "Postgres not accepting connections yet (attempt $i) — retrying..."
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Postgres never accepted connections for the migration gate"
+            docker logs "opsapi-smoke-pg-$RUN_ID" || true
+            exit 1
+          fi
+          # PROJECT_CODE=tax_copilot matches the deployed fleet so the
+          # feature-gated tax migrations (7xx) actually run, not just core.
+          if ! docker exec \
+              -e LAPIS_ENVIRONMENT=production \
+              -e PROJECT_CODE=tax_copilot \
+              "opsapi-smoke-$RUN_ID" sh -c "cd /app && lapis migrate"; then
+            echo "::error::lapis migrate failed against a fresh database — deploying this image would break the migrate hook (deploys blocked)"
+            exit 1
+          fi
+          echo "All migrations applied cleanly from zero state."
 
       - name: Check container starts
+        env:
+          RUN_ID: ${{ github.run_id }}
         run: |
-          echo "Waiting for OpenResty to start..."
+          set -uo pipefail
+          echo "Waiting for OpenResty to serve /health..."
           for i in $(seq 1 30); do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:34080/health 2>/dev/null || echo "000")
-            echo "Attempt $i: HTTP $HTTP_CODE"
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "Health check passed!"
-              exit 0
+            # Fail fast if the container died (e.g. a worker segfault loop) —
+            # polling a dead container for 90s just hides the real error.
+            STATE=$(docker inspect -f '{{.State.Status}}' "opsapi-smoke-$RUN_ID" 2>/dev/null || echo "missing")
+            if [ "$STATE" != "running" ]; then
+              echo "::error::Container is '$STATE', not running"
+              break
             fi
-            # Accept 503 as OK for smoke test - means OpenResty is running but no DB available
-            if [ "$HTTP_CODE" = "503" ]; then
-              echo "OpenResty is running (503 expected without database). Smoke test passed."
+
+            # --max-time matters: a request that hangs on a DB connect would
+            # otherwise consume the entire retry budget in one attempt.
+            HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+              "http://localhost:${SMOKE_PORT}/health" 2>/dev/null || echo "000")
+            echo "Attempt $i: HTTP $HTTP_CODE"
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Health check passed."
+              curl -s --max-time 10 "http://localhost:${SMOKE_PORT}/health" | head -c 2000 || true
               exit 0
             fi
             sleep 2
           done
-          echo "Smoke test failed - container not responding"
-          docker logs opsapi-smoke-test
+
+          # 503 is a real failure now that a database is present: it means the
+          # app could not reach Postgres, which is exactly what we're testing.
+          echo "::error::Smoke test failed - /health never returned 200"
+          echo "===== opsapi container logs ====="
+          docker logs --tail 100 "opsapi-smoke-$RUN_ID" 2>&1 || true
+          echo "===== opsapi nginx error log ====="
+          docker exec "opsapi-smoke-$RUN_ID" tail -100 /var/log/nginx/error.log 2>/dev/null || echo "(unavailable)"
+          echo "===== postgres logs ====="
+          docker logs --tail 30 "opsapi-smoke-pg-$RUN_ID" 2>&1 || true
           exit 1
 
       - name: Cleanup
         if: always()
-        run: docker rm -f opsapi-smoke-test || true
-
-  # =========================================================================
-  # 3. PLAN — derive which env(s) this run targets, based on the trigger
-  # =========================================================================
-  # Why a separate job rather than computing inside deploy-to-k3s: matrix
-  # strategies must be defined at job-level and YAML can't conditionally
-  # expand them, so we compute a JSON array here and feed it into the
-  # next job's matrix via `fromJson(needs.plan.outputs.envs)`.
-  plan:
-    name: Plan target environment(s)
-    needs: [smoke-test]
-    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure')
-    runs-on: [self-hosted, Linux, X64]
-    outputs:
-      envs: ${{ steps.plan.outputs.envs }}
-    steps:
-      - id: plan
-        name: Resolve envs from trigger
+        env:
+          RUN_ID: ${{ github.run_id }}
         run: |
-          # Manual dispatch always wins — single env from the input.
-          if [ -n "${{ github.event.inputs.TARGET_ENV }}" ]; then
-            ENVS_JSON='["${{ github.event.inputs.TARGET_ENV }}"]'
-          elif [ "${{ github.ref }}" = "refs/heads/release" ]; then
-            ENVS_JSON='["acc"]'
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            # Low tiers — fan out so dev and int receive every main commit.
-            ENVS_JSON='["dev","int"]'
-          else
-            echo "::error::Unsupported trigger: ${{ github.ref }} / ${{ github.event_name }}"
-            exit 1
-          fi
-          echo "envs=$ENVS_JSON" >> "$GITHUB_OUTPUT"
-          echo "Planned envs: $ENVS_JSON"
+          docker rm -f "opsapi-smoke-$RUN_ID" "opsapi-smoke-pg-$RUN_ID" >/dev/null 2>&1 || true
+          docker network rm "opsapi-smoke-net-$RUN_ID" >/dev/null 2>&1 || true
+          # Sweep any orphans left by runs that were cancelled mid-flight.
+          docker rm -f opsapi-smoke-test >/dev/null 2>&1 || true
 
   # =========================================================================
-  # 4. DEPLOY TO K3S — one parallel job per planned env
+  # 3. DNS — ensure the Cloudflare CNAME for this env's host → the WSL Proxy
+  #    edge, BEFORE the app rolls, so the hostname resolves by the time real
+  #    traffic (and any edge cert issuance) arrives. Cloudflare needs only
+  #    egress, so this runs on a GitHub-hosted runner.
   # =========================================================================
-  deploy-to-k3s:
-    name: Deploy OpsAPI to K3s (${{ matrix.target_env }})
-    needs: [smoke-test, plan]
-    if: always() && (needs.smoke-test.result == 'success' || github.event.inputs.SKIP_SMOKE_TEST == 'true') && (needs.smoke-test.result != 'failure') && needs.plan.result == 'success'
+  dns:
+    name: Ensure Cloudflare DNS
+    runs-on: ubuntu-latest
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure the CNAME for this environment
+        env:
+          # Scoped API token (Bearer) — cloudflare-dns.sh prefers this over the
+          # legacy global key. We switched because opsapi's legacy
+          # CLOUDFLARE_ACCOUNT_EMAIL/API_KEY are invalid (Cloudflare 9103
+          # "Unknown X-Auth-Key or X-Auth-Email"). This token has Zone:Read +
+          # Zone:DNS:Edit and covers the workstation.co.uk zone. CLOUDFLARE_ZONE
+          # gives the script the zone name to resolve the id from.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE: ${{ env.DNS_ZONE }}
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file for env '${TARGET_ENV}' ($VALUES)"; exit 1; }
+
+          # Single source of truth: whatever host the chart's Ingress claims.
+          HOST="$(awk '/^host:/{print $2; exit}' "$VALUES")"
+          [ -n "$HOST" ] || { echo "::error::no 'host:' in $VALUES"; exit 1; }
+
+          echo "Ensuring ${HOST} -> ${DNS_TARGET} (proxied=${DNS_PROXIED})"
+          chmod +x devops/scripts/cloudflare-dns.sh
+          ./devops/scripts/cloudflare-dns.sh \
+            --name "$HOST" \
+            --content "$DNS_TARGET" \
+            --proxied "$DNS_PROXIED"
+
+  # =========================================================================
+  # 4. WSL PROXY — register the vhost + rule on the edge control plane BEFORE
+  #    helm rolls the app, else the hostname resolves to an edge with no
+  #    config for it. All opsapi hosts live under the 'prod' WSL Proxy profile
+  #    (matches the beacon layout); ACTIVATE_CONFIG=true takes them live.
+  # =========================================================================
+  wslproxy:
+    name: Register WSL Proxy vhost
+    needs: [dns]
+    if: ${{ (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build' }}
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  # =========================================================================
+  # 5. DEPLOY — helm upgrade the `workstation-opsapi` release to k3s1. Runs on
+  #    a self-hosted runner because the k3s1 API and the WSL Proxy control
+  #    plane only answer on the operator network. Waits for build + smoke +
+  #    dns + wslproxy (skipped needs are tolerated for deploy-only runs).
+  # =========================================================================
+  deploy:
+    name: Deploy workstation-opsapi to K3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [build, smoke-test, dns, wslproxy]
     runs-on: [self-hosted, Linux, X64]
-    # fail-fast off: a broken dev shouldn't cancel an in-flight int deploy.
-    strategy:
-      fail-fast: false
-      matrix:
-        target_env: ${{ fromJson(needs.plan.outputs.envs) }}
-    # Backstop: never let a hung kubectl step hold the (single) self-hosted
-    # runner for GitHub's 6h default — fail fast and free it for the next run.
     timeout-minutes: 15
+    if: >-
+      ${{ always()
+          && (github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy') != 'build'
+          && (needs.build.result == 'success' || needs.build.result == 'skipped')
+          && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')
+          && needs.dns.result == 'success'
+          && needs.wslproxy.result == 'success' }}
     steps:
       - name: Identify Runner
-        run: echo "Running on $(hostname) — target=${{ matrix.target_env }}"
-
-      - name: Clean up Workspace
-        run: sudo rm -rf ${{ github.workspace }}/.[!.]* ${{ github.workspace }}/* || true
-        shell: bash
+        run: echo "Running on $(hostname) — env=${TARGET_ENV}, release=${RELEASE_NAME}"
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Resolve target environment
-        id: env
-        run: |
-          TARGET_ENV="${{ matrix.target_env }}"
-          echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_OUTPUT
-
-          # Select the right values file
-          if [ -f "${{ env.HELM_CHART_PATH }}/values-${TARGET_ENV}.yaml" ]; then
-            echo "VALUES_FILE=${{ env.HELM_CHART_PATH }}/values-${TARGET_ENV}.yaml" >> $GITHUB_OUTPUT
-          else
-            echo "::error::Values file not found: values-${TARGET_ENV}.yaml"
-            exit 1
-          fi
-          echo "Deploying to $TARGET_ENV"
-
-      - name: Set up Kubeconfig
-        run: |
-          if [ -z "${{ secrets.MY_K3S_CONFIG }}" ]; then
-            echo "::error::Secret MY_K3S_CONFIG is empty or missing!"
-            exit 1
-          fi
-          echo "${{ secrets.MY_K3S_CONFIG }}" | base64 -d > ./kubeconfig
-
-          # Override to use the Kube-VIP address
-          echo "Overriding Kubeconfig server to k3s0.diytaxreturn.co.uk..."
-          sed -i 's|server: https://.*:6443|server: https://k3s0.diytaxreturn.co.uk:6443|g' ./kubeconfig
-
-          # Disable TLS verification in case the cert is bound to 127.0.0.1
-          kubectl config set-cluster default --insecure-skip-tls-verify=true --kubeconfig=./kubeconfig
-
-          chmod 600 ./kubeconfig
-          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
-
-      - name: Verify Cluster Connectivity
-        run: |
-          echo "Checking connectivity to Kube-VIP k3s0.diytaxreturn.co.uk..."
-          nc -zv -w 5 k3s0.diytaxreturn.co.uk 6443 && echo "Kube-VIP is REACHABLE" || (echo "Kube-VIP is UNREACHABLE"; exit 1)
-          kubectl cluster-info --kubeconfig=./kubeconfig
-
-      - name: Install Helm
-        uses: azure/setup-helm@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Namespace
-        run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          kubectl create namespace ${{ steps.env.outputs.TARGET_ENV }} --dry-run=client -o yaml | kubectl apply -f -
-
-      # For dev: Vault ExternalSecrets are disabled, so create secrets manually.
-      # For int/acc/prod: Vault manages secrets via ExternalSecret — skip manual creation.
-      - name: Create Secrets (dev only — int/acc/prod use Vault)
-        if: steps.env.outputs.TARGET_ENV == 'dev'
+      - name: Decode kubeconfig (k3s1)
         env:
-          ENV_CONTENT: ${{ secrets.OPSAPI_ENV_FILE }}
-          TARGET_ENV: ${{ steps.env.outputs.TARGET_ENV }}
+          # Base64 kubeconfig for the CURRENT k3s1 cluster. Keep this secret in
+          # sync with the live cluster (server: https://k3s1api.diytaxreturn.co.uk:6443).
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          echo "$ENV_CONTENT" > ./.env-opsapi.tmp
-          chmod 600 ./.env-opsapi.tmp
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
 
-          # Create opsapi secret from .env file
-          kubectl create secret generic diytaxreturn-lapis-secrets \
-            --from-env-file=./.env-opsapi.tmp \
-            --namespace "$TARGET_ENV" \
-            --dry-run=client -o yaml | kubectl apply --validate=false -f -
-
-          rm -f ./.env-opsapi.tmp
-
-      - name: Deploy OpsAPI
+      - name: Ensure kubectl + helm
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          # Only override projectCode when an explicit value is passed on
-          # workflow_dispatch. When blank (a push to main, or a dispatch that
-          # leaves it empty) the env's values file decides — values-acc.yaml
-          # sets projectCode: tax_copilot. Previously this forced 'all', which
-          # re-enabled every feature's migrations regardless of the values file.
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || {
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          }
+          kubectl version --client=true 2>/dev/null | head -1 || true
+          helm version --short || true
+
+      - name: Deploy workstation-opsapi
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file ($VALUES)"; exit 1; }
+
+          # Which image tag to roll: explicit dispatch input wins; else this
+          # run's immutable build tag; else :latest.
+          TAG="${{ github.event.inputs.IMAGE_TAG }}"
+          if [ -z "$TAG" ]; then
+            REF="${{ needs.build.outputs.image_ref }}"
+            if [ -n "$REF" ]; then TAG="${REF##*:}"; else TAG="latest"; fi
+          fi
+          echo "Deploying release '${RELEASE_NAME}' to namespace '${TARGET_ENV}' with image tag '${TAG}'"
+
+          # Only override projectCode when a value is explicitly passed on
+          # dispatch; otherwise the values file (tax_copilot) decides.
           PROJECT_CODE_ARG=""
           if [ -n "${{ github.event.inputs.PROJECT_CODE }}" ]; then
             PROJECT_CODE_ARG="--set projectCode=${{ github.event.inputs.PROJECT_CODE }}"
           fi
-          helm upgrade --install diytaxreturn-lapis ${{ env.HELM_CHART_PATH }} \
-            -f ${{ steps.env.outputs.VALUES_FILE }} \
-            --namespace ${{ steps.env.outputs.TARGET_ENV }} \
-            --create-namespace \
-            --set image.repository=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }} \
-            --set image.tag=latest \
-            --set env=${{ steps.env.outputs.TARGET_ENV }} \
-            --set setup.adminEmail=${{ github.event.inputs.ADMIN_EMAIL || '' }} \
-            --set setup.adminPassword=${{ github.event.inputs.ADMIN_PASSWORD || '' }} \
-            --set setup.namespaceSlug=${{ github.event.inputs.NAMESPACE_SLUG || '' }} \
+
+          # No --wait here on purpose. The app's config.lua lives in a Secret
+          # (rendered by the ExternalSecret), not the pod template, so a
+          # config-only change does not alter the Deployment and helm --wait
+          # would just block on the EXISTING pods. We drive the rollout
+          # explicitly in the next step instead.
+          helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
+            -f "$VALUES" \
+            --namespace "${TARGET_ENV}" --create-namespace \
+            --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
+            --set image.tag="${TAG}" \
             $PROJECT_CODE_ARG
 
-      - name: Force Refresh Pods
+      - name: Roll out and wait
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          NS=${{ steps.env.outputs.TARGET_ENV }}
-          # Remove failed pods so K3s recreates them with new config.
-          # --wait=false is REQUIRED: kubectl delete otherwise blocks until
-          # the pods fully terminate, and a pod stuck in Terminating (a
-          # finalizer, a container ignoring SIGTERM, or an unresponsive
-          # kubelet) hangs the whole job for hours — this exact step hung
-          # the acc deploy for 2h+ on 2026-06-11. We only want to *issue*
-          # the deletes; the Deployment recreates pods and the next step
-          # waits on the rollout. --grace-period=30 bounds termination.
-          kubectl delete pods -n "$NS" --field-selector=status.phase=Failed \
-            --wait=false --grace-period=30 || true
-          kubectl delete pods -n "$NS" -l app=diytaxreturn-lapis \
-            --wait=false --grace-period=30 || true
+          set -euo pipefail
+          NS="${TARGET_ENV}"; REL="${RELEASE_NAME}"
+          # Wait for ESO to sync the Secret (which carries config.lua) BEFORE
+          # rolling, so the new pods start with the current config rather than
+          # a stale/half-rendered one.
+          kubectl -n "$NS" wait --for=condition=Ready "externalsecret/${REL}-secrets" --timeout=120s \
+            || echo "::warning::ExternalSecret ${REL}-secrets not Ready within 120s — rolling anyway"
+          # Force a fresh rollout so pods pick up Secret/config changes even
+          # when the pod template is unchanged (this is what a Secret-only
+          # change is). This makes config-only deploys reliable and skips any
+          # stale pod stuck in CrashLoopBackOff.
+          kubectl -n "$NS" rollout restart "deploy/$REL"
+          kubectl -n "$NS" rollout status "deploy/$REL" --timeout=6m
+          kubectl -n "$NS" get pods -o wide -l app="$REL"
 
-      - name: Wait for rollout
+      - name: Public URL probe (informational)
         run: |
-          export KUBECONFIG=$(pwd)/kubeconfig
-          NS=${{ steps.env.outputs.TARGET_ENV }}
-          echo "Waiting for diytaxreturn-lapis rollout..."
-          kubectl rollout status deployment/diytaxreturn-lapis -n "$NS" --timeout=180s || true
+          # Best-effort only: on a first deploy the DNS record + WSL Proxy edge
+          # cert can take a few minutes to propagate, so a hard gate here would
+          # flap. Rollout status above is the authoritative health signal.
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          HOST="$(awk '/^host:/{print $2; exit}' "$VALUES")"
+          echo "Probing https://${HOST}/health ..."
+          for i in $(seq 1 5); do
+            CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "https://${HOST}/health" || echo "000")
+            echo "Attempt $i: HTTP $CODE"
+            [ "$CODE" = "200" ] && { echo "Public health OK."; break; }
+            sleep 5
+          done
 
-      # Why this gate exists:
-      # `kubectl rollout status` only proves the Pod is Ready. It does NOT
-      # prove the public URL actually returns 200 — and on 2026-06-15 we
-      # had a 4-day intermittent outage of int-api where the Pod was healthy
-      # but a stale Ingress in a different namespace was sharing the host
-      # claim, so the wslproxy ingress controller flapped between a working
-      # backend and an orphaned one. Symptom: 9/10 requests succeeded; 1/10
-      # returned the wslproxy ingress controller's stock 404 page. Both
-      # `kubectl get pods` and the rollout step happily reported success.
-      #
-      # The gate below requires 5 CONSECUTIVE fast 200s within 2 minutes
-      # before the deploy is declared green. The consecutive bar is the
-      # important part — it catches the "sometimes works" regression mode
-      # that a single-shot probe would have missed today.
-      - name: Public-URL health gate
+  # =========================================================================
+  # 6. SEED RING PROMOTER
+  # =========================================================================
+  # Hands the freshly-built, immutable image tag to Ring Promoter's
+  # `diytaxreturn-opsapi` app and starts an int deploy of it.
+  #
+  # This is the entry point of the diytaxreturn release train for opsapi:
+  #
+  #   merge to opsapi main
+  #     -> build job pushes bwalia/opsapi:<git-describe>-<run_number>
+  #     -> THIS job seeds that tag into Ring Promoter's int ring
+  #     -> Ring Promoter dispatches diy-tax-return-uk deploy-lapis.yml,
+  #        which helm-upgrades diytaxreturn-lapis in `int` pinned to that tag
+  #     -> you promote int -> test -> acc by hand in the Ring Promoter UI
+  #
+  # Note what is deliberately NOT automated: only int is seeded. Promotion
+  # stays a human act, matching the `auto_promote: false` declared on every
+  # diytaxreturn-opsapi ring in diy-tax-return-uk's ring-promoter ConfigMap.
+  #
+  # SEPARATE from the `deploy` job above. That one rolls the
+  # `workstation-opsapi` release on *.workstation.co.uk; this one hands the tag
+  # to the pipeline that owns `diytaxreturn-lapis` on *.diytaxreturn.co.uk.
+  # They share an image and nothing else, so this job needs neither.
+  #
+  # Requires repo secret RING_PROMOTER_TOKEN — the Ring Promoter API bearer
+  # token (the RP_API_TOKEN value from the ring-system Secret).
+  seed-ring-promoter:
+    name: Seed Ring Promoter (diytaxreturn-opsapi → int)
+    needs: [build, smoke-test]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    # Only on a merge to main, and only when this run actually built and smoked
+    # an image. A manual deploy-only dispatch has no new tag to seed, and a
+    # manual build-only dispatch is an experiment the release train shouldn't
+    # pick up.
+    if: >-
+      ${{ github.event_name == 'push'
+          && needs.build.result == 'success'
+          && needs.smoke-test.result == 'success' }}
+    steps:
+      - name: Seed int with the tag this run built
+        env:
+          RP_BASE: https://ring-promoter.diytaxreturn.co.uk
+          RP_TOKEN: ${{ secrets.RING_PROMOTER_TOKEN }}
+          TAG: ${{ needs.build.outputs.image_tag }}
         run: |
-          # Map env -> public URL. dev/int/acc follow the `<env>-api.*`
-          # convention; prod's public URL is bare `api.*`. New envs need
-          # to be added here explicitly rather than left to a default,
-          # so a typo in an env name fails CI instead of silently passing.
-          case "${{ matrix.target_env }}" in
-            prod) URL="https://api.diytaxreturn.co.uk/health" ;;
-            dev|int|acc) URL="https://${{ matrix.target_env }}-api.diytaxreturn.co.uk/health" ;;
+          set -euo pipefail
+          if [ -z "${RP_TOKEN:-}" ]; then
+            echo "::error::Secret RING_PROMOTER_TOKEN is missing. Add the Ring Promoter API bearer token (RP_API_TOKEN from the ring-system Secret) as this repo's Actions secret RING_PROMOTER_TOKEN. Until then a merge here will NOT start an int deploy of opsapi."
+            exit 1
+          fi
+          if [ -z "${TAG:-}" ]; then
+            echo "::error::build job produced no image_tag output — nothing to seed."
+            exit 1
+          fi
+
+          echo "Seeding diytaxreturn-opsapi int with ${TAG}"
+          # async=true returns 202 + a job id immediately instead of holding the
+          # connection open for the whole helm upgrade (the lapis migrate hook
+          # alone budgets 20m — far past any sane HTTP timeout). Ring Promoter
+          # still validates the ring/version/gates synchronously and 4xxs here
+          # if the seed could never succeed, so a bad tag fails this step rather
+          # than silently spawning a doomed job.
+          BODY=$(mktemp)
+          CODE=$(curl -sS --max-time 60 -o "$BODY" -w "%{http_code}" \
+            -X POST "${RP_BASE}/api/apps/diytaxreturn-opsapi/seed?async=true" \
+            -H "Authorization: Bearer ${RP_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"ring\":\"int\",\"version\":\"${TAG}\"}" || echo 000)
+
+          echo "HTTP $CODE"
+          cat "$BODY"; echo
+          case "$CODE" in
+            200|202)
+              echo "::notice::Ring Promoter accepted opsapi ${TAG} for int. Watch it at ${RP_BASE}"
+              ;;
+            000)
+              echo "::error::could not reach ${RP_BASE} — opsapi ${TAG} is pushed but NOT deploying. Seed it by hand in the Ring Promoter UI."
+              exit 1
+              ;;
             *)
-              echo "::error::Unknown env '${{ matrix.target_env }}' — extend the case above with its public URL"
+              echo "::error::Ring Promoter rejected the seed (HTTP $CODE). The image ${TAG} is pushed and safe to seed manually once the cause above is fixed."
               exit 1
               ;;
           esac
-          echo "Health-gating against $URL — need 5 consecutive fast 200s within 2 min"
-          ok_run=0
-          last_code=""
-          last_time=""
-          # ~30 attempts * 4s sleep = ~2 min ceiling. The 8s connect timeout
-          # is intentional: any single probe taking longer than the slow-path
-          # threshold (3s) breaks the streak — that's how we catch the
-          # Ingress-conflict pattern where one backend works and another
-          # times out at ~5s.
-          for i in $(seq 1 30); do
-            t=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" -m 8 "$URL" 2>&1 || true)
-            last_code=$(echo "$t" | awk '{print $1}')
-            last_time=$(echo "$t" | awk '{print $2}')
-            slow=$(echo "$last_time" | awk '{print ($1 >= 3.0) ? 1 : 0}')
-            if [ "$last_code" = "200" ] && [ "$slow" = "0" ]; then
-              ok_run=$((ok_run+1))
-              echo "  attempt $i: code=$last_code time=${last_time}s — streak=$ok_run/5"
-              if [ "$ok_run" -ge 5 ]; then
-                echo "::notice::$URL healthy — 5 consecutive fast 200s"
-                exit 0
-              fi
-            else
-              ok_run=0
-              echo "  attempt $i: code=$last_code time=${last_time}s — streak reset"
-            fi
-            sleep 4
-          done
-          echo "::error::Public health gate failed — $URL did not produce 5 consecutive fast 200s in ~2 min (last: code=$last_code time=${last_time}s)"
-          exit 1
-
-      - name: Cleanup Kubeconfig
-        if: always()
-        run: |
-          rm -f ./kubeconfig ./.env-opsapi.tmp

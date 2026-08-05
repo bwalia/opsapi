@@ -135,6 +135,13 @@ local services_module_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVIC
 local bank_transaction_migrations = load_if_enabled(ProjectConfig.FEATURES.BANK_TRANSACTIONS,
     "migrations.bank-transactions") or {}
 
+-- Academy (LMS: courses + lessons, namespace-scoped)
+local academy_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-system") or {}
+local academy_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-menu-items") or {}
+local academy_enrollment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-enrollments") or {}
+local academy_payment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-payments") or {}
+local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-progress") or {}
+
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
@@ -144,6 +151,11 @@ local tax_copilot_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILO
 
 -- Dynamic Profile Builder (tax_copilot feature)
 local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-profile-builder") or {}
+
+-- Personal Details cleanup — NINO validation + soft-delete of duplicate
+-- surname / ni_number questions the wizard-tree seed had left behind on
+-- top of the earlier last_name / nino questions.
+local personal_details_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.personal-details-cleanup") or {}
 
 -- My Income (tax_copilot feature) — manually-entered income source-of-truth
 local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
@@ -155,6 +167,124 @@ local income_types_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPIL
 -- dynamic Profile Builder questions; see dynamic-profile-builder.lua [38]).
 local income_questionnaire_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-questionnaire-cleanup") or {}
 
+-- Property Income (tax_copilot feature) — rental hub + per-property entities,
+-- entity-scoped profile answers, and SA105 line-item catalogue/rows
+local property_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.property-income-system") or {}
+
+-- Self-Employment (tax_copilot feature) — sole-trader hub + per-business
+-- entities (reuses user_profile_entities), SA103 fixed-box catalogue/values,
+-- and the Capital Allowances grid
+local self_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.self-employment-system") or {}
+
+-- Overseas Property (tax_copilot feature) — "Land and property abroad" hub:
+-- reuses user_profile_entities + property_line_items with a catalogue
+-- schedule split, plus the overseas_property income type + question section
+local overseas_property_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.overseas-property-system") or {}
+
+-- Pension Payments (tax_copilot feature) — "Relief: Pension payments"
+-- (SA100 TR4): section catalogue + payment rows, no per-entity drill-down
+local pension_payments_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-payments-system") or {}
+
+-- Form Sections engine (tax_copilot feature) — generic admin-defined
+-- sections + sub-form rows; supersedes the pension-specific stack and
+-- ends per-screen Lua work for this screen family
+local form_sections_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.form-sections-system") or {}
+
+-- Salary / Employment (SA102) — content-only: seeds the record-mode
+-- section/field catalogue for the existing 'salary' income type and
+-- ports legacy flat entries. The engine work lives in form-sections.
+local salary_employment_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-employment-system") or {}
+
+-- Dynamic answer scope — moves the "how are these answers scoped?"
+-- decision from a hardcoded map in routes/profile-builder.lua into two
+-- new columns on profile_categories (answer_scope + entity_type) and a
+-- new tax_year column on user_profile_answers. Admins can define brand
+-- new form sections — SA100 income boxes today, US 1040 or any other
+-- regional form tomorrow — without a code deploy. Every subsequent
+-- profile-builder-driven feature depends on this.
+local dynamic_answer_scope_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dynamic-answer-scope") or {}
+
+-- SA100 dividend & interest questions: extracted to the consumer repo
+-- as tax_copilot_app plugin migrations 20260801_001..003 (Phase 3
+-- slice 1 of the migration-decoupling plan). The source .lua file is
+-- retained here for one release cycle for rollback safety; the
+-- consumer's reconcile hook seeds project_migrations on envs where
+-- opsapi already applied 750/750a/751.
+
+-- Rental joint-owner details — first consumer of the config-driven
+-- repeating_group widget contract. Adds ONE question
+-- (`rb_joint_owners`) whose config_json defines the name/relation/share%
+-- subfield schema the frontend widget renders. Every future repeating
+-- question (children, shareholders, foreign properties…) is another
+-- seed migration in the same shape with zero widget changes.
+local rental_joint_owner_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.rental-joint-owner-questions") or {}
+
+-- Phase 1 of the profile-builder unification (see the diy-tax-return-uk
+-- repo's docs/PROFILE_BUILDER_UNIFICATION_PLAN.md). Ports the salary
+-- income type from tax_form_sections onto the unified Profile Builder
+-- store:
+--   - catalog: seed 7 profile_categories + 42 profile_questions +
+--     4 visibility rules under entity_type='employment' (mirrors the
+--     salary-employment-system.lua field catalog)
+--   - backfill: walk every non-archived tax_form_records salary row,
+--     upsert into user_profile_entities + user_profile_answers with
+--     a deterministic-hashed entity UUID (idempotent + reversible)
+-- The two are separate step files so a re-run of one doesn't force
+-- the other. Both are gated on TAX_COPILOT.
+local salary_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-catalog") or {}
+local salary_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.salary-profile-builder-backfill") or {}
+
+-- Phase 2 pension migration (see docs/PROFILE_BUILDER_UNIFICATION_PLAN.md
+-- §5-6 in the diy-tax-return-uk repo) — three catalog entries and one
+-- aggregating backfill. Same shape as the Phase 1 salary pair but the
+-- data model differs: year-scoped answers (answer_scope='year', no
+-- entities) each holding an aggregated JSON array of payment rows via
+-- the repeating_group question type. See catalog file's docstring
+-- for the SA100 TR4 mapping.
+local pension_profile_builder_catalog_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-catalog") or {}
+local pension_profile_builder_backfill_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.pension-profile-builder-backfill") or {}
+
+-- SA110 Tax Calculation Summary + SA108 Capital Gains Tax questions:
+-- extracted to the consumer repo as tax_copilot_app plugin migrations
+-- 20260801_004..007 (Phase 3 slice 1). Source .lua files retained for
+-- one release cycle for rollback safety; the consumer's reconcile hook
+-- seeds project_migrations on envs where opsapi already applied
+-- 766/767/768/769.
+
+-- Adds admin-configurable linked-form metadata columns to income_types
+-- (linked_form_title / linked_form_description / linked_form_weblink)
+-- so the "SA100 boxes — {year}" card header on /my-income/[type] stops
+-- being hardcoded and starts naming the actual reference form the
+-- admin has associated with the type. Step 1 = ALTER TABLE, step 2 =
+-- seed sensible defaults for the 8 known income types (COALESCE — never
+-- overwrites admin edits).
+local income_types_linked_form_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.income-types-linked-form-metadata") or {}
+
+-- SA101 Additional information + linked-form defaults, and the
+-- SA10x completion round (SA105 property, SA109 residence, SA106
+-- foreign income, SA103F self-employment): all extracted to the
+-- consumer repo as tax_copilot_app plugin migrations 20260801_008..018
+-- (Phase 3 slice 1). Source .lua files retained for one release cycle
+-- for rollback safety; the consumer's reconcile hook seeds
+-- project_migrations on envs where opsapi already applied
+-- 772/773/774/775/776/785/786/787/788/789/790.
+
+-- Dividend panels — splits dividends into THREE income-type tabs
+-- (dividends / foreign_dividends / other_dividends), each an itemised
+-- table rendered by the repeating_group widget's table layout. Retires
+-- the 7 flat boxes the old single "Dividends and interest" category
+-- held. SA106 foreign_income is untouched. Companion frontend PR ships
+-- the table layout mode.
+local dividend_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.dividend-panels") or {}
+
+-- Interest panels: /my-income/interest (UK banks, untaxed + taxed
+-- tables) and a new foreign_interest income type, each an itemised
+-- table rendered by the repeating_group widget's table layout. The
+-- follow-on dividend-panels.lua flagged: the flat interest boxes it
+-- deactivated (old boxes 1-3) get their itemised home here. SA106
+-- foreign_income is untouched.
+local interest_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.interest-panels") or {}
+
 -- Billing / payments (Stripe Connect: subscriptions + one-time). Gated on
 -- tax_copilot for now; broaden to a feature list (e.g. {ECOMMERCE, TAX_COPILOT})
 -- once multiple project codes need it. See migrations/billing-system.lua.
@@ -162,8 +292,14 @@ local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COP
 
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
-local crm_leads_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads") or {}
 local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
+
+-- Leads are a CORE capability: the crm_leads table is created for EVERY
+-- PROJECT_CODE (lead capture is generic), so this module loads unconditionally.
+-- Steps [1]/[2] run as core migrations; step [3] (FKs to crm_contacts/crm_deals)
+-- is gated on the CRM feature since those tables only exist there. See the
+-- registry entries 510/511 (core) and 512 (CRM) below.
+local crm_leads_migrations = require("migrations.crm-leads")
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
@@ -205,6 +341,23 @@ end
 -- migration runs if the active PROJECT_CODE enables ANY of them. This lets a
 -- single table be shared across project codes, e.g.
 --   conditional({ProjectConfig.FEATURES.ECOMMERCE, ProjectConfig.FEATURES.TAX_COPILOT}, fn)
+-- A disabled feature's migration must NOT be registered at all.
+--
+-- Returning a no-op function here would let lapis run it and then write the key
+-- into `lapis_migrations`. The feature's tables would never be created, and
+-- because the key is recorded as "applied", turning the feature on later would
+-- silently skip it forever — you'd get routes that 500 with
+-- "relation ... does not exist". Returning nil omits the key from the migrations
+-- table, so lapis neither runs nor records it, and the migration is still
+-- pending the day the feature is enabled.
+--
+-- The skip is recorded here (registry-build time, after MigrationTracker.init)
+-- so the run summary still reports it.
+local function skip_unregistered(name, label)
+    MigrationTracker.recordSkipped(name, label)
+    return nil
+end
+
 local function conditional(feature, migration_func)
     local label = feature_label(feature)
     if ProjectConfig.isAnyFeatureEnabled(feature) and migration_func then
@@ -213,10 +366,10 @@ local function conditional(feature, migration_func)
             return migration_func(...)
         end
     end
-    return skip_migration(label, label)
+    return skip_unregistered(label, label)
 end
 
--- Returns the migration from an array or a skip function (with tracking).
+-- Returns the migration from an array, or nil when the feature is off (see above).
 -- `feature` may be a single feature string or a list (OR semantics) — see conditional().
 local function conditional_array(feature, migrations_array, index)
     local label = feature_label(feature)
@@ -227,7 +380,7 @@ local function conditional_array(feature, migrations_array, index)
             return migrations_array[index](...)
         end
     end
-    return skip_migration(name, label)
+    return skip_unregistered(name, label)
 end
 
 -- Dry-run: preview what would run/skip without touching the DB.
@@ -1532,9 +1685,16 @@ local _migrations = {
     ['503_crm_create_deals'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 4),
     ['504_crm_create_activities'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_system_migrations, 5),
 
-    -- CRM Leads (510-511)
-    ['510_crm_create_leads'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 1),
-    ['511_crm_leads_enquiry_link'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 2),
+    -- CRM Leads (510-512)
+    -- CORE: the crm_leads table + enquiry link run for EVERY project (lead
+    -- capture is generic — not gated on the CRM feature). Kept at keys 510/511
+    -- so they still sort after namespaces/enquiries; the module is idempotent
+    -- (guards on table_exists) so existing CRM databases just no-op on re-run.
+    ['510_crm_create_leads'] = function() return crm_leads_migrations[1]() end,
+    ['511_crm_leads_enquiry_link'] = function() return crm_leads_migrations[2]() end,
+    -- CRM-only: attach converted_contact_id/converted_deal_id foreign keys.
+    -- Sorts after 501-504 (crm_contacts/crm_deals) so the FK targets exist.
+    ['512_crm_leads_crm_fks'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 3),
 
     -- CRM menu items (720-723): surface CRM in the backend-driven sidebar
     ['720_seed_crm_menu_items'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 1),
@@ -1796,6 +1956,25 @@ local _migrations = {
     ['713_tax_statements_file_hash'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 86),
     ['714_seed_upload_duplicate_filed_message'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 87),
 
+    -- IDENTITY LOCK (anti-fraud) — wires slots [88]/[89]/[90] from
+    -- tax-copilot-system.lua into the top-level migration manifest so
+    -- `lapis migrate` actually runs them. Without these three lines the
+    -- migrations sit dead in tax-copilot-system.lua and every request
+    -- through IdentityLock.getPolicy() 500s with
+    -- `relation "identity_lock_settings" does not exist`. Reported
+    -- 2026-07-13 by the user testing locally in docker — the same three
+    -- migrations ran fine on int/test/acc because those envs picked up
+    -- an older version of this file that... wait, they DIDN'T run either
+    -- (the numeric [88]/[89]/[90] never appear in lapis_migrations on
+    -- acc's DB when queried via the read-only kubeconfig). The reason
+    -- acc "worked" earlier is that no one had exercised saveNino yet.
+    -- Every env needs these three mapping lines to pick up the new
+    -- feature.
+    ['819_tax_identity_lock_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 88),
+    ['820_tax_identity_lock_settings_and_module'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 89),
+    ['821_tax_identity_lock_message_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 90),
+    ['822_tax_user_profile_mtd_enabled'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, tax_copilot_migrations, 91),
+
     -- MY INCOME — manually-entered income source-of-truth
     -- =========================================================================
     ['715_create_my_incomes'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, my_income_migrations, 1),
@@ -1812,6 +1991,223 @@ local _migrations = {
     -- =========================================================================
     ['722_drop_income_questionnaire_bespoke'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_questionnaire_cleanup_migrations, 1),
     ['723_profile_seed_income_questions'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, profile_builder_migrations, 38),
+
+    -- =========================================================================
+    -- PROPERTY INCOME — rental hub + per-property drill-down (UX option A).
+    -- 724-726 extend the Profile Builder with entity scoping + category
+    -- contexts; 727-729 add the SA105 line-item catalogue and rows; 730
+    -- seeds the admin-editable rental_business / property question sections.
+    -- =========================================================================
+    ['724_create_profile_entities'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 1),
+    ['725_answers_entity_scope'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 2),
+    ['726_categories_context'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 3),
+    ['727_create_property_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 4),
+    ['728_seed_property_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 5),
+    ['729_create_property_line_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 6),
+    ['730_seed_property_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, property_income_migrations, 7),
+
+    -- =========================================================================
+    -- SELF-EMPLOYMENT — sole-trader hub + per-business drill-down (same
+    -- architecture as Property Income). 731-732 add the SA103 fixed-box
+    -- catalogue + seed; 733 the per-year values; 734-735 the Capital
+    -- Allowances grid catalogues + cells; 736 seeds the admin-editable
+    -- 'business' contexted question section.
+    -- =========================================================================
+    ['731_create_business_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 1),
+    ['732_seed_business_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 2),
+    ['733_create_business_line_values'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 3),
+    ['734_create_business_ca_catalogues'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 4),
+    ['735_create_business_ca_values'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 5),
+    ['736_seed_business_section'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, self_employment_migrations, 6),
+
+    -- =========================================================================
+    -- OVERSEAS PROPERTY — "Land and property abroad" (SA106) hub. 737 adds
+    -- the catalogue schedule split; 738 seeds the overseas categories; 739
+    -- the income type; 740 the admin-editable per-holding question section.
+    -- =========================================================================
+    ['737_property_categories_schedule'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 1),
+    ['738_seed_overseas_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 2),
+    ['739_seed_overseas_income_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 3),
+    ['740_seed_overseas_section'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, overseas_property_migrations, 4),
+
+    -- ─────────────────────────────────────────────────────────────────────
+    -- PENSION PAYMENTS — "Relief: Pension payments" (SA100 TR4). 744-745
+    -- add the section catalogue + seed; 746 the payment rows; 747 the
+    -- income type. (Prefixes 741-743 are shared with unrelated invoicing
+    -- keys — full key strings differ, so ordering is unaffected; these
+    -- start at 744 purely for readability.)
+    -- ─────────────────────────────────────────────────────────────────────
+    ['744_create_pension_payment_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 1),
+    ['745_seed_pension_payment_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 2),
+    ['746_create_pension_payment_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 3),
+    ['747_seed_pension_payments_income_type'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_payments_migrations, 4),
+
+    -- Dynamic answer scope — DB-driven scoping model (user | entity | year)
+    -- so admins can define new form sections without code changes. Must run
+    -- before any seed migration that sets answer_scope on categories.
+    ['748_add_answer_scope_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 1),
+    ['748a_add_entity_type_column'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 2),
+    ['748b_add_tax_year_column'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 3),
+    ['748c_add_year_scope_unique_index'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 4),
+    ['749_backfill_answer_scope_from_context'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dynamic_answer_scope_migrations, 5),
+
+    -- SA100 dividends & interest (keys 750, 750a, 751): EXTRACTED to
+    -- diy-tax-return-uk consumer repo as tax_copilot_app plugin
+    -- migrations 20260801_001..003. Phase 3 slice 1 of the
+    -- migration-decoupling plan.
+
+    -- Rental joint-owner details — first consumer of the config-driven
+    -- repeating_group widget contract. See
+    -- lapis/migrations/rental-joint-owner-questions.lua for the config
+    -- schema and the widget contract, and frontend
+    -- src/components/profile/RepeatingGroupField.tsx for the renderer.
+    -- Runs AFTER 700* (property-income-system) so the rental-business
+    -- category and rb_jointly_let question exist.
+    ['755_seed_rental_joint_owners'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, rental_joint_owner_migrations, 1),
+    ['756_seed_rental_joint_owners_visibility'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, rental_joint_owner_migrations, 2),
+
+    -- ─────────────────────────────────────────────────────────────────────
+    -- FORM SECTIONS ENGINE — generic "sections with sub-form rows" pages.
+    -- 752 the section catalogue; 753 the user rows; 754 ports pension
+    -- payments onto the engine (must sort after 744-747, which it does).
+    -- Renumbered from 748-750 when the dividends feature claimed those
+    -- prefixes on main — full key strings never collided, this is purely
+    -- for one-feature-per-prefix readability.
+    -- ─────────────────────────────────────────────────────────────────────
+    ['752_create_tax_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 1),
+    ['753_create_tax_form_items'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 2),
+    ['754_port_pension_form_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 3),
+    -- 755 adds RECORD MODE to the engine (fixed field-forms per repeating
+    -- record — the SA102 employment shape); 756/757 are salary content.
+    ['755_create_tax_form_records'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, form_sections_migrations, 4),
+    ['756_seed_salary_sa102_sections'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 1),
+    ['757_port_flat_salary_entries'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_employment_migrations, 2),
+    -- 758/759 — Phase 1 profile-builder unification for salary. Catalog
+    -- MUST run before backfill (backfill looks up question_id by
+    -- question_key). Both are idempotent + reversible per the design
+    -- doc. Feature-flag flip on the frontend is separate (env var).
+    ['758_seed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 1),
+    ['759_backfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 1),
+    -- 760/761 — re-run pass. In an earlier iteration the catalog seed
+    -- passed nil to db.query for the categories with no description
+    -- (close-company / foreign / notes); Lua truncates varargs at the
+    -- first nil, so the SQL fired with unfilled placeholders and the
+    -- whole seed aborted after "Employment details". Envs that ran the
+    -- buggy 758 have only 1 of the 7 employment categories. 760 re-runs
+    -- the (now fixed) seed and 761 re-runs the backfill so any answers
+    -- that were silently dropped (because their question_id didn't yet
+    -- exist) get their user_profile_answers row this time. Both are
+    -- idempotent — a fresh env where 758/759 already succeeded treats
+    -- 760/761 as no-ops.
+    ['760_reseed_salary_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_catalog_migrations, 2),
+    ['761_rebackfill_salary_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, salary_profile_builder_backfill_migrations, 2),
+    -- 762/763 — Phase 2 profile-builder unification for pension_payments.
+    -- Catalog MUST run before backfill (backfill looks up question_id
+    -- by question_key). Both are idempotent + reversible per the design
+    -- doc. Feature-flag flip on the frontend is separate (env var).
+    -- Data model note: pension is year-scoped (no user_profile_entities
+    -- rows) with one aggregated JSON array per (user, year, section) —
+    -- differs from salary's per-entity + typed-column shape.
+    ['762_seed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 1),
+    ['763_backfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 1),
+    -- 764/765 — safety-net re-run for pension (same pattern as
+    -- 760/761 for salary). Idempotent — a fresh env where 762/763
+    -- already fully succeeded treats these as no-ops.
+    ['764_reseed_pension_profile_builder_catalog'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_catalog_migrations, 2),
+    ['765_rebackfill_pension_to_profile_builder'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, pension_profile_builder_backfill_migrations, 2),
+    -- SA110 Tax Calculation Summary + SA108 Capital Gains Tax (keys
+    -- 766, 767, 768, 769): EXTRACTED to diy-tax-return-uk consumer
+    -- repo as tax_copilot_app plugin migrations 20260801_004..007.
+    -- Phase 3 slice 1.
+    -- 770/771 — linked-form metadata columns on income_types + seed
+    -- defaults for the 8 known types. Retires the hardcoded
+    -- "SA100 boxes" card header on /my-income/[type]. Both idempotent.
+    ['770_add_income_types_linked_form_columns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 1),
+    ['771_seed_income_types_linked_form_defaults'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, income_types_linked_form_migrations, 2),
+
+    -- SA101 Additional information + linked-form defaults + the SA10x
+    -- completion round (SA105 property, SA109 residence, SA106 foreign
+    -- income, SA103F self-employment) — keys 772, 773, 774, 775, 776,
+    -- 785, 786, 787, 788, 789, 790: EXTRACTED to diy-tax-return-uk
+    -- consumer repo as tax_copilot_app plugin migrations
+    -- 20260801_008..018. Phase 3 slice 1.
+
+    -- 791/792 — Dividend panels. Seeds the foreign_dividends +
+    -- other_dividends income types, three itemised-table categories
+    -- (one per tab), and deactivates the old flat dividend boxes.
+    -- Must run AFTER 750/751 (which seeded those boxes) so the
+    -- retirement step has something to deactivate — key order
+    -- guarantees it. 792 is the re-run safety net (convention: 760 /
+    -- 764 / 767).
+    ['791_seed_dividend_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dividend_panels_migrations, 1),
+    ['792_reseed_dividend_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, dividend_panels_migrations, 2),
+
+    -- 793/794 — Interest panels. Seeds the foreign_interest income
+    -- type and four itemised categories: untaxed UK / taxed UK /
+    -- notes under context='interest', and foreign savings interest
+    -- under context='foreign_interest'. Adding a context to
+    -- 'interest' also switches /my-income/interest out of flat-entry
+    -- mode (my_incomes rows stay in the DB, the Add-income surface
+    -- stops rendering) — same trade 791 made for dividends. 794 is
+    -- the re-run safety net (convention: 760 / 764 / 767 / 792).
+    ['793_seed_interest_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, interest_panels_migrations, 1),
+    ['794_reseed_interest_panels'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, interest_panels_migrations, 2),
+
+    -- =========================================================================
+    -- Academy (LMS): courses + lessons (namespace-scoped). Feature-gated, so
+    -- these only run when PROJECT_CODE enables `academy`.
+    -- =========================================================================
+    ['800_create_academy_courses'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 1),
+    ['801_academy_courses_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 2),
+    ['802_create_academy_lessons'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 3),
+    ['803_academy_lessons_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 4),
+    ['818_create_academy_instructor_profiles'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 5),
+    -- Seed the "academy" tenant namespace (owner + roles + sidebar). Runs after the
+    -- namespace tables, the admin user, and the academy menu/RBAC migrations, so it
+    -- can wire itself to all of them. Prefix 822: 819/820 are this repo's academy
+    -- progress migrations and 819/820/821 are tax identity-lock — distinct features,
+    -- but 822 is free everywhere, avoiding any numeric-prefix dedup in the `all` preset.
+    ['822_seed_academy_namespace'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 6),
+    -- Admin-approval gate: widen the course status CHECK to allow pending_review.
+    -- =========================================================================
+    -- PERSONAL DETAILS CLEANUP — NINO validation + duplicate-question soft-delete
+    -- Undoes the schema-level ambiguity that caused the 2026-07-29
+    -- IDENTITY_LOCK_ACTIVE outage on /profile (profile-builder.lua also
+    -- got a defence-in-depth per-answer error path in the same PR).
+    -- =========================================================================
+    ['825_profile_nino_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 1),
+    ['826_profile_deactivate_surname'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 2),
+    ['827_profile_migrate_ni_number_to_nino'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 3),
+    ['828_profile_deactivate_ni_number'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 4),
+    ['829_profile_utr_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 5),
+    ['830_profile_migrate_lua_patterns_to_pcre'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 6),
+    ['831_profile_heal_empty_identity_locks'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 7),
+
+    ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
+    -- Add a jsonb `tags` array to courses (create-or-select category + multi-tags).
+    ['824_academy_course_tags'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 8),
+    -- Academy sidebar menu item + RBAC module ("courses") + role grants
+    ['804_seed_academy_menu_items'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 1),
+    ['805_register_academy_modules'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 2),
+    ['806_grant_academy_permissions'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 3),
+    ['807_enable_academy_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_menu_migrations, 4),
+    -- Academy enrollments (learner ↔ course)
+    ['808_create_academy_enrollments'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_enrollment_migrations, 1),
+    ['809_academy_enrollments_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_enrollment_migrations, 2),
+    -- Academy money layer (platform-as-merchant: creator bank+fee, plans, subs,
+    -- payments ledger, settings, payouts)
+    ['810_create_creator_accounts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 1),
+    ['811_create_creator_subscription_plans'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 2),
+    ['812_create_academy_subscriptions'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 3),
+    ['813_create_academy_payments'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 4),
+    ['814_create_processed_stripe_events'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 5),
+    ['815_create_academy_settings'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 6),
+    ['816_create_creator_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 7),
+    ['817_academy_per_instructor_payouts'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_payment_migrations, 8),
+
+    -- Academy learner progress (completed lessons -> dashboard progress bars)
+    ['819_create_academy_lesson_progress'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 1),
+    ['820_academy_lesson_progress_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 2),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

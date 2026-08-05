@@ -67,10 +67,13 @@ return {
                 -- Notes
                 notes TEXT,
 
-                -- Conversion tracking
+                -- Conversion tracking. Plain BIGINT columns here: crm_contacts/
+                -- crm_deals only exist when the CRM feature is enabled, and this
+                -- step runs for EVERY project. Step [3] (registry key 512,
+                -- CRM-gated) attaches the foreign keys where the targets exist.
                 converted_at TIMESTAMP,
-                converted_contact_id BIGINT REFERENCES crm_contacts(id) ON DELETE SET NULL,
-                converted_deal_id BIGINT REFERENCES crm_deals(id) ON DELETE SET NULL,
+                converted_contact_id BIGINT,
+                converted_deal_id BIGINT,
 
                 -- Standard CRM columns
                 metadata JSONB DEFAULT '{}',
@@ -122,6 +125,46 @@ return {
                     FOREIGN KEY (enquiry_id) REFERENCES enquiries(id) ON DELETE SET NULL
                 ]])
             end)
+        end
+    end,
+
+    -- ========================================
+    -- [3] Attach conversion FKs to crm_contacts/crm_deals (CRM-only)
+    -- Registered as key 512, gated on the CRM feature, sorting after
+    -- 501-504 so the FK targets exist. Guarded per-column so databases
+    -- created before this split (inline REFERENCES in step [1]) no-op.
+    -- ========================================
+    [3] = function()
+        if not table_exists("crm_leads") then return end
+
+        local function fk_exists(col)
+            local result = db.query([[
+                SELECT EXISTS (
+                    SELECT FROM information_schema.key_column_usage kcu
+                    JOIN information_schema.table_constraints tc
+                      ON tc.constraint_name = kcu.constraint_name
+                     AND tc.table_name = kcu.table_name
+                    WHERE tc.table_name = 'crm_leads'
+                      AND tc.constraint_type = 'FOREIGN KEY'
+                      AND kcu.column_name = ?
+                ) as exists
+            ]], col)
+            return result and result[1] and result[1].exists
+        end
+
+        if table_exists("crm_contacts") and not fk_exists("converted_contact_id") then
+            db.query([[
+                ALTER TABLE crm_leads
+                ADD CONSTRAINT crm_leads_converted_contact_fk
+                FOREIGN KEY (converted_contact_id) REFERENCES crm_contacts(id) ON DELETE SET NULL
+            ]])
+        end
+        if table_exists("crm_deals") and not fk_exists("converted_deal_id") then
+            db.query([[
+                ALTER TABLE crm_leads
+                ADD CONSTRAINT crm_leads_converted_deal_fk
+                FOREIGN KEY (converted_deal_id) REFERENCES crm_deals(id) ON DELETE SET NULL
+            ]])
         end
     end
 }

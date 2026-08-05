@@ -78,6 +78,19 @@ function IncomeTypeQueries.active_keys()
     return set
 end
 
+-- Active keys that may be WRITTEN as my_incomes rows. Catalogue rows with
+-- allows_manual_entry = false (e.g. 'pension_payments' — a RELIEF whose
+-- amounts must never be summed as income) stay selectable in the profile
+-- questionnaire and visible in /types, but my-incomes create/type-change
+-- validates against THIS set.
+function IncomeTypeQueries.manual_entry_keys()
+    local rows = db.query(
+        "SELECT income_type_key FROM income_types WHERE is_active = true AND allows_manual_entry = true")
+    local set = {}
+    for _, r in ipairs(rows or {}) do set[r.income_type_key] = true end
+    return set
+end
+
 -- ── Admin CRUD (consumed by routes/tax-admin-income-types.lua) ───────────────
 
 -- params: { include_inactive? = "false" }. Each row carries usage_count.
@@ -121,14 +134,19 @@ function IncomeTypeQueries.create(body)
     end
 
     local uuid = Global.generateUUID()
+    -- linked_form_* columns are admin-configurable metadata pointing at
+    -- the HMRC reference form for this income type (SA100/SA110/SA108/
+    -- etc). All three optional — nil coerces to db.NULL. Rendered by
+    -- the frontend as a small reference card on /my-income/[type].
     db.query([[
         INSERT INTO income_types
             (uuid, income_type_key, display_name, description,
              required_documents, allows_manual_entry,
              keyword_rules, category_affinity, rules_markdown,
              hmrc_mapping, display_order, is_active, namespace_id,
+             linked_form_title, linked_form_description, linked_form_weblink,
              created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?::jsonb, ?, ?::jsonb, ?, ?, ?, NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?::jsonb, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     ]],
         uuid,
         body.income_type_key,
@@ -142,7 +160,10 @@ function IncomeTypeQueries.create(body)
         enc_json(body.hmrc_mapping, false),
         body.display_order or 100,
         body.is_active ~= false,                     -- default true
-        body.namespace_id or db.NULL
+        body.namespace_id or db.NULL,
+        body.linked_form_title or db.NULL,
+        body.linked_form_description or db.NULL,
+        body.linked_form_weblink or db.NULL
     )
 
     local created = db.query("SELECT * FROM income_types WHERE uuid = ?", uuid)
@@ -175,6 +196,14 @@ function IncomeTypeQueries.update(uuid, body)
     add("hmrc_mapping", body.hmrc_mapping, "object")
     add("rules_markdown", body.rules_markdown)
     add("display_order", body.display_order)
+    -- Linked-form metadata — admin renames the reference form (SA110 →
+    -- SA103) via the /admin/income-types edit modal and this catches
+    -- it. Empty string is a valid "clear" operation (add() only skips
+    -- when the field is nil, not when it's ""), so a partial payload
+    -- doesn't accidentally wipe a value the admin didn't touch.
+    add("linked_form_title", body.linked_form_title)
+    add("linked_form_description", body.linked_form_description)
+    add("linked_form_weblink", body.linked_form_weblink)
     -- Booleans handled explicitly: Lua truthiness would coerce a JSON false.
     if body.allows_manual_entry ~= nil then
         table.insert(sets, "allows_manual_entry = " ..
@@ -183,6 +212,16 @@ function IncomeTypeQueries.update(uuid, body)
     if body.is_active ~= nil then
         table.insert(sets, "is_active = " ..
             db.interpolate_query("?", body.is_active and true or false))
+    end
+    -- Admin-controlled opt-in for the /file-my-tax local tax preview
+    -- (see backend/app/api/my_income_tax.py in the consumer repo).
+    -- Column is added by consumer migration
+    -- 20260804_002_income_types_include_in_tax_preview.lua with a
+    -- default of FALSE — the preview only sums income types an admin
+    -- has explicitly ticked here.
+    if body.include_in_tax_preview ~= nil then
+        table.insert(sets, "include_in_tax_preview = " ..
+            db.interpolate_query("?", body.include_in_tax_preview and true or false))
     end
     table.insert(sets, "updated_at = NOW()")
 

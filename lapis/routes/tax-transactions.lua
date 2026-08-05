@@ -125,6 +125,28 @@ local function build_user_filters(params, user_id)
         end
     end
 
+    -- UUID filters — the frontend only ever has UUIDs (BankAccount.id
+    -- and Statement.id in the TypeScript surface are both the opaque
+    -- ``uuid`` column, never the numeric PK). Filtering by UUID means
+    -- the client side of /transactions can drop bank/statement values
+    -- straight from its dropdowns into the query string with no
+    -- extra "resolve uuid -> integer" round-trip.
+    --
+    -- The main list query LEFT JOINs both tax_bank_accounts (as ``ba``)
+    -- and tax_statements (as ``s``) already, so we just add conditions
+    -- on their ``uuid`` columns. Kept as separate params from the
+    -- integer forms above so no existing caller relying on the numeric
+    -- ``bank_account_id`` breaks — both work in parallel.
+    if params.bank_account_uuid and params.bank_account_uuid ~= "" then
+        table.insert(conds, "ba.uuid = ?")
+        table.insert(vals, params.bank_account_uuid)
+    end
+
+    if params.statement_uuid and params.statement_uuid ~= "" then
+        table.insert(conds, "s.uuid = ?")
+        table.insert(vals, params.statement_uuid)
+    end
+
     return conds, vals
 end
 

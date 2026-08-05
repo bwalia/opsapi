@@ -20,13 +20,19 @@ local AuthMiddleware = require("middleware.auth")
 -- than a hard-coded Lua list. Both helpers read the active set on demand —
 -- low-frequency paths (validation + the /types dropdown), so no cache needed.
 -- See queries/IncomeTypeQueries.lua and routes/tax-admin-income-types.lua.
+-- Writes validate against manual_entry_keys(), not active_keys(): catalogue
+-- rows with allows_manual_entry = false (e.g. 'pension_payments', a RELIEF)
+-- are selectable in the questionnaire but must never become my_incomes rows —
+-- the calculation sums my_incomes as INCOME, which would move the estimate
+-- the wrong way for a relief. Unchanged types on update are grandfathered
+-- below, so existing rows stay editable if an admin flips the flag later.
 local function valid_income_type(key)
     if not key or key == "" then return false end
-    return IncomeTypeQueries.active_keys()[key] == true
+    return IncomeTypeQueries.manual_entry_keys()[key] == true
 end
 local function income_type_list()
     local keys = {}
-    for k in pairs(IncomeTypeQueries.active_keys()) do keys[#keys + 1] = k end
+    for k in pairs(IncomeTypeQueries.manual_entry_keys()) do keys[#keys + 1] = k end
     table.sort(keys)
     return keys
 end
@@ -113,8 +119,24 @@ return function(app)
             data[#data + 1] = {
                 key = r.income_type_key,
                 label = r.display_name,
+                -- Admin-configured plain-English description shown under the
+                -- H1 on the income type's page. Optional in the schema (text
+                -- null=true) — pass through as-is, incl. the empty string,
+                -- so the frontend can distinguish "admin left it blank" from
+                -- "backend forgot to send it".
+                description = r.description,
                 required_documents = docs,
                 allows_manual_entry = r.allows_manual_entry,
+                -- Admin-configured "linked HMRC form" metadata (SA100 /
+                -- SA110 / SA108 / etc). Rendered as a small reference card
+                -- above the profile-builder ContextSections on
+                -- /my-income/[type]. All three optional — omit or blank
+                -- either field and the frontend renders the fallback layout.
+                -- See migration income-types-linked-form-metadata for the
+                -- column semantics + initial seed defaults.
+                linked_form_title = r.linked_form_title,
+                linked_form_description = r.linked_form_description,
+                linked_form_weblink = r.linked_form_weblink,
             }
         end
         -- Force [] (not {}) when empty so JSON consumers that do

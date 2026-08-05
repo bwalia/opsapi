@@ -1,0 +1,74 @@
+# ── OpsAPI on workstation.co.uk — INTEGRATION ──────────────────────────────
+# Helm RELEASE: workstation-opsapi   Namespace: int   Cluster: k3s1
+# Public host: https://int-opsapi.workstation.co.uk
+#
+# This file describes the NEW `workstation-opsapi` release — a dedicated
+# deployment that owns its own Ingress for the *-opsapi.workstation.co.uk
+# host. It is deliberately SEPARATE from values-int.yaml (which drives the
+# legacy `diytaxreturn-lapis` release still serving *.diytaxreturn.co.uk).
+# The two releases share the chart, the namespace, and the same Vault-backed
+# secret data, but have distinct release names so nothing on the old domain
+# is disturbed. See deploy-k3s.yml.
+env: int
+app: workstation-opsapi
+
+# Single source of truth for the DNS + wslproxy jobs (deploy-k3s.yml reads
+# this `host:` via awk). MUST equal ingress.hosts[0].host below.
+host: int-opsapi.workstation.co.uk
+
+# Scope migrations to the tax app only — see values-int.yaml for the full
+# rationale (a CRM migration drift took acc down for 22h once).
+projectCode: tax_copilot
+
+# Password-reset email link target (the Next.js dashboard, unchanged — the
+# API moving to workstation.co.uk does not move the frontend). Migration 489
+# bootstraps namespaces.allowed_redirect_origins from this.
+frontendUrl: "https://int.diytaxreturn.co.uk"
+
+image:
+  repository: bwalia/opsapi
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Dedicated Ingress for this release. className `wslproxy` = the k3s1 traefik
+# ingress class the WSL Proxy edge proxies to. NO cert-manager annotation and
+# NO tls block: cert-manager is not installed on k3s1 — TLS is terminated at
+# the WSL Proxy edge (ssl_enabled in the committed server JSON), and traefik
+# serves plain HTTP :80 behind it, routing by Host header.
+ingress:
+  enabled: true
+  className: wslproxy
+  annotations: {}
+  hosts:
+    - host: int-opsapi.workstation.co.uk
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Empty map (NOT unset): the chart's ExternalSecret reads
+# `.Values.database.host | default <Vault POSTGRES_HOST>`, which nil-pointers
+# if `database` is absent entirely. `{}` leaves `.host` unset so the Vault
+# fallback fires — the correct in-cluster address for diytaxreturn-pg on k3s1.
+# The legacy 10.96.x IP in values-int.yaml is a dead k3s0-era ClusterIP.
+database: {}
+
+externalSecret:
+  enabled: true
+
+setup:
+  adminEmail: ""
+  adminPassword: ""
+  namespaceSlug: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80

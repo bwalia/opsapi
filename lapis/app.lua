@@ -4,6 +4,20 @@ local CorsMiddleware = require("middleware.cors")
 local GlobalRateLimit = require("middleware.global-rate-limit")
 local Errors = require("lib.errors")
 
+-- Build metadata baked into the image at `docker build` time — the CI
+-- workflow passes `--build-arg APP_VERSION=$(git describe --tags --always)`
+-- + BUILD_NUMBER + BUILD_TIME, and the Dockerfile turns them into container
+-- ENVs. Every environment (int/test/acc/prod) pulls the same
+-- docker.io/bwalia/opsapi:latest tag, so they all report the same version
+-- once a new build has propagated — which is the point.
+--
+-- Captured once at module-load rather than re-read per request because it
+-- can't change without a pod restart anyway. Fallbacks match what the
+-- Dockerfile ARG defaults are so a locally-run opsapi (no CI) still boots.
+local APP_VERSION = os.getenv("APP_VERSION") or "dev"
+local BUILD_NUMBER = os.getenv("BUILD_NUMBER") or "local"
+local BUILD_TIME = os.getenv("BUILD_TIME") or ""
+
 -- Enable CORS
 CorsMiddleware.enable(app)
 
@@ -30,7 +44,12 @@ app:get("/", function(self)
     return {
         json = {
             message = "OpsAPI is running",
-            version = "1.0.0",
+            -- All three fields baked in at `docker build` time (see the
+            -- module-level constants above). Same across every environment
+            -- pulling the same :latest tag.
+            version = APP_VERSION,
+            build_number = BUILD_NUMBER,
+            build_time = BUILD_TIME,
             endpoints = {
                 documentation = "/swagger",
                 docs = "/docs",
@@ -143,7 +162,12 @@ app:get("/api/v2/system/info", function(self)
             parsed_codes = info_or_err.project_codes,
             enabled_features = info_or_err.enabled_features,
             environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
-            version = "1.0.0",
+            -- Same git-derived version everything else reports (see module-
+            -- level APP_VERSION). Keeps this endpoint in sync with `/`
+            -- and the /metrics gauge so all three agree.
+            version = APP_VERSION,
+            build_number = BUILD_NUMBER,
+            build_time = BUILD_TIME,
             timestamp = ngx.time(),
         }
     }
@@ -201,7 +225,7 @@ opsapi_up 1
 
 # HELP opsapi_info API information
 # TYPE opsapi_info gauge
-opsapi_info{version="1.0.0"} 1
+opsapi_info{version="]] .. APP_VERSION .. [["} 1
 
 # HELP opsapi_memory_usage_bytes Memory usage in bytes
 # TYPE opsapi_memory_usage_bytes gauge
@@ -473,6 +497,11 @@ load_if("tax_copilot", "routes.tax-training-data")
 load_if("tax_copilot", "routes.tax-admin")
 load_if("tax_copilot", "routes.tax-admin-categories")
 load_if("tax_copilot", "routes.tax-admin-profiles")
+-- Admin unlock endpoint for the identity-lock feature (2026-07-13).
+-- Requires the `identity_lock.unlock` RBAC permission (module seeded in
+-- migration [89]); platform admins / namespace owners bypass. See
+-- routes/admin-identity-lock.lua for the full contract + audit shape.
+load_if("tax_copilot", "routes.admin-identity-lock")
 load_if("tax_copilot", "routes.tax-admin-income-types")
 load_if("tax_copilot", "routes.tax-app-settings")
 load_if("tax_copilot", "routes.tax-admin-custom-categories")
@@ -480,6 +509,26 @@ load_if("tax_copilot", "routes.tax-custom-categories")
 load_if("tax_copilot", "routes.tax-categories")
 load_if("tax_copilot", "routes.tax-support")
 load_if("tax_copilot", "routes.my-incomes")
+-- Rental hub: properties (user_profile_entities) + SA105 line items.
+-- Property-scope questions stay under routes.profile-builder (?context=&entity=).
+load_if("tax_copilot", "routes.tax-properties")
+-- Self-employment hub: businesses (user_profile_entities) + SA103 fixed-box
+-- values + Capital Allowances grid. Business-scope questions stay under
+-- routes.profile-builder (?context=business&entity=).
+load_if("tax_copilot", "routes.tax-businesses")
+-- Overseas property hub ("Land and property abroad", SA106): same engine as
+-- tax-properties with entity_type='overseas_property' + overseas catalogue.
+load_if("tax_copilot", "routes.tax-overseas-properties")
+-- Employment hub (Salary via Profile Builder — Phase 1 of the profile-builder
+-- unification plan). Entity CRUD over user_profile_entities of entity_type
+-- 'employment'; questions come from routes.profile-builder scoped by that
+-- entity, so admins add / edit fields without shipping code.
+load_if("tax_copilot", "routes.tax-employments")
+-- Form Sections engine: generic admin-defined sections + sub-form rows
+-- (pension payments and every future screen of that shape). The admin
+-- surface is what lets new screens ship without code changes.
+load_if("tax_copilot", "routes.tax-form-sections")
+load_if("tax_copilot", "routes.tax-admin-form-sections")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
 load_if("tax_copilot", "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")
@@ -494,8 +543,16 @@ load_if("crm", "routes.crm-accounts")
 load_if("crm", "routes.crm-contacts")
 load_if("crm", "routes.crm-deals")
 load_if("crm", "routes.crm-activities")
-load_if("crm", "routes.crm-leads")
-load_if("crm", "routes.crm-leads-public")
+-- Leads are core: capture (public submit + manual CRUD) works for every
+-- project regardless of whether the full CRM feature (accounts, contacts,
+-- deals, pipelines) is enabled. A lead is inbound raw contact info — most
+-- projects need a way to receive it even if they don't run the pipeline
+-- side of CRM. The convert-to-contact/deal endpoint inside crm-leads
+-- self-gates on the CRM feature (it needs crm_contacts + crm_deals), so
+-- the "core"-ness only exposes capture + list + edit + archive, never the
+-- convert path.
+safe_load_routes("routes.crm-leads")
+safe_load_routes("routes.crm-leads-public")
 
 -- ============================================
 -- TIMESHEETS (Time tracking and approval)
@@ -512,6 +569,14 @@ load_if("invoicing", "routes.document-templates")
 -- ACCOUNTING / BOOKKEEPING (AI-powered)
 -- ============================================
 load_if("accounting", "routes.accounting")
+
+-- ============================================
+-- ACADEMY (LMS: courses, lessons, rich content)
+-- ============================================
+load_if("academy", "routes.academy")
+load_if("academy", "routes.academy-billing")
+load_if("academy", "routes.academy-stripe-webhook")
+load_if("academy", "routes.academy-admin")
 
 -- ============================================
 -- PROJECT MODULE ROUTES (auto-loaded from /projects/)

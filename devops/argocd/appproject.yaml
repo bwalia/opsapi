@@ -1,0 +1,71 @@
+# =========================================================================
+# AppProject — opsapi
+# =========================================================================
+# Security boundary for every Application that deploys this repo's helm chart.
+# A rogue Application targeting opsapi's source repo cannot deploy outside the
+# {dev,int,acc,prod} namespaces because ArgoCD rejects the sync against this
+# Project's destinations list. This is the *one* thing that's safe to apply
+# even before you're ready to turn on auto-sync — it only DEFINES permissions,
+# it doesn't sync anything by itself.
+#
+# Apply with:  kubectl apply -f devops/argocd/appproject.yaml
+# =========================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: opsapi
+  namespace: argocd
+  # Keep this Project alive even if the bootstrap App is deleted —
+  # otherwise removing the bootstrap can cascade-delete every env.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: |
+    OpsAPI / DIY Tax Return Lapis backend — all four delivery environments.
+    Deploys the helm chart at devops/helm-charts/diytaxreturn-lapis/ using
+    per-env values files (values-{dev,int,acc,prod}.yaml).
+
+  # Only this repo's source is allowed. ArgoCD rejects any Application
+  # in this Project that points at a different repoURL.
+  sourceRepos:
+    - https://github.com/bwalia/opsapi.git
+
+  # Whitelist of namespaces this Project may deploy into.
+  # Adding a new env later = one entry here + one element in the
+  # ApplicationSet's list generator.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: dev
+    - server: https://kubernetes.default.svc
+      namespace: int
+    - server: https://kubernetes.default.svc
+      namespace: acc
+    - server: https://kubernetes.default.svc
+      namespace: prod
+
+  # The chart never creates cluster-scoped resources (no CRDs, no
+  # ClusterRoles, no ValidatingWebhookConfig, etc). Keeping this empty
+  # is the strongest blast-radius limit available — even if someone
+  # adds a cluster-scoped template to the chart by mistake, ArgoCD
+  # refuses to apply it.
+  clusterResourceWhitelist: []
+
+  # Inside each destination namespace, the chart may create any kind
+  # of namespaced resource (Deployment, Service, Ingress, CronJob,
+  # ConfigMap, ExternalSecret, etc — see templates/ for the full set).
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Sync windows — optional safety rails. Uncomment to enforce them.
+  # Useful once prod is ArgoCD-managed: prevent any sync into prod
+  # during UK office hours so a rogue auto-sync can't ship at 09:30
+  # on a Monday.
+  #
+  # syncWindows:
+  #   - kind: deny
+  #     schedule: "0 9-17 * * 1-5"        # Mon-Fri 09:00-17:00 UTC
+  #     duration: 8h
+  #     applications:
+  #       - opsapi-prod
+  #     manualSync: true                  # humans can still click sync

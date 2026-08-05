@@ -1,0 +1,288 @@
+# workstation-minio — MinIO owned by the WORKSTATION product.
+#
+# Why this exists (and why it is NOT diytaxreturn-minio)
+# -----------------------------------------------------
+# This repo IS the workstation product. `diy-tax-return-uk` is a SEPARATE
+# project that consumes our Docker Hub image and deploys it with its own chart
+# (diy-tax-return-uk/devops/helm-charts/diytaxreturn-lapis). So nothing here
+# should deploy, own, or depend on `diytaxreturn-*` resources — this stack is
+# entirely workstation-owned and self-contained.
+#
+# Serves the S3 API for <env>-minio.workstation.co.uk:
+#   <env>-minio.workstation.co.uk
+#     -> Cloudflare (*.workstation.co.uk wildcard CNAMEs to the edge)
+#     -> pop0.wslproxy.com  (vhost ssl_enabled + ssl_auto_renew => real LE cert)
+#     -> 13.42.188.136:80   (k3s1 traefik, wslproxy ingress class)
+#     -> Ingress workstation-minio -> workstation-minio:9000 (S3 API)
+#
+# Edge vhosts live in .github/wslproxy/data/{rules,servers}/prod/
+# (rule: minio-prod-default), pushed by wslproxy-register-domains.yml.
+#
+# Credentials: the Secret `workstation-minio-creds` is NOT in git. It is created
+# out-of-band with generated values:
+#   kubectl -n <ns> create secret generic workstation-minio-creds \
+#     --from-literal=MINIO_ROOT_USER=... --from-literal=MINIO_ROOT_PASSWORD=...
+# Read them back with:
+#   kubectl -n <ns> get secret workstation-minio-creds \
+#     -o go-template='{{range $k,$v := .data}}{{$k}}={{$v|base64decode}}{{"\n"}}{{end}}'
+#
+# Apply with:
+#   kubectl apply -f devops/k8s/workstation-minio.yaml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workstation-minio-data
+  namespace: int
+  labels: { app: workstation-minio }
+spec:
+  accessModes: [ReadWriteOnce]
+  # Two StorageClasses are marked default on this cluster (local-path and
+  # longhorn), so name it explicitly rather than relying on the default.
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workstation-minio
+  namespace: int
+  labels: { app: workstation-minio }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: workstation-minio }
+  template:
+    metadata:
+      labels: { app: workstation-minio }
+    spec:
+      containers:
+        - name: workstation-minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef: { name: workstation-minio-creds }
+          ports:
+            - { name: s3, containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: 9000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: 9000 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: workstation-minio-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workstation-minio
+  namespace: int
+  labels: { app: workstation-minio }
+spec:
+  type: ClusterIP
+  selector: { app: workstation-minio }
+  ports:
+    - { name: s3, port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: workstation-minio
+  namespace: int
+  labels: { app: workstation-minio }
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: int-minio.workstation.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: workstation-minio
+                port:
+                  number: 9000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workstation-minio-data
+  namespace: test
+  labels: { app: workstation-minio }
+spec:
+  accessModes: [ReadWriteOnce]
+  # Two StorageClasses are marked default on this cluster (local-path and
+  # longhorn), so name it explicitly rather than relying on the default.
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workstation-minio
+  namespace: test
+  labels: { app: workstation-minio }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: workstation-minio }
+  template:
+    metadata:
+      labels: { app: workstation-minio }
+    spec:
+      containers:
+        - name: workstation-minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef: { name: workstation-minio-creds }
+          ports:
+            - { name: s3, containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: 9000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: 9000 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: workstation-minio-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workstation-minio
+  namespace: test
+  labels: { app: workstation-minio }
+spec:
+  type: ClusterIP
+  selector: { app: workstation-minio }
+  ports:
+    - { name: s3, port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: workstation-minio
+  namespace: test
+  labels: { app: workstation-minio }
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: test-minio.workstation.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: workstation-minio
+                port:
+                  number: 9000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workstation-minio-data
+  namespace: acc
+  labels: { app: workstation-minio }
+spec:
+  accessModes: [ReadWriteOnce]
+  # Two StorageClasses are marked default on this cluster (local-path and
+  # longhorn), so name it explicitly rather than relying on the default.
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workstation-minio
+  namespace: acc
+  labels: { app: workstation-minio }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: workstation-minio }
+  template:
+    metadata:
+      labels: { app: workstation-minio }
+    spec:
+      containers:
+        - name: workstation-minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef: { name: workstation-minio-creds }
+          ports:
+            - { name: s3, containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: 9000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: 9000 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: workstation-minio-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workstation-minio
+  namespace: acc
+  labels: { app: workstation-minio }
+spec:
+  type: ClusterIP
+  selector: { app: workstation-minio }
+  ports:
+    - { name: s3, port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: workstation-minio
+  namespace: acc
+  labels: { app: workstation-minio }
+spec:
+  ingressClassName: wslproxy
+  rules:
+    - host: acc-minio.workstation.co.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: workstation-minio
+                port:
+                  number: 9000
