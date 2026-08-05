@@ -21,6 +21,22 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
+      # The postStart bootstrap attaches to nginx via `lapis exec`, which must
+      # signal the nginx master from the hook's exec session. On Ubuntu nodes
+      # the kernel mediates AppArmor signals and exec sessions run under a
+      # stacked label (cri-containerd.apparmor.d//&unconfined), so the kill is
+      # denied and the hook fails -> CrashLoopBackOff (int, lubuntu001,
+      # 2026-08-05). Debian nodes do not mediate signals. Keep this workload
+      # off Ubuntu nodes until the node profile allows cross-label signals.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - lubuntu001
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
