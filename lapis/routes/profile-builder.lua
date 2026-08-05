@@ -52,9 +52,34 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
 -- doesn't roll back the caller's answer save, and a subsequent
 -- profile visit will re-attempt.
 local function mirror_nino_to_tax_user_profile(user_id, user_uuid, namespace_id, raw_value)
-    if raw_value == nil or raw_value == cjson.null then return end
+    -- Guard rails logged loudly rather than silently returning — the
+    -- silent-return path masked a call-site arity bug for the first
+    -- 24 hours of this helper's life (2026-08-05: PR #523 updated the
+    -- signature to add user_uuid but only reached one of the two call
+    -- sites via `replace_all`, so the other passed 3 args → raw_value
+    -- resolved to nil → this function noop'd invisibly). If any call
+    -- site ever passes something unusable we want it visible in
+    -- ngx.log(ngx.ERR), not silent.
+    if raw_value == nil or raw_value == cjson.null then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror skipped: raw_value is nil ",
+            "(user_id=", tostring(user_id), " user_uuid=", tostring(user_uuid),
+            " namespace_id=", tostring(namespace_id), ")")
+        return
+    end
     local canonical = tostring(raw_value):upper():gsub("%s+", "")
-    if canonical == "" then return end
+    if canonical == "" then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror skipped: canonical value is empty ",
+            "(user_id=", tostring(user_id), " raw=", tostring(raw_value), ")")
+        return
+    end
+    if not user_uuid or user_uuid == "" then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror skipped: user_uuid is missing ",
+            "(user_id=", tostring(user_id), ") — INSERT branch would violate NOT NULL")
+        return
+    end
 
     local ok_enc, enc = pcall(Global.encryptSecret, canonical)
     if not ok_enc or not enc then
@@ -3692,7 +3717,7 @@ return function(app)
                             -- has_utr / utr_last4 columns yet.
                             if lock_field == "nino" then
                                 mirror_nino_to_tax_user_profile(
-                                    user_id, namespace_id, ans.answer_text
+                                    user_id, user_uuid, namespace_id, ans.answer_text
                                 )
                             end
 

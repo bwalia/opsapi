@@ -348,9 +348,19 @@ return function(app)
                           nino_consent_at = db.raw("NOW()"), updated_at = db.raw("NOW()") },
                         { user_id = user_id })
                 else
+                    -- user_uuid is NOT NULL on tax_user_profiles — omitting
+                    -- it fails this fresh-user INSERT path. Historically
+                    -- masked because established users usually have a row
+                    -- from another flow (default_profile_key set at
+                    -- register, HMRC obligations fetch, business-profile
+                    -- wizard) and take the UPDATE branch above. A truly
+                    -- fresh user routing NINO through this endpoint hits
+                    -- this INSERT and needs the uuid populated. Same
+                    -- rationale as the profile-builder mirror INSERT.
                     db.insert("tax_user_profiles", {
                         uuid = Global.generateStaticUUID(),
                         user_id = user_id,
+                        user_uuid = user_uuid,
                         namespace_id = namespace_id,
                         nino_encrypted = enc,
                         nino_last4 = last4,
