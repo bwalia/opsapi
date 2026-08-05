@@ -51,7 +51,7 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
 -- user_profile_answers write is authoritative — a failed mirror
 -- doesn't roll back the caller's answer save, and a subsequent
 -- profile visit will re-attempt.
-local function mirror_nino_to_tax_user_profile(user_id, namespace_id, raw_value)
+local function mirror_nino_to_tax_user_profile(user_id, user_uuid, namespace_id, raw_value)
     if raw_value == nil or raw_value == cjson.null then return end
     local canonical = tostring(raw_value):upper():gsub("%s+", "")
     if canonical == "" then return end
@@ -82,11 +82,20 @@ local function mirror_nino_to_tax_user_profile(user_id, namespace_id, raw_value)
                 tostring(user_id), ": ", tostring(upd_err))
         end
     else
+        -- ``user_uuid`` is a NOT NULL column on tax_user_profiles — omitting
+        -- it fails the fresh-user INSERT branch (which is the exact case
+        -- this helper's INSERT branch exists for). saveNino in
+        -- tax-hmrc-data.lua has the same missing-column bug but has been
+        -- masked in practice because established users usually already
+        -- have a row from another flow, so it takes the UPDATE path;
+        -- a truly fresh user routing NINO through the profile-builder
+        -- path hits this INSERT and needs the uuid populated.
         local ok_ins, ins_err = pcall(db.insert, "tax_user_profiles", {
             uuid           = Global.generateStaticUUID
                                  and Global.generateStaticUUID()
                                  or nil,
             user_id        = user_id,
+            user_uuid      = user_uuid,
             namespace_id   = namespace_id or 0,
             nino_encrypted = enc,
             nino_last4     = last4,
@@ -3604,7 +3613,7 @@ return function(app)
                            and not entity_uuid
                            and not tax_year then
                             mirror_nino_to_tax_user_profile(
-                                user_id, namespace_id, ans.answer_text
+                                user_id, user_uuid, namespace_id, ans.answer_text
                             )
                         end
                         saved = saved + 1
