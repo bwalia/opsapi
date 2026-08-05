@@ -42,7 +42,7 @@ spec:
                     exit 1
                   fi
                   # Install MinIO Client
-                  curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+                  curl -fSL --retry 3 -o mc https://dl.min.io/client/mc/release/linux-amd64/mc
                   chmod +x mc && mv mc /usr/local/bin/
 
                   # Debugging: Ensure MinIO variables are set
@@ -170,7 +170,7 @@ spec:
                     exit 1
                   fi
                   # Install MinIO Client
-                  curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
+                  curl -fSL --retry 3 -o mc https://dl.min.io/client/mc/release/linux-amd64/mc
                   chmod +x mc && mv mc /usr/local/bin/
 
                   # Debugging: Ensure MinIO variables are set
