@@ -31,6 +31,77 @@ local LOCK_FIELD_BY_QUESTION_KEY = {
     utr_number  = "utr",
 }
 
+-- ─── NINO mirror into tax_user_profiles ──────────────────────────────────
+-- The /settings HMRC tab + tax-hmrc-filing.lua both read from
+-- tax_user_profiles.nino_encrypted / has_nino / nino_last4. This helper
+-- upserts those columns from a plaintext NINO answer that came in via
+-- POST /api/v2/profile-builder/answers, using the same AES-128-CBC
+-- encryption (Global.encryptSecret) that POST /api/v2/hmrc/nino uses,
+-- so the two write paths become interchangeable at rest.
+--
+-- Called from BOTH the fresh-write branch AND the noop-same-value branch
+-- of the answers endpoint. The noop case matters for users whose lock
+-- was stamped before the mirror existed (nino_locked_at IS NOT NULL
+-- while has_nino=false): re-saving the same NINO on /profile hits the
+-- noop branch, and without the mirror there their tax_user_profiles
+-- row would never catch up.
+--
+-- Best-effort: any failure (encryption unavailable, DB write blocked
+-- by another advisory lock, etc.) is logged and swallowed. The
+-- user_profile_answers write is authoritative — a failed mirror
+-- doesn't roll back the caller's answer save, and a subsequent
+-- profile visit will re-attempt.
+local function mirror_nino_to_tax_user_profile(user_id, namespace_id, raw_value)
+    if raw_value == nil or raw_value == cjson.null then return end
+    local canonical = tostring(raw_value):upper():gsub("%s+", "")
+    if canonical == "" then return end
+
+    local ok_enc, enc = pcall(Global.encryptSecret, canonical)
+    if not ok_enc or not enc then
+        ngx.log(ngx.ERR,
+            "[ProfileBuilder] NINO mirror encrypt failed for user_id=",
+            tostring(user_id), ": ", tostring(enc))
+        return
+    end
+
+    local last4 = canonical:sub(-4)
+    local existing = db.select(
+        "id FROM tax_user_profiles WHERE user_id = ? LIMIT 1",
+        user_id
+    )
+    if existing and #existing > 0 then
+        local ok_upd, upd_err = pcall(db.update, "tax_user_profiles", {
+            nino_encrypted = enc,
+            nino_last4     = last4,
+            has_nino       = true,
+            updated_at     = db.raw("NOW()"),
+        }, { user_id = user_id })
+        if not ok_upd then
+            ngx.log(ngx.ERR,
+                "[ProfileBuilder] NINO mirror update failed for user_id=",
+                tostring(user_id), ": ", tostring(upd_err))
+        end
+    else
+        local ok_ins, ins_err = pcall(db.insert, "tax_user_profiles", {
+            uuid           = Global.generateStaticUUID
+                                 and Global.generateStaticUUID()
+                                 or nil,
+            user_id        = user_id,
+            namespace_id   = namespace_id or 0,
+            nino_encrypted = enc,
+            nino_last4     = last4,
+            has_nino       = true,
+            created_at     = db.raw("NOW()"),
+            updated_at     = db.raw("NOW()"),
+        })
+        if not ok_ins then
+            ngx.log(ngx.ERR,
+                "[ProfileBuilder] NINO mirror insert failed for user_id=",
+                tostring(user_id), ": ", tostring(ins_err))
+        end
+    end
+end
+
 -- Answer-value pattern matcher used by both /answers POST and
 -- /answers/validate. Handles the two syntaxes we've had stored in
 -- profile_questions.validation_json:
@@ -3522,6 +3593,20 @@ return function(app)
                         -- Nothing to write; lock is already stamped; no
                         -- history row needed (nothing changed). Count as
                         -- saved so the client's saved/total math matches.
+                        --
+                        -- Still fire the mirror so tax_user_profiles catches
+                        -- up if the user's lock was stamped before the
+                        -- mirror existed (nino_locked_at IS NOT NULL while
+                        -- has_nino=false). Without this, users stuck in that
+                        -- pre-mirror state could never unblock — every
+                        -- re-save would noop and never mirror.
+                        if lock_field == "nino"
+                           and not entity_uuid
+                           and not tax_year then
+                            mirror_nino_to_tax_user_profile(
+                                user_id, namespace_id, ans.answer_text
+                            )
+                        end
                         saved = saved + 1
                     else
 
@@ -3590,76 +3675,16 @@ return function(app)
                         -- value even if an admin mis-files an identity
                         -- question into a per-entity or per-year category.
                         if lock_field and not entity_uuid and not tax_year then
-                            -- ─── Mirror NINO into tax_user_profiles so HMRC
-                            -- filing sees the value ─────────────────────────
-                            --
-                            -- Historically the /profile builder wrote NINO
-                            -- to user_profile_answers only and left
-                            -- tax_user_profiles.nino_encrypted null. The
-                            -- /settings HMRC tab (which reads has_nino /
-                            -- nino_masked from tax_user_profiles) then
-                            -- re-asked for the number even though the user
-                            -- had already typed it, and HMRC filing
-                            -- couldn't proceed because tax-hmrc-filing.lua
-                            -- decrypts from nino_encrypted.
-                            --
-                            -- Fix: on every successful lock_field write,
-                            -- also upsert tax_user_profiles with the
-                            -- encrypted canonical value. Idempotent — a
-                            -- re-write with the same value produces the
-                            -- same encrypted output and updates the row
-                            -- in place. Same encryption path (AES-128-CBC
-                            -- via Global.encryptSecret) that /settings'
-                            -- POST /api/v2/hmrc/nino uses, so the two
-                            -- write paths are interchangeable at rest.
-                            --
-                            -- UTR mirror is intentionally not done here —
-                            -- tax_user_profiles has no utr_encrypted /
-                            -- has_utr / utr_last4 columns today. Add
-                            -- those alongside a UTR mirror when the
-                            -- filing flow needs the UTR in tax_user_profiles.
+                            -- Mirror NINO into tax_user_profiles so /settings
+                            -- HMRC + tax-hmrc-filing.lua see the value. See
+                            -- mirror_nino_to_tax_user_profile helper above
+                            -- for the full rationale. UTR mirror is not done
+                            -- here — tax_user_profiles has no utr_encrypted /
+                            -- has_utr / utr_last4 columns yet.
                             if lock_field == "nino" then
-                                local raw = ans.answer_text
-                                if raw ~= nil and raw ~= cjson.null then
-                                    local canonical = tostring(raw)
-                                        :upper()
-                                        :gsub("%s+", "")
-                                    if canonical ~= "" then
-                                        local ok_enc, enc = pcall(
-                                            Global.encryptSecret, canonical
-                                        )
-                                        if ok_enc and enc then
-                                            local last4 = canonical:sub(-4)
-                                            local existing = db.select(
-                                                "id FROM tax_user_profiles WHERE user_id = ? LIMIT 1",
-                                                user_id
-                                            )
-                                            if existing and #existing > 0 then
-                                                pcall(db.update, "tax_user_profiles", {
-                                                    nino_encrypted = enc,
-                                                    nino_last4     = last4,
-                                                    has_nino       = true,
-                                                    updated_at     = db.raw("NOW()"),
-                                                }, { user_id = user_id })
-                                            else
-                                                pcall(db.insert, "tax_user_profiles", {
-                                                    uuid           = Global.generateStaticUUID and Global.generateStaticUUID() or nil,
-                                                    user_id        = user_id,
-                                                    namespace_id   = namespace_id or 0,
-                                                    nino_encrypted = enc,
-                                                    nino_last4     = last4,
-                                                    has_nino       = true,
-                                                    created_at     = db.raw("NOW()"),
-                                                    updated_at     = db.raw("NOW()"),
-                                                })
-                                            end
-                                        else
-                                            ngx.log(ngx.ERR,
-                                                "[ProfileBuilder] NINO mirror encrypt failed: ",
-                                                tostring(enc))
-                                        end
-                                    end
-                                end
+                                mirror_nino_to_tax_user_profile(
+                                    user_id, namespace_id, ans.answer_text
+                                )
                             end
 
                             IdentityLock.stampLock(user_uuid, namespace_id or 0, lock_field)
