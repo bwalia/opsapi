@@ -1,0 +1,204 @@
+{
+  "entries": [
+    {
+      "box": "23",
+      "description": "Professional services fees",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "accountancy_legal",
+      "label": "Accountancy, Legal and Other Professional Fees",
+      "mtd_field_name": "professionalFees",
+      "mtd_section": "periodExpenses",
+      "uuid": "60267a53-0d60-4941-ab0b-c7b0e403d2ef"
+    },
+    {
+      "box": "27a",
+      "description": "Advertising, marketing, promotional and sponsorship costs",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "advertising_marketing",
+      "label": "Advertising and Marketing",
+      "mtd_field_name": "advertisingCosts",
+      "mtd_section": "periodExpenses",
+      "uuid": "226f7a57-a37e-4abc-bd6e-ab15f67135fa"
+    },
+    {
+      "box": "29a",
+      "description": "Bad debts and other irrecoverable amounts written off during the period",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "bad_debts",
+      "label": "Irrecoverable Debts",
+      "mtd_field_name": "irrecoverableDebts",
+      "mtd_section": "periodExpenses",
+      "uuid": "0d46e28a-5403-4f21-a8cc-76c2c6dbf775"
+    },
+    {
+      "box": "28",
+      "description": "Annual Investment Allowance on equipment",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "capital_allowances",
+      "label": "Capital Allowances",
+      "uuid": "1ec3d473-7757-40e6-b00c-ccd602f463a7"
+    },
+    {
+      "box": "19",
+      "description": "Business travel costs including fuel, repairs, insurance",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "car_van_travel",
+      "label": "Car, Van and Travel Expenses",
+      "mtd_field_name": "carVanTravelExpenses",
+      "mtd_section": "periodExpenses",
+      "uuid": "b63045cc-04ad-4b4e-970b-dc1337cc2e2d"
+    },
+    {
+      "box": "17",
+      "description": "Cost of goods bought for resale or goods used",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "cost_of_goods",
+      "label": "Cost of Goods Sold",
+      "mtd_field_name": "costOfGoods",
+      "mtd_section": "periodExpenses",
+      "uuid": "24ec9cfb-6ec3-417d-aa3d-e0f33e58fd08"
+    },
+    {
+      "box": "27",
+      "description": "Asset depreciation (informational only)",
+      "is_active": true,
+      "is_tax_deductible": false,
+      "key": "depreciation",
+      "label": "Depreciation and Loss/Profit on Sale of Assets",
+      "mtd_field_name": "depreciation",
+      "mtd_section": "periodExpenses",
+      "uuid": "5806d80c-1bcd-4ea7-be22-cdf50d05fbed"
+    },
+    {
+      "box": "25b",
+      "description": "Client and business entertainment costs (not tax deductible — captured for completeness)",
+      "is_active": true,
+      "is_tax_deductible": false,
+      "key": "entertainment_costs",
+      "label": "Business Entertainment",
+      "mtd_field_name": "businessEntertainmentCosts",
+      "mtd_section": "periodExpenses",
+      "uuid": "a1a195ec-df98-4889-ba21-9e66e527c8ff"
+    },
+    {
+      "box": "24",
+      "description": "Bank charges, loan interest, finance charges",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "interest_finance",
+      "label": "Interest and Other Finance Charges",
+      "mtd_field_name": "interestOnBankOtherLoans",
+      "mtd_section": "periodExpenses",
+      "uuid": "f7656363-740c-47a9-9e66-9068885a4beb"
+    },
+    {
+      "box": "26",
+      "description": "Other business expenses not listed elsewhere",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "other_expenses",
+      "label": "Other Allowable Business Expenses",
+      "mtd_field_name": "otherExpenses",
+      "mtd_section": "periodExpenses",
+      "uuid": "fdeed390-4fb5-4a53-9a50-eb122ce7f583"
+    },
+    {
+      "box": "16",
+      "description": "Any other business income",
+      "is_active": true,
+      "is_tax_deductible": false,
+      "key": "other_income",
+      "label": "Other Business Income",
+      "mtd_field_name": "other",
+      "mtd_section": "periodIncome",
+      "uuid": "5e07586c-92b0-4b4f-a661-55b80d69bc65"
+    },
+    {
+      "box": "21",
+      "description": "Business premises rent, council rates, utilities, insurance",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "rent_rates",
+      "label": "Rent, Rates, Power and Insurance Costs",
+      "mtd_field_name": "premisesRunningCosts",
+      "mtd_section": "periodExpenses",
+      "uuid": "7f66c81a-a7e2-4b9d-9212-8d23334a5459"
+    },
+    {
+      "box": "22",
+      "description": "Repairs to business property and equipment",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "repairs_maintenance",
+      "label": "Repairs and Maintenance",
+      "mtd_field_name": "maintenanceCosts",
+      "mtd_section": "periodExpenses",
+      "uuid": "d3e60011-26ab-4aec-8ac1-b09be288c1a7"
+    },
+    {
+      "box": "20a",
+      "description": "Payments to CIS and non-CIS subcontractors (construction, trades, agency staff)",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "subcontractor_payments",
+      "label": "Payments to Subcontractors",
+      "mtd_field_name": "paymentsToSubcontractors",
+      "mtd_section": "periodExpenses",
+      "uuid": "ca517f24-a448-4f5c-bf3e-cc11408d79ae"
+    },
+    {
+      "box": "25",
+      "description": "Communication and office expenses",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "telephone_office",
+      "label": "Phone, Fax, Stationery and Other Office Costs",
+      "mtd_field_name": "adminCosts",
+      "mtd_section": "periodExpenses",
+      "uuid": "56df882a-f19c-4ab5-9a19-9a0165270e6a"
+    },
+    {
+      "box": "15",
+      "description": "Total business income/turnover",
+      "is_active": true,
+      "is_tax_deductible": false,
+      "key": "turnover",
+      "label": "Turnover/Sales",
+      "mtd_field_name": "turnover",
+      "mtd_section": "periodIncome",
+      "uuid": "fe6bca38-d37f-488a-b835-e013a91a5bcd"
+    },
+    {
+      "box": "32",
+      "description": "Proportion of home costs for business use",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "use_of_home",
+      "label": "Use of Home as Office",
+      "uuid": "5f9ac13f-f232-4724-abe7-167e5e9557e2"
+    },
+    {
+      "box": "20",
+      "description": "Employee wages, salaries, NI contributions",
+      "is_active": true,
+      "is_tax_deductible": true,
+      "key": "wages_staff",
+      "label": "Wages, Salaries and Other Staff Costs",
+      "mtd_field_name": "wagesAndStaffCosts",
+      "mtd_section": "periodExpenses",
+      "uuid": "6f92647c-40bf-4ce3-be2f-3bbb04f59c9d"
+    }
+  ],
+  "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
+  "key": "key",
+  "namespace_scope": "global",
+  "namespace_slug": "system",
+  "registry_version": 1,
+  "table": "tax_hmrc_categories"
+}

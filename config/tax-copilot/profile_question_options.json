@@ -1,0 +1,787 @@
+{
+  "entries": [
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Company-owned",
+      "question_key": "property_ownership_type",
+      "uuid": "e2585d09-1cf2-45bf-a91a-7e1bebff0267",
+      "value": "company"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Joint ownership",
+      "question_key": "property_ownership_type",
+      "uuid": "4caee521-bf25-4c55-b62c-3e825ede961e",
+      "value": "joint"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Sole ownership",
+      "question_key": "property_ownership_type",
+      "uuid": "42357844-d3a7-471f-a0c7-a7f885f17981",
+      "value": "sole"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Accruals (traditional) basis",
+      "question_key": "op_accounting_basis",
+      "uuid": "a54cd1a6-b7cb-44a9-8799-f4e35937fc0e",
+      "value": "accruals"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Cash basis",
+      "question_key": "op_accounting_basis",
+      "uuid": "a6ecd79c-f21b-4bfb-80c1-5b31a7c94778",
+      "value": "cash"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "£15,000 - £50,000",
+      "question_key": "rental_income_band",
+      "uuid": "1d93de81-e6bd-4993-a1a1-9825a9c12c22",
+      "value": "15k_50k"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "£50,000 - £100,000",
+      "question_key": "rental_income_band",
+      "uuid": "6c3d0882-7f76-4a58-b9fb-46f59bc286ce",
+      "value": "50k_100k"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "£5,000 - £15,000",
+      "question_key": "rental_income_band",
+      "uuid": "35a8e59a-42ab-4a5a-b18b-17e83509f1fe",
+      "value": "5k_15k"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Over £100,000",
+      "question_key": "rental_income_band",
+      "uuid": "884240ed-c0f1-4cd3-95c0-6e9f6eb93815",
+      "value": "over_100k"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Under £5,000",
+      "question_key": "rental_income_band",
+      "uuid": "f657b1d9-09be-4b2c-b499-6a40a6f7e183",
+      "value": "under_5k"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "A-Level",
+      "question_key": "highest_qualification",
+      "uuid": "df807b0e-37f8-47c1-bbb2-a922685ea9a2",
+      "value": "a_level"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Bachelor's Degree",
+      "question_key": "highest_qualification",
+      "uuid": "fe901470-2ed8-4382-a45c-01da53130498",
+      "value": "bachelors"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Diploma",
+      "question_key": "highest_qualification",
+      "uuid": "cc10b5d1-ce4a-4999-a4eb-d0c12f850e73",
+      "value": "diploma"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "GCSE",
+      "question_key": "highest_qualification",
+      "uuid": "b6ec0e20-f8d9-4dca-bc70-6590c6699db7",
+      "value": "gcse"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Master's Degree",
+      "question_key": "highest_qualification",
+      "uuid": "3bd69aec-b2f9-4329-bd5b-3b01701fa1db",
+      "value": "masters"
+    },
+    {
+      "display_order": 8,
+      "is_active": true,
+      "is_default": false,
+      "label": "Other",
+      "question_key": "highest_qualification",
+      "uuid": "3efa848e-18ef-4eae-a4b2-70a92e0ffecb",
+      "value": "other"
+    },
+    {
+      "display_order": 6,
+      "is_active": true,
+      "is_default": false,
+      "label": "PhD / Doctorate",
+      "question_key": "highest_qualification",
+      "uuid": "c1f720ac-8a6b-46cf-b56f-8c21cd11b816",
+      "value": "phd"
+    },
+    {
+      "display_order": 7,
+      "is_active": true,
+      "is_default": false,
+      "label": "Professional Qualification",
+      "question_key": "highest_qualification",
+      "uuid": "90a570ff-f8b0-4e8d-85ae-07c3ca2a4337",
+      "value": "professional"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Dr",
+      "question_key": "title",
+      "uuid": "687382e8-18ee-437f-8a37-d5d280ef5672",
+      "value": "dr"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Miss",
+      "question_key": "title",
+      "uuid": "427a1ef9-0c2d-452f-8137-fdc7146f9dfe",
+      "value": "miss"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Mr",
+      "question_key": "title",
+      "uuid": "8677689e-8813-4c9a-ad6f-092223b5bd04",
+      "value": "mr"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Mrs",
+      "question_key": "title",
+      "uuid": "82958bfe-68e9-4d85-b2dd-fca232f22123",
+      "value": "mrs"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Ms",
+      "question_key": "title",
+      "uuid": "e93d53bb-34ba-40cc-8cfe-75811168d3cc",
+      "value": "ms"
+    },
+    {
+      "display_order": 6,
+      "is_active": true,
+      "is_default": false,
+      "label": "Other",
+      "question_key": "title",
+      "uuid": "c21e34c0-5ab1-43fd-831e-a6e46c3a9279",
+      "value": "other"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Limited Company",
+      "question_key": "business_type",
+      "uuid": "049facaa-2018-4473-9b9b-de84b230ea5f",
+      "value": "limited_company"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "LLP",
+      "question_key": "business_type",
+      "uuid": "a062c6aa-870e-472c-ba13-bfe07bf2d851",
+      "value": "llp"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Other",
+      "question_key": "business_type",
+      "uuid": "3b62c5b4-08cf-423d-8751-f77452a489c3",
+      "value": "other"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Partnership",
+      "question_key": "business_type",
+      "uuid": "c3fa216d-2049-4f0d-acb8-45dc5e43e374",
+      "value": "partnership"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Sole Trader",
+      "question_key": "business_type",
+      "uuid": "752da4bf-fe25-4a98-b18a-3b0c8616342d",
+      "value": "sole_trader"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Female",
+      "question_key": "gender",
+      "uuid": "6333256a-e931-4ccb-ab50-0a1471f8c483",
+      "value": "female"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Male",
+      "question_key": "gender",
+      "uuid": "7e192cc2-7531-4f36-9178-64c5491e045f",
+      "value": "male"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Non-binary",
+      "question_key": "gender",
+      "uuid": "5dc8259d-7af2-4458-b111-88be54b0b404",
+      "value": "non_binary"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Prefer not to say",
+      "question_key": "gender",
+      "uuid": "37801097-3f82-4b12-a105-07321ff98b70",
+      "value": "prefer_not_to_say"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Civil Partnership",
+      "question_key": "marital_status",
+      "uuid": "a212dacb-d5a0-4891-b85c-1d0ecd3a6ab0",
+      "value": "civil_partnership"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Divorced",
+      "question_key": "marital_status",
+      "uuid": "6f58cd01-abf9-4860-9c85-412055882cbb",
+      "value": "divorced"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Married",
+      "question_key": "marital_status",
+      "uuid": "737596f0-5d9d-4e35-bb8b-2441ec860e4f",
+      "value": "married"
+    },
+    {
+      "display_order": 6,
+      "is_active": true,
+      "is_default": false,
+      "label": "Separated",
+      "question_key": "marital_status",
+      "uuid": "2945b709-972e-42cd-adb2-a7eb4f7145f2",
+      "value": "separated"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Single",
+      "question_key": "marital_status",
+      "uuid": "f213cf1b-335d-4a92-987e-18002f4d0cba",
+      "value": "single"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Widowed",
+      "question_key": "marital_status",
+      "uuid": "914524a1-5d60-42d9-b758-69545d20c5cc",
+      "value": "widowed"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": true,
+      "label": "United Kingdom",
+      "question_key": "country",
+      "uuid": "848dab96-a3c9-46c1-850a-d5c4edc0276b",
+      "value": "GB"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Ireland",
+      "question_key": "country",
+      "uuid": "b2d752c6-05c0-4d35-a836-a78d1c7a0768",
+      "value": "IE"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "India",
+      "question_key": "country",
+      "uuid": "3c688e13-4f7a-4d90-ab48-acb7b787a08d",
+      "value": "IN"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Pakistan",
+      "question_key": "country",
+      "uuid": "32e2fcdf-a16f-4779-8af3-0398feb74637",
+      "value": "PK"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "United States",
+      "question_key": "country",
+      "uuid": "802edfa4-e4ff-4c79-ac2e-c6a61214bcb0",
+      "value": "US"
+    },
+    {
+      "display_order": 6,
+      "is_active": true,
+      "is_default": false,
+      "label": "Other",
+      "question_key": "country",
+      "uuid": "78a46c42-7f4a-4c2f-bdc4-a6fefd34afee",
+      "value": "other"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": true,
+      "label": "Email",
+      "question_key": "preferred_contact_method",
+      "uuid": "0203032f-6f3e-49ab-b7cb-cd8ac528b3d3",
+      "value": "email"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Phone",
+      "question_key": "preferred_contact_method",
+      "uuid": "b5871c7a-78fa-4adf-9117-2282066d4f2c",
+      "value": "phone"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Post",
+      "question_key": "preferred_contact_method",
+      "uuid": "c2c7b2a6-da81-42ef-a194-1d3430a431ac",
+      "value": "post"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "SMS",
+      "question_key": "preferred_contact_method",
+      "uuid": "65cb8bd0-c722-4816-93ac-50f7261b389e",
+      "value": "sms"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Director",
+      "question_key": "employment_status",
+      "uuid": "a42cd5ad-46bf-427a-a0ac-fd07c9cd2fcb",
+      "value": "director"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Employed (full-time)",
+      "question_key": "employment_status",
+      "uuid": "f4efc798-61e1-4ca6-a28c-8943fb3bb63d",
+      "value": "employed_full_time"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Employed (part-time)",
+      "question_key": "employment_status",
+      "uuid": "97cae4d9-d471-4cbc-9a4d-819d2e93a2cc",
+      "value": "employed_part_time"
+    },
+    {
+      "display_order": 8,
+      "is_active": true,
+      "is_default": false,
+      "label": "Not working",
+      "question_key": "employment_status",
+      "uuid": "59833e8a-aa0b-499a-ae37-8027a473b198",
+      "value": "not_working"
+    },
+    {
+      "display_order": 6,
+      "is_active": true,
+      "is_default": false,
+      "label": "Retired",
+      "question_key": "employment_status",
+      "uuid": "8eebf5b1-416f-412d-960c-4a374de3ed39",
+      "value": "retired"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Self-employed",
+      "question_key": "employment_status",
+      "uuid": "e636ea69-673e-407e-918c-16aec682dc4b",
+      "value": "self_employed"
+    },
+    {
+      "display_order": 7,
+      "is_active": true,
+      "is_default": false,
+      "label": "Student",
+      "question_key": "employment_status",
+      "uuid": "eb835a5d-6d9f-43c1-b5a7-a0c6bc0a82e2",
+      "value": "student"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Unemployed",
+      "question_key": "employment_status",
+      "uuid": "0b5de0c6-51ad-4519-88ed-f0de0a30dbb5",
+      "value": "unemployed"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "£12,570 - £50,270 (Basic rate)",
+      "question_key": "annual_salary_band",
+      "uuid": "bdb08b25-afb1-4458-8c10-725642f7598d",
+      "value": "12570_50270"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "£50,270 - £125,140 (Higher rate)",
+      "question_key": "annual_salary_band",
+      "uuid": "6853f4aa-9fe9-4e04-81c0-1f699f660cd7",
+      "value": "50270_125140"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Over £125,140 (Additional rate)",
+      "question_key": "annual_salary_band",
+      "uuid": "4dd0a161-7ae5-45ed-9269-5a8236d9375e",
+      "value": "over_125140"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Under £12,570 (below Personal Allowance)",
+      "question_key": "annual_salary_band",
+      "uuid": "50724453-2900-4cb9-815e-41946fd7e3b8",
+      "value": "under_12570"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "2023-24 (6 Apr 2023 - 5 Apr 2024)",
+      "question_key": "tax_year_end",
+      "uuid": "567e8ec0-c36a-463b-bb0b-72f70375f3d6",
+      "value": "2023-24"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "2024-25 (6 Apr 2024 - 5 Apr 2025)",
+      "question_key": "tax_year_end",
+      "uuid": "dc19687f-06a9-435d-b60b-7e5a9accc3f3",
+      "value": "2024-25"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "2025-26 (6 Apr 2025 - 5 Apr 2026)",
+      "question_key": "tax_year_end",
+      "uuid": "c7aee6ee-ea31-40ae-bb70-9a3aac11c423",
+      "value": "2025-26"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Plan 1 (pre-2012)",
+      "question_key": "student_loan_plan",
+      "uuid": "310ecf91-62f0-425f-bda0-c74b15495dca",
+      "value": "plan_1"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Plan 2 (post-2012)",
+      "question_key": "student_loan_plan",
+      "uuid": "3794982f-9713-4c34-967e-f429d78dfdee",
+      "value": "plan_2"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Plan 4 (Scotland)",
+      "question_key": "student_loan_plan",
+      "uuid": "f65a4b9d-72bf-4fb8-8b47-e34cbbdf336a",
+      "value": "plan_4"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Plan 5 (post-2023)",
+      "question_key": "student_loan_plan",
+      "uuid": "4ffb4f0a-e988-4a12-8dfb-3b2268b4ea88",
+      "value": "plan_5"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "Postgraduate Loan",
+      "question_key": "student_loan_plan",
+      "uuid": "0727f59b-5663-4d0d-ab35-63a26f5f308e",
+      "value": "postgrad"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "£100,000 - £500,000",
+      "question_key": "annual_turnover_band",
+      "uuid": "bbe1d605-ce4a-4d25-94ce-48fceeeca0d2",
+      "value": "100k_500k"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "£10,000 - £50,000",
+      "question_key": "annual_turnover_band",
+      "uuid": "6631cdaf-c7de-4b8f-95d5-6bf195c54b4c",
+      "value": "10k_50k"
+    },
+    {
+      "display_order": 5,
+      "is_active": true,
+      "is_default": false,
+      "label": "£500,000 - £1,000,000",
+      "question_key": "annual_turnover_band",
+      "uuid": "ffd59ac3-5508-47fb-919a-a1f6532f6c4d",
+      "value": "500k_1m"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "£50,000 - £100,000",
+      "question_key": "annual_turnover_band",
+      "uuid": "b552972a-9f1b-431a-8e98-7520a884ae11",
+      "value": "50k_100k"
+    },
+    {
+      "display_order": 6,
+      "is_active": true,
+      "is_default": false,
+      "label": "Over £1,000,000",
+      "question_key": "annual_turnover_band",
+      "uuid": "0048980f-b2bc-4eef-91ce-752003d18c6d",
+      "value": "over_1m"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Under £10,000",
+      "question_key": "annual_turnover_band",
+      "uuid": "48828abb-da5c-4d07-a309-f610939aa3c2",
+      "value": "under_10k"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Welsh (Cymraeg)",
+      "question_key": "language_preference",
+      "uuid": "d08b5dc4-c252-4f63-814a-4e84ad052a5f",
+      "value": "cy"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": true,
+      "label": "English",
+      "question_key": "language_preference",
+      "uuid": "d867f91d-2291-40b3-9628-0b7433874ea9",
+      "value": "en"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Gaelic (Gàidhlig)",
+      "question_key": "language_preference",
+      "uuid": "c269c01b-b33a-4ee4-9e53-8d64992d99d4",
+      "value": "gd"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Accruals (traditional) basis",
+      "question_key": "rb_accounting_basis",
+      "uuid": "4b22100a-81dd-4feb-a338-3bdfc95618be",
+      "value": "accruals"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Cash basis (recommended for most landlords)",
+      "question_key": "rb_accounting_basis",
+      "uuid": "4e36c751-6736-4157-b47b-d2a8e96fad5f",
+      "value": "cash"
+    },
+    {
+      "display_order": 3,
+      "is_active": true,
+      "is_default": false,
+      "label": "Commercial property",
+      "question_key": "prop_let_type",
+      "uuid": "1d26a4f5-b1ab-464f-801c-a0ae29820a69",
+      "value": "commercial"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Furnished holiday let",
+      "question_key": "prop_let_type",
+      "uuid": "01d3c6e4-6c07-4640-a7d0-d89c5593012f",
+      "value": "fhl"
+    },
+    {
+      "display_order": 4,
+      "is_active": true,
+      "is_default": false,
+      "label": "Rent-a-room in my own home",
+      "question_key": "prop_let_type",
+      "uuid": "489f5b8f-8a56-4591-8edb-6a9be86112b5",
+      "value": "rent_a_room"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Residential letting",
+      "question_key": "prop_let_type",
+      "uuid": "e6152d7c-50b8-4e6a-ae85-681e19988bd4",
+      "value": "residential"
+    },
+    {
+      "display_order": 2,
+      "is_active": true,
+      "is_default": false,
+      "label": "Traditional (accruals) accounting",
+      "question_key": "se_accounting_basis",
+      "uuid": "7b4e3dde-6304-4c98-8ac3-54016b9543d9",
+      "value": "accruals"
+    },
+    {
+      "display_order": 1,
+      "is_active": true,
+      "is_default": false,
+      "label": "Cash basis (recommended for most sole traders)",
+      "question_key": "se_accounting_basis",
+      "uuid": "0d82f248-6b65-4a49-b54f-c860e4bc15b5",
+      "value": "cash"
+    }
+  ],
+  "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
+  "key": [
+    "question_id",
+    "value"
+  ],
+  "namespace_scope": "inherited",
+  "namespace_slug": "tax-copilot",
+  "registry_version": 1,
+  "table": "profile_question_options"
+}

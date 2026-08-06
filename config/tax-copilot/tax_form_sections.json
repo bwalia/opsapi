@@ -1,0 +1,117 @@
+{
+  "entries": [
+    {
+      "config_json": "{\"amount_help\":\"Enter what you actually paid — don’t add basic-rate tax relief on top.\",\"checkboxes\":[],\"description_label\":\"Provider and payment description\",\"description_placeholder\":\"e.g. Aviva personal pension — monthly contributions\",\"amount_label\":\"Payment made (£)\"}",
+      "description": "Contributions to your employer's pension scheme that were taken from pay AFTER tax, so no tax relief has been given yet.",
+      "display_order": 2,
+      "hmrc_mapping": "{\"sa100_box\":\"TR4.3\"}",
+      "income_type_key": "pension_payments",
+      "is_active": true,
+      "label": "Payments to employer schemes not deducted from gross pay",
+      "section_key": "pp_employer_schemes",
+      "uuid": "5b1216b5-2629-4a22-85cf-f36257ea7f7b"
+    },
+    {
+      "config_json": "{\"amount_help\":\"Enter what you actually paid — don’t add basic-rate tax relief on top.\",\"checkboxes\":[],\"description_label\":\"Provider and payment description\",\"description_placeholder\":\"e.g. Aviva personal pension — monthly contributions\",\"amount_label\":\"Payment made (£)\"}",
+      "description": "Payments to a qualifying overseas pension scheme, paid out of taxed income and eligible for UK tax relief.",
+      "display_order": 3,
+      "hmrc_mapping": "{\"sa100_box\":\"TR4.4\"}",
+      "income_type_key": "pension_payments",
+      "is_active": true,
+      "label": "Payments to eligible overseas schemes not deducted from gross pay",
+      "section_key": "pp_overseas_schemes",
+      "uuid": "7106fb82-a490-4449-8807-1f3b52f4b292"
+    },
+    {
+      "config_json": "{\"amount_help\":\"Enter what you actually paid — don’t add basic-rate tax relief on top.\",\"checkboxes\":[{\"help\":\"Tick if the scheme adds basic-rate relief to your payments for you (relief at source) — most personal pensions do.\",\"key\":\"relief_at_source\",\"label\":\"Basic rate tax relief claimed by provider\"},{\"help\":\"Single payments HMRC shouldn’t expect again next year — it helps keep your tax code accurate.\",\"key\":\"one_off\",\"label\":\"This is a one-off payment\"}],\"description_label\":\"Provider and payment description\",\"description_placeholder\":\"e.g. Aviva personal pension — monthly contributions\",\"amount_label\":\"Payment made (£)\"}",
+      "description": "Personal payments into registered pension schemes and retirement annuity contracts. Tick 'relief claimed by provider' where the scheme adds basic-rate tax relief for you (relief at source).",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa100_box\":\"TR4.1\",\"sa100_box_no_relief\":\"TR4.2\",\"sa100_box_one_off\":\"TR4.1.1\",\"gross_up\":\"basic_rate\"}",
+      "income_type_key": "pension_payments",
+      "is_active": true,
+      "label": "Payments into registered schemes and retirement annuity contracts",
+      "section_key": "pp_registered_schemes",
+      "uuid": "06ad91bd-5bbd-4b49-af9b-fd04c8f0b0d0"
+    },
+    {
+      "config_json": "{\"fields\":[{\"box\":\"9\",\"type\":\"money\",\"key\":\"company_cars\",\"label\":\"Company cars\"},{\"box\":\"10\",\"type\":\"money\",\"key\":\"fuel_company_cars\",\"label\":\"Fuel for company cars\"},{\"box\":\"9\",\"type\":\"money\",\"key\":\"company_vans\",\"label\":\"Company vans\"},{\"box\":\"10\",\"type\":\"money\",\"key\":\"fuel_company_vans\",\"label\":\"Fuel for company vans\"},{\"box\":\"16\",\"type\":\"money\",\"key\":\"travel_subsistence\",\"label\":\"Travel and subsistence\"},{\"box\":\"16\",\"type\":\"money\",\"key\":\"entertaining\",\"label\":\"Entertaining\"},{\"box\":\"11\",\"type\":\"money\",\"key\":\"private_medical\",\"label\":\"Private medical and dental insurance\"},{\"box\":\"16\",\"type\":\"money\",\"key\":\"telephone\",\"label\":\"Telephone\"},{\"box\":\"16\",\"type\":\"money\",\"key\":\"professional_fees_employer\",\"label\":\"Professional fees & subscriptions paid by employer\"},{\"box\":\"12\",\"type\":\"money\",\"key\":\"vouchers_credit_cards\",\"label\":\"Vouchers and credit cards\"},{\"box\":\"12\",\"type\":\"money\",\"key\":\"excess_mileage_allowance\",\"label\":\"Excess mileage allowance\"},{\"box\":\"13\",\"type\":\"money\",\"key\":\"goods_assets_provided\",\"label\":\"Goods and other assets provided by employer\"},{\"box\":\"14\",\"type\":\"money\",\"key\":\"accommodation_provided\",\"label\":\"Accommodation provided by employer\"},{\"box\":\"15\",\"type\":\"money\",\"key\":\"other_benefits\",\"label\":\"Other benefits\"},{\"box\":\"16\",\"type\":\"money\",\"key\":\"expenses_payments_received\",\"label\":\"Expenses payments received\"}]}",
+      "description": "These amounts will be on form P11D from your employer.",
+      "display_order": 4,
+      "hmrc_mapping": "{\"sa102_boxes\":\"9-16\"}",
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Benefits",
+      "section_key": "benefits",
+      "uuid": "2e814497-aebc-4137-a6be-2314b426ca1f"
+    },
+    {
+      "config_json": "{\"fields\":[{\"show_if\":{\"field\":\"is_close_company\"},\"type\":\"text\",\"key\":\"registered_number\",\"label\":\"Registered number\"},{\"show_if\":{\"field\":\"is_close_company\"},\"type\":\"money\",\"key\":\"close_company_dividends\",\"label\":\"Dividends you received from this close company\"},{\"show_if\":{\"field\":\"is_close_company\"},\"type\":\"number\",\"key\":\"shareholding_percent\",\"label\":\"Percentage shareholding in this close company\"}]}",
+      "display_order": 2,
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Close company details",
+      "section_key": "close_company_details",
+      "uuid": "ab6fdf97-b34b-4fbf-8584-d2d05141a43a"
+    },
+    {
+      "config_json": "{\"fields\":[{\"box\":\"5\",\"type\":\"text\",\"required\":true,\"key\":\"employer_name\",\"label\":\"Employer's name\"},{\"help\":\"On your P60 or P45 — three numbers, a slash, then letters and numbers.\",\"format\":\"paye_reference\",\"box\":\"4\",\"type\":\"text\",\"required\":true,\"key\":\"paye_reference\",\"label\":\"Employer's PAYE tax reference (NNN\\/XXXXXX)\"},{\"type\":\"date\",\"key\":\"start_date\",\"label\":\"Date employment started\"},{\"type\":\"date\",\"key\":\"end_date\",\"label\":\"Date employment ceased\"},{\"box\":\"6\",\"type\":\"boolean\",\"key\":\"is_director\",\"label\":\"Were you a company director?\"},{\"show_if\":{\"field\":\"is_director\"},\"key\":\"director_ceased_date\",\"type\":\"date\",\"box\":\"6.1\",\"label\":\"Date ceased being a director\"},{\"help\":\"A company controlled by 5 or fewer people (or by its directors).\",\"key\":\"is_close_company\",\"type\":\"boolean\",\"box\":\"7\",\"label\":\"Is this a close company?\"}],\"record\":{\"noun\":\"Employment\",\"title_field\":\"employer_name\",\"subtitle_field\":\"paye_reference\"}}",
+      "description": "Who you worked for — from your P60, P45 or payslips.",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa102_boxes\":\"4-7\"}",
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Employment details",
+      "section_key": "employment_details",
+      "uuid": "facc2122-f474-4aa8-9f70-2ee2d4f5da63"
+    },
+    {
+      "config_json": "{\"fields\":[{\"box\":\"17\",\"type\":\"money\",\"key\":\"business_travel\",\"label\":\"Business travel\"},{\"box\":\"17\",\"type\":\"money\",\"key\":\"hotel_meal_expenses\",\"label\":\"Hotel and meal expenses\"},{\"box\":\"18\",\"type\":\"money\",\"key\":\"fixed_deductions\",\"label\":\"Fixed deductions for expenses\"},{\"box\":\"19\",\"type\":\"money\",\"key\":\"professional_fees_subs\",\"label\":\"Professional fees and subscriptions\"},{\"box\":\"18\",\"type\":\"money\",\"key\":\"tools_work_clothes\",\"label\":\"Cost of tools and work clothes\"},{\"box\":\"17\",\"type\":\"money\",\"key\":\"vehicle_expenses\",\"label\":\"Vehicle expenses\"},{\"box\":\"17\",\"type\":\"money\",\"key\":\"mileage_shortfall\",\"label\":\"Mileage allowance shortfall\"},{\"box\":\"20\",\"type\":\"money\",\"key\":\"other_expenses_capital\",\"label\":\"Other expenses and capital allowances\"}]}",
+      "description": "Costs of doing your job that your employer didn't reimburse.",
+      "display_order": 5,
+      "hmrc_mapping": "{\"sa102_boxes\":\"17-20\"}",
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Expenses",
+      "section_key": "expenses",
+      "uuid": "c4799fee-7052-428a-8567-904d468c45a4"
+    },
+    {
+      "config_json": "{\"fields\":[{\"type\":\"money\",\"key\":\"seafarers_deduction\",\"label\":\"Seafarers' earnings deduction\"},{\"type\":\"money\",\"key\":\"foreign_earnings_not_taxable\",\"label\":\"Foreign earnings not taxable in the UK\"},{\"type\":\"money\",\"key\":\"foreign_tax_no_credit\",\"label\":\"Foreign tax for which tax credit relief not claimed\"},{\"type\":\"money\",\"key\":\"exempt_overseas_pension\",\"label\":\"Exempt employers' contributions to an overseas pension scheme\"}]}",
+      "display_order": 6,
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Foreign earnings and deductions",
+      "section_key": "foreign",
+      "uuid": "defb6729-1088-4da2-88bc-05f016ae93db"
+    },
+    {
+      "config_json": "{\"fields\":[{\"summary\":true,\"key\":\"pay_before_tax\",\"type\":\"money\",\"box\":\"1\",\"label\":\"Pay from this employment before tax was taken off\"},{\"box\":\"1.1\",\"type\":\"money\",\"key\":\"payrolled_benefits\",\"label\":\"Payrolled benefits included above which affect your student loan repayments\"},{\"box\":\"2\",\"type\":\"money\",\"key\":\"uk_tax_taken_off\",\"label\":\"UK tax taken off\"},{\"summary\":true,\"key\":\"tips_not_on_p60\",\"type\":\"money\",\"box\":\"3\",\"label\":\"Tips and other payments not on your P60\"}]}",
+      "description": "From your P60 (or P45 if you left during the year).",
+      "display_order": 3,
+      "hmrc_mapping": "{\"sa102_boxes\":\"1-3\"}",
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Income",
+      "section_key": "income",
+      "uuid": "7b469d9a-fd90-4975-be3b-b0cca00a41c2"
+    },
+    {
+      "config_json": "{\"fields\":[{\"help\":\"Anything HMRC should know about this employment — goes in the 'any other information' box.\",\"type\":\"textarea\",\"key\":\"tax_return_note\",\"label\":\"Additional text note for your tax return\"}]}",
+      "display_order": 7,
+      "income_type_key": "salary",
+      "is_active": true,
+      "label": "Additional information",
+      "section_key": "notes",
+      "uuid": "8fdf8354-35c5-49b5-b128-536fd815fe50"
+    }
+  ],
+  "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
+  "key": [
+    "income_type_key",
+    "section_key"
+  ],
+  "namespace_scope": "tenant_scoped",
+  "namespace_slug": "tax-copilot",
+  "registry_version": 1,
+  "table": "tax_form_sections"
+}

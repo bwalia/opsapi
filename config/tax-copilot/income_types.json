@@ -1,0 +1,464 @@
+{
+  "entries": [
+    {
+      "allows_manual_entry": true,
+      "category_affinity": {},
+      "description": "Gains from selling assets such as property or shares.",
+      "display_name": "Capital gains",
+      "display_order": 70,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "capital_gains",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Capital gains from selling assets",
+      "linked_form_title": "SA108",
+      "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "completion_statement",
+          "label": "Completion statement",
+          "required": false
+        },
+        {
+          "allows_upload": true,
+          "key": "contract_notes",
+          "label": "Contract notes (shares)",
+          "required": false
+        }
+      ],
+      "uuid": "f9565df2-4a9f-44b8-96f3-04474c17f7ad"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Dividends from UK companies, listed per holding.",
+      "display_name": "Dividends",
+      "display_order": 30,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "dividends",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "",
+      "linked_form_title": "",
+      "linked_form_weblink": "",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "dividend_vouchers",
+          "label": "Dividend vouchers",
+          "required": false
+        }
+      ],
+      "uuid": "8cd67b87-e8d0-454e-8483-c4611de7c57e"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Dividends from companies based outside the UK.",
+      "display_name": "Foreign dividends",
+      "display_order": 31,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "foreign_dividends",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "",
+      "linked_form_title": "",
+      "linked_form_weblink": "",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "dividend_vouchers",
+          "label": "Dividend vouchers",
+          "required": false
+        },
+        {
+          "allows_upload": true,
+          "key": "broker_statements",
+          "label": "Broker / platform statements",
+          "required": false
+        }
+      ],
+      "uuid": "128c2687-0394-4bf9-b3a8-fe3f7070a667"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Foreign savings interest, dividends above the £500 UK threshold, overseas pensions, and Foreign Tax Credit Relief. If you have foreign PROPERTY income use the 'Overseas property' section instead.",
+      "display_name": "Foreign income (SA106)",
+      "display_order": 40,
+      "hmrc_mapping": {
+        "sa106_form": "F1-F2, F5"
+      },
+      "include_in_tax_preview": false,
+      "income_type_key": "foreign_income",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Foreign income and gains",
+      "linked_form_title": "SA106",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c94af6a03e18e2ca4a3f/SA106-2025.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "income_source",
+          "label": "Income source",
+          "required": false
+        }
+      ],
+      "uuid": "511eaa4e-7d3e-4665-98cd-34e777ebad13"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Interest from banks and savings accounts outside the UK.",
+      "display_name": "Foreign interest",
+      "display_order": 51,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "foreign_interest",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "",
+      "linked_form_title": "",
+      "linked_form_weblink": "",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "interest_certificate",
+          "label": "Interest certificate",
+          "required": false
+        },
+        {
+          "allows_upload": false,
+          "key": "broker_statements",
+          "label": "Bank / broker statements",
+          "required": false
+        }
+      ],
+      "uuid": "48f0e44e-6a50-42a6-ad07-9ed6406ec897"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Interest from UK banks and building societies, listed per account.",
+      "display_name": "Bank interest",
+      "display_order": 50,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "interest",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "",
+      "linked_form_title": "",
+      "linked_form_weblink": "",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "interest_certificate",
+          "label": "Interest certificate",
+          "required": false
+        },
+        {
+          "allows_upload": true,
+          "key": "bank_statements",
+          "label": "Bank statements",
+          "required": false
+        }
+      ],
+      "uuid": "990e4191-ffcb-4702-a2b8-0681467f9f2a"
+    },
+    {
+      "allows_manual_entry": true,
+      "category_affinity": {},
+      "description": "Any other taxable income not covered by the categories above.",
+      "display_name": "Other income",
+      "display_order": 80,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "other",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "These fields map directly to the SA101 Additional information form.",
+      "linked_form_title": "SA101",
+      "linked_form_weblink": "https://www.gov.uk/government/publications/self-assessment-additional-information-sa101",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "income_proof",
+          "label": "Income Proof",
+          "required": false
+        }
+      ],
+      "uuid": "274f9ac9-3099-4efa-acf8-358520befaf9"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Dividends from authorised unit trusts, open-ended investment companies and other collective investments.",
+      "display_name": "Other dividends",
+      "display_order": 32,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "other_dividends",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "",
+      "linked_form_title": "",
+      "linked_form_weblink": "",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "dividend_vouchers",
+          "label": "Dividend vouchers",
+          "required": false
+        },
+        {
+          "allows_upload": false,
+          "key": "fund_statements",
+          "label": "Unit trust / fund statements",
+          "required": false
+        }
+      ],
+      "uuid": "f85e9592-7c00-4ec7-bc6f-7b04594714cc"
+    },
+    {
+      "allows_manual_entry": true,
+      "category_affinity": {},
+      "description": "Rent from land and property outside the UK.",
+      "display_name": "Overseas property",
+      "display_order": 45,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "overseas_property",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Foreign income and gains",
+      "linked_form_title": "SA106",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c9e963b78ce8bc3c2f78/SA106-2025.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "rental_statements",
+          "label": "Rental / letting statements",
+          "required": false
+        },
+        {
+          "allows_upload": true,
+          "key": "overseas_tax_docs",
+          "label": "Overseas tax paid — statements or certificates",
+          "required": false
+        }
+      ],
+      "uuid": "7482ac90-75f0-4b6d-be19-7fbc83303dfa"
+    },
+    {
+      "allows_manual_entry": true,
+      "category_affinity": {},
+      "description": "Income drawn from a pension.",
+      "display_name": "Pension income",
+      "display_order": 60,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "pension",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "",
+      "linked_form_title": "",
+      "linked_form_weblink": "",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "pension_statement",
+          "label": "Pension statement / P60",
+          "required": false
+        }
+      ],
+      "uuid": "e6944f81-cff3-48e8-8055-c4fda14095b1"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Payments you made INTO pension schemes that qualify for tax relief — not pension income.",
+      "display_name": "Pension payments (tax relief)",
+      "display_order": 65,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "pension_payments",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Tax reliefs section on the main return",
+      "linked_form_title": "SA100 TR4",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c86d4c1a4020117e9d68/SA100-2025.pdf",
+      "required_documents": [
+        {
+          "key": "pension_contribution_statements",
+          "label": "Pension contribution statements or certificates",
+          "required": false
+        }
+      ],
+      "uuid": "61bc3372-39d3-43f1-bdd2-e5b249a71def"
+    },
+    {
+      "allows_manual_entry": true,
+      "category_affinity": {},
+      "description": "Rent received from letting out property.",
+      "display_name": "Rental / Property income",
+      "display_order": 40,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "rental",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "UK property rental income",
+      "linked_form_title": "SA105",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c94af6a03e18e2ca4a3d/SA105-2025.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "rental_statements",
+          "label": "Rental / letting statements",
+          "required": false
+        },
+        {
+          "allows_upload": true,
+          "key": "tenancy_agreement",
+          "label": "Lease / tenancy agreement",
+          "required": false
+        }
+      ],
+      "uuid": "20db92af-5114-4631-8717-6997a79fc3e7"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "HMRC's SA109 supplementary form — residence status, split-year treatment, domicile and remittance basis claims. File this if you're non-UK resident, dual-resident, claiming split-year treatment, or opting into the remittance basis.",
+      "display_name": "Residence, remittance basis etc. (SA109)",
+      "display_order": 95,
+      "hmrc_mapping": {
+        "sa109_form": "RR1-RR3"
+      },
+      "include_in_tax_preview": false,
+      "income_type_key": "sa109",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Residence and remittance basis",
+      "linked_form_title": "SA109",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c9e9d24a86df80b8ceb0/SA109-2025.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "residence",
+          "label": "Residence",
+          "required": false
+        }
+      ],
+      "uuid": "f06321af-21e1-40d5-b35d-97cf6c124fa0"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "HMRC's SA110 supplementary form — enter the total tax, NICs, Student & Postgraduate Loan repayments, CGT, pension charges and any payments-on-account claims for the year. Use the working sheet in the 'Tax calculation summary notes' to derive the box values.",
+      "display_name": "Tax calculation summary (SA110)",
+      "display_order": 90,
+      "hmrc_mapping": {
+        "sa110_form": "TC1-TC2"
+      },
+      "include_in_tax_preview": false,
+      "income_type_key": "sa110",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Your final tax calculation summary",
+      "linked_form_title": "SA110",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/68af7c2fe1055f748d55c184/SA110-2026.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "tax_income",
+          "label": "Tax Income",
+          "required": false
+        }
+      ],
+      "uuid": "11946d06-b34c-4bd4-9273-73d0d9b9d163"
+    },
+    {
+      "allows_manual_entry": false,
+      "category_affinity": {},
+      "description": "Wages or salary from employment, taxed through PAYE.",
+      "display_name": "Salary / Employment (PAYE)",
+      "display_order": 10,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "salary",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Employment income and benefits",
+      "linked_form_title": "SA102",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874ca9c66bef7d5e5b60fc7/SA102-2025.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "p60",
+          "label": "P60 end-of-year certificate",
+          "required": false,
+          "requires_bank_account": false
+        },
+        {
+          "allows_upload": true,
+          "key": "p45",
+          "label": "P45 (if you left a job)",
+          "required": false,
+          "requires_bank_account": false
+        },
+        {
+          "allows_upload": true,
+          "key": "payslips",
+          "label": "Payslips",
+          "required": false,
+          "requires_bank_account": true
+        }
+      ],
+      "uuid": "0f946d18-feb0-4699-904e-b4619725ff33"
+    },
+    {
+      "allows_manual_entry": true,
+      "category_affinity": {},
+      "description": "Income from your trade as a sole trader or self-employed individual.",
+      "display_name": "Self-employment / Sole trader",
+      "display_order": 20,
+      "hmrc_mapping": {},
+      "include_in_tax_preview": false,
+      "income_type_key": "self_employment",
+      "is_active": true,
+      "keyword_rules": {},
+      "linked_form_description": "Self-employment income and expenses",
+      "linked_form_title": "SA103",
+      "linked_form_weblink": "https://assets.publishing.service.gov.uk/media/6874c8cd63b78ce8bc3c2f5b/SA103F-2025.pdf",
+      "required_documents": [
+        {
+          "allows_upload": true,
+          "key": "bank_statements",
+          "label": "Business bank statements",
+          "required": false,
+          "requires_bank_account": true
+        },
+        {
+          "allows_upload": true,
+          "key": "sales_invoices",
+          "label": "Sales invoices",
+          "required": false,
+          "requires_bank_account": false
+        }
+      ],
+      "uuid": "d23649a1-04e2-48cb-89e6-7499470d5e70"
+    }
+  ],
+  "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
+  "key": "income_type_key",
+  "namespace_scope": "tenant_scoped",
+  "namespace_slug": "tax-copilot",
+  "registry_version": 1,
+  "table": "income_types"
+}
