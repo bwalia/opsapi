@@ -153,7 +153,30 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
     },
+
+    -- Services (Domain management + GitHub workflow integration). This is a
+    -- FEATURE-ONLY code (see FEATURE_ONLY_CODES): it exists so a deployment can
+    -- inherit the SERVICES feature + its migrations into its PRIMARY namespace by
+    -- combining codes — e.g. PROJECT_CODE=tax_copilot,services keeps a single
+    -- `tax_copilot` tenant but also enables and migrates SERVICES/domains.
+    services = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.SERVICES,
+    },
 }
+
+-- Project codes that ONLY contribute features (and their migrations) and must
+-- NOT seed their own tenant when combined with a real project code. See
+-- scripts/setup-namespace.lua runMulti(), which filters these out of tenant
+-- creation so PROJECT_CODE=tax_copilot,services yields exactly one namespace.
+ProjectConfig.FEATURE_ONLY_CODES = {
+    services = true,
+}
+
+--- Is this project code feature-only (no dedicated tenant)?
+function ProjectConfig.isFeatureOnlyCode(code)
+    return ProjectConfig.FEATURE_ONLY_CODES[tostring(code or ""):lower()] == true
+end
 
 -- Cache for enabled features
 local _enabled_features = nil
@@ -384,9 +407,11 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "projects", name = "Projects", description = "Kanban projects and tasks", category = "Productivity" },
     },
 
-    -- Services modules
+    -- Services modules (includes Domain Management — same infrastructure remit,
+    -- gated under FEATURES.SERVICES rather than a dedicated project code)
     services = {
         { machine_name = "services", name = "Services", description = "Service deployment and management", category = "Infrastructure" },
+        { machine_name = "domains", name = "Domains", description = "Domain registry, SSL/expiry monitoring, Cloudflare DNS, and k3s sync", category = "Infrastructure" },
     },
 
     -- Hospital modules

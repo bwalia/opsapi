@@ -459,10 +459,30 @@ function SetupNamespace.runMulti(config)
     local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL", "admin@opsapi.com")
     local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD", "Admin@123")
 
+    -- Feature-only codes (e.g. `services`) enable features + run their migrations
+    -- but must NOT seed a separate tenant — they are inherited into the primary
+    -- namespace. Drop them from the per-code seeding list so, for example,
+    -- PROJECT_CODE=tax_copilot,services yields exactly one `tax_copilot` tenant.
+    local ProjectConfig = require("helper.project-config")
+    local seed_codes = {}
+    for _, code in ipairs(valid_codes) do
+        if ProjectConfig.isFeatureOnlyCode and ProjectConfig.isFeatureOnlyCode(code) then
+            print("Skipping tenant creation for feature-only code: " .. code
+                .. " (its features/migrations still apply to the deployment)")
+        else
+            table.insert(seed_codes, code)
+        end
+    end
+    if #seed_codes == 0 then
+        -- All codes were feature-only — nothing to seed, but not an error.
+        print("No tenant-seeding project codes after filtering feature-only codes; skipping namespace setup.")
+        return { total = 0, succeeded = 0, failed = 0, failures = {} }
+    end
+
     local failures = {}
     local succeeded = 0
 
-    for i, code in ipairs(valid_codes) do
+    for i, code in ipairs(seed_codes) do
         local code_slug = code:gsub("_", "-")
         local code_name = code:gsub("_", " "):gsub("(%a)([%w_']*)", function(a, b)
             return a:upper() .. b
