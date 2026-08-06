@@ -61,7 +61,19 @@ local function dir_exists(path)
     return false
 end
 
-local function resolve_config_dir()
+-- Resolve the config directory. Priority:
+--   1. Explicit arg from the caller (highest)
+--   2. $CMI_CONFIG_DIR env var (works from a shell but NOT from
+--      `lapis exec`, which runs inside the OpenResty worker whose
+--      env is frozen at nginx spawn — pass an arg in that case)
+--   3. ./config or ../config relative to CWD (dev-shell fallback)
+local function resolve_config_dir(override)
+    if override and override ~= "" then
+        if not dir_exists(override) then
+            error("Config dir arg points at '" .. override .. "' but that directory does not exist")
+        end
+        return override
+    end
     local env = os.getenv("CMI_CONFIG_DIR")
     if env and env ~= "" then
         if not dir_exists(env) then
@@ -72,8 +84,7 @@ local function resolve_config_dir()
     for _, candidate in ipairs({ "./config", "../config" }) do
         if dir_exists(candidate) then return candidate end
     end
-    error("No config directory found (looked for ./config, ../config). " ..
-          "Set CMI_CONFIG_DIR=/path/to/opsapi/config to override.")
+    error("No config directory found (looked for arg, CMI_CONFIG_DIR, ./config, ../config).")
 end
 
 --=============================================================================
@@ -95,14 +106,26 @@ local function key_columns(entry)
     return { entry.key }
 end
 
--- Build a WHERE clause + bind values for the entry's key columns.
-local function key_where_fragment(entry, row)
-    local frags, vals = {}, {}
-    for _, col in ipairs(key_columns(entry)) do
-        frags[#frags + 1] = col .. " = ?"
-        vals[#vals + 1] = row[col]
+-- Given a table name, return the list of column names it actually has.
+-- Cached per-table so the export/import walk doesn't re-query information_schema.
+local column_cache = {}
+local function get_columns(tbl)
+    if column_cache[tbl] then return column_cache[tbl] end
+    local rows = db.query([[
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = ? AND table_schema = 'public'
+    ]], tbl)
+    local cols = {}
+    for _, r in ipairs(rows or {}) do cols[#cols + 1] = r.column_name end
+    column_cache[tbl] = cols
+    return cols
+end
+
+local function column_exists(tbl, col)
+    for _, c in ipairs(get_columns(tbl)) do
+        if c == col then return true end
     end
-    return table.concat(frags, " AND "), vals
+    return false
 end
 
 -- Sort the entries in a stable order for both export (deterministic diff)
@@ -123,8 +146,10 @@ end
 --=============================================================================
 
 -- Look up a stable-key value for an integer FK id (used when exporting).
+-- Treats 0 as absent — 0 can never be a valid serial PK, but shows up in
+-- older seed data on columns that lacked a NULL default at insert time.
 local function deref_id_to_key(fk_spec, id)
-    if id == nil or id == cjson.null then return nil end
+    if id == nil or id == cjson.null or id == 0 then return nil end
     local rows = db.query("SELECT " .. fk_spec.key .. " AS k FROM " ..
                           fk_spec.table .. " WHERE id = ?", id)
     if not rows or #rows == 0 then
@@ -135,10 +160,14 @@ end
 
 local function export_one(entry, config_dir)
     local sql = "SELECT * FROM " .. entry.table
-    if (Registry.defaults.namespace_scope == "global_only") and entry.table ~= "profile_touchpoints" then
-        -- profile_touchpoints has no namespace_id column (verified 2026-08-06);
-        -- every other in-scope table does.
-        sql = sql .. " WHERE namespace_id IS NULL"
+    -- Some in-scope tables (e.g. tax_hmrc_categories, tax_categories,
+    -- income_types-linked ones) are already single-tenant and don't carry
+    -- a namespace_id at all. Only apply the WHERE when the column exists.
+    if (Registry.defaults.namespace_scope == "global_only") and column_exists(entry.table, "namespace_id") then
+        -- Treat namespace_id IS NULL and namespace_id = 0 as equivalent —
+        -- some seed migrations wrote 0, others wrote NULL. Both mean
+        -- "global config, not tenant-scoped".
+        sql = sql .. " WHERE (namespace_id IS NULL OR namespace_id = 0)"
     end
     local rows = db.query(sql) or {}
     sort_entries(entry, rows)
@@ -149,10 +178,14 @@ local function export_one(entry, config_dir)
 
     for _, row in ipairs(rows) do
         local out = {}
-        -- Dereference FK columns first
+        -- Dereference FK columns first. 0 shows up on nullable FK columns
+        -- whose seed data was inserted without an explicit NULL — treat it
+        -- as absent to keep warnings signal-heavy.
         for local_col, spec in pairs(entry.fk_refs or {}) do
             local id = row[local_col]
-            if id ~= nil and id ~= cjson.null then
+            if id == nil or id == cjson.null or id == 0 then
+                out[spec.as] = cjson.null
+            else
                 local k, err = deref_id_to_key(spec, id)
                 if k == nil then
                     warnings[#warnings + 1] = entry.table .. ": " ..
@@ -162,8 +195,6 @@ local function export_one(entry, config_dir)
                     end
                 end
                 out[spec.as] = k
-            else
-                out[spec.as] = cjson.null
             end
         end
         -- Copy remaining columns
@@ -191,8 +222,8 @@ local function export_one(entry, config_dir)
     return #out_entries, warnings
 end
 
-function M.export()
-    local config_dir = resolve_config_dir()
+function M.export(config_dir_override)
+    local config_dir = resolve_config_dir(config_dir_override)
     print("[cmi export] config dir: " .. config_dir)
     local total_rows, total_warnings = 0, 0
     for _, tbl_name in ipairs(Registry.export_order) do
@@ -240,7 +271,9 @@ local function coerce_value(v)
 end
 
 -- Build the SET clause for an ON CONFLICT DO UPDATE — every non-key column.
-local function build_upsert(entry, key_cols, columns)
+-- The entry itself isn't consulted (all info is in key_cols + columns) but
+-- kept in the signature for symmetry with the other builder helpers.
+local function build_upsert(_entry, key_cols, columns)
     local key_set = {}
     for _, c in ipairs(key_cols) do key_set[c] = true end
     local set_frags = {}
@@ -254,26 +287,6 @@ local function build_upsert(entry, key_cols, columns)
     return table.concat(set_frags, ", ")
 end
 
--- Given a table name, return the list of column names it actually has.
-local column_cache = {}
-local function get_columns(tbl)
-    if column_cache[tbl] then return column_cache[tbl] end
-    local rows = db.query([[
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = ? AND table_schema = 'public'
-    ]], tbl)
-    local cols = {}
-    for _, r in ipairs(rows or {}) do cols[#cols + 1] = r.column_name end
-    column_cache[tbl] = cols
-    return cols
-end
-
-local function column_exists(tbl, col)
-    for _, c in ipairs(get_columns(tbl)) do
-        if c == col then return true end
-    end
-    return false
-end
 
 local function import_one(entry, config_dir, apply)
     local path = config_dir .. "/" .. entry.file
@@ -289,14 +302,14 @@ local function import_one(entry, config_dir, apply)
 
     local key_cols = key_columns(entry)
     local plan = { table = entry.table, inserts = 0, updates = 0,
-                   deactivates = 0, errors = {} }
+                   matches = 0, deactivates = 0, errors = {} }
 
     -- Snapshot current keys so we can spot rows that disappeared.
     local existing = {}
     local snapshot_sql = "SELECT " .. table.concat(key_cols, ", ") ..
                          " FROM " .. entry.table
     if (Registry.defaults.namespace_scope == "global_only") and column_exists(entry.table, "namespace_id") then
-        snapshot_sql = snapshot_sql .. " WHERE namespace_id IS NULL"
+        snapshot_sql = snapshot_sql .. " WHERE (namespace_id IS NULL OR namespace_id = 0)"
     end
     for _, r in ipairs(db.query(snapshot_sql) or {}) do
         local composite = {}
@@ -357,6 +370,7 @@ local function import_one(entry, config_dir, apply)
             local conflict_target = table.concat(key_cols, ", ")
             local set_clause = build_upsert(entry, key_cols, cols)
 
+            local key_str = table.concat(composite, "|")
             if apply then
                 local ok_q, err_q = pcall(db.query,
                     "INSERT INTO " .. entry.table ..
@@ -367,16 +381,19 @@ local function import_one(entry, config_dir, apply)
                     unpack(vals))
                 if not ok_q then
                     plan.errors[#plan.errors + 1] = tostring(err_q)
+                elseif existing[key_str] then
+                    plan.updates = plan.updates + 1
                 else
-                    if existing[table.concat(composite, "|")] then
-                        plan.updates = plan.updates + 1
-                    else
-                        plan.inserts = plan.inserts + 1
-                    end
+                    plan.inserts = plan.inserts + 1
                 end
             else
-                if existing[table.concat(composite, "|")] then
-                    plan.updates = plan.updates + 1
+                -- Dry-run: we can't cheaply tell value-level drift here (JSON
+                -- columns need a real deep-compare vs the DB row). Report
+                -- STRUCTURAL drift only — new keys as inserts, missing keys
+                -- as deactivates, existing keys as `matches`. A follow-up
+                -- can add value-level diff for a stricter status.
+                if existing[key_str] then
+                    plan.matches = plan.matches + 1
                 else
                     plan.inserts = plan.inserts + 1
                 end
@@ -414,8 +431,8 @@ local function import_one(entry, config_dir, apply)
     return plan
 end
 
-local function run_import(apply)
-    local config_dir = resolve_config_dir()
+local function run_import(apply, config_dir_override)
+    local config_dir = resolve_config_dir(config_dir_override)
     print(string.format("[cmi import] %s mode, config dir: %s",
                         apply and "APPLY" or "DRY-RUN", config_dir))
     local totals = { inserts = 0, updates = 0, deactivates = 0, errors = 0 }
@@ -446,16 +463,18 @@ local function run_import(apply)
     end
 end
 
-function M.import_dry() run_import(false) end
-function M.import_apply() run_import(true) end
+function M.import_dry(config_dir_override) run_import(false, config_dir_override) end
+function M.import_apply(config_dir_override) run_import(true, config_dir_override) end
 
 --=============================================================================
 -- STATUS — one-line drift summary
 --=============================================================================
 
-function M.status()
-    local config_dir = resolve_config_dir()
+function M.status(config_dir_override)
+    local config_dir = resolve_config_dir(config_dir_override)
     print("[cmi status] config dir: " .. config_dir)
+    print("[cmi status] (v1 reports structural drift only: added/removed rows.")
+    print("[cmi status]  value-level drift on existing rows is a follow-up.)")
     local any_drift = false
     for _, tbl_name in ipairs(Registry.export_order) do
         local entry = Registry.tables[tbl_name]
@@ -464,19 +483,20 @@ function M.status()
             print(string.format("  %-32s ERROR: %s", entry.table, plan.error))
             any_drift = true
         else
-            local drift = plan.inserts + plan.updates + plan.deactivates
+            local drift = plan.inserts + plan.deactivates
             local marker = drift > 0 and "DRIFT" or "clean"
-            print(string.format("  %-32s [%s]  +%d ~%d -%d",
+            print(string.format("  %-32s [%s]  +%d matches=%d -%d",
                                 entry.table, marker,
-                                plan.inserts, plan.updates, plan.deactivates))
+                                plan.inserts, plan.matches, plan.deactivates))
             if drift > 0 then any_drift = true end
         end
     end
     if any_drift then
-        print("[cmi status] drift detected — run import_dry() for a full plan, then import_apply() to apply.")
-        os.exit(1)
+        -- error() propagates to `lapis exec` as non-zero exit without
+        -- killing the openresty worker (which os.exit would).
+        error("[cmi status] structural drift detected — run import_dry() for details, then import_apply() to apply.")
     else
-        print("[cmi status] no drift.")
+        print("[cmi status] no structural drift.")
     end
 end
 
