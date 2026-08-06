@@ -316,6 +316,15 @@ local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "m
 -- registry entries 510/511 (core) and 512 (CRM) below.
 local crm_leads_migrations = require("migrations.crm-leads")
 
+-- Domain Management (domains registry + credentials + k3s sync configs + menu).
+-- Gated on the existing SERVICES feature (shares the infrastructure remit) —
+-- no dedicated project code.
+local domain_management_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-management") or {}
+local domain_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-menu-items") or {}
+local domain_wslproxy_fields_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-wslproxy-fields") or {}
+local domain_pipeline_runs_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-pipeline-runs") or {}
+local domain_sync_settings_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-sync-settings") or {}
+
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
 local timesheet_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-menu-items") or {}
@@ -1710,6 +1719,19 @@ local _migrations = {
     -- CRM-only: attach converted_contact_id/converted_deal_id foreign keys.
     -- Sorts after 501-504 (crm_contacts/crm_deals) so the FK targets exist.
     ['512_crm_leads_crm_fks'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_migrations, 3),
+
+    -- Domain Management (600-606): registry + encrypted credentials + sync configs + menu.
+    -- Gated on FEATURES.SERVICES; namespace-scoped tables sort after namespaces (152).
+    ['600_domains_create'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_management_migrations, 1),
+    ['601_domain_credentials_create'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_management_migrations, 2),
+    ['602_domain_sync_configs_create'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_management_migrations, 3),
+    ['603_seed_domain_menu_item'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_menu_items_migrations, 1),
+    ['604_seed_domain_modules'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_menu_items_migrations, 2),
+    ['605_grant_domain_permissions'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_menu_items_migrations, 3),
+    ['606_enable_domain_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_menu_items_migrations, 4),
+    ['607_domain_wslproxy_fields'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 1),
+    ['608_domain_pipeline_runs'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_pipeline_runs_migrations, 1),
+    ['609_domain_sync_settings'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_sync_settings_migrations, 1),
 
     -- CRM menu items (720-723): surface CRM in the backend-driven sidebar
     ['720_seed_crm_menu_items'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 1),

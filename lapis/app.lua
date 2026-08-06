@@ -460,6 +460,10 @@ load_if("hospital", "routes.patient-audit-logs")
 -- ============================================
 load_if("services", "routes.services")
 
+-- Domain Management (registry, SSL/expiry monitoring, Cloudflare DNS, k3s sync).
+-- Shares the SERVICES feature (infrastructure remit) — no dedicated project code.
+load_if("services", "routes.domains")
+
 -- ============================================
 -- SECRET VAULT
 -- ============================================
