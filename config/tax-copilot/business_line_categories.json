@@ -1,0 +1,521 @@
+{
+  "entries": [
+    {
+      "category_key": "accelerated_transition_profit",
+      "description": "Extra transition profit you choose to tax this year on top of the automatic spread",
+      "display_order": 2,
+      "hmrc_mapping": "{\"sa103f_box\":\"73\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Accelerated transition profit",
+      "supports_disallowable": false,
+      "uuid": "563e2237-5a4e-4a3a-aa64-49f44430b09e"
+    },
+    {
+      "category_key": "fig_claim",
+      "display_order": 6,
+      "hmrc_mapping": "{\"sa103f_box\":\"75\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Amount claimed under the foreign income and gains (FIG) regime",
+      "supports_disallowable": false,
+      "uuid": "0c64b41b-b750-478e-8f66-3c0f121aa72c"
+    },
+    {
+      "category_key": "fig_loss_adjustment",
+      "display_order": 7,
+      "hmrc_mapping": "{\"sa103f_box\":\"75\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Adjustment to losses from a FIG regime claim",
+      "supports_disallowable": false,
+      "uuid": "e503292f-8d30-4558-a26e-c08a5e4918ff"
+    },
+    {
+      "category_key": "loss_brought_forward",
+      "display_order": 4,
+      "hmrc_mapping": "{\"sa103f_box\":\"74\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss brought forward from earlier years",
+      "supports_disallowable": false,
+      "uuid": "0d267fbc-9c52-42a7-8aa5-69d76c381734"
+    },
+    {
+      "category_key": "non_arms_length_income",
+      "display_order": 5,
+      "hmrc_mapping": "{\"sa103f_box\":\"75\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Any other business income (e.g. non-arm's-length reverse premiums)",
+      "supports_disallowable": false,
+      "uuid": "67205cc8-2ad2-443f-99db-9f06ab8adb83"
+    },
+    {
+      "category_key": "transitional_profit_bf",
+      "description": "Basis-period reform: profit being spread from the 2023–24 transition year",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa103f_box\":\"73\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Transitional profit brought forward",
+      "supports_disallowable": false,
+      "uuid": "e548e4be-6bbe-40cb-90cc-3e12d6fa947a"
+    },
+    {
+      "category_key": "transitional_profit_taxable",
+      "display_order": 3,
+      "hmrc_mapping": "{\"sa103f_box\":\"73\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Transitional profit taxable this year",
+      "supports_disallowable": false,
+      "uuid": "b2296c04-28be-459e-907d-30fd659aa3b5"
+    },
+    {
+      "category_key": "trading_income_allowance",
+      "description": "If you claim the allowance you can't also claim expenses. Only worth it when expenses are under £1,000 — and it's one allowance across ALL your trades.",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa103f_box\":\"16.1\"}",
+      "is_active": true,
+      "kind": "allowance",
+      "label": "Trading income allowance claimed (up to £1,000)",
+      "supports_disallowable": false,
+      "uuid": "7075f1d2-a858-409f-9a10-b1263050e4ab"
+    },
+    {
+      "category_key": "bs_balance_start",
+      "display_order": 11,
+      "hmrc_mapping": "{\"sa103f_box\":\"94\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Balance at start of period",
+      "supports_disallowable": false,
+      "uuid": "aa3ab90b-47b3-4268-989e-d438201dff97"
+    },
+    {
+      "category_key": "bs_bank",
+      "display_order": 5,
+      "hmrc_mapping": "{\"sa103f_box\":\"87\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Bank and building society balances",
+      "supports_disallowable": false,
+      "uuid": "8fe4dc54-092c-4ae5-8c68-ec8aa729d99b"
+    },
+    {
+      "category_key": "bs_capital_introduced",
+      "display_order": 12,
+      "hmrc_mapping": "{\"sa103f_box\":\"96\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Capital introduced",
+      "supports_disallowable": false,
+      "uuid": "52145529-f08a-42e9-b55f-4020d3812b21"
+    },
+    {
+      "category_key": "bs_cash",
+      "display_order": 6,
+      "hmrc_mapping": "{\"sa103f_box\":\"88\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Cash in hand",
+      "supports_disallowable": false,
+      "uuid": "89aa5c93-75d2-4f21-b817-214735c55e2d"
+    },
+    {
+      "category_key": "bs_drawings",
+      "display_order": 13,
+      "hmrc_mapping": "{\"sa103f_box\":\"97\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Drawings",
+      "supports_disallowable": false,
+      "uuid": "70036aa2-0803-435c-8670-ddd8843d9100"
+    },
+    {
+      "category_key": "bs_equipment",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa103f_box\":\"83\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Equipment, machinery and vehicles",
+      "supports_disallowable": false,
+      "uuid": "f70a158d-2f21-46c6-880a-c93c5fe601d9"
+    },
+    {
+      "category_key": "bs_loans_overdrafts",
+      "display_order": 9,
+      "hmrc_mapping": "{\"sa103f_box\":\"92\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Loans and overdrafts",
+      "supports_disallowable": false,
+      "uuid": "b711d0dd-7583-45e6-a588-588f3d17f38a"
+    },
+    {
+      "category_key": "bs_other_current_assets",
+      "display_order": 7,
+      "hmrc_mapping": "{\"sa103f_box\":\"89\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Other current assets and prepayments",
+      "supports_disallowable": false,
+      "uuid": "4ebea96c-cb13-49e5-a35d-b1061ae31eb0"
+    },
+    {
+      "category_key": "bs_other_fixed_assets",
+      "display_order": 2,
+      "hmrc_mapping": "{\"sa103f_box\":\"84\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Other fixed assets",
+      "supports_disallowable": false,
+      "uuid": "b825ca97-86fc-4c9e-846e-d8a4fb4667ad"
+    },
+    {
+      "category_key": "bs_other_liabilities",
+      "display_order": 10,
+      "hmrc_mapping": "{\"sa103f_box\":\"93\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Other liabilities and accruals",
+      "supports_disallowable": false,
+      "uuid": "672aefbb-bd3e-4560-916a-e00936516d32"
+    },
+    {
+      "category_key": "bs_stock",
+      "display_order": 3,
+      "hmrc_mapping": "{\"sa103f_box\":\"85\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Stock and work in progress",
+      "supports_disallowable": false,
+      "uuid": "03261b58-9283-47a1-98d3-855b387b79a5"
+    },
+    {
+      "category_key": "bs_trade_creditors",
+      "display_order": 8,
+      "hmrc_mapping": "{\"sa103f_box\":\"91\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Trade creditors",
+      "supports_disallowable": false,
+      "uuid": "3f2f0a6d-7960-41f2-915b-25304ec695cd"
+    },
+    {
+      "category_key": "bs_trade_debtors",
+      "display_order": 4,
+      "hmrc_mapping": "{\"sa103f_box\":\"86\"}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Trade debtors",
+      "supports_disallowable": false,
+      "uuid": "01ee3329-faa2-4b20-803b-25ee1b1c348f"
+    },
+    {
+      "category_key": "aia",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa103f_box\":\"49\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Annual Investment Allowance",
+      "supports_disallowable": false,
+      "uuid": "48f21460-9907-47f6-8c66-22c28fcd1938"
+    },
+    {
+      "category_key": "ca_equipment_main",
+      "display_order": 3,
+      "hmrc_mapping": "{\"sa103f_box\":\"50\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Capital allowance on equipment — main rate",
+      "supports_disallowable": false,
+      "uuid": "3777b7d1-f41e-4a07-83cb-6e7dd411e5b8"
+    },
+    {
+      "category_key": "ca_equipment_special",
+      "display_order": 4,
+      "hmrc_mapping": "{\"sa103f_box\":\"51\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Capital allowance on equipment — special rate",
+      "supports_disallowable": false,
+      "uuid": "b40a7964-a52b-41a2-8311-eef74539816e"
+    },
+    {
+      "category_key": "ca_single_asset_main",
+      "display_order": 5,
+      "hmrc_mapping": "{\"sa103f_box\":\"50\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Capital allowances on single asset pools — main rate",
+      "supports_disallowable": false,
+      "uuid": "030b47b1-902a-47dd-a843-0176a40c9de0"
+    },
+    {
+      "category_key": "ca_single_asset_special",
+      "display_order": 6,
+      "hmrc_mapping": "{\"sa103f_box\":\"51\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Capital allowances on single asset pools — special rate",
+      "supports_disallowable": false,
+      "uuid": "ad4b39df-209f-47af-86f5-70a0ba2d1162"
+    },
+    {
+      "category_key": "electric_charge_point",
+      "display_order": 11,
+      "hmrc_mapping": "{\"sa103f_box\":\"54\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Electric charge-point allowance",
+      "supports_disallowable": false,
+      "uuid": "2d82449f-16bc-434d-a4ef-93fa655b08a4"
+    },
+    {
+      "category_key": "enhanced_100",
+      "display_order": 12,
+      "hmrc_mapping": "{\"sa103f_box\":\"54\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "100% and other enhanced capital allowances",
+      "supports_disallowable": false,
+      "uuid": "ac862e0b-189b-4953-81d5-3ac878b49bd3"
+    },
+    {
+      "category_key": "freeport_sba",
+      "display_order": 10,
+      "hmrc_mapping": "{\"sa103f_box\":\"53\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Freeport and Investment Zones Structures and Buildings Allowance",
+      "supports_disallowable": false,
+      "uuid": "ab4a8f38-9bd6-4a96-8343-335caf62493f"
+    },
+    {
+      "category_key": "sba",
+      "display_order": 9,
+      "hmrc_mapping": "{\"sa103f_box\":\"53\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Structures and Buildings Allowance",
+      "supports_disallowable": false,
+      "uuid": "896bae51-b8dd-4f7c-88fd-46f5e309e81c"
+    },
+    {
+      "category_key": "small_pool_balance",
+      "display_order": 2,
+      "hmrc_mapping": "{\"sa103f_box\":\"50\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Small pool balance written off",
+      "supports_disallowable": false,
+      "uuid": "b22c72da-3d9b-4162-b151-559671c1ed6b"
+    },
+    {
+      "category_key": "zero_emission_car",
+      "display_order": 8,
+      "hmrc_mapping": "{\"sa103f_box\":\"52\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Zero-emission car allowance",
+      "supports_disallowable": false,
+      "uuid": "a3370a54-4b80-44eb-a575-4d8bd7f55469"
+    },
+    {
+      "category_key": "zero_emission_goods_vehicle",
+      "display_order": 7,
+      "hmrc_mapping": "{\"sa103f_box\":\"52\"}",
+      "is_active": true,
+      "kind": "capital_allowance",
+      "label": "Zero-emission goods vehicle allowance",
+      "supports_disallowable": false,
+      "uuid": "f8ccd59a-ab26-445a-a5ca-1d921c1b6637"
+    },
+    {
+      "category_key": "advertising",
+      "display_order": 8,
+      "hmrc_mapping": "{\"sa103f_box\":\"24\",\"disallowable_box\":\"39\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Advertising costs",
+      "supports_disallowable": true,
+      "uuid": "3dc8348f-f6c9-4ee8-8703-2b1c65efa020"
+    },
+    {
+      "category_key": "bank_charges",
+      "display_order": 11,
+      "hmrc_mapping": "{\"sa103f_box\":\"26\",\"disallowable_box\":\"41\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Bank, credit card and other financial charges",
+      "supports_disallowable": true,
+      "uuid": "6c4690ea-3589-4836-8537-103256df6b5c"
+    },
+    {
+      "category_key": "business_entertainment",
+      "description": "Client entertainment is normally disallowable for tax — record it in the disallowable column too",
+      "display_order": 9,
+      "hmrc_mapping": "{\"sa103f_box\":\"24\",\"disallowable_box\":\"39\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Business entertainment costs",
+      "supports_disallowable": true,
+      "uuid": "77456206-0dab-4f22-93b6-fda0c81d5359"
+    },
+    {
+      "category_key": "car_van_travel",
+      "display_order": 4,
+      "hmrc_mapping": "{\"sa103f_box\":\"20\",\"disallowable_box\":\"35\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Car, van and travel expenses",
+      "supports_disallowable": true,
+      "uuid": "6196b901-17c8-4b58-aea2-1b9384be8cde"
+    },
+    {
+      "category_key": "cis_subcontractors",
+      "display_order": 2,
+      "hmrc_mapping": "{\"sa103f_box\":\"18\",\"disallowable_box\":\"33\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Construction industry — payments to subcontractors",
+      "supports_disallowable": true,
+      "uuid": "0c7e4b13-f5d4-4e5b-a082-72b885d49ea4"
+    },
+    {
+      "category_key": "cost_of_goods",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa103f_box\":\"17\",\"disallowable_box\":\"32\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Cost of goods bought for resale or goods used",
+      "supports_disallowable": true,
+      "uuid": "344de93f-1c5d-4e91-ab36-0318fe943751"
+    },
+    {
+      "category_key": "depreciation",
+      "description": "Depreciation is always disallowable for tax — claim capital allowances instead",
+      "display_order": 14,
+      "hmrc_mapping": "{\"sa103f_box\":\"29\",\"disallowable_box\":\"44\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Depreciation and loss/profit on sale of assets",
+      "supports_disallowable": true,
+      "uuid": "e3236771-2c97-4407-ab6e-7d8b71ec7b9f"
+    },
+    {
+      "category_key": "interest_loans",
+      "display_order": 10,
+      "hmrc_mapping": "{\"sa103f_box\":\"25\",\"disallowable_box\":\"40\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Interest on bank and other loans",
+      "supports_disallowable": true,
+      "uuid": "9beaf909-2bf0-4d09-99d5-d4ee77384bbb"
+    },
+    {
+      "category_key": "irrecoverable_debts",
+      "display_order": 12,
+      "hmrc_mapping": "{\"sa103f_box\":\"27\",\"disallowable_box\":\"42\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Irrecoverable debts written off",
+      "supports_disallowable": true,
+      "uuid": "19795624-e254-4dbd-b463-d3e04209160a"
+    },
+    {
+      "category_key": "other_expenses",
+      "display_order": 15,
+      "hmrc_mapping": "{\"sa103f_box\":\"30\",\"disallowable_box\":\"45\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Other business expenses",
+      "supports_disallowable": true,
+      "uuid": "467970bb-abaa-4414-8214-0ded95e91924"
+    },
+    {
+      "category_key": "phone_office",
+      "display_order": 7,
+      "hmrc_mapping": "{\"sa103f_box\":\"23\",\"disallowable_box\":\"38\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Phone, fax, stationery and other office costs",
+      "supports_disallowable": true,
+      "uuid": "7c9d3ac8-7ccb-4aba-a5ee-5e2be6136a31"
+    },
+    {
+      "category_key": "professional_fees",
+      "display_order": 13,
+      "hmrc_mapping": "{\"sa103f_box\":\"28\",\"disallowable_box\":\"43\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Accountancy, legal and other professional fees",
+      "supports_disallowable": true,
+      "uuid": "245adeee-6d0f-4507-9a24-56b1351fd203"
+    },
+    {
+      "category_key": "rent_rates_power",
+      "display_order": 5,
+      "hmrc_mapping": "{\"sa103f_box\":\"21\",\"disallowable_box\":\"36\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Rent, rates, power and insurance costs",
+      "supports_disallowable": true,
+      "uuid": "e522dda1-f103-4b2f-80c0-8f0ba46a6862"
+    },
+    {
+      "category_key": "repairs_maintenance",
+      "display_order": 6,
+      "hmrc_mapping": "{\"sa103f_box\":\"22\",\"disallowable_box\":\"37\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Repairs and maintenance of property and equipment",
+      "supports_disallowable": true,
+      "uuid": "9f9b9d34-c024-492d-a8cc-2b184625602e"
+    },
+    {
+      "category_key": "wages_staff",
+      "description": "Don't include money you took out for yourself — that's drawings, not an expense",
+      "display_order": 3,
+      "hmrc_mapping": "{\"sa103f_box\":\"19\",\"disallowable_box\":\"34\"}",
+      "is_active": true,
+      "kind": "expense",
+      "label": "Wages, salaries and other staff costs",
+      "supports_disallowable": true,
+      "uuid": "fcc185b0-2dff-413b-8d1c-c399edef4b9f"
+    },
+    {
+      "category_key": "other_income",
+      "description": "e.g. grants or rental income from business premises — not the trading allowance",
+      "display_order": 2,
+      "hmrc_mapping": "{\"sa103f_box\":\"16\"}",
+      "is_active": true,
+      "kind": "income",
+      "label": "Any other business income",
+      "supports_disallowable": false,
+      "uuid": "28832a79-c27f-47f0-a88a-288d9fe2d1a4"
+    },
+    {
+      "category_key": "turnover",
+      "description": "Your takings, fees and sales before any expenses",
+      "display_order": 1,
+      "hmrc_mapping": "{\"sa103f_box\":\"15\"}",
+      "is_active": true,
+      "kind": "income",
+      "label": "Business turnover",
+      "supports_disallowable": false,
+      "uuid": "4f32da4c-11ec-4f6b-9039-088196f26d1c"
+    }
+  ],
+  "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
+  "key": [
+    "kind",
+    "category_key"
+  ],
+  "namespace_scope": "tenant_scoped",
+  "namespace_slug": "tax-copilot",
+  "registry_version": 1,
+  "table": "business_line_categories"
+}

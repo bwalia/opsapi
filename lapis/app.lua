@@ -529,6 +529,10 @@ load_if("tax_copilot", "routes.tax-employments")
 -- surface is what lets new screens ship without code changes.
 load_if("tax_copilot", "routes.tax-form-sections")
 load_if("tax_copilot", "routes.tax-admin-form-sections")
+-- Config-as-Code (CMI) admin API — export / dry-run / apply for the admin
+-- dashboard. Same admin-role gate as the other tax-admin routes; every
+-- endpoint is scoped by an explicit namespace_slug.
+load_if("tax_copilot", "routes.tax-admin-cmi")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
 load_if("tax_copilot", "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")

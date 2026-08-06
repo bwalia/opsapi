@@ -1,0 +1,220 @@
+name: CMI — Drift PR (int → main)
+
+# Config-as-Code drift detection.
+#
+# What this does:
+#   1. Runs `lapis config export` inside int's opsapi pod, dumping the
+#      tax-copilot namespace + globals to a workspace directory.
+#   2. Compares that against the checked-in `config/` tree.
+#   3. If anything differs, creates a branch, commits the diff, and
+#      opens a PR against main so a human can review before the
+#      changes propagate to acc/prod via the import workflow.
+#
+# When this runs:
+#   * Daily at 03:00 UTC (a schedule the merge freezes don't touch).
+#   * On-demand via workflow_dispatch — useful right after an admin
+#     makes a batch of edits and wants to see them in a PR now.
+#
+# What this does NOT do:
+#   * Import anything anywhere. Import happens ONLY on merge to main
+#     via cmi-import.yml, one env at a time.
+#   * Touch any namespace other than tax-copilot. The CLI refuses
+#     without a slug arg; the arg is hard-coded here.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      NAMESPACE_SLUG:
+        description: "Namespace slug to export (default: tax-copilot)"
+        required: true
+        default: "tax-copilot"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # A second dispatch while one is running would clobber the same
+  # branch. Serialise them.
+  group: cmi-drift-pr
+  cancel-in-progress: false
+
+env:
+  NAMESPACE_SLUG: ${{ github.event.inputs.NAMESPACE_SLUG || 'tax-copilot' }}
+  # int is the authoring env for CMI — admin edits happen here first.
+  SOURCE_ENV: int
+
+jobs:
+  drift:
+    # In-cluster runner in the int namespace — same k3s1 cluster all
+    # envs live on, so kubectl reaches every namespace. `int` label
+    # is chosen so this workflow's queue never blocks acc/prod deploys.
+    runs-on: [self-hosted, int]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout opsapi
+        uses: actions/checkout@v4
+        with:
+          # Full history — the PR branch is created off main below.
+          fetch-depth: 0
+
+      - name: Install kubectl (if missing)
+        run: |
+          if ! command -v kubectl >/dev/null 2>&1; then
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          fi
+          kubectl version --client=true 2>/dev/null | head -1 || true
+
+      - name: Configure kubectl
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          if [ -z "$KUBECONFIG_BASE64" ]; then
+            echo "::error::KUBE_CONFIG_DATA_K3S secret is not set."
+            exit 1
+          fi
+          echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Validate NAMESPACE_SLUG shape
+        # The slug flows into `lapis exec "require(...).export(..., '${NAMESPACE_SLUG}')"`
+        # further down. workflow_dispatch inputs are typed strings, but
+        # anyone with dispatch permission could enter shell/Lua
+        # metacharacters. Same regex the CLI's validate_slug uses.
+        run: |
+          set -euo pipefail
+          case "$NAMESPACE_SLUG" in
+            ''|*[!a-z0-9-]*|-*|[0-9]*)
+              echo "::error::Invalid NAMESPACE_SLUG '$NAMESPACE_SLUG' — must match ^[a-z][a-z0-9-]{0,63}\$"
+              exit 1 ;;
+          esac
+          if [ ${#NAMESPACE_SLUG} -gt 64 ]; then
+            echo "::error::NAMESPACE_SLUG too long"; exit 1
+          fi
+          echo "Slug OK: $NAMESPACE_SLUG"
+
+      - name: Locate opsapi pod in $SOURCE_ENV
+        id: pod
+        run: |
+          set -euo pipefail
+          POD="$(kubectl -n "$SOURCE_ENV" get pod -l app=opsapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+          if [ -z "$POD" ]; then
+            echo "::error::No opsapi pod found in namespace $SOURCE_ENV (label app=opsapi)"
+            exit 1
+          fi
+          echo "pod=$POD" >> "$GITHUB_OUTPUT"
+          echo "Located opsapi pod: $POD"
+
+      - name: Export config from $SOURCE_ENV opsapi pod
+        run: |
+          set -euo pipefail
+          POD="${{ steps.pod.outputs.pod }}"
+          rm -rf export-out && mkdir -p export-out
+          # Ensure the pod has a writable dir; /tmp/cmi-export is world-
+          # writable on the openresty image.
+          kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c 'rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export'
+          kubectl -n "$SOURCE_ENV" exec "$POD" -- \
+            lapis exec "require('scripts.config-cli').export('/tmp/cmi-export', '${NAMESPACE_SLUG}')"
+          # cp -r requires the source to exist; the export step above
+          # errors out if it didn't create anything, so this is safe.
+          kubectl -n "$SOURCE_ENV" cp "$POD:/tmp/cmi-export/." export-out/
+
+      - name: Overlay export onto checked-in config/
+        run: |
+          set -euo pipefail
+          mkdir -p config
+          # Rsync-style overlay: replace files that changed, keep the
+          # tree layout the exporter produced. Nothing is deleted from
+          # git-tracked config/ that isn't overwritten — a namespace
+          # slug missing from the export would leave stale files, so
+          # we clear its subfolder first.
+          rm -rf "config/${NAMESPACE_SLUG}" "config/_global"
+          cp -r export-out/. config/
+
+      - name: Detect drift
+        id: diff
+        run: |
+          set -euo pipefail
+          if git diff --quiet --exit-code -- config/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No drift between int and main — nothing to PR."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "diff_summary<<DIFF_EOF"
+              git diff --stat -- config/
+              echo "DIFF_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create branch + commit + push
+        if: steps.diff.outputs.changed == 'true'
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A single stable branch — daily drift folds into the same PR
+          # until it's merged. That means one live PR per namespace, not
+          # a new PR each day cluttering the queue.
+          BRANCH="cmi/drift-${NAMESPACE_SLUG}"
+          git config user.name  "cmi-drift-bot"
+          git config user.email "cmi-drift-bot@users.noreply.github.com"
+          git fetch origin main --depth=1
+          git checkout -B "$BRANCH" origin/main
+          # Re-apply the export on top of a clean main so our commit
+          # only carries genuine drift, not local checkout state.
+          rm -rf "config/${NAMESPACE_SLUG}" "config/_global"
+          cp -r export-out/. config/
+          git add config/
+          MSG=$(cat <<EOF
+          chore(cmi): drift from ${SOURCE_ENV} @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+          Auto-generated by .github/workflows/cmi-drift-pr.yml — the tax-copilot
+          namespace on ${SOURCE_ENV} has diverged from the main baseline. Review
+          the diff before merge; merging kicks off cmi-import against acc + prod.
+          EOF
+          )
+          git commit -m "$MSG"
+          git push origin "$BRANCH" --force-with-lease
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open (or update) PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIFF_SUMMARY: ${{ steps.diff.outputs.diff_summary }}
+        run: |
+          set -euo pipefail
+          BRANCH="${{ steps.branch.outputs.branch }}"
+          # gh pr create errors out if a PR from this branch already
+          # exists — that's fine, we just push updates to it.
+          if ! gh pr view "$BRANCH" >/dev/null 2>&1; then
+            # Multi-line body via heredoc so YAML doesn't have to parse
+            # embedded newlines / backticks.
+            BODY=$(cat <<EOF
+          Automated drift PR from \`${SOURCE_ENV}\` opsapi's tax-copilot namespace.
+
+          ## Diff summary
+          \`\`\`
+          ${DIFF_SUMMARY}
+          \`\`\`
+
+          ## What happens on merge
+          GitHub Actions \`cmi-import.yml\` fans out over acc + prod and runs \`lapis config import_apply\` there. Rows removed here get \`is_active = false\` on target envs, never a hard DELETE.
+
+          ## Regenerating this PR
+          Push to \`main\` to close it out (the next daily run recomputes drift), or dispatch \`cmi-drift-pr\` manually to refresh.
+          EOF
+            )
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "CMI drift: ${NAMESPACE_SLUG} from ${SOURCE_ENV}" \
+              --body "$BODY"
+          else
+            echo "PR from $BRANCH already exists; force-push refreshed its diff."
+          fi

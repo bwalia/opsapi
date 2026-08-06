@@ -86,6 +86,14 @@ COPY views /app/views
 # 4. Core scripts — one-shot bootstrap / migration helpers.
 COPY scripts /app/scripts
 
+# 4b. Config-as-Code (CMI) library — the registry that declares which
+#     tables are portable and the JSON pretty-printer. Only the two .lua
+#     modules ship in the image; the baseline .json files live in
+#     opsapi/config/ (repo root, outside this build context) and are
+#     mounted or docker-cp'd in at import time — same pattern the
+#     cmi-import CI workflow uses via `kubectl cp`.
+COPY config /app/config
+
 # 4. Helpers + libs — reusable modules. Change less than routes/queries.
 COPY helper /app/helper
 COPY lib /app/lib
