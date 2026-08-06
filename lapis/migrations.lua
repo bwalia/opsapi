@@ -290,6 +290,11 @@ local interest_panels_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- once multiple project codes need it. See migrations/billing-system.lua.
 local billing_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.billing-system") or {}
 
+-- Config-as-Code (CMI) — backfill UNIQUE indexes on composite business keys
+-- so `lapis config export|import` can safely upsert by stable key. See the
+-- module's docstring for the four tables covered and rationale.
+local config_cmi_unique_keys_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.config-cmi-unique-keys") or {}
+
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
 local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
@@ -2182,6 +2187,17 @@ local _migrations = {
     ['829_profile_utr_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 5),
     ['830_profile_migrate_lua_patterns_to_pcre'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 6),
     ['831_profile_heal_empty_identity_locks'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 7),
+
+    -- =========================================================================
+    -- Config-as-Code (CMI) prep — unique indexes on composite business keys
+    -- so `lapis config export|import` can upsert by stable key. Runs after
+    -- everything else in the TAX_COPILOT block; every step is idempotent
+    -- (CREATE UNIQUE INDEX IF NOT EXISTS).
+    -- =========================================================================
+    ['990_cmi_uq_property_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_unique_keys_migrations, 1),
+    ['991_cmi_uq_business_line_categories'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_unique_keys_migrations, 2),
+    ['992_cmi_uq_profile_question_options'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_unique_keys_migrations, 3),
+    ['993_cmi_uq_profile_lookup_values']    = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_unique_keys_migrations, 4),
 
     ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
     -- Add a jsonb `tags` array to courses (create-or-select category + multi-tags).
