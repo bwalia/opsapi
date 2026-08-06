@@ -16,6 +16,7 @@ local TaxUserProfileQueries = require("queries.TaxUserProfileQueries")
 local HMRCBusinessQueries = require("queries.HMRCBusinessQueries")
 local HMRCObligationQueries = require("queries.HMRCObligationQueries")
 local HMRCTokenQueries = require("queries.HMRCTokenQueries")
+local IdentityLock = require("lib.identity_lock")
 
 -- Helper: parse JSON body into params
 local function parseJsonBody(self)
@@ -97,6 +98,23 @@ return function(app)
             nino_display = "****" .. profile.nino_last4
         end
 
+        -- Policy gate on the lock stamps (see migration 832): with the
+        -- tenant's lock policy off — the default since the client asked
+        -- for NINO/UTR to stay user-editable — the write path accepts
+        -- edits, so surfacing the historical stamp here would render a
+        -- "your NINO is locked" banner over a field the server no
+        -- longer locks. Stamps stay in the DB for audit; re-enabling
+        -- the policy makes them bite again.
+        local nino_locked_at = profile.nino_locked_at
+        local utr_locked_at  = profile.utr_locked_at
+        if nino_locked_at or utr_locked_at then
+            local pol_ok, policy = pcall(IdentityLock.getPolicy, profile.namespace_id or 0)
+            if pol_ok and policy then
+                if not policy.nino_lock_enabled then nino_locked_at = nil end
+                if not policy.utr_lock_enabled then utr_locked_at = nil end
+            end
+        end
+
         return {
             status = 200,
             json = {
@@ -108,8 +126,8 @@ return function(app)
                 -- reads these to render the locked card + support links
                 -- without probing a write and catching the 403. See PR
                 -- #464 / lib/identity_lock.lua for the enforcement logic.
-                nino_locked_at = profile.nino_locked_at,
-                utr_locked_at  = profile.utr_locked_at,
+                nino_locked_at = nino_locked_at,
+                utr_locked_at  = utr_locked_at,
                 hmrc_connected = hmrc_connected,
                 hmrc_token_expires_at = hmrc_token and hmrc_token.expires_at or nil,
                 default_business_id = profile.default_business_id,

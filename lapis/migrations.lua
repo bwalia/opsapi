@@ -157,6 +157,11 @@ local profile_builder_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_CO
 -- top of the earlier last_name / nino questions.
 local personal_details_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.personal-details-cleanup") or {}
 
+-- Identity lock default flip — client reversed the anti-fraud freeze
+-- (2026-08-06): NINO/UTR stay user-editable unless a tenant re-enables
+-- the lock in admin settings. See migrations/identity-lock-defaults.lua.
+local identity_lock_defaults_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.identity-lock-defaults") or {}
+
 -- My Income (tax_copilot feature) — manually-entered income source-of-truth
 local my_income_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.my-income-system") or {}
 
@@ -2192,6 +2197,11 @@ local _migrations = {
     ['829_profile_utr_validation'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 5),
     ['830_profile_migrate_lua_patterns_to_pcre'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 6),
     ['831_profile_heal_empty_identity_locks'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, personal_details_cleanup_migrations, 7),
+    -- 832: disable the NINO/UTR identity lock by default (client
+    -- reversal 2026-08-06 — users must be able to correct their own
+    -- identifiers). Policy flags off + column defaults off; stamps and
+    -- enforcement machinery kept for tenants that re-enable.
+    ['832_identity_lock_disable_by_default'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, identity_lock_defaults_migrations, 1),
 
     -- =========================================================================
     -- Config-as-Code (CMI) prep — unique indexes on composite business keys
