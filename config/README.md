@@ -91,6 +91,71 @@ enabling CI-driven `import_apply` on any real env:
 - **Slug-in / id-out.** Every FK in the JSON is a stable business key,
   not an integer id. IDs resolve locally at import time — an env's
   namespace id can differ from int's and everything still lines up.
+- **Post-apply status check.** The CI workflow re-runs `status` after
+  `import_apply`; any remaining drift fails the run loudly.
+
+## Rollback
+
+CMI is git-first, so rollback is a git operation:
+
+1. **Identify the bad merge.**
+   ```sh
+   git log --oneline config/tax-copilot/
+   ```
+   Find the SHA that introduced the bad row(s).
+
+2. **Revert the merge on main.**
+   ```sh
+   git revert -m 1 <merge-sha>
+   git push origin main
+   ```
+   The `cmi-import.yml` workflow fires on the revert push and undoes
+   the change on acc + prod (in that order, prod gated on acc success).
+
+3. **Verify.**
+   Watch the workflow, then `curl` or spot-check the admin dashboard
+   on prod to confirm the reverted row's state.
+
+Between step 2 and 3 there IS a window where acc is on the old
+(reverted) state but prod is still on the bad state. That's ~5-10
+minutes. If speed matters, use `workflow_dispatch` on `cmi-import.yml`
+with `TARGET_ENV=prod` to skip the acc → prod sequencing.
+
+### The one thing rollback cannot undo
+
+Row deactivations. If a bad merge dropped an income type from
+`income_types.json`, apply set its `is_active=false`. Revert restores
+`is_active=true`. Good.
+
+But if the bad merge dropped a `profile_question` whose *users had
+already answered*, and their answers still reference `question_id=X`
+via `user_profile_answers.question_id` — the row was deactivated, not
+deleted, so those answers still resolve. Even in the worst case,
+nothing is lost; the row just needs its `is_active` flipped back.
+
+There is no case where CMI hard-deletes user-visible data. That's a
+design invariant, not a hope.
+
+## Prerequisites for CI (opsapi)
+
+The two workflows in `.github/workflows/cmi-*.yml` need:
+
+* **Secret `KUBE_CONFIG_DATA_K3S`** — base64 kubeconfig with reach
+  into the int, acc, and prod namespaces on k3s1. Same secret
+  `db_backup.yml` uses; already present on the opsapi repo.
+* **Self-hosted runners** labelled `[self-hosted, int]`,
+  `[self-hosted, acc]`, `[self-hosted, prod]`. Same runners the
+  deploy-lapis and db_backup workflows use.
+* **`GITHUB_TOKEN`** with `contents: write` + `pull-requests: write`
+  — the drift-PR workflow's `permissions:` block declares these; no
+  extra PAT needed.
+* **Ring Promoter entry** (added in the diy-tax-return-uk repo,
+  `devops/ring-promoter/configmap.yaml`) needs `RP_GITHUB_TOKEN`
+  scoped to trigger workflows in `bwalia/opsapi` — same token used
+  for `diytaxreturn-opsapi`; already scoped correctly.
+
+If any prereq is missing on your fork, the workflow fails loudly
+with a `::error::` line pointing at what's absent.
 
 ## Adding a new config table
 
