@@ -1,0 +1,103 @@
+name: CMI — Import to acc + prod
+
+# Config-as-Code import. Runs after a config/ change lands on main.
+#
+# What this does:
+#   1. For each target env (acc + prod on push; user's pick on
+#      dispatch), copy the checked-in config/ tree into that env's
+#      opsapi pod.
+#   2. Run `lapis config status` first — soft check. If drift exists
+#      we log it, but we don't gate on it because the intent of this
+#      workflow is TO produce drift (import applies changes).
+#   3. Run `lapis config import_apply` for the tax-copilot namespace.
+#   4. Run status again as a post-check — should be clean after apply.
+#
+# Ordering: acc runs first, prod second. `needs:` blocks the prod job
+# on acc's success so a bad import can't reach prod.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'config/**'
+      - '.github/workflows/cmi-import.yml'
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: "Which env to import into"
+        required: true
+        default: "acc"
+        type: choice
+        options:
+          - acc
+          - prod
+          - both
+      NAMESPACE_SLUG:
+        description: "Namespace slug (default: tax-copilot)"
+        required: true
+        default: "tax-copilot"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two imports race against the same env's DB.
+  group: cmi-import-${{ github.event.inputs.TARGET_ENV || 'push' }}
+  cancel-in-progress: false
+
+env:
+  NAMESPACE_SLUG: ${{ github.event.inputs.NAMESPACE_SLUG || 'tax-copilot' }}
+
+jobs:
+  # Decide the matrix based on trigger. Push events always fan out over
+  # acc + prod (with sequencing enforced by `needs:`). Manual dispatch
+  # honours the operator's choice, including "both".
+  set-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      envs: ${{ steps.pick.outputs.envs }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ github.event.inputs.TARGET_ENV }}" in
+              acc)  echo 'envs=["acc"]'         >> "$GITHUB_OUTPUT" ;;
+              prod) echo 'envs=["prod"]'        >> "$GITHUB_OUTPUT" ;;
+              both) echo 'envs=["acc","prod"]'  >> "$GITHUB_OUTPUT" ;;
+              *)    echo "::error::Unknown TARGET_ENV"; exit 1 ;;
+            esac
+          else
+            # push to main: acc first, then prod (sequenced below).
+            echo 'envs=["acc","prod"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  # Import to acc first — this job MUST succeed before prod runs.
+  import-acc:
+    needs: set-matrix
+    if: contains(fromJSON(needs.set-matrix.outputs.envs), 'acc')
+    runs-on: [self-hosted, acc]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/cmi-import
+        with:
+          target_env: acc
+          namespace_slug: ${{ env.NAMESPACE_SLUG }}
+          kubeconfig_b64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+
+  # Prod runs ONLY after acc finishes cleanly.
+  import-prod:
+    needs: [set-matrix, import-acc]
+    if: |
+      always() &&
+      contains(fromJSON(needs.set-matrix.outputs.envs), 'prod') &&
+      (needs.import-acc.result == 'success' || needs.import-acc.result == 'skipped')
+    runs-on: [self-hosted, prod]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/cmi-import
+        with:
+          target_env: prod
+          namespace_slug: ${{ env.NAMESPACE_SLUG }}
+          kubeconfig_b64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}

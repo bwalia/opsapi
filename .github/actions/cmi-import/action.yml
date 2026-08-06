@@ -1,0 +1,96 @@
+name: CMI Import
+description: |
+  Copies the checked-out `config/` tree into the opsapi pod in
+  <target_env> and runs `lapis config import_apply` for a namespace.
+  Includes pre/post `status` checks and refuses to run if the pod is
+  missing or the kubeconfig is empty.
+
+  Extracted from cmi-import.yml so acc and prod jobs share exactly
+  one code path — any behaviour change lands in one place.
+
+inputs:
+  target_env:
+    description: "Env namespace to import into (acc | prod)"
+    required: true
+  namespace_slug:
+    description: "CMI namespace slug to import (e.g. tax-copilot)"
+    required: true
+  kubeconfig_b64:
+    description: "Base64-encoded kubeconfig with reach to <target_env>"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install kubectl (if missing)
+      shell: bash
+      run: |
+        if ! command -v kubectl >/dev/null 2>&1; then
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+        fi
+        kubectl version --client=true 2>/dev/null | head -1 || true
+
+    - name: Configure kubectl
+      shell: bash
+      env:
+        KUBECONFIG_BASE64: ${{ inputs.kubeconfig_b64 }}
+      run: |
+        if [ -z "$KUBECONFIG_BASE64" ]; then
+          echo "::error::kubeconfig_b64 input is empty."
+          exit 1
+        fi
+        echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+        echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+    - name: Locate opsapi pod
+      id: pod
+      shell: bash
+      run: |
+        set -euo pipefail
+        POD="$(kubectl -n "${{ inputs.target_env }}" get pod -l app=opsapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+        if [ -z "$POD" ]; then
+          echo "::error::No opsapi pod in namespace ${{ inputs.target_env }} (label app=opsapi)"
+          exit 1
+        fi
+        echo "pod=$POD" >> "$GITHUB_OUTPUT"
+        echo "Located: $POD in ${{ inputs.target_env }}"
+
+    - name: Copy config/ into the pod
+      shell: bash
+      run: |
+        set -euo pipefail
+        POD="${{ steps.pod.outputs.pod }}"
+        # /tmp is world-writable on the openresty image. Wipe first so
+        # a partial copy from a previous run can't confuse the import.
+        kubectl -n "${{ inputs.target_env }}" exec "$POD" -- sh -c 'rm -rf /tmp/cmi-import && mkdir -p /tmp/cmi-import'
+        kubectl -n "${{ inputs.target_env }}" cp config/. "$POD:/tmp/cmi-import/"
+
+    - name: Pre-import status (informational)
+      shell: bash
+      run: |
+        set -euo pipefail
+        POD="${{ steps.pod.outputs.pod }}"
+        # Status exits non-zero on drift — which is expected before
+        # apply. Capture but don't fail here.
+        kubectl -n "${{ inputs.target_env }}" exec "$POD" -- \
+          lapis exec "require('scripts.config-cli').status('/tmp/cmi-import', '${{ inputs.namespace_slug }}')" \
+          2>&1 | tee pre-status.log || true
+
+    - name: Import apply
+      shell: bash
+      run: |
+        set -euo pipefail
+        POD="${{ steps.pod.outputs.pod }}"
+        kubectl -n "${{ inputs.target_env }}" exec "$POD" -- \
+          lapis exec "require('scripts.config-cli').import_apply('/tmp/cmi-import', '${{ inputs.namespace_slug }}')"
+
+    - name: Post-import status (must be clean)
+      shell: bash
+      run: |
+        set -euo pipefail
+        POD="${{ steps.pod.outputs.pod }}"
+        # After apply, drift MUST be zero. Non-zero here is a real
+        # error — surfaces value-drift bugs or missed FK derefs.
+        kubectl -n "${{ inputs.target_env }}" exec "$POD" -- \
+          lapis exec "require('scripts.config-cli').status('/tmp/cmi-import', '${{ inputs.namespace_slug }}')"
