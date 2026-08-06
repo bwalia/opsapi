@@ -1295,6 +1295,49 @@ function FormSectionQueries.card_summary(user)
         fold_in(slot.key, slot.total, slot.count)
     end
 
+    -- ── Tax relief tables (rebranded pension_payments hub) ──────────
+    -- The four relief categories seeded 2026-08-06 (Gift Aid, gifts to
+    -- charity, VCT/EIS/SEIS subscriptions) live under the SAME context
+    -- as pension payments but use their own repeating-group question
+    -- keys, so the pp_* pension sum above never sees them and the
+    -- "Tax relief" card stayed on "Nothing recorded yet" after a user
+    -- filled a whole table. Headline money column per table matches
+    -- the seed's hmrc_mapping.total_field (keys hardcoded here for the
+    -- same malformed-config_json reason as the dividend branch — keep
+    -- in step with 20260806_002_seed_tax_relief_questions.lua in the
+    -- diy-tax-return-uk consumer migrations).
+    -- Count = table rows entered across all years, pension convention.
+    local relief_row = db.query(string.format([[
+        SELECT
+          COALESCE(SUM(CASE q.question_key
+            WHEN 'sa100_gift_aid_payments'          THEN %s
+            WHEN 'sa100_shares_gifted_to_charity'   THEN %s
+            WHEN 'sa100_property_gifted_to_charity' THEN %s
+            WHEN 'sa101_vct_subscriptions'          THEN %s
+            WHEN 'sa101_eis_subscriptions'          THEN %s
+            WHEN 'sa101_seis_subscriptions'         THEN %s
+          END), 0)  AS total,
+          COUNT(*)  AS row_count
+        FROM user_profile_answers a
+        JOIN profile_questions q ON q.id = a.question_id
+        CROSS JOIN LATERAL jsonb_array_elements(a.answer_json::jsonb) elem
+        WHERE a.user_id = ?
+          AND q.question_key IN
+              ('sa100_gift_aid_payments', 'sa100_shares_gifted_to_charity',
+               'sa100_property_gifted_to_charity', 'sa101_vct_subscriptions',
+               'sa101_eis_subscriptions', 'sa101_seis_subscriptions')
+          AND a.answer_json IS NOT NULL
+          AND a.answer_json <> ''
+          AND jsonb_typeof(a.answer_json::jsonb) = 'array'
+    ]], money_cell("amount"), money_cell("net_benefit"), money_cell("net_benefit"),
+        money_cell("amount_subscribed"), money_cell("relief_claimed"),
+        money_cell("relief_claimed")), internal_user_id)
+    if relief_row and relief_row[1] then
+        fold_in("pension_payments",
+            tonumber(relief_row[1].total) or 0,
+            tonumber(relief_row[1].row_count) or 0)
+    end
+
     return out
 end
 
