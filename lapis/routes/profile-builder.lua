@@ -1090,6 +1090,18 @@ return function(app)
                 user_utr_locked_at  = up_rows[1].utr_locked_at
             end
         end
+        -- Policy gate: a historical lock stamp only disables the field
+        -- while the tenant's lock policy is ON. With the policy off
+        -- (the default since migration 832) the write path skips
+        -- assertNotLocked, so reporting is_locked_for_user=true here
+        -- would grey out a field the server would happily accept — the
+        -- FE and the write path must agree. Stamps are kept (audit
+        -- semantics); re-enabling the policy re-locks instantly.
+        if user_nino_locked_at or user_utr_locked_at then
+            local lock_policy = IdentityLock.getPolicy(namespace_id or 0)
+            if not lock_policy.nino_lock_enabled then user_nino_locked_at = nil end
+            if not lock_policy.utr_lock_enabled then user_utr_locked_at = nil end
+        end
 
         local result = {}
         for _, cat in ipairs(categories or {}) do

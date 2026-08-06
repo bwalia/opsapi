@@ -81,16 +81,20 @@ function IdentityLock.getPolicy(namespace_id)
     if rows and #rows > 0 then
         return rows[1]
     end
-    -- Sane defaults matching the migration's DEFAULT clauses. If the
-    -- settings row is missing (tenant hasn't opened the admin UI yet),
-    -- we STILL enforce the lock — the client's whole ask is anti-fraud,
-    -- so the default posture is "protected".
+    -- Defaults matching the migration's DEFAULT clauses (updated by
+    -- migration 832: the client reversed the original anti-fraud ask on
+    -- 2026-08-06 — users must be able to correct their own NINO/UTR, so
+    -- the out-of-the-box posture is now "editable"). A tenant that wants
+    -- the lock back flips nino_lock_enabled / utr_lock_enabled in the
+    -- identity-lock admin settings; all enforcement machinery is intact.
+    -- Uniqueness stays on — it guards a different fraud vector (same
+    -- NINO across two accounts) and doesn't block self-correction.
     return {
-        nino_lock_enabled           = true,
+        nino_lock_enabled           = false,
         nino_confirmation_required  = true,
         nino_backfill_scheduled_at  = nil,
         nino_uniqueness_enforced    = true,
-        utr_lock_enabled            = true,
+        utr_lock_enabled            = false,
         utr_backfill_enabled        = false,
         utr_backfill_scheduled_at   = nil,
     }

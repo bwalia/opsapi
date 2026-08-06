@@ -1204,6 +1204,97 @@ function FormSectionQueries.card_summary(user)
         other_entry.row_count = tonumber(other_row[1].row_count) or 0
     end
 
+    -- ── Per-entity types: self-employment + property ────────────────
+    -- The three hub types whose money does NOT live in profile answers
+    -- at all: business_line_values (one row per SA103F line per
+    -- business per year) and property_line_items (one row per rental
+    -- income/expense line per property per year). The generic
+    -- profile-builder branch above can't see either table, and their
+    -- entity contexts ('business', 'property', 'overseas_property')
+    -- never equal an income_type_key — so a user could fill in a whole
+    -- business's turnover and /my-income still said "Nothing recorded
+    -- yet". That was the bug this branch fixes.
+    --
+    -- Total   income-kind lines only (turnover, other business income,
+    --         rent) — expenses/allowances/balance-sheet lines would
+    --         make the headline meaningless.
+    -- Count   number of non-archived entities (businesses /
+    --         properties), matching the salary branch's "one entry =
+    --         one employment" convention.
+    --
+    -- Merged ADDITIVELY into any existing entry (the generic branch
+    -- may already hold year-scoped SA103F/SA105 completion boxes for
+    -- 'self_employment'/'rental'); entries are only CREATED when the
+    -- user actually has entities or lines, so an untouched type keeps
+    -- its "Add income" call-to-action.
+    local function fold_in(income_type_key, add_total, add_count)
+        if (add_total or 0) == 0 and (add_count or 0) == 0 then return end
+        local entry = by_type[income_type_key]
+        if not entry then
+            entry = { income_type_key = income_type_key, total = 0, row_count = 0 }
+            out[#out + 1] = entry
+            by_type[income_type_key] = entry
+        end
+        entry.total = entry.total + (add_total or 0)
+        entry.row_count = entry.row_count + (add_count or 0)
+    end
+
+    local se_rows = db.query([[
+        SELECT COALESCE(SUM(v.amount), 0) AS total
+        FROM business_line_values v
+        JOIN user_profile_entities e ON e.uuid = v.business_uuid
+        WHERE v.user_id = ?
+          AND v.kind = 'income'
+          AND e.entity_type = 'business'
+          AND e.is_archived = false
+    ]], internal_user_id)
+    local se_count = db.query([[
+        SELECT COUNT(*) AS n FROM user_profile_entities
+        WHERE user_id = ? AND entity_type = 'business' AND is_archived = false
+    ]], internal_user_id)
+    fold_in("self_employment",
+        tonumber(((se_rows or {})[1] or {}).total) or 0,
+        tonumber(((se_count or {})[1] or {}).n) or 0)
+
+    -- UK rental and overseas property share property_line_items; the
+    -- owning entity's entity_type says which hub card the money
+    -- belongs to ('property' → rental, 'overseas_property' → itself).
+    local prop_totals = db.query([[
+        SELECT e.entity_type,
+               COALESCE(SUM(li.amount), 0) AS total
+        FROM property_line_items li
+        JOIN user_profile_entities e ON e.uuid = li.property_uuid
+        WHERE li.user_id = ?
+          AND li.kind = 'income'
+          AND li.is_archived = false
+          AND e.entity_type IN ('property', 'overseas_property')
+          AND e.is_archived = false
+        GROUP BY e.entity_type
+    ]], internal_user_id) or {}
+    local prop_counts = db.query([[
+        SELECT entity_type, COUNT(*) AS n
+        FROM user_profile_entities
+        WHERE user_id = ?
+          AND entity_type IN ('property', 'overseas_property')
+          AND is_archived = false
+        GROUP BY entity_type
+    ]], internal_user_id) or {}
+    local prop_by_entity = {
+        property = { total = 0, count = 0, key = "rental" },
+        overseas_property = { total = 0, count = 0, key = "overseas_property" },
+    }
+    for _, r in ipairs(prop_totals) do
+        local slot = prop_by_entity[r.entity_type]
+        if slot then slot.total = tonumber(r.total) or 0 end
+    end
+    for _, r in ipairs(prop_counts) do
+        local slot = prop_by_entity[r.entity_type]
+        if slot then slot.count = tonumber(r.n) or 0 end
+    end
+    for _, slot in pairs(prop_by_entity) do
+        fold_in(slot.key, slot.total, slot.count)
+    end
+
     return out
 end
 
