@@ -2,40 +2,58 @@
   Config-as-Code (CMI) CLI — export / import / status.
 
   Reads config/registry.lua to know which tables are in scope, walks
-  each, and either dumps them to opsapi/config/*.json or reads those
-  files back and upserts them into the current DB.
+  each, and either dumps them to opsapi/config/... or reads those files
+  back and upserts them into the current DB.
 
-  Invocation (from inside the opsapi container or a dev shell with
-  lapis on PATH):
+  MULTI-TENANT MODEL
+  ------------------
+  Every namespaced table is scoped to ONE namespace per operation. The
+  caller passes a namespace slug ('tax-copilot' is the DIY-tax-return
+  default); the CLI resolves it to the local integer id and filters
+  every query. Cross-tenant leakage is impossible by construction —
+  every SELECT WHERE clause carries the resolved id.
 
-    # Dump current DB → JSON files under $CMI_CONFIG_DIR (or ./config)
-    lapis exec "require('scripts.config-cli').export()"
+  Global tables (no namespace concept — e.g. tax_hmrc_categories,
+  menu_items) are exported to a shared `_global/` subfolder regardless
+  of the namespace arg.
 
-    # Preview an import (no writes) — shows every INSERT / UPDATE it
-    # would perform, plus rows it would mark inactive.
-    lapis exec "require('scripts.config-cli').import_dry()"
+  Invocation (from inside the opsapi container or a dev shell):
 
-    # Apply the import for real (upsert + mark-inactive-not-delete).
-    lapis exec "require('scripts.config-cli').import_apply()"
+    -- Dump the tax-copilot namespace + globals into /path/to/config/
+    lapis exec "require('scripts.config-cli').export('/path/to/config', 'tax-copilot')"
 
-    # One-line drift summary (per-table row counts + INSERT/UPDATE
-    # counts vs on-disk config). Non-zero when drift exists.
-    lapis exec "require('scripts.config-cli').status()"
+    -- Preview an import (no writes) — shows every INSERT / DEACTIVATE
+    -- and MATCHES counts, per table.
+    lapis exec "require('scripts.config-cli').import_dry('/path/to/config', 'tax-copilot')"
 
-  Config directory resolution, in order:
-    1. $CMI_CONFIG_DIR                            (explicit override)
-    2. First of these that exists as a directory: ./config, ../config
-    3. Fatal error — export/import cannot proceed without a target.
+    -- Apply the import for real (upsert + mark-inactive-not-delete).
+    lapis exec "require('scripts.config-cli').import_apply('/path/to/config', 'tax-copilot')"
 
-  IMPORTANT — SAFETY MODEL
+    -- Structural drift summary; non-zero on any add/remove.
+    lapis exec "require('scripts.config-cli').status('/path/to/config', 'tax-copilot')"
 
+  File layout produced:
+
+    <config_dir>/_global/tax_hmrc_categories.json
+    <config_dir>/_global/menu_items.json
+    <config_dir>/<namespace-slug>/income_types.json
+    <config_dir>/<namespace-slug>/profile_categories.json
+    <config_dir>/<namespace-slug>/...
+
+  SAFETY MODEL
+  ------------
   Export is read-only against the DB but WILL overwrite JSON files.
   Import is destructive against the DB. It does NOT hard-delete
-  anything: rows not present in the YAML get is_active=false (soft
-  delete), preserving referential integrity for historical user data.
+  anything: rows present in the DB but missing from the file get
+  is_active = false (soft delete), preserving referential integrity
+  for historical user rows that reference a retired config row.
 
-  Only rows with `namespace_id IS NULL` participate. Per-tenant
-  customization is treated as data, not config, and follows the tenant.
+  Refusing to proceed
+  -------------------
+  If any tenant-scoped table still has rows with namespace_id IS NULL
+  or namespace_id = 0, the CLI aborts with a repair hint pointing at
+  migration 994_cmi_ns_cleanup_to_tax_copilot. Zero and NULL are never
+  real namespaces and would silently drop out of scoped queries.
 ]]
 
 local db = require("lapis.db")
@@ -44,15 +62,14 @@ local JSON = require("config.json_pretty")
 local Registry = require("config.registry")
 local Global = require("helper.global")
 
--- Lua 5.2 renamed unpack → table.unpack; opsapi runs LuaJIT 5.1 where the
--- global still exists, but belt-and-braces so this module keeps compiling
--- if the runtime ever moves.
+-- Lua 5.2+ renamed unpack → table.unpack; opsapi runs LuaJIT 5.1 where
+-- the global still exists. Belt-and-braces for future runtime moves.
 local unpack = unpack or table.unpack
 
 local M = {}
 
 --=============================================================================
--- config dir resolution
+-- helpers
 --=============================================================================
 
 local function dir_exists(path)
@@ -61,12 +78,12 @@ local function dir_exists(path)
     return false
 end
 
--- Resolve the config directory. Priority:
---   1. Explicit arg from the caller (highest)
---   2. $CMI_CONFIG_DIR env var (works from a shell but NOT from
---      `lapis exec`, which runs inside the OpenResty worker whose
---      env is frozen at nginx spawn — pass an arg in that case)
---   3. ./config or ../config relative to CWD (dev-shell fallback)
+local function ensure_dir(path)
+    -- Best-effort mkdir -p. `os.execute` is safe here — path is an operator
+    -- input to the CLI, not user input to a route.
+    os.execute("mkdir -p '" .. path:gsub("'", "'\\''") .. "'")
+end
+
 local function resolve_config_dir(override)
     if override and override ~= "" then
         if not dir_exists(override) then
@@ -87,27 +104,22 @@ local function resolve_config_dir(override)
     error("No config directory found (looked for arg, CMI_CONFIG_DIR, ./config, ../config).")
 end
 
---=============================================================================
--- shared helpers
---=============================================================================
-
-local function merged_skip_columns(entry)
-    local skip = {}
-    for _, c in ipairs(Registry.defaults.skip_columns or {}) do skip[c] = true end
-    for _, c in ipairs(entry.skip_columns or {}) do skip[c] = true end
-    -- Every FK ref's local column is skipped from raw output (replaced by
-    -- the dereferenced field via `as`).
-    for local_col, _ in pairs(entry.fk_refs or {}) do skip[local_col] = true end
-    return skip
+-- Resolve a namespace slug to its local integer id on this env. Every
+-- CLI operation begins with this — no downstream query runs without it.
+local function resolve_namespace(slug)
+    if not slug or slug == "" then
+        error("CMI CLI requires a namespace slug (e.g. 'tax-copilot'). " ..
+              "Passing nil would silently export/import across all namespaces.")
+    end
+    local rows = db.query("SELECT id FROM namespaces WHERE slug = ? LIMIT 1", slug)
+    if not rows or #rows == 0 then
+        error("Namespace '" .. slug .. "' does not exist on this environment. " ..
+              "Available: run `SELECT slug FROM namespaces`.")
+    end
+    return rows[1].id
 end
 
-local function key_columns(entry)
-    if type(entry.key) == "table" then return entry.key end
-    return { entry.key }
-end
-
--- Given a table name, return the list of column names it actually has.
--- Cached per-table so the export/import walk doesn't re-query information_schema.
+-- Cached per-table column list; used to detect namespace_id presence.
 local column_cache = {}
 local function get_columns(tbl)
     if column_cache[tbl] then return column_cache[tbl] end
@@ -128,8 +140,41 @@ local function column_exists(tbl, col)
     return false
 end
 
--- Sort the entries in a stable order for both export (deterministic diff)
--- and status (readable output). Sort by the entry's key columns.
+-- Refuse to run if any tenant-scoped table still holds ns=0 / NULL rows
+-- (namespace-cleanup migration not yet applied). Bail loudly rather than
+-- silently miss data.
+local function preflight_namespace_cleanliness()
+    local bad = {}
+    for _, tbl_name in ipairs(Registry.export_order) do
+        local entry = Registry.tables[tbl_name]
+        if entry.namespace_scope == "tenant_scoped" and column_exists(entry.table, "namespace_id") then
+            local rows = db.query(
+                "SELECT COUNT(*) AS n FROM " .. entry.table ..
+                " WHERE namespace_id IS NULL OR namespace_id = 0")
+            local n = rows and rows[1] and tonumber(rows[1].n) or 0
+            if n > 0 then bad[#bad + 1] = entry.table .. " (" .. n .. " rows)" end
+        end
+    end
+    if #bad > 0 then
+        error("CMI refuses to run — tables have ns=0 / NULL rows: " ..
+              table.concat(bad, ", ") .. ". Apply migration " ..
+              "'994_cmi_ns_cleanup_to_tax_copilot' first.")
+    end
+end
+
+local function merged_skip_columns(entry)
+    local skip = {}
+    for _, c in ipairs(Registry.defaults.skip_columns or {}) do skip[c] = true end
+    for _, c in ipairs(entry.skip_columns or {}) do skip[c] = true end
+    for local_col, _ in pairs(entry.fk_refs or {}) do skip[local_col] = true end
+    return skip
+end
+
+local function key_columns(entry)
+    if type(entry.key) == "table" then return entry.key end
+    return { entry.key }
+end
+
 local function sort_entries(entry, rows)
     local cols = key_columns(entry)
     table.sort(rows, function(a, b)
@@ -141,13 +186,35 @@ local function sort_entries(entry, rows)
     end)
 end
 
+-- Build the WHERE fragment applying the entry's namespace scope. Returns
+-- (sql_fragment, bind_values) where fragment starts with " WHERE ..." or
+-- is the empty string for global tables.
+local function scope_where(entry, target_ns_id)
+    local scope = entry.namespace_scope or "tenant_scoped"
+    if scope == "global" then
+        return "", {}
+    elseif scope == "tenant_scoped" then
+        return " WHERE " .. entry.table .. ".namespace_id = ?", { target_ns_id }
+    elseif scope == "inherited" then
+        -- Filter via the parent's namespace_id through the local FK.
+        local via = entry.inherit_ns_via
+        return " WHERE " .. entry.table .. "." .. via.local_col .. " IN (" ..
+               "SELECT id FROM " .. via.parent_table ..
+               " WHERE namespace_id = ?)", { target_ns_id }
+    end
+    error("Unknown namespace_scope '" .. tostring(scope) .. "' for " .. entry.table)
+end
+
+-- Choose the subfolder for a table given the target slug.
+local function subfolder(entry, ns_slug)
+    if entry.namespace_scope == "global" then return "_global" end
+    return ns_slug
+end
+
 --=============================================================================
--- EXPORT — DB → JSON files
+-- EXPORT
 --=============================================================================
 
--- Look up a stable-key value for an integer FK id (used when exporting).
--- Treats 0 as absent — 0 can never be a valid serial PK, but shows up in
--- older seed data on columns that lacked a NULL default at insert time.
 local function deref_id_to_key(fk_spec, id)
     if id == nil or id == cjson.null or id == 0 then return nil end
     local rows = db.query("SELECT " .. fk_spec.key .. " AS k FROM " ..
@@ -158,18 +225,10 @@ local function deref_id_to_key(fk_spec, id)
     return rows[1].k, nil
 end
 
-local function export_one(entry, config_dir)
-    local sql = "SELECT * FROM " .. entry.table
-    -- Some in-scope tables (e.g. tax_hmrc_categories, tax_categories,
-    -- income_types-linked ones) are already single-tenant and don't carry
-    -- a namespace_id at all. Only apply the WHERE when the column exists.
-    if (Registry.defaults.namespace_scope == "global_only") and column_exists(entry.table, "namespace_id") then
-        -- Treat namespace_id IS NULL and namespace_id = 0 as equivalent —
-        -- some seed migrations wrote 0, others wrote NULL. Both mean
-        -- "global config, not tenant-scoped".
-        sql = sql .. " WHERE (namespace_id IS NULL OR namespace_id = 0)"
-    end
-    local rows = db.query(sql) or {}
+local function export_one(entry, config_dir, ns_slug, target_ns_id)
+    local where_frag, where_binds = scope_where(entry, target_ns_id)
+    local sql = "SELECT " .. entry.table .. ".* FROM " .. entry.table .. where_frag
+    local rows = db.query(sql, unpack(where_binds)) or {}
     sort_entries(entry, rows)
 
     local skip = merged_skip_columns(entry)
@@ -178,9 +237,6 @@ local function export_one(entry, config_dir)
 
     for _, row in ipairs(rows) do
         local out = {}
-        -- Dereference FK columns first. 0 shows up on nullable FK columns
-        -- whose seed data was inserted without an explicit NULL — treat it
-        -- as absent to keep warnings signal-heavy.
         for local_col, spec in pairs(entry.fk_refs or {}) do
             local id = row[local_col]
             if id == nil or id == cjson.null or id == 0 then
@@ -197,11 +253,8 @@ local function export_one(entry, config_dir)
                 out[spec.as] = k
             end
         end
-        -- Copy remaining columns
         for col, val in pairs(row) do
-            if not skip[col] then
-                out[col] = val
-            end
+            if not skip[col] then out[col] = val end
         end
         out_entries[#out_entries + 1] = out
     end
@@ -209,12 +262,16 @@ local function export_one(entry, config_dir)
     local doc = {
         table = entry.table,
         key = entry.key,
+        namespace_scope = entry.namespace_scope,
+        namespace_slug = (entry.namespace_scope == "global") and nil or ns_slug,
         registry_version = Registry.version,
         exported_at_note = "regenerated by `lapis exec require('scripts.config-cli').export()`",
         entries = out_entries,
     }
 
-    local path = config_dir .. "/" .. entry.file
+    local subdir = config_dir .. "/" .. subfolder(entry, ns_slug)
+    ensure_dir(subdir)
+    local path = subdir .. "/" .. entry.file
     local ok, err = JSON.write_file(path, doc)
     if not ok then
         error("Failed to write " .. path .. ": " .. tostring(err))
@@ -222,9 +279,12 @@ local function export_one(entry, config_dir)
     return #out_entries, warnings
 end
 
-function M.export(config_dir_override)
+function M.export(config_dir_override, namespace_slug)
     local config_dir = resolve_config_dir(config_dir_override)
-    print("[cmi export] config dir: " .. config_dir)
+    local target_ns_id = resolve_namespace(namespace_slug)
+    preflight_namespace_cleanliness()
+    print(string.format("[cmi export] namespace=%s (id=%d), config dir=%s",
+                        namespace_slug, target_ns_id, config_dir))
     local total_rows, total_warnings = 0, 0
     for _, tbl_name in ipairs(Registry.export_order) do
         local entry = Registry.tables[tbl_name]
@@ -232,11 +292,11 @@ function M.export(config_dir_override)
             error("export_order references '" .. tbl_name ..
                   "' but no entry exists in Registry.tables")
         end
-        local count, warnings = export_one(entry, config_dir)
+        local count, warnings = export_one(entry, config_dir, namespace_slug, target_ns_id)
         total_rows = total_rows + count
         total_warnings = total_warnings + #warnings
-        print(string.format("[cmi export]   %-32s %4d rows  → %s",
-                            entry.table, count, entry.file))
+        print(string.format("[cmi export]   %-32s %4d rows  → %s/%s",
+                            entry.table, count, subfolder(entry, namespace_slug), entry.file))
         for _, w in ipairs(warnings) do
             print("[cmi export]     WARN: " .. w)
         end
@@ -246,10 +306,9 @@ function M.export(config_dir_override)
 end
 
 --=============================================================================
--- IMPORT — JSON files → DB
+-- IMPORT
 --=============================================================================
 
--- Look up an integer id for a stable-key value (used when importing).
 local function resolve_key_to_id(fk_spec, key_val)
     if key_val == nil or key_val == cjson.null then return nil end
     local rows = db.query("SELECT id FROM " .. fk_spec.table ..
@@ -262,17 +321,11 @@ local function resolve_key_to_id(fk_spec, key_val)
 end
 
 local function coerce_value(v)
-    -- cjson.null → SQL NULL sentinel that db.query understands
     if v == cjson.null then return db.NULL end
-    -- JSON objects / arrays go back to the DB as JSON strings; the columns
-    -- are jsonb/text and postgres will parse them.
     if type(v) == "table" then return cjson.encode(v) end
     return v
 end
 
--- Build the SET clause for an ON CONFLICT DO UPDATE — every non-key column.
--- The entry itself isn't consulted (all info is in key_cols + columns) but
--- kept in the signature for symmetry with the other builder helpers.
 local function build_upsert(_entry, key_cols, columns)
     local key_set = {}
     for _, c in ipairs(key_cols) do key_set[c] = true end
@@ -282,14 +335,12 @@ local function build_upsert(_entry, key_cols, columns)
             set_frags[#set_frags + 1] = c .. " = EXCLUDED." .. c
         end
     end
-    -- always bump updated_at if the target has one
     set_frags[#set_frags + 1] = "updated_at = NOW()"
     return table.concat(set_frags, ", ")
 end
 
-
-local function import_one(entry, config_dir, apply)
-    local path = config_dir .. "/" .. entry.file
+local function import_one(entry, config_dir, ns_slug, target_ns_id, apply)
+    local path = config_dir .. "/" .. subfolder(entry, ns_slug) .. "/" .. entry.file
     local doc, err = JSON.read_file(path)
     if not doc then
         return { table = entry.table, error = "cannot read " .. path .. ": " .. tostring(err) }
@@ -304,14 +355,13 @@ local function import_one(entry, config_dir, apply)
     local plan = { table = entry.table, inserts = 0, updates = 0,
                    matches = 0, deactivates = 0, errors = {} }
 
-    -- Snapshot current keys so we can spot rows that disappeared.
+    -- Snapshot current keys, scoped to the target namespace.
+    local where_frag, where_binds = scope_where(entry, target_ns_id)
+    local snapshot_sql = "SELECT " .. table.concat(
+        (function() local q = {} for _, c in ipairs(key_cols) do q[#q+1] = entry.table.."."..c end; return q end)(),
+        ", ") .. " FROM " .. entry.table .. where_frag
     local existing = {}
-    local snapshot_sql = "SELECT " .. table.concat(key_cols, ", ") ..
-                         " FROM " .. entry.table
-    if (Registry.defaults.namespace_scope == "global_only") and column_exists(entry.table, "namespace_id") then
-        snapshot_sql = snapshot_sql .. " WHERE (namespace_id IS NULL OR namespace_id = 0)"
-    end
-    for _, r in ipairs(db.query(snapshot_sql) or {}) do
+    for _, r in ipairs(db.query(snapshot_sql, unpack(where_binds)) or {}) do
         local composite = {}
         for _, c in ipairs(key_cols) do composite[#composite + 1] = tostring(r[c]) end
         existing[table.concat(composite, "|")] = true
@@ -319,13 +369,12 @@ local function import_one(entry, config_dir, apply)
     local seen = {}
 
     for _, yaml_row in ipairs(doc.entries or {}) do
-        -- Resolve FKs (stable-key → integer id)
         local row = {}
         for k, v in pairs(yaml_row) do row[k] = v end
         local resolved_ok = true
         for local_col, spec in pairs(entry.fk_refs or {}) do
             local key_val = row[spec.as]
-            row[spec.as] = nil -- consumed
+            row[spec.as] = nil
             if key_val ~= nil and key_val ~= cjson.null then
                 local id, id_err = resolve_key_to_id(spec, key_val)
                 if id == nil then
@@ -342,35 +391,31 @@ local function import_one(entry, config_dir, apply)
         end
 
         if resolved_ok then
-            -- Track composite for is_active fallback
+            -- Force the correct namespace id on tenant-scoped rows; global
+            -- and inherited tables don't carry a namespace_id column.
+            if entry.namespace_scope == "tenant_scoped" and column_exists(entry.table, "namespace_id") then
+                row.namespace_id = target_ns_id
+            end
+
             local composite = {}
             for _, c in ipairs(key_cols) do composite[#composite + 1] = tostring(row[c]) end
-            seen[table.concat(composite, "|")] = true
+            local key_str = table.concat(composite, "|")
+            seen[key_str] = true
 
-            -- Ensure uuid is present so an INSERT can succeed. Rule tables
-            -- always carry their uuid in the YAML (it IS their identity);
-            -- slug-keyed tables usually do too (round-tripped from the
-            -- original int export). If it's missing, mint one the same
-            -- way the seed migrations do — Global.generateUUID falls back
-            -- to a non-ngx generator when invoked from the CLI.
             if row.uuid == nil and column_exists(entry.table, "uuid") then
                 row.uuid = Global.generateUUID()
             end
 
-            -- Build INSERT ... ON CONFLICT (keys) DO UPDATE SET ...
             local cols, vals = {}, {}
             for c, v in pairs(row) do
                 cols[#cols + 1] = c
                 vals[#vals + 1] = coerce_value(v)
             end
-
             local placeholders = {}
             for _ = 1, #cols do placeholders[#placeholders + 1] = "?" end
-
             local conflict_target = table.concat(key_cols, ", ")
             local set_clause = build_upsert(entry, key_cols, cols)
 
-            local key_str = table.concat(composite, "|")
             if apply then
                 local ok_q, err_q = pcall(db.query,
                     "INSERT INTO " .. entry.table ..
@@ -387,11 +432,9 @@ local function import_one(entry, config_dir, apply)
                     plan.inserts = plan.inserts + 1
                 end
             else
-                -- Dry-run: we can't cheaply tell value-level drift here (JSON
-                -- columns need a real deep-compare vs the DB row). Report
-                -- STRUCTURAL drift only — new keys as inserts, missing keys
-                -- as deactivates, existing keys as `matches`. A follow-up
-                -- can add value-level diff for a stricter status.
+                -- Dry-run: report structural drift only; value drift on
+                -- existing rows is a follow-up (would require deep-compare
+                -- against decoded JSON cols).
                 if existing[key_str] then
                     plan.matches = plan.matches + 1
                 else
@@ -401,7 +444,8 @@ local function import_one(entry, config_dir, apply)
         end
     end
 
-    -- Rows in DB but missing from YAML → is_active = false (soft delete).
+    -- Rows in DB but missing from file → is_active = false (soft delete),
+    -- scoped by the same namespace filter so this can't touch other tenants.
     if column_exists(entry.table, "is_active") then
         for composite_str in pairs(existing) do
             if not seen[composite_str] then
@@ -411,18 +455,21 @@ local function import_one(entry, config_dir, apply)
                     for part in string.gmatch(composite_str, "([^|]+)") do
                         parts[#parts + 1] = part
                     end
-                    local where_frags, where_vals = {}, {}
+                    local wf, wv = {}, {}
                     for i, c in ipairs(key_cols) do
-                        where_frags[i] = c .. " = ?"
-                        where_vals[i] = parts[i]
+                        wf[i] = c .. " = ?"
+                        wv[i] = parts[i]
                     end
-                    if (Registry.defaults.namespace_scope == "global_only") and column_exists(entry.table, "namespace_id") then
-                        where_frags[#where_frags + 1] = "namespace_id IS NULL"
+                    -- Layer the scope filter on top of the key filter so a
+                    -- key collision across tenants can never cross-write.
+                    if entry.namespace_scope == "tenant_scoped" and column_exists(entry.table, "namespace_id") then
+                        wf[#wf + 1] = "namespace_id = ?"
+                        wv[#wv + 1] = target_ns_id
                     end
                     db.query("UPDATE " .. entry.table ..
                              " SET is_active = false, updated_at = NOW()" ..
-                             " WHERE " .. table.concat(where_frags, " AND "),
-                             unpack(where_vals))
+                             " WHERE " .. table.concat(wf, " AND "),
+                             unpack(wv))
                 end
             end
         end
@@ -431,54 +478,65 @@ local function import_one(entry, config_dir, apply)
     return plan
 end
 
-local function run_import(apply, config_dir_override)
+local function run_import(apply, config_dir_override, namespace_slug)
     local config_dir = resolve_config_dir(config_dir_override)
-    print(string.format("[cmi import] %s mode, config dir: %s",
-                        apply and "APPLY" or "DRY-RUN", config_dir))
-    local totals = { inserts = 0, updates = 0, deactivates = 0, errors = 0 }
+    local target_ns_id = resolve_namespace(namespace_slug)
+    preflight_namespace_cleanliness()
+    print(string.format("[cmi import] %s mode, namespace=%s (id=%d), config dir=%s",
+                        apply and "APPLY" or "DRY-RUN", namespace_slug, target_ns_id, config_dir))
+    local totals = { inserts = 0, updates = 0, matches = 0, deactivates = 0, errors = 0 }
     for _, tbl_name in ipairs(Registry.export_order) do
         local entry = Registry.tables[tbl_name]
-        local plan = import_one(entry, config_dir, apply)
+        local plan = import_one(entry, config_dir, namespace_slug, target_ns_id, apply)
         if plan.error then
             print(string.format("[cmi import] %-32s ERROR: %s",
                                 entry.table, plan.error))
             totals.errors = totals.errors + 1
         else
-            print(string.format("[cmi import]   %-32s +%d ~%d -%d",
+            print(string.format("[cmi import]   %-32s +%d ~%d matches=%d -%d",
                                 entry.table, plan.inserts, plan.updates,
-                                plan.deactivates))
+                                plan.matches, plan.deactivates))
             for _, e in ipairs(plan.errors) do
                 print("[cmi import]     ROW ERROR: " .. e)
                 totals.errors = totals.errors + 1
             end
             totals.inserts = totals.inserts + plan.inserts
             totals.updates = totals.updates + plan.updates
+            totals.matches = totals.matches + plan.matches
             totals.deactivates = totals.deactivates + plan.deactivates
         end
     end
-    print(string.format("[cmi import] done — %d inserts, %d updates, %d deactivates, %d errors",
-                        totals.inserts, totals.updates, totals.deactivates, totals.errors))
+    print(string.format("[cmi import] done — %d inserts, %d updates, %d matches, %d deactivates, %d errors",
+                        totals.inserts, totals.updates, totals.matches, totals.deactivates, totals.errors))
     if totals.errors > 0 then
         error("[cmi import] " .. totals.errors .. " errors above — aborting.")
     end
 end
 
-function M.import_dry(config_dir_override) run_import(false, config_dir_override) end
-function M.import_apply(config_dir_override) run_import(true, config_dir_override) end
+function M.import_dry(config_dir_override, namespace_slug)
+    run_import(false, config_dir_override, namespace_slug)
+end
+
+function M.import_apply(config_dir_override, namespace_slug)
+    run_import(true, config_dir_override, namespace_slug)
+end
 
 --=============================================================================
--- STATUS — one-line drift summary
+-- STATUS
 --=============================================================================
 
-function M.status(config_dir_override)
+function M.status(config_dir_override, namespace_slug)
     local config_dir = resolve_config_dir(config_dir_override)
-    print("[cmi status] config dir: " .. config_dir)
+    local target_ns_id = resolve_namespace(namespace_slug)
+    preflight_namespace_cleanliness()
+    print(string.format("[cmi status] namespace=%s (id=%d), config dir=%s",
+                        namespace_slug, target_ns_id, config_dir))
     print("[cmi status] (v1 reports structural drift only: added/removed rows.")
     print("[cmi status]  value-level drift on existing rows is a follow-up.)")
     local any_drift = false
     for _, tbl_name in ipairs(Registry.export_order) do
         local entry = Registry.tables[tbl_name]
-        local plan = import_one(entry, config_dir, false)
+        local plan = import_one(entry, config_dir, namespace_slug, target_ns_id, false)
         if plan.error then
             print(string.format("  %-32s ERROR: %s", entry.table, plan.error))
             any_drift = true
@@ -492,8 +550,6 @@ function M.status(config_dir_override)
         end
     end
     if any_drift then
-        -- error() propagates to `lapis exec` as non-zero exit without
-        -- killing the openresty worker (which os.exit would).
         error("[cmi status] structural drift detected — run import_dry() for details, then import_apply() to apply.")
     else
         print("[cmi status] no structural drift.")
