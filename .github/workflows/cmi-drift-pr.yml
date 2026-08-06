@@ -79,6 +79,23 @@ jobs:
           echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
           echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
 
+      - name: Validate NAMESPACE_SLUG shape
+        # The slug flows into `lapis exec "require(...).export(..., '${NAMESPACE_SLUG}')"`
+        # further down. workflow_dispatch inputs are typed strings, but
+        # anyone with dispatch permission could enter shell/Lua
+        # metacharacters. Same regex the CLI's validate_slug uses.
+        run: |
+          set -euo pipefail
+          case "$NAMESPACE_SLUG" in
+            ''|*[!a-z0-9-]*|-*|[0-9]*)
+              echo "::error::Invalid NAMESPACE_SLUG '$NAMESPACE_SLUG' — must match ^[a-z][a-z0-9-]{0,63}\$"
+              exit 1 ;;
+          esac
+          if [ ${#NAMESPACE_SLUG} -gt 64 ]; then
+            echo "::error::NAMESPACE_SLUG too long"; exit 1
+          fi
+          echo "Slug OK: $NAMESPACE_SLUG"
+
       - name: Locate opsapi pod in $SOURCE_ENV
         id: pod
         run: |

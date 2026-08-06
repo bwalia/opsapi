@@ -22,13 +22,25 @@
 local cjson = require("cjson")
 local M = {}
 
+-- Distinguish arrays from objects. Priority:
+--   1. cjson.array_mt metatable is a hard signal (either set by the CLI on
+--      empty-entries lists, or by cjson.empty_array). Always array.
+--   2. cjson.empty_array_mt (some cjson builds use this name variant).
+--   3. Positive integer key 1 present → treat as array (packed 1..N check).
+--   4. Non-empty table with only integer keys 1..N → array.
+--   5. Everything else → object.
 local function is_array(t)
-    if getmetatable(t) == cjson.array_mt then return true end
+    local mt = getmetatable(t)
+    if mt == cjson.array_mt then return true end
+    if cjson.empty_array_mt and mt == cjson.empty_array_mt then return true end
+    if t == cjson.empty_array then return true end
     local n = 0
     for _ in pairs(t) do n = n + 1 end
     if n == 0 then
-        -- Empty: caller's intent unknown. Default to object; explicit array
-        -- callers use cjson.empty_array (which has array_mt).
+        -- Empty and no array metatable: intent ambiguous. Default to
+        -- object — matches cjson.encode's default and keeps behaviour
+        -- backwards-compatible with callers that pass literal `{}` for
+        -- a hash they'll fill in later.
         return false
     end
     for i = 1, n do
@@ -106,11 +118,23 @@ function M.encode(value)
     return encode_value(value, "  ", 0) .. "\n"
 end
 
+-- Hard cap on config file size. 64MB is ~100× the current baseline
+-- (500KB) — anything larger is either a bug or an attack; either way
+-- we should refuse rather than let a runaway read blow up the worker.
+local MAX_FILE_BYTES = 64 * 1024 * 1024
+
 --- Convenience: read a JSON file, return the parsed Lua value.
 -- Returns (value, nil) on success or (nil, err_string) on failure.
 function M.read_file(path)
     local f, err = io.open(path, "r")
     if not f then return nil, err end
+    -- Peek size before reading everything into memory.
+    local ok_size, size = pcall(function() return f:seek("end") end)
+    if ok_size and size and size > MAX_FILE_BYTES then
+        f:close()
+        return nil, "file exceeds " .. MAX_FILE_BYTES .. " bytes (" .. size .. ")"
+    end
+    if ok_size then f:seek("set", 0) end
     local content = f:read("*a")
     f:close()
     local ok, parsed = pcall(cjson.decode, content)

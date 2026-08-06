@@ -22,6 +22,29 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      # target_env and namespace_slug both interpolate into `lapis exec`
+      # further down. Same shape rules the CLI's validate_slug enforces.
+      # Extra-strict target_env: hardcoded whitelist (int / test / acc / prod)
+      # since a fake env would still name a real k8s namespace.
+      shell: bash
+      env:
+        TARGET_ENV: ${{ inputs.target_env }}
+        NAMESPACE_SLUG: ${{ inputs.namespace_slug }}
+      run: |
+        set -euo pipefail
+        case "$TARGET_ENV" in
+          int|test|acc|prod) : ;;
+          *) echo "::error::Invalid target_env '$TARGET_ENV'"; exit 1 ;;
+        esac
+        case "$NAMESPACE_SLUG" in
+          ''|*[!a-z0-9-]*|-*|[0-9]*)
+            echo "::error::Invalid namespace_slug '$NAMESPACE_SLUG'"; exit 1 ;;
+        esac
+        if [ ${#NAMESPACE_SLUG} -gt 64 ]; then
+          echo "::error::namespace_slug too long"; exit 1
+        fi
+
     - name: Install kubectl (if missing)
       shell: bash
       run: |

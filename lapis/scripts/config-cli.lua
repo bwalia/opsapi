@@ -66,6 +66,27 @@ local Global = require("helper.global")
 -- the global still exists. Belt-and-braces for future runtime moves.
 local unpack = unpack or table.unpack
 
+-- Hard caps to protect the process against runaway inputs.
+-- MAX_ENTRIES_PER_TABLE keeps a bad bundle from OOM-ing the openresty
+-- worker while parsing rows into memory. 50,000 is 60× the biggest
+-- catalogue we ship today (profile_questions with ~400) — well under
+-- Lua table headroom, well above any real-world admin catalogue.
+local MAX_ENTRIES_PER_TABLE = 50000
+
+-- Slug shape enforced everywhere a namespace slug crosses a trust
+-- boundary. `namespaces.slug` in Postgres is already a varchar; this
+-- rejects anything a Lua/SQL/shell layer could interpret badly if the
+-- string reached one of those verbatim (spaces, quotes, semicolons).
+local SLUG_PATTERN = "^[a-z][a-z0-9%-]*$"
+local SLUG_MAX_LEN = 64
+local function validate_slug(slug)
+    if type(slug) ~= "string" or #slug == 0 or #slug > SLUG_MAX_LEN or
+       not slug:match(SLUG_PATTERN) then
+        error("Invalid namespace slug '" .. tostring(slug) .. "': must be " ..
+              "1-" .. SLUG_MAX_LEN .. " chars matching " .. SLUG_PATTERN)
+    end
+end
+
 local M = {}
 
 --=============================================================================
@@ -106,11 +127,10 @@ end
 
 -- Resolve a namespace slug to its local integer id on this env. Every
 -- CLI operation begins with this — no downstream query runs without it.
+-- validate_slug() rejects anything that could sneak past a shell/Lua
+-- interpolation layer (workflow_dispatch inputs travel as strings).
 local function resolve_namespace(slug)
-    if not slug or slug == "" then
-        error("CMI CLI requires a namespace slug (e.g. 'tax-copilot'). " ..
-              "Passing nil would silently export/import across all namespaces.")
-    end
+    validate_slug(slug)
     local rows = db.query("SELECT id FROM namespaces WHERE slug = ? LIMIT 1", slug)
     if not rows or #rows == 0 then
         error("Namespace '" .. slug .. "' does not exist on this environment. " ..
@@ -141,9 +161,14 @@ local function column_exists(tbl, col)
 end
 
 -- Refuse to run if any tenant-scoped table still holds ns=0 / NULL rows
--- (namespace-cleanup migration not yet applied). Bail loudly rather than
--- silently miss data.
+-- (namespace-cleanup migration not yet applied). Cached per worker after
+-- the first success — the check is 11 COUNT(*) queries and the answer
+-- only changes if someone directly writes ns=0 rows to the DB (which
+-- would be a separate bug worth surfacing loudly, but not on every
+-- import step).
+local _preflight_ok = false
 local function preflight_namespace_cleanliness()
+    if _preflight_ok then return end
     local bad = {}
     for _, tbl_name in ipairs(Registry.export_order) do
         local entry = Registry.tables[tbl_name]
@@ -160,6 +185,7 @@ local function preflight_namespace_cleanliness()
               table.concat(bad, ", ") .. ". Apply migration " ..
               "'994_cmi_ns_cleanup_to_tax_copilot' first.")
     end
+    _preflight_ok = true
 end
 
 local function merged_skip_columns(entry)
@@ -211,18 +237,48 @@ local function subfolder(entry, ns_slug)
     return ns_slug
 end
 
+-- Startup: guarantee every registry entry has a distinct (scope, file)
+-- pair. Two entries sharing the same file name would let entry_for_path
+-- silently return the wrong table on bundle import, applying doc A's
+-- rows to table B — data corruption with no error surfacing. Fail loud
+-- at load rather than trust the registry is well-formed.
+do
+    local seen = {}
+    for tbl_name, entry in pairs(Registry.tables) do
+        local scope_key = entry.namespace_scope == "global" and "_global" or "<slug>"
+        local path_key = scope_key .. "/" .. entry.file
+        if seen[path_key] then
+            error("Registry duplicate file path: '" .. path_key ..
+                  "' claimed by both '" .. seen[path_key] .. "' and '" .. tbl_name .. "'")
+        end
+        seen[path_key] = tbl_name
+    end
+    -- Also assert every export_order entry actually exists in tables{}.
+    -- A typo here would cause a nil-index crash mid-export otherwise.
+    for _, tbl_name in ipairs(Registry.export_order) do
+        if not Registry.tables[tbl_name] then
+            error("Registry.export_order references '" .. tbl_name ..
+                  "' but Registry.tables has no such entry")
+        end
+    end
+end
+
 --=============================================================================
 -- EXPORT
 --=============================================================================
 
-local function deref_id_to_key(fk_spec, id)
-    if id == nil or id == cjson.null or id == 0 then return nil end
-    local rows = db.query("SELECT " .. fk_spec.key .. " AS k FROM " ..
-                          fk_spec.table .. " WHERE id = ?", id)
-    if not rows or #rows == 0 then
-        return nil, "no " .. fk_spec.table .. " row with id=" .. tostring(id)
+-- Load an id→key lookup for one FK target table, in ONE query. Replaces
+-- what used to be N+1 (one SELECT per row for the same target). Called
+-- once per (fk_spec.table, fk_spec.key) pair per export_one invocation;
+-- for 96 tax_categories with one hmrc_category_id FK that's 1 query
+-- instead of 96.
+local function load_fk_lookup(fk_spec)
+    local rows = db.query("SELECT id, " .. fk_spec.key .. " AS k FROM " .. fk_spec.table)
+    local map = {}
+    for _, r in ipairs(rows or {}) do
+        map[r.id] = r.k
     end
-    return rows[1].k, nil
+    return map
 end
 
 -- Build the export doc for one table as a Lua table — no disk I/O.
@@ -233,6 +289,14 @@ local function build_export_doc(entry, ns_slug, target_ns_id)
     local sql = "SELECT " .. entry.table .. ".* FROM " .. entry.table .. where_frag
     local rows = db.query(sql, unpack(where_binds)) or {}
     sort_entries(entry, rows)
+
+    -- Pre-load id→key maps for every FK we'll dereference. Bounded by
+    -- the size of the parent config table (never large — hmrc_categories
+    -- ~18 rows, profile_categories ~80). One query per FK column.
+    local fk_maps = {}
+    for local_col, spec in pairs(entry.fk_refs or {}) do
+        fk_maps[local_col] = load_fk_lookup(spec)
+    end
 
     local skip = merged_skip_columns(entry)
     local out_entries = {}
@@ -245,21 +309,35 @@ local function build_export_doc(entry, ns_slug, target_ns_id)
             if id == nil or id == cjson.null or id == 0 then
                 out[spec.as] = cjson.null
             else
-                local k, err = deref_id_to_key(spec, id)
+                local k = fk_maps[local_col][id]
                 if k == nil then
                     warnings[#warnings + 1] = entry.table .. ": " ..
-                        local_col .. "=" .. tostring(id) .. " " .. tostring(err)
+                        local_col .. "=" .. tostring(id) ..
+                        " no " .. spec.table .. " row"
                     if spec.required then
                         error("EXPORT FAILED: " .. warnings[#warnings])
                     end
+                    out[spec.as] = cjson.null
+                else
+                    out[spec.as] = k
                 end
-                out[spec.as] = k
             end
         end
         for col, val in pairs(row) do
             if not skip[col] then out[col] = val end
         end
         out_entries[#out_entries + 1] = out
+    end
+
+    -- Force `entries` to serialise as an ARRAY even when empty.
+    -- cjson's default for `{}` is object; setmetatable pins the type
+    -- so downstream JSON output (json_pretty + cjson.encode both
+    -- consult the metatable) produces `[]` deterministically. Empty
+    -- catalogues (e.g. profile_lookup_values on a fresh env) render
+    -- as `[]` — same shape whether populated or not, git diffs stay
+    -- clean.
+    if #out_entries == 0 then
+        setmetatable(out_entries, cjson.array_mt)
     end
 
     local doc = {
@@ -333,7 +411,7 @@ local function coerce_value(v)
     return v
 end
 
-local function build_upsert(_entry, key_cols, columns)
+local function build_upsert(entry, key_cols, columns)
     local key_set = {}
     for _, c in ipairs(key_cols) do key_set[c] = true end
     local set_frags = {}
@@ -342,7 +420,19 @@ local function build_upsert(_entry, key_cols, columns)
             set_frags[#set_frags + 1] = c .. " = EXCLUDED." .. c
         end
     end
-    set_frags[#set_frags + 1] = "updated_at = NOW()"
+    -- Bump updated_at ONLY if the table has it. Some link tables (e.g.
+    -- profile_question_touchpoints) don't carry timestamps — appending
+    -- `updated_at = NOW()` there fails with "column does not exist".
+    if column_exists(entry.table, "updated_at") then
+        set_frags[#set_frags + 1] = "updated_at = NOW()"
+    end
+    -- ON CONFLICT DO UPDATE SET requires at least one SET clause. If
+    -- every column is a key column and the table has no updated_at
+    -- (a pure join row), fall back to a no-op on one of the key cols
+    -- so ON CONFLICT still resolves cleanly.
+    if #set_frags == 0 then
+        set_frags[#set_frags + 1] = key_cols[1] .. " = EXCLUDED." .. key_cols[1]
+    end
     return table.concat(set_frags, ", ")
 end
 
@@ -423,6 +513,13 @@ local function apply_import_doc(entry, doc, ns_slug, target_ns_id, apply)
             local set_clause = build_upsert(entry, key_cols, cols)
 
             if apply then
+                -- Under a transaction, ANY Postgres error poisons the
+                -- txn — every subsequent statement fails with "current
+                -- transaction is aborted" until ROLLBACK. So we can't
+                -- swallow the error and continue like dry-run does;
+                -- one row failure means the whole apply is doomed.
+                -- Raise so the outer pcall catches it and rolls back
+                -- the transaction cleanly, then reports the real cause.
                 local ok_q, err_q = pcall(db.query,
                     "INSERT INTO " .. entry.table ..
                     " (" .. table.concat(cols, ", ") .. ")" ..
@@ -431,8 +528,10 @@ local function apply_import_doc(entry, doc, ns_slug, target_ns_id, apply)
                     " DO UPDATE SET " .. set_clause,
                     unpack(vals))
                 if not ok_q then
-                    plan.errors[#plan.errors + 1] = tostring(err_q)
-                elseif existing[key_str] then
+                    error(entry.table .. " row " ..
+                          (row[key_cols[1]] or "?") .. ": " .. tostring(err_q))
+                end
+                if existing[key_str] then
                     plan.updates = plan.updates + 1
                 else
                     plan.inserts = plan.inserts + 1
@@ -472,8 +571,12 @@ local function apply_import_doc(entry, doc, ns_slug, target_ns_id, apply)
                         wf[#wf + 1] = "namespace_id = ?"
                         wv[#wv + 1] = target_ns_id
                     end
+                    local set_clause_deact = "is_active = false"
+                    if column_exists(entry.table, "updated_at") then
+                        set_clause_deact = set_clause_deact .. ", updated_at = NOW()"
+                    end
                     db.query("UPDATE " .. entry.table ..
-                             " SET is_active = false, updated_at = NOW()" ..
+                             " SET " .. set_clause_deact ..
                              " WHERE " .. table.concat(wf, " AND "),
                              unpack(wv))
                 end
@@ -500,32 +603,48 @@ local function run_import(apply, config_dir_override, namespace_slug)
     preflight_namespace_cleanliness()
     print(string.format("[cmi import] %s mode, namespace=%s (id=%d), config dir=%s",
                         apply and "APPLY" or "DRY-RUN", namespace_slug, target_ns_id, config_dir))
+
+    -- Wrap the whole apply in a single transaction. Without this, a
+    -- worker crash / connection drop / uncaught error halfway through
+    -- leaves the DB with N tables imported and 18-N tables stale — a
+    -- silent split-brain nobody would notice until the next diff.
+    -- Dry-run doesn't write, so no transaction needed there.
+    if apply then db.query("BEGIN") end
     local totals = { inserts = 0, updates = 0, matches = 0, deactivates = 0, errors = 0 }
-    for _, tbl_name in ipairs(Registry.export_order) do
-        local entry = Registry.tables[tbl_name]
-        local plan = import_one(entry, config_dir, namespace_slug, target_ns_id, apply)
-        if plan.error then
-            print(string.format("[cmi import] %-32s ERROR: %s",
-                                entry.table, plan.error))
-            totals.errors = totals.errors + 1
-        else
-            print(string.format("[cmi import]   %-32s +%d ~%d matches=%d -%d",
-                                entry.table, plan.inserts, plan.updates,
-                                plan.matches, plan.deactivates))
-            for _, e in ipairs(plan.errors) do
-                print("[cmi import]     ROW ERROR: " .. e)
+    local ok, walk_err = pcall(function()
+        for _, tbl_name in ipairs(Registry.export_order) do
+            local entry = Registry.tables[tbl_name]
+            local plan = import_one(entry, config_dir, namespace_slug, target_ns_id, apply)
+            if plan.error then
+                print(string.format("[cmi import] %-32s ERROR: %s",
+                                    entry.table, plan.error))
                 totals.errors = totals.errors + 1
+            else
+                print(string.format("[cmi import]   %-32s +%d ~%d matches=%d -%d",
+                                    entry.table, plan.inserts, plan.updates,
+                                    plan.matches, plan.deactivates))
+                for _, e in ipairs(plan.errors) do
+                    print("[cmi import]     ROW ERROR: " .. e)
+                    totals.errors = totals.errors + 1
+                end
+                totals.inserts = totals.inserts + plan.inserts
+                totals.updates = totals.updates + plan.updates
+                totals.matches = totals.matches + plan.matches
+                totals.deactivates = totals.deactivates + plan.deactivates
             end
-            totals.inserts = totals.inserts + plan.inserts
-            totals.updates = totals.updates + plan.updates
-            totals.matches = totals.matches + plan.matches
-            totals.deactivates = totals.deactivates + plan.deactivates
         end
+    end)
+    if apply and (not ok or totals.errors > 0) then
+        db.query("ROLLBACK")
+        if not ok then error("[cmi import] aborted mid-flight: " .. tostring(walk_err)) end
+        error("[cmi import] " .. totals.errors .. " errors above — rolled back.")
     end
+    if apply then db.query("COMMIT") end
+
     print(string.format("[cmi import] done — %d inserts, %d updates, %d matches, %d deactivates, %d errors",
                         totals.inserts, totals.updates, totals.matches, totals.deactivates, totals.errors))
-    if totals.errors > 0 then
-        error("[cmi import] " .. totals.errors .. " errors above — aborting.")
+    if not apply and totals.errors > 0 then
+        error("[cmi import] " .. totals.errors .. " errors above (dry-run).")
     end
 end
 
@@ -672,6 +791,10 @@ end
 
 -- Import a bundle (already-parsed Lua table). `apply` controls dry-run vs
 -- write. Returns { plans = [...], totals = {...} } — no printing, all data.
+--
+-- Apply wraps every write in ONE transaction. If any table's upsert
+-- errors, or a plan carries row-level errors, we ROLLBACK — no partial
+-- imports. Dry-run needs no transaction (reads only).
 local function run_bundle_import(bundle, namespace_slug, apply)
     if not bundle or type(bundle) ~= "table" then
         error("bundle must be a table (JSON-decoded); got " .. type(bundle))
@@ -679,6 +802,16 @@ local function run_bundle_import(bundle, namespace_slug, apply)
     if bundle.version ~= 1 then
         error("bundle version " .. tostring(bundle.version) ..
               " not supported (this CLI understands version 1)")
+    end
+    -- Enforce entries-per-table ceiling. Protects the worker from OOM
+    -- when someone posts a bundle with a runaway array. Applied here
+    -- rather than at the HTTP boundary so the CLI path also benefits.
+    for path, doc in pairs(bundle.files or {}) do
+        if doc and doc.entries and #doc.entries > MAX_ENTRIES_PER_TABLE then
+            error("bundle file '" .. tostring(path) .. "' has " ..
+                  #doc.entries .. " entries — exceeds MAX_ENTRIES_PER_TABLE=" ..
+                  MAX_ENTRIES_PER_TABLE)
+        end
     end
     -- namespace_slug from bundle is informational; target is the caller's.
     -- Cross-tenant apply is fine if the operator is explicit.
@@ -689,20 +822,38 @@ local function run_bundle_import(bundle, namespace_slug, apply)
     local plans = {}
     local totals = { inserts = 0, updates = 0, matches = 0,
                      deactivates = 0, errors = 0 }
-    for _, item in ipairs(ordered) do
-        local plan = apply_import_doc(item.entry, item.doc, namespace_slug,
-                                      target_ns_id, apply)
-        plans[#plans + 1] = plan
-        if plan.error then
-            totals.errors = totals.errors + 1
-        else
-            totals.inserts = totals.inserts + (plan.inserts or 0)
-            totals.updates = totals.updates + (plan.updates or 0)
-            totals.matches = totals.matches + (plan.matches or 0)
-            totals.deactivates = totals.deactivates + (plan.deactivates or 0)
-            totals.errors = totals.errors + #(plan.errors or {})
+
+    if apply then db.query("BEGIN") end
+    local ok, walk_err = pcall(function()
+        for _, item in ipairs(ordered) do
+            local plan = apply_import_doc(item.entry, item.doc, namespace_slug,
+                                          target_ns_id, apply)
+            plans[#plans + 1] = plan
+            if plan.error then
+                totals.errors = totals.errors + 1
+            else
+                totals.inserts = totals.inserts + (plan.inserts or 0)
+                totals.updates = totals.updates + (plan.updates or 0)
+                totals.matches = totals.matches + (plan.matches or 0)
+                totals.deactivates = totals.deactivates + (plan.deactivates or 0)
+                totals.errors = totals.errors + #(plan.errors or {})
+            end
         end
+    end)
+    if apply and (not ok or totals.errors > 0) then
+        db.query("ROLLBACK")
+        if not ok then error("[cmi bundle-import] aborted mid-flight: " .. tostring(walk_err)) end
+        -- Row-level errors: return the plans (they contain the error
+        -- detail) but mark applied=false so the caller knows nothing
+        -- actually wrote.
+        return { plans = plans, totals = totals,
+                 namespace_slug = namespace_slug,
+                 target_ns_id = target_ns_id,
+                 applied = false,
+                 rolled_back = true }
     end
+    if apply then db.query("COMMIT") end
+
     return { plans = plans, totals = totals,
              namespace_slug = namespace_slug,
              target_ns_id = target_ns_id,

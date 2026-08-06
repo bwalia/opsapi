@@ -2206,6 +2206,15 @@ local _migrations = {
     -- 994 runs AFTER the unique-index backfill so the namespace UPDATE can't
     -- create dup keys mid-flight. Idempotent: re-running does nothing.
     ['994_cmi_ns_cleanup_to_tax_copilot']   = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_namespace_cleanup_migrations, 1),
+    -- 995/996 add non-partial UNIQUE (business_key, namespace_id) indexes on
+    -- the two tables whose original indexes were partial (WHERE namespace_id
+    -- IS/IS NOT NULL). ON CONFLICT can't target a partial index generically;
+    -- these give the CMI upsert something to conflict on. Discovered when
+    -- transaction-wrapped apply started surfacing "no unique or exclusion
+    -- constraint matching the ON CONFLICT specification" — previously the
+    -- pcall was swallowing the error and calling it a no-op update.
+    ['995_cmi_uq_profile_tags_slug_ns']     = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_unique_keys_migrations, 5),
+    ['996_cmi_uq_profile_questions_key_ns'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, config_cmi_unique_keys_migrations, 6),
 
     ['823_academy_course_pending_review'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_migrations, 7),
     -- Add a jsonb `tags` array to courses (create-or-select category + multi-tags).

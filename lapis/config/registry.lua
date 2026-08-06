@@ -152,7 +152,14 @@ return {
         profile_tags = {
             table = "profile_tags",
             file = "profile_tags.json",
-            key = "slug",
+            -- Composite: slug is unique within a namespace, not global.
+            -- The DB's original indexes are PARTIAL (WHERE ns IS/NOT NULL)
+            -- and can't be used as ON CONFLICT targets. Migration 995 adds
+            -- a non-partial UNIQUE (slug, namespace_id) that this keys on.
+            -- namespace_id is stripped from the exported file (defaults)
+            -- but re-injected at import time by the CLI, so the composite
+            -- resolves correctly on both sides.
+            key = { "slug", "namespace_id" },
             namespace_scope = "tenant_scoped",
             description = "Tag catalogue (manual + auto)",
         },
@@ -250,7 +257,10 @@ return {
         profile_questions = {
             table = "profile_questions",
             file = "profile_questions.json",
-            key = "question_key",
+            -- Composite key on (question_key, namespace_id) — same reason
+            -- as profile_tags above. Migration 996 adds the non-partial
+            -- unique index this ON CONFLICT targets.
+            key = { "question_key", "namespace_id" },
             namespace_scope = "tenant_scoped",
             fk_refs = {
                 category_id = {

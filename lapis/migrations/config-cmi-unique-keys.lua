@@ -72,4 +72,36 @@ return {
         ]])
         print("[CMI] Ensured uq_plv_t_value on profile_lookup_values")
     end,
+
+    -- =========================================================================
+    -- 5. profile_tags : (slug, namespace_id)
+    --
+    -- The existing indexes are PARTIAL:
+    --   idx_pt_slug_ns    ON (slug, namespace_id) WHERE namespace_id IS NOT NULL
+    --   idx_pt_slug_global ON (slug)              WHERE namespace_id IS NULL
+    -- Postgres only accepts a partial index as an ON CONFLICT target if
+    -- the caller repeats the WHERE clause verbatim — messy to express
+    -- generically. A plain non-partial UNIQUE (slug, namespace_id)
+    -- coexists with the partial ones AND satisfies ON CONFLICT for the
+    -- CMI upsert path. Duplicate rows can't already exist (the partial
+    -- indexes prevented them within their scopes), so the build is safe.
+    -- =========================================================================
+    [5] = function()
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_pt_slug_ns
+            ON profile_tags (slug, namespace_id)
+        ]])
+        print("[CMI] Ensured uq_pt_slug_ns on profile_tags")
+    end,
+
+    -- =========================================================================
+    -- 6. profile_questions : (question_key, namespace_id) — same story as 5.
+    -- =========================================================================
+    [6] = function()
+        db.query([[
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_pq_key_ns
+            ON profile_questions (question_key, namespace_id)
+        ]])
+        print("[CMI] Ensured uq_pq_key_ns on profile_questions")
+    end,
 }

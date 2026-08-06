@@ -43,10 +43,22 @@
 local cjson = require("cjson")
 local db = require("lapis.db")
 local AuthMiddleware = require("middleware.auth")
+local RateLimit = require("middleware.rate-limit")
 
 -- Load the CLI module once at boot. Nothing here is stateful, so a single
 -- reference for the lifetime of the openresty worker is fine.
 local CMI = require("scripts.config-cli")
+
+-- Rate limits. CMI writes are heavy (dozens of upserts in one call);
+-- read (export) is a many-table SELECT scan. Both should be admin-only
+-- and rare in absolute terms.
+local CMI_READ_LIMIT  = { rate = 30, window = 60, prefix = "cmi:read"  }
+local CMI_WRITE_LIMIT = { rate = 10, window = 60, prefix = "cmi:write" }
+
+-- Reject bundles larger than this at the HTTP boundary. Baseline is
+-- ~500KB; 32MB gives 60× headroom while stopping a hostile upload from
+-- blocking a worker parsing multi-GB JSON.
+local MAX_BUNDLE_BYTES = 32 * 1024 * 1024
 
 --=============================================================================
 -- helpers
@@ -83,11 +95,13 @@ local function forbidden()
 end
 
 -- Body parser mirrors tax-admin-income-types.lua: handles both in-memory
--- bodies and OpenResty's spillover-to-tempfile for large uploads. The
--- import bundle for tax_copilot lands around 500KB — well under any
--- realistic body limit — but the temp-file path is free insurance.
+-- bodies and OpenResty's spillover-to-tempfile for large uploads.
+--
+-- Returns (parsed_table, nil) on success, or (nil, err_string) on any
+-- shape/size violation. Callers MUST inspect the error — the previous
+-- silent-empty-on-error was hiding malformed uploads as "empty body".
 local function parseJSON(self)
-    local ok, result = pcall(function()
+    local ok, data_or_err = pcall(function()
         ngx.req.read_body()
         local data = ngx.req.get_body_data()
         if not data or data == "" then
@@ -95,16 +109,42 @@ local function parseJSON(self)
             if file then
                 local f = io.open(file, "r")
                 if f then
+                    -- Peek size before reading — cap at MAX_BUNDLE_BYTES.
+                    local sz = f:seek("end") or 0
+                    if sz > MAX_BUNDLE_BYTES then
+                        f:close()
+                        error("body exceeds " .. MAX_BUNDLE_BYTES .. " bytes")
+                    end
+                    f:seek("set", 0)
                     data = f:read("*a")
                     f:close()
                 end
             end
+        elseif #data > MAX_BUNDLE_BYTES then
+            error("body exceeds " .. MAX_BUNDLE_BYTES .. " bytes")
         end
-        if not data or data == "" then return {} end
-        return cjson.decode(data)
+        if not data or data == "" then return nil end
+        return data
     end)
-    if ok and type(result) == "table" then return result end
-    return {}
+    if not ok then return nil, tostring(data_or_err) end
+    if data_or_err == nil then return {}, nil end
+    local ok_decode, parsed = pcall(cjson.decode, data_or_err)
+    if not ok_decode then return nil, "malformed JSON body" end
+    if type(parsed) ~= "table" then return nil, "body must be a JSON object" end
+    return parsed, nil
+end
+
+-- Log the full internal error to nginx logs (with correlation) and
+-- return a compact user-facing message. Never leak Lua paths, SQL
+-- fragments, or file names in an HTTP response body.
+local function internal_error(context, err)
+    local corr = require("helper.global").generateUUID()
+    ngx.log(ngx.ERR, "[cmi] " .. context .. " corr=" .. corr .. " err=" .. tostring(err))
+    return { status = 500, json = {
+        error = "Internal error while processing " .. context ..
+                "; check server logs (correlation " .. corr .. ")",
+        correlation_id = corr,
+    } }
 end
 
 -- Compute a token that captures the human-visible summary of a dry-run.
@@ -127,9 +167,12 @@ return function(app)
     -- Export
     -- --------------------------------------------------------------
     app:post("/api/v2/tax/admin/cmi/export",
-        AuthMiddleware.requireAuth(function(self)
+        AuthMiddleware.requireAuth(RateLimit.wrap(CMI_READ_LIMIT, function(self)
             if not isAdmin(self.current_user) then return forbidden() end
-            local body = parseJSON(self)
+            local body, body_err = parseJSON(self)
+            if not body then
+                return { status = 400, json = { error = body_err } }
+            end
             local slug = body.namespace_slug
             if not slug or slug == "" then
                 return { status = 400, json = {
@@ -139,7 +182,13 @@ return function(app)
             local ok, bundle_or_err, total_rows, warnings =
                 pcall(CMI.export_bundle, slug)
             if not ok then
-                return { status = 500, json = { error = tostring(bundle_or_err) } }
+                -- validate_slug / resolve_namespace failures are 400s,
+                -- not 500s — user-fixable input errors.
+                local msg = tostring(bundle_or_err)
+                if msg:find("Invalid namespace slug") or msg:find("does not exist on this environment") then
+                    return { status = 400, json = { error = msg } }
+                end
+                return internal_error("cmi export", bundle_or_err)
             end
             ngx.header["Content-Disposition"] =
                 'attachment; filename="cmi-' .. slug .. '-' ..
@@ -152,22 +201,23 @@ return function(app)
                     table_row_counts = bundle_or_err.table_row_counts,
                 }
             } }
-        end)
+        end))
     )
 
     -- --------------------------------------------------------------
     -- Import — dry-run (no writes)
     -- --------------------------------------------------------------
     app:post("/api/v2/tax/admin/cmi/import/dry-run",
-        AuthMiddleware.requireAuth(function(self)
+        AuthMiddleware.requireAuth(RateLimit.wrap(CMI_WRITE_LIMIT, function(self)
             if not isAdmin(self.current_user) then return forbidden() end
-            local body = parseJSON(self)
+            local body, body_err = parseJSON(self)
+            if not body then
+                return { status = 400, json = { error = body_err } }
+            end
             local slug = body.namespace_slug
             local bundle = body.bundle
             if not slug or slug == "" then
-                return { status = 400, json = {
-                    error = "namespace_slug is required"
-                } }
+                return { status = 400, json = { error = "namespace_slug is required" } }
             end
             if not bundle or type(bundle) ~= "table" then
                 return { status = 400, json = {
@@ -176,36 +226,56 @@ return function(app)
             end
             local ok, result_or_err = pcall(CMI.import_bundle_plan, bundle, slug)
             if not ok then
-                return { status = 400, json = { error = tostring(result_or_err) } }
+                -- CLI-thrown validation errors → 400. Real crashes → 500.
+                local msg = tostring(result_or_err)
+                if msg:find("bundle version") or msg:find("Invalid namespace slug") or
+                   msg:find("does not exist on this environment") or
+                   msg:find("bundle contains unknown file path") or
+                   msg:find("exceeds MAX_ENTRIES_PER_TABLE") then
+                    return { status = 400, json = { error = msg } }
+                end
+                return internal_error("cmi dry-run", result_or_err)
             end
             result_or_err.confirm_token = confirm_token_for(result_or_err.totals)
             return { status = 200, json = result_or_err }
-        end)
+        end))
     )
 
     -- --------------------------------------------------------------
     -- Import — apply (writes)
     -- --------------------------------------------------------------
     app:post("/api/v2/tax/admin/cmi/import/apply",
-        AuthMiddleware.requireAuth(function(self)
+        AuthMiddleware.requireAuth(RateLimit.wrap(CMI_WRITE_LIMIT, function(self)
             if not isAdmin(self.current_user) then return forbidden() end
-            local body = parseJSON(self)
+            local body, body_err = parseJSON(self)
+            if not body then
+                return { status = 400, json = { error = body_err } }
+            end
             local slug = body.namespace_slug
             local bundle = body.bundle
             local claimed_token = body.confirm_token
             if not slug or slug == "" then
-                return { status = 400, json = {
-                    error = "namespace_slug is required"
-                } }
+                return { status = 400, json = { error = "namespace_slug is required" } }
             end
             if not bundle or type(bundle) ~= "table" then
-                return { status = 400, json = {
-                    error = "bundle is required"
-                } }
+                return { status = 400, json = { error = "bundle is required" } }
             end
             if not claimed_token or claimed_token == "" then
                 return { status = 400, json = {
                     error = "confirm_token is required; call dry-run first, echo its token"
+                } }
+            end
+            -- Defense in depth: the bundle carries its authoring
+            -- namespace_slug; refuse to import it into a different
+            -- namespace unless the operator explicitly acknowledges by
+            -- matching. Prevents a UI bug (or URL tampering) from
+            -- cross-tenant applying.
+            if bundle.namespace_slug and bundle.namespace_slug ~= slug then
+                return { status = 400, json = {
+                    error = "Bundle was exported for namespace '" ..
+                            tostring(bundle.namespace_slug) ..
+                            "' but this request targets '" .. slug ..
+                            "'. Re-export from the source or dispatch to the correct target.",
                 } }
             end
 
@@ -215,7 +285,14 @@ return function(app)
             -- apply a different plan than the one they saw.
             local ok_plan, plan_or_err = pcall(CMI.import_bundle_plan, bundle, slug)
             if not ok_plan then
-                return { status = 400, json = { error = tostring(plan_or_err) } }
+                local msg = tostring(plan_or_err)
+                if msg:find("bundle version") or msg:find("Invalid namespace slug") or
+                   msg:find("does not exist on this environment") or
+                   msg:find("bundle contains unknown file path") or
+                   msg:find("exceeds MAX_ENTRIES_PER_TABLE") then
+                    return { status = 400, json = { error = msg } }
+                end
+                return internal_error("cmi apply (dry-run stage)", plan_or_err)
             end
             local expected = confirm_token_for(plan_or_err.totals)
             if expected ~= claimed_token then
@@ -228,9 +305,21 @@ return function(app)
 
             local ok, result_or_err = pcall(CMI.import_bundle_apply, bundle, slug)
             if not ok then
-                return { status = 500, json = { error = tostring(result_or_err) } }
+                return internal_error("cmi apply", result_or_err)
             end
+            -- Structured audit log so the "who applied what, when" is
+            -- reconstructable from nginx logs even without a dedicated
+            -- audit table. Follow-up: promote to audit_events.
+            ngx.log(ngx.WARN, string.format(
+                "[cmi apply] user=%s slug=%s applied=%s inserts=%d updates=%d deactivates=%d errors=%d",
+                tostring(self.current_user and self.current_user.uuid or "?"),
+                slug,
+                tostring(result_or_err.applied),
+                result_or_err.totals.inserts or 0,
+                result_or_err.totals.updates or 0,
+                result_or_err.totals.deactivates or 0,
+                result_or_err.totals.errors or 0))
             return { status = 200, json = result_or_err }
-        end)
+        end))
     )
 end
