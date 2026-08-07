@@ -163,8 +163,72 @@ function TaxStatementQueries.all(params, user)
 
     local where_clause = table.concat(where_parts, " AND ")
 
-    -- Get statements with bank account info
-    local query = [[
+    -- Historically statements only existed as tax_statements rows,
+    -- created by the /api/v2/tax/upload path used by /upload and
+    -- /bank-accounts. The DMS (dms_documents) is a second store the
+    -- newer income-page upload flow writes to: uploading a bank
+    -- statement from /my-income/self_employment/business/[id] (or
+    -- rental/property/[id], or salary/employment/[id]) lands the file
+    -- in dms_documents with doc_type_key='bank_statement' AND
+    -- bank_account_uuid set — but never in tax_statements. So
+    -- /bank-accounts previously showed 0 statements for accounts
+    -- whose files were uploaded via that newer path.
+    --
+    -- This query UNIONs both tables so /bank-accounts sees every
+    -- statement regardless of upload path. The two rows shape into
+    -- the same columns; dms_document rows carry the income-type +
+    -- linked-entity linkage (via the LEFT JOIN to
+    -- user_profile_entities for a display label) so the UI can
+    -- surface "Linked to Self-employment · Acme Ltd" chips.
+    --
+    -- Filters unique to tax_statements (processing_status,
+    -- workflow_step) simply produce no dms rows when set to
+    -- anything other than 'UPLOADED' — dms bank statements are
+    -- always raw uploads until the classify/extract pipeline lifts
+    -- one into tax_statements. Same for tax_year (dms doesn't have
+    -- one) — a tax_year filter excludes dms rows entirely.
+
+    -- Build the dms_documents branch's WHERE parts. It shares user_id
+    -- and the two bank/search filters with the primary branch, but
+    -- has to re-alias `s.` → `d.` and `ba.` stays `ba.`.
+    local dms_include = true
+    local dms_where_parts = { "d.user_id = ?", "d.doc_type_key = 'bank_statement'", "d.bank_account_uuid IS NOT NULL" }
+    local dms_where_values = { user_id }
+    if ns_rows and #ns_rows > 0 and ns_rows[1].default_namespace_id and tonumber(ns_rows[1].default_namespace_id) > 0 then
+        table.insert(dms_where_parts, "d.namespace_id = ?")
+        table.insert(dms_where_values, tonumber(ns_rows[1].default_namespace_id))
+    end
+    if params.bank_account_id then
+        table.insert(dms_where_parts, "ba.uuid = ?")
+        table.insert(dms_where_values, params.bank_account_id)
+    end
+    -- Any processing_status filter other than 'UPLOADED' excludes dms
+    -- rows — they don't have workflow state. Same for workflow_step
+    -- and tax_year (columns absent on dms_documents).
+    if params.processing_status and params.processing_status ~= "UPLOADED" then
+        dms_include = false
+    end
+    if params.workflow_step and params.workflow_step ~= "UPLOADED" then
+        dms_include = false
+    end
+    if params.tax_year then
+        dms_include = false
+    end
+    if params.search and params.search ~= "" then
+        table.insert(dms_where_parts, "(d.file_name ILIKE ? OR ba.bank_name ILIKE ? OR ba.account_name ILIKE ? OR d.uuid ILIKE ?)")
+        local pattern = "%" .. params.search .. "%"
+        table.insert(dms_where_values, pattern)
+        table.insert(dms_where_values, pattern)
+        table.insert(dms_where_values, pattern)
+        table.insert(dms_where_values, pattern)
+    end
+    local dms_where_clause = table.concat(dms_where_parts, " AND ")
+
+    -- The two SELECTs share every column position + type; unshared
+    -- fields are NULL::<type> on the side that doesn't have them.
+    -- Column count: 30 including the four new linkage columns and
+    -- the discriminator `source` at the end.
+    local ts_select = [[
         SELECT
             s.uuid as id,
             ba.uuid as bank_account_id,
@@ -192,24 +256,89 @@ function TaxStatementQueries.all(params, user)
             s.updated_at,
             (SELECT COUNT(*) FROM tax_transactions WHERE statement_id = s.id) as transaction_count,
             (SELECT COUNT(*) FROM tax_transactions WHERE statement_id = s.id AND confirmation_status = 'CONFIRMED') as confirmed_count,
-            (SELECT COUNT(*) FROM tax_transactions WHERE statement_id = s.id AND classification_status = 'CONFIRMED') as classified_count
+            (SELECT COUNT(*) FROM tax_transactions WHERE statement_id = s.id AND classification_status = 'CONFIRMED') as classified_count,
+            NULL::varchar as income_type_key,
+            NULL::varchar as linked_entity_type,
+            NULL::text    as linked_entity_uuid,
+            NULL::varchar as linked_entity_label,
+            'tax_statement' as source
         FROM tax_statements s
         JOIN tax_bank_accounts ba ON s.bank_account_id = ba.id
-        WHERE ]] .. where_clause .. [[
-        ORDER BY s.uploaded_at DESC
-        LIMIT ? OFFSET ?
-    ]]
+        WHERE ]] .. where_clause
 
-    table.insert(where_values, perPage)
-    table.insert(where_values, offset)
+    local dms_select = [[
+        SELECT
+            d.uuid as id,
+            ba.uuid as bank_account_id,
+            ba.bank_name,
+            ba.account_name,
+            d.file_name,
+            d.file_type,
+            d.file_size_bytes,
+            NULL::date    as statement_date,
+            NULL::date    as period_start,
+            NULL::date    as period_end,
+            NULL::numeric as opening_balance,
+            NULL::numeric as closing_balance,
+            'UPLOADED'::varchar as processing_status,
+            'UPLOADED'::varchar as workflow_step,
+            NULL::varchar as tax_year,
+            NULL::numeric as total_income,
+            NULL::numeric as total_expenses,
+            NULL::numeric as tax_due,
+            false         as is_filed,
+            NULL::timestamp as filed_at,
+            NULL::varchar as hmrc_submission_id,
+            d.uploaded_at,
+            NULL::timestamp as processed_at,
+            d.updated_at,
+            0 as transaction_count,
+            0 as confirmed_count,
+            0 as classified_count,
+            d.income_type_key,
+            d.linked_entity_type,
+            d.linked_entity_uuid,
+            upe.label as linked_entity_label,
+            'dms_document' as source
+        FROM dms_documents d
+        JOIN tax_bank_accounts ba ON ba.uuid = d.bank_account_uuid
+        LEFT JOIN user_profile_entities upe ON upe.uuid = d.linked_entity_uuid
+        WHERE ]] .. dms_where_clause
 
-    local statements = db.query(query, table.unpack(where_values))
+    local query, all_values
+    if dms_include then
+        query = "(" .. ts_select .. ") UNION ALL (" .. dms_select ..
+                ") ORDER BY uploaded_at DESC LIMIT ? OFFSET ?"
+        all_values = {}
+        for _, v in ipairs(where_values) do table.insert(all_values, v) end
+        for _, v in ipairs(dms_where_values) do table.insert(all_values, v) end
+        table.insert(all_values, perPage)
+        table.insert(all_values, offset)
+    else
+        -- Filter chose an option dms rows can't satisfy — fall back to
+        -- the original single-source query so we don't pay the union cost.
+        query = ts_select .. " ORDER BY s.uploaded_at DESC LIMIT ? OFFSET ?"
+        all_values = {}
+        for _, v in ipairs(where_values) do table.insert(all_values, v) end
+        table.insert(all_values, perPage)
+        table.insert(all_values, offset)
+    end
 
-    -- Get total count
-    local count_query =
-        "SELECT COUNT(*) as total FROM tax_statements s JOIN tax_bank_accounts ba ON s.bank_account_id = ba.id WHERE " ..
-        where_clause
-    local count_result = db.query(count_query, table.unpack(where_values, 1, #where_values - 2))
+    local statements = db.query(query, table.unpack(all_values))
+
+    -- Total counts — count each source, sum. Same filter shape as the
+    -- SELECTs above; do NOT include the LIMIT/OFFSET tail.
+    local ts_count = db.query(
+        "SELECT COUNT(*) as n FROM tax_statements s JOIN tax_bank_accounts ba ON s.bank_account_id = ba.id WHERE " .. where_clause,
+        table.unpack(where_values))
+    local total = (ts_count and ts_count[1] and tonumber(ts_count[1].n)) or 0
+    if dms_include then
+        local dms_count = db.query(
+            "SELECT COUNT(*) as n FROM dms_documents d JOIN tax_bank_accounts ba ON ba.uuid = d.bank_account_uuid WHERE " .. dms_where_clause,
+            table.unpack(dms_where_values))
+        total = total + ((dms_count and dms_count[1] and tonumber(dms_count[1].n)) or 0)
+    end
+    local count_result = { { total = total } }
 
     return {
         data = statements,
