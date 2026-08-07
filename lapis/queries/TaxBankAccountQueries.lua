@@ -210,9 +210,23 @@ function TaxBankAccountQueries.all(params, user)
 
     local accounts = paginated:get_page(page)
 
-    -- Add statement count for each account
+    -- Add statement count for each account. Counts BOTH pipelines so
+    -- the /bank-accounts summary matches the list under each account:
+    --   - tax_statements: /upload + /bank-accounts workflow uploads
+    --   - dms_documents:  /my-income drill-down slot uploads
+    --     (doc_type_key='bank_statement', bank_account_uuid set)
+    -- Same UNION rationale as TaxStatementQueries.all — see the comment
+    -- there for the full picture.
     for _, account in ipairs(accounts) do
-        local count_result = db.query("SELECT COUNT(*) as count FROM tax_statements WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?)", account.id)
+        local count_result = db.query([[
+            SELECT
+              (SELECT COUNT(*) FROM tax_statements
+                 WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?))
+              +
+              (SELECT COUNT(*) FROM dms_documents
+                 WHERE bank_account_uuid = ? AND doc_type_key = 'bank_statement')
+              AS count
+        ]], account.id, account.id)
         account.statement_count = count_result[1] and count_result[1].count or 0
     end
 
@@ -251,8 +265,17 @@ function TaxBankAccountQueries.show(uuid, user)
 
     if result and #result > 0 then
         local account = result[1]
-        -- Add statement count
-        local count_result = db.query("SELECT COUNT(*) as count FROM tax_statements WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?)", uuid)
+        -- Add statement count. Counts both pipelines — see the loop
+        -- in .all for the full rationale.
+        local count_result = db.query([[
+            SELECT
+              (SELECT COUNT(*) FROM tax_statements
+                 WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?))
+              +
+              (SELECT COUNT(*) FROM dms_documents
+                 WHERE bank_account_uuid = ? AND doc_type_key = 'bank_statement')
+              AS count
+        ]], uuid, uuid)
         account.statement_count = count_result[1] and count_result[1].count or 0
         return account
     end
