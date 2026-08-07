@@ -238,7 +238,11 @@ function ServiceQueries.createGithubIntegration(namespace_id, data)
         github_username = github_username,
         status = "active",
         last_validated_at = timestamp,  -- Set validation timestamp
-        created_by = data.created_by,
+        -- created_by is a nullable INTEGER column, but callers pass a user UUID
+        -- (self.current_user.uuid). Coerce so a UUID becomes NULL rather than
+        -- 500ing the INSERT with "invalid input syntax for type integer"; a real
+        -- integer id, if ever supplied, is preserved.
+        created_by = tonumber(data.created_by),
         created_at = timestamp,
         updated_at = timestamp
     }
