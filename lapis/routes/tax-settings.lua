@@ -237,6 +237,15 @@ return function(app)
             notification_email = true,
             notification_deadlines = true,
             auto_categorise = true,
+            -- auto_process_statements: when true, uploading a bank
+            -- statement from /my-income drill-down slots (self-
+            -- employment/rental/salary) automatically fires the
+            -- extract → classify chain via
+            -- POST /api/statements/auto-process/<dms_uuid>. Defaults
+            -- OFF: existing users are unaffected until they opt in
+            -- from Settings. Phase 1 of a multi-phase feature (see
+            -- backend/app/api/statement_auto_process.py docstring).
+            auto_process_statements = false,
             currency = "GBP",
             date_format = "DD/MM/YYYY",
         }
