@@ -7,8 +7,7 @@
   "match": {
     "rules": {
       "path": "/",
-      "path_key": "starts_with",
-      "jwt_token_validation": "equals"
+      "path_key": "starts_with"
     },
     "response": {
       "code": 305,
