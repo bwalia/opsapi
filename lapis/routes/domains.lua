@@ -302,16 +302,25 @@ return function(app)
         NamespaceMiddleware.requirePermission("domains", "update", function(self)
             local data = parse_body(self)
 
-            -- Inline GitHub auth: if a raw token is supplied, create (validate +
-            -- encrypt) a Services integration and link it. Otherwise use the
-            -- github_integration_id the caller picked.
+            -- Inline GitHub auth is OPTIONAL. Saving the sync target (owner/repo/
+            -- branch) must never be blocked by GitHub-token validation, so we
+            -- only validate + encrypt + link a Services integration when a
+            -- GENUINE new token is supplied. A nil / empty / whitespace-only /
+            -- masked ("********") value means "leave auth unchanged" — the caller
+            -- may instead pick an existing integration via github_integration_id,
+            -- or save no auth at all and add it later. (A real-but-invalid token
+            -- still returns a clear 400 so the user knows it was rejected.)
             local integration_id = data.github_integration_id
-            if data.github_token and data.github_token ~= "" and data.github_token ~= "********" then
+            local token = data.github_token
+            if type(token) == "string" then
+                token = token:gsub("^%s+", ""):gsub("%s+$", "")
+            end
+            if type(token) == "string" and token ~= "" and token ~= "********" then
                 local ok_sq, ServiceQueries = pcall(require, "queries.ServiceQueries")
                 if not ok_sq then return err_resp(500, "services module unavailable") end
                 local created, cerr = ServiceQueries.createGithubIntegration(self.namespace.id, {
                     name = data.integration_name or "Domain Sync",
-                    github_token = data.github_token,
+                    github_token = token,
                     github_username = data.github_username,
                     created_by = self.current_user and self.current_user.uuid,
                 })
