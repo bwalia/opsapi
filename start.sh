@@ -68,11 +68,15 @@ show_help() {
     echo "  business       - CRM + Timesheets + Invoicing + Accounting + Kanban"
     echo "  academy        - LMS: courses + lessons + rich (WYSIWYG) content"
     echo "  core_only      - Just authentication tables"
+    echo "  services       - Domain Management + GitHub-workflow integration"
+    echo "                   (feature-only: adds the feature to a tenant, seeds no"
+    echo "                    tenant of its own — combine, e.g. tax_copilot,services)"
     echo ""
     echo -e "${BLUE}Multi-Project (comma-separated):${NC}"
     echo "  Combine multiple project codes to enable features from each:"
     echo "  ecommerce,collaboration   - E-commerce + Chat + Kanban + Vault"
     echo "  tax_copilot,business      - Tax filing + CRM + Invoicing"
+    echo "  tax_copilot,services      - Tax filing + Domain Management (one tax_copilot tenant)"
     echo "  Each code creates its own namespace with appropriate roles/modules."
     echo ""
     echo -e "${BLUE}Examples:${NC}"
@@ -348,7 +352,12 @@ validate_protocol() {
 # Function to validate project code (supports comma-separated multi-project codes)
 validate_project_code() {
     local input="$1"
-    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business academy core_only"
+    # NOTE: `services` is a FEATURE-ONLY code (helper/project-config.lua
+    # FEATURE_ONLY_CODES) — it enables the SERVICES feature (Domain Management +
+    # GitHub-workflow integration) and its migrations WITHOUT seeding its own
+    # tenant, so it is meant to be combined with a tenant code, e.g.
+    # `tax_copilot,services`. It is a valid code on its own here too.
+    local VALID_CODES="all tax_copilot ecommerce ecommerce_chat collaboration hospital business academy core_only services"
 
     # Split on commas and validate each individual code.
     # NOTE: scope IFS=',' to just the `read` so the whitespace-split loop below
@@ -852,8 +861,8 @@ if [[ -n "$PROJECT_CODE" ]]; then
         echo -e "${BLUE}[i] Project code from argument: ${CYAN}${PROJECT_CODE}${NC}"
     else
         echo -e "${RED}[!] Invalid project code: '$PROJECT_CODE'${NC}"
-        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, academy, core_only${NC}"
-        echo -e "${YELLOW}[!] Combine with commas: ecommerce,collaboration${NC}"
+        echo -e "${YELLOW}[!] Valid options: all, tax_copilot, ecommerce, ecommerce_chat, collaboration, hospital, business, academy, core_only, services${NC}"
+        echo -e "${YELLOW}[!] Combine with commas: ecommerce,collaboration  or  tax_copilot,services${NC}"
         exit 1
     fi
 else
