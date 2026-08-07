@@ -474,24 +474,30 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
 
   const save = async () => {
     if (!form.owner || !form.repo) { toast.error('owner and repo required'); return; }
-    if (authMode === 'new' && !newToken.trim()) { toast.error('Paste a GitHub token or pick an existing integration'); return; }
-    if (authMode === 'existing' && !form.github_integration_id) { toast.error('Pick a GitHub integration (or add a token)'); return; }
     setSaving(true);
     try {
+      // GitHub auth is OPTIONAL here — the sync target saves on its own. Only
+      // send a token when the user actually typed a new one (never a blank or
+      // the masked placeholder, which would otherwise trip token validation and
+      // block the save); only send an integration id when one is picked.
       const payload: Record<string, unknown> = {
         owner: form.owner, repo: form.repo, branch: form.branch, default_environment: form.default_environment,
       };
-      if (authMode === 'new') {
-        payload.github_token = newToken;
-        payload.integration_name = newTokenName || 'Domain Sync';
-      } else {
+      const token = newToken.trim();
+      if (authMode === 'new' && token && token !== '********') {
+        payload.github_token = token;
+        payload.integration_name = (newTokenName || '').trim() || 'Domain Sync';
+      } else if (authMode === 'existing' && form.github_integration_id) {
         payload.github_integration_id = form.github_integration_id;
       }
       await domainService.saveSyncSettings(payload);
       toast.success('Sync settings saved');
       onClose();
-    } catch {
-      toast.error('Save failed — check the token has repo Contents + Actions write');
+    } catch (e: unknown) {
+      // Surface the real API reason (e.g. "Token validation failed: Bad
+      // credentials") instead of a generic message.
+      const apiMsg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(apiMsg || 'Save failed — check the token has repo Contents + Actions write');
     } finally { setSaving(false); }
   };
 
