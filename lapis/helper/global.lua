@@ -102,14 +102,32 @@ local function validateEncryptionConfig()
         error("OPENSSL_SECRET_IV environment variable is not set")
     end
 
-    -- AES-128 requires 16-byte key and IV
-    -- Keys can be provided as 16 raw bytes or 32 hex characters
-    if #secretKey < 16 then
-        ngx.log(ngx.WARN, "OPENSSL_SECRET_KEY is ", #secretKey, " bytes, AES-128 requires 16 bytes. Key will be padded.")
+    -- AES needs RAW bytes: a 16-byte (AES-128) or 32-byte (AES-256) key, and a
+    -- 16-byte IV. Keys/IVs are commonly generated hex-encoded — `openssl rand
+    -- -hex 16` is 32 chars, `-hex 32` is 64 chars — which resty.aes rejects if
+    -- passed through verbatim (a 64-byte "key" / 32-byte "IV" match no cipher,
+    -- so AES:new returns nil and encrypt/decrypt throw "Failed to initialize
+    -- AES encryption"). Decode hex to raw ONLY when the raw length isn't a
+    -- valid AES size but the hex-decoded length is; a value already at a valid
+    -- raw length is used as-is, so existing raw-byte configs are unaffected.
+    local function to_raw(s, valid)
+        if valid[#s] then return s end
+        if #s % 2 == 0 and s:match("^[0-9a-fA-F]+$") and valid[#s / 2] then
+            return (s:gsub("..", function(cc) return string.char(tonumber(cc, 16)) end))
+        end
+        return s
+    end
+    secretKey = to_raw(secretKey, { [16] = true, [32] = true })
+    secretIV = to_raw(secretIV, { [16] = true })
+
+    if #secretKey ~= 16 and #secretKey ~= 32 then
+        ngx.log(ngx.WARN, "OPENSSL_SECRET_KEY is ", #secretKey,
+            " bytes after hex-normalisation; AES needs 16 (AES-128) or 32 (AES-256).")
     end
 
-    if #secretIV < 16 then
-        ngx.log(ngx.WARN, "OPENSSL_SECRET_IV is ", #secretIV, " bytes, AES-128 requires 16 bytes. IV will be padded.")
+    if #secretIV ~= 16 then
+        ngx.log(ngx.WARN, "OPENSSL_SECRET_IV is ", #secretIV,
+            " bytes after hex-normalisation; AES-CBC needs 16.")
     end
 
     return secretKey, secretIV
