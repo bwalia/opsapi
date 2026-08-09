@@ -223,6 +223,31 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
                 allowed_modules[m.machine_name] = true
             end
         end
+
+        -- Feature-only codes (e.g. "services") are deployment-wide add-ons
+        -- layered onto EVERY namespace of this deployment (see project-config
+        -- FEATURE_ONLY_CODES) — the namespace's own project_code never lists
+        -- them. Merge their feature modules in from the environment PROJECT_CODE
+        -- so their menu items (e.g. Domains) appear wherever their routes are
+        -- actually loaded; without this a `tax_copilot,services` deployment
+        -- migrates + serves /api/v2/domains but the sidebar item stays hidden.
+        local env_code = ProjectConfig.getProjectCode() or ""
+        for code in env_code:gmatch("[^,]+") do
+            code = code:gsub("^%s+", ""):gsub("%s+$", "")
+            if ProjectConfig.isFeatureOnlyCode and ProjectConfig.isFeatureOnlyCode(code) then
+                local feats = ProjectConfig.PROJECT_FEATURES[code]
+                if feats then
+                    for _, feature in ipairs(feats) do
+                        local fmods = ProjectConfig.PROJECT_MODULES[feature]
+                        if fmods then
+                            for _, m in ipairs(fmods) do
+                                allowed_modules[m.machine_name] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 
     local filtered_items = {}
