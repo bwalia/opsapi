@@ -45,6 +45,8 @@ export interface SyncToRepoResult {
   branch?: string;
   commit?: string;
   count: number;
+  rules?: number;
+  warnings?: string[];
   dry_run?: boolean;
   files: { path: string; server_name: string; content?: string }[];
 }
@@ -157,6 +159,11 @@ export interface DomainSyncSettings {
   github_integration_id?: string;
   data_base?: string;
   default_environment?: string;
+  // Rule generation. default_backend is used when a domain has no proxy_target;
+  // sync_rules toggles emitting rule files at all.
+  default_backend?: string;
+  default_rule_id?: string;
+  sync_rules?: boolean;
 }
 
 export interface GithubIntegrationLite {
