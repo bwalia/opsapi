@@ -342,6 +342,10 @@ return function(app)
 
             local SyncSettings = require("queries.DomainSyncSettingsQueries")
             local saved = SyncSettings.upsert(self.namespace.id, {
+                -- Callers may paste a repo URL instead of owner+repo; upsert
+                -- derives owner/repo (and branch) from it. owner/repo are still
+                -- honoured when sent explicitly (e.g. an older client).
+                repo_url = data.repo_url,
                 owner = data.owner,
                 repo = data.repo,
                 branch = data.branch,

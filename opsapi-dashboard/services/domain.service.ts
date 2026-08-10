@@ -148,6 +148,9 @@ export interface PipelineStep {
 
 export interface DomainSyncSettings {
   uuid?: string;
+  // Write-only convenience: paste a repo URL and the backend derives
+  // owner/repo (and branch). owner/repo are what the API stores + returns.
+  repo_url?: string;
   owner?: string;
   repo?: string;
   branch?: string;
