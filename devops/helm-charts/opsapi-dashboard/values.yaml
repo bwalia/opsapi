@@ -1,0 +1,62 @@
+# Base defaults for the opsapi-dashboard chart. Per-env overrides live in
+# values-workstation-<env>.yaml and are layered on top by the deploy workflow.
+env: int
+
+# The opsapi backend this dashboard talks to. NOTE: Next.js inlines
+# NEXT_PUBLIC_* at BUILD time, so the image must be BUILT with
+#   --build-arg NEXT_PUBLIC_API_URL=<this value>
+# (the deploy workflow does this from `apiUrl`). The runtime env below is for
+# server-side reads only; the browser bundle uses the build-time value.
+apiUrl: https://int-opsapi.workstation.co.uk
+
+# Bumped by the deploy workflow (build timestamp) to force a re-pull of :latest.
+deployedAt: "unset"
+
+# opsapi-dashboard image, built from opsapi-dashboard/ and pushed to public
+# Docker Hub by .github/workflows/deploy-workstation-dashboard.yml. Public repo
+# → no imagePullSecret needed.
+image:
+  repository: bwalia/opsapi-dashboard
+  tag: latest
+  pullPolicy: Always
+imagePullSecretName: ""
+
+service:
+  type: ClusterIP
+  port: 8039
+  targetPort: 8039
+
+ingress:
+  enabled: true
+  className: wslproxy
+  hostname: int-opsapi-ui.workstation.co.uk
+  annotations: {}
+  tls: []
+
+# The Next.js standalone server serves the /login page (200) before auth — a
+# cheap, dependency-free readiness signal.
+livenessProbe:
+  enabled: true
+  path: /login
+  port: 8039
+readinessProbe:
+  enabled: true
+  path: /login
+  port: 8039
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 2
+
+# Pin to debworker00 (debian node with disk headroom), matching the API pod.
+nodeSelector:
+  kubernetes.io/hostname: debworker00
+tolerations: []

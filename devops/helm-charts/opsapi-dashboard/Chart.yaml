@@ -1,0 +1,10 @@
+apiVersion: v2
+name: opsapi-dashboard
+description: >-
+  OpsAPI admin dashboard (Next.js) for workstation.co.uk — the UI that talks to
+  the workstation-opsapi backend. The image is built from opsapi-dashboard/ with
+  NEXT_PUBLIC_API_URL baked in at build time (Next.js inlines NEXT_PUBLIC_* into
+  the browser bundle), so one image maps to exactly one API host.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

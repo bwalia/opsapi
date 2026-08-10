@@ -1,0 +1,26 @@
+# ── OpsAPI Dashboard on workstation.co.uk — INTEGRATION ─────────────────────
+# Helm RELEASE: workstation-opsapi-dashboard   Namespace: int   Cluster: k3s1
+# Public host: https://int-opsapi-ui.workstation.co.uk
+#   → calls the API at https://int-opsapi.workstation.co.uk (workstation-opsapi)
+#
+# Layered on top of values.yaml by deploy-workstation-dashboard.yml. Only the
+# fields that differ from the base defaults (or that other jobs read) live here.
+env: int
+
+# The API this UI calls. Baked into the browser bundle at BUILD time
+# (--build-arg NEXT_PUBLIC_API_URL) by the deploy workflow.
+apiUrl: https://int-opsapi.workstation.co.uk
+
+# Single source of truth for the DNS + wslproxy jobs (read via awk). MUST equal
+# ingress.hostname below.
+host: int-opsapi-ui.workstation.co.uk
+
+ingress:
+  enabled: true
+  className: wslproxy
+  hostname: int-opsapi-ui.workstation.co.uk
+  annotations: {}
+  tls: []
+
+nodeSelector:
+  kubernetes.io/hostname: debworker00

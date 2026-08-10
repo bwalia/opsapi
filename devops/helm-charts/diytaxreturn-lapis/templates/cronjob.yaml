@@ -114,10 +114,18 @@ spec:
                       name: {{ .Release.Name }}-secrets
                       key: POSTGRES_PORT
                 - name: POSTGRES_DB
+                  {{- if and .Values.database .Values.database.name }}
+                  # Isolation: back up THIS release's own database (see the
+                  # POSTGRES_DB override in deployment.yaml), not the shared
+                  # secret's POSTGRES_DB — otherwise this release would dump the
+                  # co-tenant's database instead of its own.
+                  value: {{ .Values.database.name | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: POSTGRES_DB
+                  {{- end }}
           volumes:
             - name: {{ .Release.Name }}-backup-script
               configMap:
@@ -241,10 +249,18 @@ spec:
                       name: {{ .Release.Name }}-secrets
                       key: POSTGRES_PORT
                 - name: POSTGRES_DB
+                  {{- if and .Values.database .Values.database.name }}
+                  # Isolation: back up THIS release's own database (see the
+                  # POSTGRES_DB override in deployment.yaml), not the shared
+                  # secret's POSTGRES_DB — otherwise this release would dump the
+                  # co-tenant's database instead of its own.
+                  value: {{ .Values.database.name | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: POSTGRES_DB
+                  {{- end }}
           volumes:
             - name: {{ .Release.Name }}-backup-script
               configMap:
