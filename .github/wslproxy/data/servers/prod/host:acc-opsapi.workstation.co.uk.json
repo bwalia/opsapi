@@ -1,9 +1,7 @@
 {
   "cache_enabled": false,
   "custom_location_block": {},
-  "rules": [
-    "opsapi-prod-default"
-  ],
+  "rules": "opsapi-prod-default",
   "custom_http_block": {},
   "config_status": true,
   "profile_id": "prod",
