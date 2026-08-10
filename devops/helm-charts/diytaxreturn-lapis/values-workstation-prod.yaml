@@ -31,7 +31,7 @@ service:
 # no cert-manager on k3s1). See values-workstation-int.yaml.
 ingress:
   enabled: true
-  className: traefik-edge
+  className: wslproxy
   annotations: {}
   hosts:
     - host: opsapi.workstation.co.uk
