@@ -108,6 +108,23 @@ spec:
             # "no encryption" and the whole API 500s.
             - name: POSTGRES_SSL
               value: {{ .Values.postgresSsl | default "true" | quote }}
+            {{- if and .Values.database .Values.database.name }}
+            # DATABASE ISOLATION. By default this release inherits POSTGRES_DB
+            # from the shared Vault ExternalSecret (envFrom above) — which is
+            # the SAME `opsapi` database the legacy diytaxreturn-lapis release
+            # uses. Setting `database.name` points THIS release at its own
+            # database on the same Postgres server, so its data (users,
+            # namespaces, tenants) is fully isolated from diytaxreturn's. An
+            # explicit container `env` WINS over the `envFrom` secretRef for the
+            # same key, and config.lua + `lapis migrate` both read
+            # os.getenv("POSTGRES_DB"), so the app and the postStart migration
+            # hook agree. The target database MUST already exist on the server
+            # (pguser lacks CREATEDB) — provision it once before first deploy:
+            #   CREATE DATABASE <name> OWNER pguser;
+            # then the postStart bootstrap migrates it fresh + seeds the admin.
+            - name: POSTGRES_DB
+              value: {{ .Values.database.name | quote }}
+            {{- end }}
             # PCRE pattern (matched via ngx.re.match) of recipients
             # whose SMTP delivery must be silently skipped. Used by
             # helper/mail.lua + helper/otp.lua; gated internally on

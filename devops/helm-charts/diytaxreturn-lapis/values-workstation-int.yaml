@@ -16,9 +16,14 @@ app: workstation-opsapi
 # this `host:` via awk). MUST equal ingress.hosts[0].host below.
 host: int-opsapi.workstation.co.uk
 
-# Scope migrations to the tax app only — see values-int.yaml for the full
-# rationale (a CRM migration drift took acc down for 22h once).
-projectCode: tax_copilot
+# Full opsapi product on its OWN isolated database (see `database` below), so
+# `all` is safe here: every migration runs against the dedicated
+# workstation_opsapi DB and cannot affect diytaxreturn's data. `all` enables
+# every feature module (incl. SERVICES/Domains) so the admin dashboard shows
+# the complete product. The "CRM drift took acc down 22h" caveat in
+# values-int.yaml applied to the SHARED diytaxreturn DB — it does not apply to
+# this isolated release.
+projectCode: all
 
 # Password-reset email link target (the Next.js dashboard, unchanged — the
 # API moving to workstation.co.uk does not move the frontend). Migration 489
@@ -63,20 +68,45 @@ ingress:
 nodeSelector:
   kubernetes.io/hostname: debworker00
 
-# Empty map (NOT unset): the chart's ExternalSecret reads
-# `.Values.database.host | default <Vault POSTGRES_HOST>`, which nil-pointers
-# if `database` is absent entirely. `{}` leaves `.host` unset so the Vault
-# fallback fires — the correct in-cluster address for diytaxreturn-pg on k3s1.
-# The legacy 10.96.x IP in values-int.yaml is a dead k3s0-era ClusterIP.
-database: {}
+# DATABASE ISOLATION.
+#   `host` is intentionally left UNSET so the chart's ExternalSecret falls back
+#   to the Vault POSTGRES_HOST (diy-tax-db.int.svc — the correct in-cluster
+#   Postgres). `name` points this release at its OWN database on that same
+#   server, isolating its data from the diytaxreturn-lapis release which shares
+#   the Vault secret. Without `name`, both releases would read/write the single
+#   `opsapi` database (verified 2026-08-10: identical 810-user DB). The chart
+#   turns `name` into a POSTGRES_DB env override (see deployment.yaml).
+#   PREREQUISITE: the database must exist before deploy (pguser has no CREATEDB):
+#     kubectl exec -n int diy-tax-db-0 -- psql -U postgres \
+#       -c 'CREATE DATABASE workstation_opsapi OWNER pguser'
+#   The postStart bootstrap then migrates it fresh (projectCode=all) and seeds
+#   the admin below. Other envs (acc/test/prod) need their own DB + this same
+#   block before they are stood up, or they will share that env's diytax DB.
+database:
+  name: workstation_opsapi
 
 externalSecret:
   enabled: true
 
+# Bootstrap super-admin for the fresh workstation_opsapi DB (created on first
+# boot by scripts/setup-namespace). Email is safe to commit; the password is
+# NOT set here (this repo is public) — it defaults to the setup-namespace
+# default on a fresh seed and should be rotated after first login. The seeded
+# admin owns the `workstation` namespace and holds the platform `administrative`
+# role. Once the admin exists, setup-namespace is idempotent and never rewrites
+# the password, so redeploys are safe.
 setup:
-  adminEmail: ""
+  adminEmail: "tenthmatrix.mailer@gmail.com"
   adminPassword: ""
-  namespaceSlug: ""
+  namespaceSlug: "workstation"
+
+# Browser CORS allow-list (consumed by middleware/cors.lua). The admin UI
+# dashboard is served from *-opsapi-ui.workstation.co.uk and calls this API
+# cross-origin; without an allow-list match the middleware emits no
+# Access-Control-Allow-Origin and the browser blocks every call. The bare
+# domain matches the apex AND every subdomain (http/https, any port), so it
+# covers int-opsapi-ui.workstation.co.uk and the other env UI hosts.
+corsAllowedDomains: "workstation.co.uk"
 
 autoscaling:
   enabled: false

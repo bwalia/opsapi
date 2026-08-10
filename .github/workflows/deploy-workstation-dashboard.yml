@@ -1,0 +1,225 @@
+name: Deploy Workstation Dashboard
+
+# Builds and deploys the OpsAPI admin UI (opsapi-dashboard/, Next.js) to
+# https://int-opsapi-ui.workstation.co.uk, fully from GitHub. The UI calls the
+# workstation-opsapi API at https://int-opsapi.workstation.co.uk.
+#
+# Mirrors deploy-k3s.yml (which deploys the API): same k3s1 cluster
+# (KUBE_CONFIG_DATA_K3S), same WSL Proxy edge (DNS CNAME -> pop0.wslproxy.com +
+# a stub vhost/rule registered on the control plane), same Docker Hub registry.
+#
+# Next.js inlines NEXT_PUBLIC_API_URL into the browser bundle at BUILD time, so
+# the image is built with the API URL baked in (one image -> one API host). The
+# API URL is read from the chart's `apiUrl:` so it can never drift from what the
+# Deployment serves.
+#
+# Flow:  build (image) -> dns (Cloudflare CNAME) -> wslproxy (edge vhost/rule)
+#        -> deploy (helm upgrade + rollout)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "opsapi-dashboard/**"
+      - "devops/helm-charts/opsapi-dashboard/**"
+      - ".github/workflows/deploy-workstation-dashboard.yml"
+      - ".github/wslproxy/data/servers/prod/host:*-opsapi-ui.workstation.co.uk.json"
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        description: "Environment (values-workstation-<env>.yaml)"
+        required: false
+        default: "int"
+        type: string
+
+concurrency:
+  group: deploy-workstation-dashboard-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_REGISTRY: bwalia
+  IMAGE_NAME: opsapi-dashboard
+  HELM_CHART_PATH: ./devops/helm-charts/opsapi-dashboard
+  RELEASE_NAME: workstation-opsapi-dashboard
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  # DNS: the UI host is a DNS-only CNAME to the WSL Proxy edge, which terminates
+  # TLS and proxies to the k3s ingress entry (same as the API host).
+  DNS_ZONE: workstation.co.uk
+  DNS_TARGET: pop0.wslproxy.com
+  DNS_PROXIED: "false"
+
+jobs:
+  # =========================================================================
+  # 1. BUILD — build + push the dashboard image with the API URL baked in.
+  # =========================================================================
+  build:
+    name: Build dashboard image
+    runs-on: [self-hosted, Linux, X64]
+    outputs:
+      image_tag: ${{ steps.meta.outputs.IMAGE_TAG }}
+      api_url: ${{ steps.meta.outputs.API_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine build metadata + API URL
+        id: meta
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file ($VALUES)"; exit 1; }
+
+          # Single source of truth: the API URL the chart deploys with. Baking
+          # a different URL than the runtime env would silently break the UI.
+          API_URL="$(awk '/^apiUrl:/{print $2; exit}' "$VALUES")"
+          [ -n "$API_URL" ] || { echo "::error::no 'apiUrl:' in $VALUES"; exit 1; }
+
+          APP_VERSION=$(git describe --tags --always 2>/dev/null || echo 'dev')
+          SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
+          IMAGE_TAG="${SAFE_VERSION}-${GITHUB_RUN_NUMBER:-local}"
+          echo "API_URL=$API_URL"     >> "$GITHUB_OUTPUT"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Building ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} (API=${API_URL})"
+
+      - name: Build & push (NEXT_PUBLIC_API_URL baked in)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./opsapi-dashboard
+          file: ./opsapi-dashboard/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ steps.meta.outputs.API_URL }}
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.IMAGE_TAG }}
+          # Registry layer cache — reuses the npm-ci deps stage unless the
+          # lockfile changed (see the Dockerfile), so most builds skip the
+          # heavy install. mode=max also caches the Next.js build cache.
+          cache-from: type=registry,ref=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          provenance: false
+
+  # =========================================================================
+  # 2. DNS — ensure the Cloudflare CNAME for the UI host -> the WSL Proxy edge.
+  # =========================================================================
+  dns:
+    name: Ensure Cloudflare DNS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure the CNAME for the UI host
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE: ${{ env.DNS_ZONE }}
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file ($VALUES)"; exit 1; }
+          HOST="$(awk '/^host:/{print $2; exit}' "$VALUES")"
+          [ -n "$HOST" ] || { echo "::error::no 'host:' in $VALUES"; exit 1; }
+          echo "Ensuring ${HOST} -> ${DNS_TARGET} (proxied=${DNS_PROXIED})"
+          chmod +x devops/scripts/cloudflare-dns.sh
+          ./devops/scripts/cloudflare-dns.sh \
+            --name "$HOST" \
+            --content "$DNS_TARGET" \
+            --proxied "$DNS_PROXIED"
+
+  # =========================================================================
+  # 3. WSL PROXY — register the edge vhost + rule for the UI host. The UI vhost
+  #    (host:*-opsapi-ui.workstation.co.uk) reuses the opsapi-prod-default rule,
+  #    so it routes to the same k3s ingress entry and traefik picks it by Host.
+  # =========================================================================
+  wslproxy:
+    name: Register WSL Proxy vhost
+    needs: [dns]
+    uses: ./.github/workflows/wslproxy-register-domains.yml
+    with:
+      TARGET_ENV: prod
+      ACTIVATE_CONFIG: true
+      DRY_RUN: false
+    secrets: inherit
+
+  # =========================================================================
+  # 4. DEPLOY — helm upgrade the workstation-opsapi-dashboard release to k3s1.
+  # =========================================================================
+  deploy:
+    name: Deploy dashboard to K3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [build, dns, wslproxy]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    if: >-
+      ${{ always()
+          && needs.build.result == 'success'
+          && needs.dns.result == 'success'
+          && needs.wslproxy.result == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Decode kubeconfig (k3s1)
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::secret KUBE_CONFIG_DATA_K3S is empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl + helm
+        run: |
+          command -v kubectl >/dev/null 2>&1 || {
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          }
+          command -v helm >/dev/null 2>&1 || {
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          }
+          kubectl version --client=true 2>/dev/null | head -1 || true
+          helm version --short || true
+
+      - name: Deploy dashboard
+        env:
+          TAG: ${{ needs.build.outputs.image_tag }}
+          API_URL: ${{ needs.build.outputs.api_url }}
+        run: |
+          set -euo pipefail
+          VALUES="${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml"
+          [ -f "$VALUES" ] || { echo "::error::no values file ($VALUES)"; exit 1; }
+          kubectl create namespace "${TARGET_ENV}" --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install "${RELEASE_NAME}" "${HELM_CHART_PATH}" \
+            -f "$VALUES" \
+            --namespace "${TARGET_ENV}" --create-namespace \
+            --set image.repository="${IMAGE_REGISTRY}/${IMAGE_NAME}" \
+            --set image.tag="${TAG}" \
+            --set apiUrl="${API_URL}" \
+            --set deployedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --wait --timeout 8m
+          kubectl -n "${TARGET_ENV}" rollout status "deploy/${RELEASE_NAME}" --timeout=300s || true
+          kubectl -n "${TARGET_ENV}" get pods -o wide -l app="${RELEASE_NAME}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Workstation Dashboard deployed"
+            echo "- URL: https://$(awk '/^host:/{print $2; exit}' "${HELM_CHART_PATH}/values-workstation-${TARGET_ENV}.yaml")"
+            echo "- image: \`${IMAGE_REGISTRY}/${IMAGE_NAME}:${{ needs.build.outputs.image_tag }}\`"
+            echo "- API (baked): \`${{ needs.build.outputs.api_url }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
