@@ -31,7 +31,7 @@ service:
 # no cert-manager on k3s1). See values-workstation-int.yaml.
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik-edge
   annotations: {}
   hosts:
     - host: opsapi.workstation.co.uk
@@ -57,3 +57,7 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
+
+# Pin to debworker00 (debian node, disk headroom) — see values-workstation-int.yaml.
+nodeSelector:
+  kubernetes.io/hostname: debworker00
