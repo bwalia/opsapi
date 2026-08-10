@@ -36,20 +36,18 @@ service:
   type: ClusterIP
   port: 80
 
-# Dedicated Ingress for this release. className `traefik-edge` = the ingress
-# class served by the `traefik-edge` daemonset on the PUBLIC k3s1 edge nodes
-# (cloud00x). The public WSL Proxy edge (an external host) cannot reach the
-# debian LAN nodes (192.168.1.x) directly, so it proxies to a public edge node
-# (cloud001, 72.62.211.28 — see the opsapi-prod-default rule backend) which
-# runs traefik-edge and routes by Host header to THIS release's Service. The
-# pod itself still runs on a debian node (see nodeSelector below) — the edge
-# node is only the HTTP entry, not where the app runs. Same working pattern as
-# the *.diytaxreturn.co.uk hosts. NO cert-manager / NO tls block: TLS is
-# terminated at the WSL Proxy edge (ssl_enabled in the committed server JSON);
-# traefik serves plain HTTP :80 behind it.
+# Dedicated Ingress for this release. className `wslproxy` = the k3s1 ingress
+# class the WSL Proxy edge routes to — identical to the working beacon
+# (monitoring-go) *.workstation.co.uk hosts (e.g. grafana/prometheus.workstation
+# .co.uk). The edge proxies to the shared k3s ingress entry 193.237.176.232:8888
+# (see the opsapi-prod-default rule backend), which serves this release's Host
+# over plain HTTP. NO cert-manager / NO tls block: TLS is terminated at the WSL
+# Proxy edge (ssl_enabled in the committed server JSON); traefik serves plain
+# HTTP :80 behind it, routing by Host header. The pod is pinned to a debian node
+# (nodeSelector below) — placement is independent of routing.
 ingress:
   enabled: true
-  className: traefik-edge
+  className: wslproxy
   annotations: {}
   hosts:
     - host: int-opsapi.workstation.co.uk
