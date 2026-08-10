@@ -52,4 +52,20 @@ return {
 
         pcall(function() db.query([[CREATE INDEX domain_sync_settings_namespace_idx ON domain_sync_settings (namespace_id)]]) end)
     end,
+
+    -- [2] Template-driven wslproxy rendering + rule generation (see
+    -- helper/wslproxy-server.lua). All nullable — NULL means "use the built-in
+    -- default template", so this is fully backward-compatible.
+    [2] = function()
+        if not table_exists("domain_sync_settings") then return end
+        local function add(sql) pcall(function() db.query(sql) end) end
+        -- Override JSON templates ({{placeholder}} strings). NULL -> code default.
+        add([[ALTER TABLE domain_sync_settings ADD COLUMN IF NOT EXISTS server_template TEXT]])
+        add([[ALTER TABLE domain_sync_settings ADD COLUMN IF NOT EXISTS rule_template TEXT]])
+        -- Fallbacks when a domain row leaves wslproxy_rule_id / proxy_target blank.
+        add([[ALTER TABLE domain_sync_settings ADD COLUMN IF NOT EXISTS default_rule_id TEXT]])
+        add([[ALTER TABLE domain_sync_settings ADD COLUMN IF NOT EXISTS default_backend TEXT]])
+        -- Whether the sync also emits rule files (default on).
+        add([[ALTER TABLE domain_sync_settings ADD COLUMN IF NOT EXISTS sync_rules BOOLEAN DEFAULT TRUE]])
+    end,
 }

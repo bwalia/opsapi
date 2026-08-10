@@ -438,10 +438,51 @@ function DomainsPageContent() {
 }
 
 // ============================================================
+// Repo URL → owner/repo/branch. Users paste a single link instead of typing
+// owner + repo separately (fewer fields, no misconfiguration). Mirrors the
+// backend DomainSyncSettingsQueries.parse_repo_url. Accepts https / ssh /
+// github.com/owner/repo / owner/repo, with an optional /tree/<branch>.
+// ============================================================
+function parseRepoUrl(url: string): { owner: string; repo: string; branch?: string } | null {
+  let s = (url || '').trim();
+  if (!s) return null;
+  s = s
+    .replace(/[?#].*$/, '')
+    .replace(/^git@github\.com:/i, '')
+    .replace(/^ssh:\/\/git@github\.com\//i, '')
+    .replace(/^\w+:\/\//, '')
+    .replace(/^www\./i, '')
+    .replace(/^github\.com\//i, '')
+    .replace(/^\/+/, '');
+  const m = s.match(/^([^/]+)\/([^/]+)/);
+  if (!m) return null;
+  const owner = m[1];
+  const repo = m[2].replace(/\.git$/, '');
+  if (!owner || !repo) return null;
+  const bm = s.match(/^[^/]+\/[^/]+\/tree\/([^/]+)/);
+  return { owner, repo, branch: bm?.[1] };
+}
+
+// Single "paste the repo URL" input with a live parse preview. Reused by every
+// modal that used to ask for owner + repo separately.
+function RepoUrlField({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+  const parsed = parseRepoUrl(value);
+  const touched = (value || '').trim() !== '';
+  return (
+    <div className={className}>
+      <Input placeholder="Paste repo URL — https://github.com/owner/repo" value={value} onChange={(e) => onChange(e.target.value)} />
+      {touched && (parsed
+        ? <p className="mt-1 text-xs text-emerald-600">✓ {parsed.owner}/{parsed.repo}{parsed.branch ? ` · branch ${parsed.branch}` : ''}</p>
+        : <p className="mt-1 text-xs text-red-600">Enter a full GitHub repo URL, e.g. github.com/owner/repo</p>)}
+    </div>
+  );
+}
+
+// ============================================================
 // Sync Settings modal — configure the repo target + GitHub auth ONCE.
 // ============================================================
 function SyncSettingsModal({ onClose }: { onClose: () => void }) {
-  const [form, setForm] = useState({ owner: '', repo: '', branch: 'main', default_environment: 'prod', github_integration_id: '' });
+  const [form, setForm] = useState({ repo_url: '', branch: 'main', default_environment: 'prod', github_integration_id: '' });
   const [integrations, setIntegrations] = useState<GithubIntegrationLite[]>([]);
   const [integrationName, setIntegrationName] = useState<string | undefined>();
   const [authMode, setAuthMode] = useState<'existing' | 'new'>('existing');
@@ -460,8 +501,7 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
         setIntegrationName(s.integration_name);
         if (s.settings) {
           setForm({
-            owner: s.settings.owner || '',
-            repo: s.settings.repo || '',
+            repo_url: (s.settings.owner && s.settings.repo) ? `https://github.com/${s.settings.owner}/${s.settings.repo}` : '',
             branch: s.settings.branch || 'main',
             default_environment: s.settings.default_environment || 'prod',
             github_integration_id: s.settings.github_integration_id || '',
@@ -473,15 +513,19 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const save = async () => {
-    if (!form.owner || !form.repo) { toast.error('owner and repo required'); return; }
+    const parsed = parseRepoUrl(form.repo_url);
+    if (!parsed) { toast.error('Enter a valid GitHub repository URL (e.g. https://github.com/owner/repo)'); return; }
     setSaving(true);
     try {
       // GitHub auth is OPTIONAL here — the sync target saves on its own. Only
       // send a token when the user actually typed a new one (never a blank or
       // the masked placeholder, which would otherwise trip token validation and
       // block the save); only send an integration id when one is picked.
+      // We send the pasted repo_url AND the client-parsed owner/repo so the
+      // save works regardless of which the backend prefers.
       const payload: Record<string, unknown> = {
-        owner: form.owner, repo: form.repo, branch: form.branch, default_environment: form.default_environment,
+        repo_url: form.repo_url.trim(), owner: parsed.owner, repo: parsed.repo,
+        branch: parsed.branch || form.branch, default_environment: form.default_environment,
       };
       const token = newToken.trim();
       if (authMode === 'new' && token && token !== '********') {
@@ -509,14 +553,15 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
           After this, “Sync to Repo” and “Run Pipeline” just work — no re-entering.
         </p>
 
-        {/* Repo target */}
-        <div className="grid grid-cols-2 gap-2">
-          <Input placeholder="owner (e.g. bwalia)" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} />
-          <Input placeholder="repo (e.g. diy-tax-return-uk)" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} />
-          <Input placeholder="branch" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
-          <select className="rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.default_environment} onChange={(e) => setForm({ ...form, default_environment: e.target.value })}>
-            {['prod', 'acc', 'test', 'int', 'dev'].map((x) => <option key={x} value={x}>{x}</option>)}
-          </select>
+        {/* Repo target — paste the repo URL, we work out owner/repo/branch */}
+        <div className="space-y-2">
+          <RepoUrlField value={form.repo_url} onChange={(v) => setForm({ ...form, repo_url: v })} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input placeholder="branch (default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+            <select className="rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.default_environment} onChange={(e) => setForm({ ...form, default_environment: e.target.value })}>
+              {['prod', 'acc', 'test', 'int', 'dev'].map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
         </div>
 
         {/* GitHub auth */}
@@ -554,7 +599,7 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
 // ============================================================
 // Pipeline modal (opsapi drives: sync → dns-reconcile → wslproxy-register → auto-tag)
 // ============================================================
-const EMPTY_PIPELINE = { environment: 'prod', owner: '', repo: '', branch: 'main', github_integration_id: '' };
+const EMPTY_PIPELINE = { environment: 'prod', repo_url: '', branch: 'main', github_integration_id: '' };
 
 function stepBadge(status: string) {
   const map: Record<string, 'success' | 'warning' | 'error' | 'secondary'> = {
@@ -575,8 +620,7 @@ function PipelineModal({ onClose }: { onClose: () => void }) {
       setForm((f) => ({
         ...f,
         environment: s.settings?.default_environment || f.environment,
-        owner: s.settings?.owner || '',
-        repo: s.settings?.repo || '',
+        repo_url: (s.settings?.owner && s.settings?.repo) ? `https://github.com/${s.settings.owner}/${s.settings.repo}` : '',
         branch: s.settings?.branch || 'main',
         github_integration_id: s.settings?.github_integration_id || '',
       }));
@@ -596,11 +640,14 @@ function PipelineModal({ onClose }: { onClose: () => void }) {
   }, [run]);
 
   const start = async () => {
-    if (!form.owner || !form.repo) { toast.error('owner and repo required'); return; }
+    const parsed = parseRepoUrl(form.repo_url);
+    if (!parsed) { toast.error('Enter a valid GitHub repository URL'); return; }
     if (!form.github_integration_id) { toast.error('GitHub integration id required'); return; }
     setStarting(true);
     try {
-      const r = await domainService.runPipeline({ ...form });
+      const r = await domainService.runPipeline({
+        ...form, owner: parsed.owner, repo: parsed.repo, branch: parsed.branch || form.branch,
+      });
       setRun(r);
       toast.success('Pipeline started');
     } catch { toast.error('Could not start pipeline'); } finally { setStarting(false); }
@@ -619,9 +666,8 @@ function PipelineModal({ onClose }: { onClose: () => void }) {
             <select className="rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>
               {['prod', 'acc', 'test', 'int', 'dev'].map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
-            <Input placeholder="branch" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
-            <Input placeholder="owner (e.g. bwalia)" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} />
-            <Input placeholder="repo (e.g. diy-tax-return-uk)" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} />
+            <Input placeholder="branch (default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+            <RepoUrlField className="col-span-2" value={form.repo_url} onChange={(v) => setForm({ ...form, repo_url: v })} />
             <Input className="col-span-2" placeholder="GitHub integration id (uuid)" value={form.github_integration_id} onChange={(e) => setForm({ ...form, github_integration_id: e.target.value })} />
           </div>
         )}
@@ -674,7 +720,7 @@ function s_error(run: PipelineRun): string | null {
 // ============================================================
 // Sync-to-repo modal (render wslproxy vhost files → commit to GitHub)
 // ============================================================
-const EMPTY_REPO = { environment: 'prod', owner: '', repo: '', branch: 'main', github_integration_id: '' };
+const EMPTY_REPO = { environment: 'prod', repo_url: '', branch: 'main', github_integration_id: '' };
 
 function RepoSyncModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ ...EMPTY_REPO });
@@ -688,8 +734,7 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
       setForm((f) => ({
         ...f,
         environment: s.settings?.default_environment || f.environment,
-        owner: s.settings?.owner || '',
-        repo: s.settings?.repo || '',
+        repo_url: (s.settings?.owner && s.settings?.repo) ? `https://github.com/${s.settings.owner}/${s.settings.repo}` : '',
         branch: s.settings?.branch || 'main',
         github_integration_id: s.settings?.github_integration_id || '',
       }));
@@ -697,20 +742,22 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const dryRun = async () => {
-    if (!form.owner || !form.repo) { toast.error('owner and repo required'); return; }
+    const parsed = parseRepoUrl(form.repo_url);
+    if (!parsed) { toast.error('Enter a valid GitHub repository URL'); return; }
     setBusy(true);
     try {
-      setPreview(await domainService.syncToRepo({ ...form, dry_run: true }));
+      setPreview(await domainService.syncToRepo({ ...form, owner: parsed.owner, repo: parsed.repo, branch: parsed.branch || form.branch, dry_run: true }));
     } catch { toast.error('Preview failed'); } finally { setBusy(false); }
   };
 
   const commit = async () => {
-    if (!form.owner || !form.repo) { toast.error('owner and repo required'); return; }
+    const parsed = parseRepoUrl(form.repo_url);
+    if (!parsed) { toast.error('Enter a valid GitHub repository URL'); return; }
     if (!form.github_integration_id) { toast.error('Select a GitHub integration id'); return; }
     setBusy(true);
     const tid = toast.loading('Committing to repo…');
     try {
-      const r = await domainService.syncToRepo({ ...form });
+      const r = await domainService.syncToRepo({ ...form, owner: parsed.owner, repo: parsed.repo, branch: parsed.branch || form.branch });
       toast.success(`Committed ${r.count} file(s) — ${r.commit?.slice(0, 7)}`, { id: tid });
       setPreview(r);
     } catch { toast.error('Commit failed — check integration & permissions', { id: tid }); } finally { setBusy(false); }
@@ -728,9 +775,8 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
           <select className="rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>
             {['prod', 'acc', 'test', 'int', 'dev'].map((x) => <option key={x} value={x}>{x}</option>)}
           </select>
-          <Input placeholder="branch" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
-          <Input placeholder="owner (e.g. bwalia)" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} />
-          <Input placeholder="repo (e.g. diy-tax-return-uk)" value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} />
+          <Input placeholder="branch (default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+          <RepoUrlField className="col-span-2" value={form.repo_url} onChange={(v) => setForm({ ...form, repo_url: v })} />
           <Input className="col-span-2" placeholder="GitHub integration id (uuid)" value={form.github_integration_id} onChange={(e) => setForm({ ...form, github_integration_id: e.target.value })} />
         </div>
 

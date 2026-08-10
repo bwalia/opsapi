@@ -172,7 +172,16 @@ return function(app)
             -- (+ the opsapi-managed manifest used by the DNS reconcile).
             local WslproxyServer = require("helper.wslproxy-server")
             local rows = DomainQueries.getAllForNamespace(self.namespace.id)
-            local built = WslproxyServer.build_sync_files(rows, env, eff.data_base)
+            -- Pass the namespace's template + rule defaults so rendering is
+            -- data-driven (dashboard-configurable), not hardcoded. Also emits a
+            -- rule file per referenced rule id so a synced domain actually routes.
+            local built = WslproxyServer.build_sync_files(rows, env, eff.data_base, {
+                server_template = eff.server_template,
+                rule_template   = eff.rule_template,
+                default_rule_id = eff.default_rule_id,
+                default_backend = eff.default_backend,
+                sync_rules      = eff.sync_rules,
+            })
             local files = built.files
             local rendered = built.rendered
 
@@ -182,7 +191,8 @@ return function(app)
 
             -- Dry-run: return the rendered files without committing.
             if data.dry_run == true or data.dry_run == "true" then
-                return ok_resp({ dry_run = true, environment = env, count = #files, files = rendered })
+                return ok_resp({ dry_run = true, environment = env, count = #files,
+                    rules = built.rules_count, warnings = built.warnings, files = rendered })
             end
 
             -- Resolve the GitHub token from the linked services integration.
@@ -220,6 +230,8 @@ return function(app)
                 branch = eff.branch,
                 commit = sha,
                 count = #files,
+                rules = built.rules_count,
+                warnings = built.warnings,
                 files = rendered,
             })
         end)
@@ -330,6 +342,10 @@ return function(app)
 
             local SyncSettings = require("queries.DomainSyncSettingsQueries")
             local saved = SyncSettings.upsert(self.namespace.id, {
+                -- Callers may paste a repo URL instead of owner+repo; upsert
+                -- derives owner/repo (and branch) from it. owner/repo are still
+                -- honoured when sent explicitly (e.g. an older client).
+                repo_url = data.repo_url,
                 owner = data.owner,
                 repo = data.repo,
                 branch = data.branch,
