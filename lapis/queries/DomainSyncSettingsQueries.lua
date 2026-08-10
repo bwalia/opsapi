@@ -13,7 +13,12 @@ local db = require("lapis.db")
 
 local DomainSyncSettingsQueries = {}
 
-local WRITABLE = { "owner", "repo", "branch", "github_integration_id", "data_base", "default_environment" }
+local WRITABLE = {
+    "owner", "repo", "branch", "github_integration_id", "data_base", "default_environment",
+    -- Template-driven wslproxy rendering (see helper/wslproxy-server.lua).
+    -- All optional; blank/NULL falls back to the built-in defaults.
+    "server_template", "rule_template", "default_rule_id", "default_backend", "sync_rules",
+}
 
 --- Get the namespace's settings (or nil).
 function DomainSyncSettingsQueries.get(namespace_id)
@@ -51,6 +56,12 @@ end
 function DomainSyncSettingsQueries.resolve(namespace_id, req)
     req = req or {}
     local s = DomainSyncSettingsQueries.get(namespace_id) or {}
+    -- sync_rules is a tri-state (true/false/nil). Only treat an explicit false
+    -- as "off"; nil anywhere means "use default (on)".
+    local function first_defined(a, b)
+        if a ~= nil then return a end
+        return b
+    end
     local eff = {
         owner = req.owner or s.owner,
         repo = req.repo or s.repo,
@@ -58,6 +69,12 @@ function DomainSyncSettingsQueries.resolve(namespace_id, req)
         github_integration_id = req.github_integration_id or s.github_integration_id,
         data_base = req.data_base or s.data_base,
         environment = req.environment or s.default_environment or "prod",
+        -- Template-driven rendering (nil -> helper uses its built-in default).
+        server_template = req.server_template or s.server_template,
+        rule_template = req.rule_template or s.rule_template,
+        default_rule_id = req.default_rule_id or s.default_rule_id,
+        default_backend = req.default_backend or s.default_backend,
+        sync_rules = first_defined(req.sync_rules, s.sync_rules),
     }
     local missing = {}
     if not eff.owner or eff.owner == "" then table.insert(missing, "owner") end
