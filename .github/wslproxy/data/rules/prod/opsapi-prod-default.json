@@ -11,13 +11,13 @@
     },
     "response": {
       "code": 305,
-      "redirect_uri": "13.42.188.136:80",
+      "redirect_uri": "72.62.211.28:80",
       "strip_path": false,
       "backends": [
         {
-          "address": "13.42.188.136:80",
+          "address": "72.62.211.28:80",
           "weight": 100,
-          "label": "k3s1 traefik ingress (wslproxy class); workstation-opsapi release routes by Host header"
+          "label": "cloud001 (72.62.211.28) traefik-edge public entry; workstation-opsapi routes by Host header. The public WSL Proxy edge can't reach the debian LAN, so it proxies here; traefik-edge routes to the ClusterIP Service (pod pinned to debworker00)."
         }
       ],
       "routing": {

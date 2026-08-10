@@ -1,25 +1,83 @@
 {
-  "id": "host:test-opsapi.workstation.co.uk",
-  "server_name": "test-opsapi.workstation.co.uk",
-  "proxy_server_name": "test-opsapi.workstation.co.uk",
-  "root": "/var/www/html",
-  "index": "index.html",
-  "access_log": "logs/test-opsapi.workstation.co.uk.access.log",
-  "error_log": "logs/test-opsapi.workstation.co.uk.error.log",
-  "config_status": false,
+  "cache_enabled": false,
+  "custom_location_block": {},
+  "rules": [
+    "opsapi-prod-default"
+  ],
+  "custom_http_block": {},
+  "config_status": true,
   "profile_id": "prod",
-  "rules": "opsapi-prod-default",
+  "cache_ttl": 3600,
+  "ssl_email": "admin@workstation.co.uk",
+  "ssl_auto_renew": true,
+  "ssl_force_https": true,
+  "ssl_staging": false,
+  "cache_bypass_auth": true,
+  "cache_docker_blobs": false,
+  "cache_docker_blobs_ttl": "2592000",
+  "match_cases": [
+    {
+      "statement": "c01433b8-52b8-5f21-e38f-f0726e4f6597",
+      "condition": "and"
+    },
+    {
+      "statement": "9e6caceb-c963-a51a-ad4a-36005b13f665",
+      "condition": "and"
+    }
+  ],
+  "cache_docker_manifests_ttl": "3600",
+  "cache_docker_serve_stale": false,
+  "cache_docker_stale_ttl": "31536000",
+  "custom_headers": {},
+  "custom_response_headers": {},
+  "proxy_server_name": "test-opsapi.workstation.co.uk",
+  "server_name": "test-opsapi.workstation.co.uk",
+  "rate_limit": {
+    "requests_per_second": 100,
+    "burst": 50
+  },
+  "dns_record_type": "A",
+  "access_log": "logs/test-opsapi.workstation.co.uk.access.log",
+  "ssl_enabled": true,
+  "root": "/var/www/html",
+  "id": "host:test-opsapi.workstation.co.uk",
+  "proxy_timeouts": {
+    "read_timeout": "",
+    "connect_timeout": "",
+    "send_timeout": ""
+  },
   "listens": [
     {
       "listen": "80"
     }
   ],
-  "ssl_enabled": true,
-  "ssl_force_https": true,
-  "ssl_staging": false,
-  "ssl_auto_renew": true,
-  "ssl_email": "admin@workstation.co.uk",
-  "cache_enabled": false,
-  "match_cases": {},
-  "custom_headers": []
+  "varnish_enabled": false,
+  "waf_enabled": false,
+  "config": "CnNlcnZlciB7CiAgICBsaXN0ZW4gODA7CiAgICBzZXJ2ZXJfbmFtZSB0ZXN0LW9wc2FwaS53b3Jrc3RhdGlvbi5jby51azsKICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8geyBjb250ZW50X2J5X2x1YV9ibG9jayB7IGF1dG9fc3NsOmNoYWxsZW5nZV9zZXJ2ZXIoKSB9IH0KICAgIGxvY2F0aW9uIC8geyByZXR1cm4gMzAxIGh0dHBzOi8vJGhvc3QkcmVxdWVzdF91cmk7IH0KfQpzZXJ2ZXIgewogICAgICBsaXN0ZW4gODA7CiAgICAgIAogICAgICBsaXN0ZW4gNDQzIHNzbCBodHRwMjsKICAgICAgc3NsX2NlcnRpZmljYXRlX2J5X2x1YV9ibG9jayB7IGF1dG9fc3NsOnNzbF9jZXJ0aWZpY2F0ZSgpIH0KICAgICAgc3NsX2NlcnRpZmljYXRlIC9ldGMvc3NsL3Jlc3R5LWF1dG8tc3NsLWZhbGxiYWNrLmNydDsKICAgICAgc3NsX2NlcnRpZmljYXRlX2tleSAvZXRjL3NzbC9yZXN0eS1hdXRvLXNzbC1mYWxsYmFjay5rZXk7CiAgICAgIHNzbF9zZXNzaW9uX3RpbWVvdXQgMWQ7CiAgICAgIHNzbF9zZXNzaW9uX2NhY2hlIHNoYXJlZDpTU0w6NTBtOwogICAgICBzc2xfc2Vzc2lvbl90aWNrZXRzIG9mZjsKICAgICAgc3NsX3Byb3RvY29scyBUTFN2MS4yIFRMU3YxLjM7CiAgICAgIHNzbF9jaXBoZXJzIEVDREhFLUVDRFNBLUFFUzEyOC1HQ00tU0hBMjU2OkVDREhFLVJTQS1BRVMxMjgtR0NNLVNIQTI1NjpFQ0RIRS1FQ0RTQS1BRVMyNTYtR0NNLVNIQTM4NDpFQ0RIRS1SU0EtQUVTMjU2LUdDTS1TSEEzODQ6RUNESEUtRUNEU0EtQ0hBQ0hBMjAtUE9MWTEzMDU6RUNESEUtUlNBLUNIQUNIQTIwLVBPTFkxMzA1OkRIRS1SU0EtQUVTMTI4LUdDTS1TSEEyNTY6REhFLVJTQS1BRVMyNTYtR0NNLVNIQTM4NDsKICAgICAgc3NsX3ByZWZlcl9zZXJ2ZXJfY2lwaGVycyBvZmY7CiAgICAgIGFkZF9oZWFkZXIgU3RyaWN0LVRyYW5zcG9ydC1TZWN1cml0eSAibWF4LWFnZT0zMTUzNjAwMDsgaW5jbHVkZVN1YkRvbWFpbnMiIGFsd2F5czsKICAgICAgc2VydmVyX25hbWUgdGVzdC1vcHNhcGkud29ya3N0YXRpb24uY28udWs7CiAgICAgIHJvb3QgL3Zhci93d3cvaHRtbDsKICAgICAgaW5kZXggaW5kZXguaHRtbDsKICAgICAgYWNjZXNzX2xvZyBsb2dzL3Rlc3Qtb3BzYXBpLndvcmtzdGF0aW9uLmNvLnVrLmFjY2Vzcy5sb2c7CiAgICAgIGVycm9yX2xvZyBsb2dzL3Rlc3Qtb3BzYXBpLndvcmtzdGF0aW9uLmNvLnVrLmVycm9yLmxvZzsKICAgICAgCiAgICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgICAgY29udGVudF9ieV9sdWFfYmxvY2sgeyBhdXRvX3NzbDpjaGFsbGVuZ2Vfc2VydmVyKCkgfQogICAgICB9CiAgICAgIAogICAgICAKICB9CiAgCiAg",
+  "rate_limit_enabled": false,
+  "cache_docker_manifests": false,
+  "index": "index.html",
+  "varnish_config": {
+    "health_check_url": "/health",
+    "health_check_interval": 5,
+    "backend_connect_timeout": 5,
+    "backend_between_bytes_timeout": 10,
+    "cache_ttl_default": 120,
+    "cache_grace": 3600,
+    "cache_keep": 7200,
+    "cache_size": "256m",
+    "health_check_enabled": false,
+    "listen_address": "0.0.0.0",
+    "listen_port": "6081",
+    "backend_first_byte_timeout": 60,
+    "health_check_timeout": 2,
+    "admin_listen_port": "6082"
+  },
+  "cached_mime_types": {},
+  "varnish_snippets": {},
+  "servers_tags": {},
+  "custom_block": {},
+  "locations": {},
+  "pop_ids": {},
+  "error_log": "logs/test-opsapi.workstation.co.uk.error.log"
 }

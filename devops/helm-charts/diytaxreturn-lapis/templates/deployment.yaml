@@ -37,6 +37,13 @@ spec:
                     operator: NotIn
                     values:
                       - lubuntu001
+      {{- with .Values.nodeSelector }}
+      # Optional hard node pin (per-release, via values). Combines with the
+      # NotIn-lubuntu001 affinity above. Used by workstation-opsapi to keep the
+      # pod on a debian node with disk headroom (debworker00).
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
