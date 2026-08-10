@@ -352,6 +352,11 @@ return function(app)
                 github_integration_id = integration_id,
                 data_base = data.data_base,
                 default_environment = data.default_environment,
+                -- Rule generation: a set-once backend (used when a domain has no
+                -- proxy_target), an optional shared rule id, and a toggle.
+                default_backend = data.default_backend,
+                default_rule_id = data.default_rule_id,
+                sync_rules = data.sync_rules,
             })
             if not saved then return err_resp(500, "Failed to save sync settings") end
             return ok_resp(saved)

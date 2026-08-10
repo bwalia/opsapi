@@ -482,7 +482,7 @@ function RepoUrlField({ value, onChange, className }: { value: string; onChange:
 // Sync Settings modal — configure the repo target + GitHub auth ONCE.
 // ============================================================
 function SyncSettingsModal({ onClose }: { onClose: () => void }) {
-  const [form, setForm] = useState({ repo_url: '', branch: 'main', default_environment: 'prod', github_integration_id: '' });
+  const [form, setForm] = useState({ repo_url: '', branch: 'main', default_environment: 'prod', github_integration_id: '', default_backend: '', sync_rules: true });
   const [integrations, setIntegrations] = useState<GithubIntegrationLite[]>([]);
   const [integrationName, setIntegrationName] = useState<string | undefined>();
   const [authMode, setAuthMode] = useState<'existing' | 'new'>('existing');
@@ -505,6 +505,8 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
             branch: s.settings.branch || 'main',
             default_environment: s.settings.default_environment || 'prod',
             github_integration_id: s.settings.github_integration_id || '',
+            default_backend: s.settings.default_backend || '',
+            sync_rules: s.settings.sync_rules !== false,
           });
         }
         if ((list?.length ?? 0) === 0) setAuthMode('new');
@@ -526,6 +528,7 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
       const payload: Record<string, unknown> = {
         repo_url: form.repo_url.trim(), owner: parsed.owner, repo: parsed.repo,
         branch: parsed.branch || form.branch, default_environment: form.default_environment,
+        default_backend: form.default_backend.trim(), sync_rules: form.sync_rules,
       };
       const token = newToken.trim();
       if (authMode === 'new' && token && token !== '********') {
@@ -562,6 +565,24 @@ function SyncSettingsModal({ onClose }: { onClose: () => void }) {
               {['prod', 'acc', 'test', 'int', 'dev'].map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
           </div>
+        </div>
+
+        {/* Rules — a synced domain needs a backend to route to. Without a
+            per-domain Proxy target, this default backend is used to generate
+            the rule; leave blank + no Proxy target = server synced, no rule. */}
+        <div className="rounded border border-secondary-200 p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.sync_rules} onChange={(e) => setForm({ ...form, sync_rules: e.target.checked })} />
+            Generate WSL Proxy rule files
+          </label>
+          {form.sync_rules && (
+            <>
+              <Input placeholder="Default backend — e.g. 193.237.176.232:8888" value={form.default_backend} onChange={(e) => setForm({ ...form, default_backend: e.target.value })} />
+              <p className="text-xs text-secondary-500">
+                Used for any domain that has no <span className="font-medium">Proxy target</span> of its own. A rule needs a backend to point at — without one the rule is skipped (the server still syncs).
+              </p>
+            </>
+          )}
         </div>
 
         {/* GitHub auth */}
@@ -784,10 +805,19 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
           <div className="rounded border border-secondary-200 p-2 text-sm">
             <div className="mb-1 font-medium">
               {preview.dry_run ? 'Preview' : `Committed ${preview.commit?.slice(0, 7)}`} — {preview.count} file(s)
+              {typeof preview.rules === 'number' && <span className="ml-1 font-normal text-secondary-500">({preview.rules} rule{preview.rules === 1 ? '' : 's'})</span>}
             </div>
             <ul className="max-h-40 overflow-auto text-xs text-secondary-600">
               {preview.files.map((f) => <li key={f.path}>{f.path}</li>)}
             </ul>
+            {preview.warnings && preview.warnings.length > 0 && (
+              <div className="mt-2 rounded bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800">
+                <div className="font-medium">⚠ {preview.warnings.length} warning{preview.warnings.length === 1 ? '' : 's'}</div>
+                <ul className="mt-1 list-disc pl-4">
+                  {preview.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
