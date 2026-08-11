@@ -28,14 +28,90 @@ local WRITABLE_FIELDS = {
 
 --------------------------------------------------------------------------------
 -- Create
+--
+-- Guards the UNIQUE(namespace_id, domain_name) constraint explicitly so a
+-- collision returns a clean, typed error instead of bubbling up as a 500:
+--   * an ACTIVE row of the same name  -> returns nil, { code = "duplicate" }
+--   * a SOFT-DELETED row of the same name -> revived in place (delete only sets
+--     deleted_at, but the unique constraint still counts that hidden row, so a
+--     naive re-insert would violate it). Deleting then re-adding a domain now
+--     just works, and returns the revived row.
+-- The final INSERT is wrapped in pcall so any residual DB error (e.g. a unique
+-- race, or a schema/column issue) is surfaced as a typed error, never a raw 500.
+--
+-- Returns: domain            on success (created or revived)
+--          nil, err_table    on failure, where err_table = { code, message }
+--                            and code is "duplicate" | "db_error".
 --------------------------------------------------------------------------------
 function DomainQueries.createDomain(params)
     if not params.uuid then
         params.uuid = Global.generateUUID()
     end
+
+    if params.namespace_id and params.domain_name then
+        local existing = db.query([[
+            SELECT uuid, deleted_at FROM domains
+            WHERE namespace_id = ? AND domain_name = ?
+            LIMIT 1
+        ]], params.namespace_id, params.domain_name)
+        existing = existing and existing[1] or nil
+        if existing then
+            if existing.deleted_at == nil then
+                return nil, {
+                    code = "duplicate",
+                    message = "A domain with this name already exists in this namespace",
+                }
+            end
+            -- Revive the previously soft-deleted domain with the new details.
+            local revived = DomainQueries.reviveDomain(existing.uuid, params)
+            if revived then return revived end
+            -- If revive unexpectedly failed, fall through to a fresh insert.
+        end
+    end
+
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
-    return DomainModel:create(params, { returning = "*" })
+
+    local ok, created = pcall(function()
+        return DomainModel:create(params, { returning = "*" })
+    end)
+    if not ok then
+        local msg = tostring(created)
+        if msg:find("domains_namespace_domain_unique") or msg:lower():find("duplicate key") then
+            return nil, {
+                code = "duplicate",
+                message = "A domain with this name already exists in this namespace",
+            }
+        end
+        return nil, { code = "db_error", message = "Failed to create domain", detail = msg }
+    end
+    return created
+end
+
+--------------------------------------------------------------------------------
+-- Revive a soft-deleted domain: clear deleted_at and overwrite its details with
+-- the supplied (whitelisted) fields, so re-adding a deleted domain behaves like
+-- a fresh create.
+--------------------------------------------------------------------------------
+function DomainQueries.reviveDomain(uuid, params)
+    local domain = DomainModel:find({ uuid = uuid })
+    if not domain then return nil end
+
+    local update_params = {}
+    for _, field in ipairs(WRITABLE_FIELDS) do
+        if params[field] ~= nil then
+            update_params[field] = params[field]
+        end
+    end
+    if params.metadata ~= nil then update_params.metadata = params.metadata end
+    update_params.status = params.status or "active"
+    update_params.deleted_at = db.NULL
+    update_params.updated_at = db.raw("NOW()")
+
+    domain:update(update_params, { returning = "*" })
+    -- Return the full refreshed row (instance:update yields a boolean), so the
+    -- create path hands back a domain object just like a fresh insert.
+    return DomainModel:find({ uuid = uuid })
 end
 
 --------------------------------------------------------------------------------

@@ -577,7 +577,7 @@ return function(app)
             local metadata = data.metadata
             if metadata and type(metadata) == "table" then metadata = cjson.encode(metadata) end
 
-            local created = DomainQueries.createDomain({
+            local created, cerr = DomainQueries.createDomain({
                 namespace_id = self.namespace.id,
                 domain_name = (data.domain_name):lower(),
                 registrar = data.registrar,
@@ -604,7 +604,13 @@ return function(app)
                 rule_path = data.rule_path or "/",
                 metadata = metadata or "{}",
             })
-            if not created then return err_resp(500, "Failed to create domain") end
+            if not created then
+                -- A same-name collision is a client error (409), not a 500.
+                if cerr and cerr.code == "duplicate" then
+                    return err_resp(409, cerr.message)
+                end
+                return err_resp(500, (cerr and cerr.message) or "Failed to create domain")
+            end
             return { status = 201, json = { success = true, data = created } }
         end)
     ))

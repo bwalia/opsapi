@@ -177,8 +177,12 @@ function DomainsPageContent() {
       }
       setFormOpen(false);
       load(); loadStats();
-    } catch {
-      toast.error('Save failed');
+    } catch (err) {
+      // Surface the backend message (e.g. the 409 "A domain with this name
+      // already exists in this namespace") instead of a generic failure.
+      const serverMsg = (err as { response?: { data?: { error?: string } } })
+        ?.response?.data?.error;
+      toast.error(serverMsg || (err instanceof Error ? err.message : 'Save failed'));
     }
   };
 
