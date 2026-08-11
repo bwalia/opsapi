@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Input, Table, Badge, Pagination, Card, Modal, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import {
   timesheetsService,
   type Timesheet,
@@ -803,28 +804,29 @@ function TimesheetsPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Timesheets</h1>
-          <p className="text-secondary-500 mt-1">Track and manage your time entries</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading || isLoadingApproval ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Create Timesheet
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Timesheets"
+        description="Track and manage your time entries"
+        icon={<Clock className="h-5 w-5" />}
+        actions={
+          <>
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading || isLoadingApproval ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Create Timesheet
+            </button>
+          </>
+        }
+      />
 
       {/* Stats Cards */}
       {summary && (

@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { User, Bell, Shield, Palette, Key, Save, Camera, ArrowRight } from 'lucide-react';
+import { User, Bell, Shield, Palette, Key, Save, Camera, ArrowRight, Settings } from 'lucide-react';
 import { Button, Input, Card } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuthStore } from '@/store/auth.store';
 import { usersService } from '@/services';
 import { getInitials } from '@/lib/utils';
@@ -126,10 +127,11 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-secondary-900">Settings</h1>
-        <p className="text-secondary-500 mt-1">Manage your account settings and preferences</p>
-      </div>
+      <PageHeader
+        title="Settings"
+        description="Manage your account settings and preferences"
+        icon={<Settings className="h-5 w-5" />}
+      />
 
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Sidebar Navigation */}

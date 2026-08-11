@@ -5,6 +5,7 @@ import {
   Search,
   Eye,
   Package,
+  ShoppingCart,
   Filter,
   Calendar,
   Store,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Input, Table, Badge, Pagination, Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { ordersService, type OrderFilters, type OrderStats, type StoreOption } from '@/services/orders.service';
 import { formatDate, formatCurrency, getFullName } from '@/lib/utils';
 import type { Order, TableColumn, OrderStatus, PaymentStatus } from '@/types';
@@ -547,21 +549,20 @@ function OrdersPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Orders</h1>
-          <p className="text-secondary-500 mt-1">
-            {isAdmin ? 'Manage all orders across the platform' : 'Manage your store orders'}
-          </p>
-        </div>
-        <button
-          onClick={() => fetchOrders()}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
-        >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Orders"
+        description={isAdmin ? 'Manage all orders across the platform' : 'Manage your store orders'}
+        icon={<ShoppingCart className="h-5 w-5" />}
+        actions={
+          <button
+            onClick={() => fetchOrders()}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        }
+      />
 
       {/* Stats Cards */}
       {stats && (

@@ -14,8 +14,10 @@ import {
   CheckCircle,
   RefreshCw,
   Building2,
+  Receipt,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService, type TaxDashboardStats } from '@/services/tax.service';
 import { formatCurrency } from '@/lib/utils';
 
@@ -139,19 +141,20 @@ function TaxDashboardContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Tax Returns</h1>
-          <p className="text-secondary-500 mt-1">Manage your UK self-assessment tax return</p>
-        </div>
-        <button
-          onClick={fetchStats}
-          className="flex items-center gap-2 px-3 py-2 text-secondary-600 hover:text-secondary-900 hover:bg-secondary-100 rounded-lg transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Tax Returns"
+        description="Manage your UK self-assessment tax return"
+        icon={<Receipt className="h-5 w-5" />}
+        actions={
+          <button
+            onClick={fetchStats}
+            className="flex items-center gap-2 px-3 py-2 text-secondary-600 hover:text-secondary-900 hover:bg-secondary-100 rounded-lg transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        }
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

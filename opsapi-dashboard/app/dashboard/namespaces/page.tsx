@@ -24,6 +24,7 @@ import {
   ConfirmDialog,
 } from "@/components/ui";
 import { CreateNamespaceModal } from "@/components/namespace";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { RequireAdmin } from "@/components/permissions/PermissionGate";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { namespaceService } from "@/services";
@@ -455,22 +456,21 @@ export default function NamespacesAdminPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Namespaces</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage platform namespaces and tenants
-          </p>
-        </div>
-        {(isAdmin || canCreate("namespaces")) && (
-          <Button
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => setCreateModalOpen(true)}
-          >
-            Create Namespace
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Namespaces"
+        description="Manage platform namespaces and tenants"
+        icon={<Building2 className="h-5 w-5" />}
+        actions={
+          (isAdmin || canCreate("namespaces")) ? (
+            <Button
+              leftIcon={<Plus className="w-4 h-4" />}
+              onClick={() => setCreateModalOpen(true)}
+            >
+              Create Namespace
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

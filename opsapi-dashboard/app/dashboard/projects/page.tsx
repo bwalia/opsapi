@@ -24,6 +24,7 @@ import {
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { CreateProjectModal } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
 import type { KanbanProject, CreateKanbanProjectDto, KanbanProjectStatus } from '@/types';
@@ -550,20 +551,19 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Projects</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage your projects and track progress with Kanban boards
-          </p>
-        </div>
-        {projectPermissions.can_create && (
-          <Button onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
-            <Plus size={18} className="mr-2" />
-            New Project
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Projects"
+        description="Manage your projects and track progress with Kanban boards"
+        icon={<FolderKanban className="h-5 w-5" />}
+        actions={
+          projectPermissions.can_create ? (
+            <Button onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
+              <Plus size={18} className="mr-2" />
+              New Project
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Stats Cards - Only show when there are projects */}
       {projects.length > 0 && (

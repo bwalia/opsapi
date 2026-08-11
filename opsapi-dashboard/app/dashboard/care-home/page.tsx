@@ -9,8 +9,10 @@ import {
   ClipboardList,
   ArrowRight,
   Activity,
+  Home,
 } from 'lucide-react';
 import { Card, Badge, Button } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { ProtectedPage } from '@/components/permissions';
 import { carePlansService, dementiaService, hospitalsService } from '@/services';
 import { formatDate } from '@/lib/utils';
@@ -98,12 +100,11 @@ function CareHomeDashboardContent() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-secondary-900">Care Home Dashboard</h1>
-        <p className="text-secondary-500 mt-1">
-          Dementia care, risk monitoring, and care plan oversight
-        </p>
-      </div>
+      <PageHeader
+        title="Care Home Dashboard"
+        description="Dementia care, risk monitoring, and care plan oversight"
+        icon={<Home className="h-5 w-5" />}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Input, Table, Pagination, Card, Modal, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import {
   invoicesService,
   type InvoiceFilters,
@@ -768,35 +769,36 @@ function InvoicesPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Invoices</h1>
-          <p className="text-secondary-500 mt-1">Manage and track your invoices</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => fetchInvoices()}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button
-            onClick={() => setIsFromTimesheetsOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 transition-colors"
-          >
-            <Clock className="w-4 h-4" />
-            From Timesheets
-          </button>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Create Invoice
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Invoices"
+        description="Manage and track your invoices"
+        icon={<FileText className="h-5 w-5" />}
+        actions={
+          <>
+            <button
+              onClick={() => fetchInvoices()}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              onClick={() => setIsFromTimesheetsOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 transition-colors"
+            >
+              <Clock className="w-4 h-4" />
+              From Timesheets
+            </button>
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Create Invoice
+            </button>
+          </>
+        }
+      />
 
       {/* Stats Cards */}
       {stats && (

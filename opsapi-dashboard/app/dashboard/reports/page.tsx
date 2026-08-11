@@ -9,8 +9,10 @@ import {
   ChevronRight,
   Shield,
   Loader2,
+  ScrollText,
 } from 'lucide-react';
 import { Card, CardHeader, CardContent, Badge, Select, Pagination } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
 import { formatDateTime, formatRelativeTime, snakeToTitle } from '@/lib/utils';
@@ -145,12 +147,11 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-secondary-900">Audit Logs</h1>
-        <p className="text-sm text-secondary-500 mt-1">
-          Track all RBAC and namespace changes — role updates, member changes, and security events.
-        </p>
-      </div>
+      <PageHeader
+        title="Audit Logs"
+        description="Track all RBAC and namespace changes — role updates, member changes, and security events."
+        icon={<ScrollText className="h-5 w-5" />}
+      />
 
       {/* Filters */}
       <Card>

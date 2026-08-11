@@ -27,6 +27,7 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   Button,
@@ -50,6 +51,7 @@ import type { NamespaceService, TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { AddServiceModal } from '@/components/services';
+import { PageHeader } from '@/components/layout/PageHeader';
 
 // Icon mapping
 const iconMap: Record<string, React.ElementType> = {
@@ -350,29 +352,28 @@ export default function ServicesPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Services</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage your deployment services and trigger GitHub workflows
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link href="/dashboard/services/settings">
-            <Button variant="outline" leftIcon={<Settings className="w-4 h-4" />}>
-              Settings
-            </Button>
-          </Link>
-          {canCreate('services') && (
-            <Button
-              leftIcon={<Plus className="w-4 h-4" />}
-              onClick={() => setAddServiceModalOpen(true)}
-            >
-              Add Service
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Services"
+        description="Manage your deployment services and trigger GitHub workflows"
+        icon={<LayoutGrid className="h-5 w-5" />}
+        actions={
+          <>
+            <Link href="/dashboard/services/settings">
+              <Button variant="outline" leftIcon={<Settings className="w-4 h-4" />}>
+                Settings
+              </Button>
+            </Link>
+            {canCreate('services') && (
+              <Button
+                leftIcon={<Plus className="w-4 h-4" />}
+                onClick={() => setAddServiceModalOpen(true)}
+              >
+                Add Service
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Filters */}
       <Card padding="md">
