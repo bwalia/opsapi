@@ -30,7 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth.store";
 import { useMenu, type MenuItemWithIcon } from "@/hooks";
-import { RoleBadge } from "@/components/permissions";
+import { LogoMark } from "@/components/brand/Logo";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -155,7 +155,6 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
   onToggleCollapse,
 }) {
   const pathname = usePathname();
-  const { user } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
 
   // Use the backend-driven menu hook
@@ -165,15 +164,9 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
     isLoading,
     isHydrated,
     error,
-    namespaceContext,
     refreshMenu,
     clearError,
   } = useMenu();
-
-  // Get user role from namespace context or fall back to platform role
-  const userRole = namespaceContext?.is_owner
-    ? "owner"
-    : user?.roles?.[0]?.role_name || "member";
 
   const handleLogout = useCallback(async () => {
     await logout();
@@ -228,9 +221,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
             onClick={handleNavClick}
             prefetch={false}
           >
-            <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25 shrink-0">
-              <span className="text-white font-bold text-xl">O</span>
-            </div>
+            <LogoMark size={40} className="shrink-0" />
             {!isCollapsed && (
               <div className="hidden lg:block">
                 <span className="text-lg font-bold text-secondary-900">
@@ -271,30 +262,6 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
             />
           </button>
         </div>
-
-        {/* User Role Badge (visible when not collapsed) */}
-        {!isCollapsed && userRole && (
-          <div className="px-4 py-3 border-b border-secondary-100">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 gradient-primary rounded-lg flex items-center justify-center text-white text-xs font-semibold">
-                {user?.first_name?.[0]}
-                {user?.last_name?.[0]}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-secondary-900 truncate">
-                  {user?.first_name} {user?.last_name}
-                </p>
-                <RoleBadge roleName={userRole} size="sm" showIcon={false} />
-              </div>
-            </div>
-            {/* Show current namespace */}
-            {namespaceContext && (
-              <p className="mt-2 text-xs text-secondary-500 truncate">
-                {namespaceContext.name}
-              </p>
-            )}
-          </div>
-        )}
 
         {/* Navigation */}
         <nav className="flex flex-col flex-1 p-4 overflow-hidden" aria-label="Main navigation">
