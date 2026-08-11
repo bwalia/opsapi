@@ -11,11 +11,20 @@
     Tenant resolution — the caller passes `project_code` (from the browser's
     `X-Project-Code` header at register.lua, or a query param at the OAuth
     callback). If the caller doesn't provide it, we fall back to the pod's
-    `PROJECT_CODE` env var. If BOTH are missing (or the value doesn't match
-    any active namespace) we return `nil, reason` and the caller MUST 400 —
-    we deliberately do NOT fall back to "first active tenant" any more, as
-    that was the exact silent-mis-routing behavior that put self-registered
-    tax-copilot users into the `system` namespace on int.
+    `PROJECT_CODE` env var, which is a comma-separated list of enabled
+    feature modules ("tax_copilot,services") and is parsed as such — each
+    listed code is tried in order and the first matching an active namespace
+    wins. If BOTH are missing (or nothing matches an active namespace) we
+    return `nil, reason` and the caller MUST 400 — we deliberately do NOT
+    fall back to "first active tenant" any more, as that was the exact
+    silent-mis-routing behavior that put self-registered tax-copilot users
+    into the `system` namespace on int.
+
+    Reading PROJECT_CODE as one atomic tenant key (rather than as the list it
+    is) meant every multi-module deploy 400'd every registration — email/
+    password and Google OAuth alike — on int, acc and production. Keep this
+    path going through ProjectConfig.parseProjectCodes, the single place that
+    knows the variable's format.
 
     Idempotent — every INSERT carries an `ON CONFLICT … DO NOTHING/UPDATE`
     clause, so repeating the call (e.g. after a partial earlier failure)
@@ -34,43 +43,92 @@
 ]]
 
 local db = require("lapis.db")
+local ProjectConfig = require("helper.project-config")
 
 local M = {}
+
+--- Build the ordered list of candidate tenant codes to try.
+-- A per-request hint (X-Project-Code header / OAuth query param) is taken
+-- verbatim and is the only candidate — the caller named a tenant, so we do
+-- not silently widen the search past it.
+--
+-- Otherwise we fall back to the pod's PROJECT_CODE. That variable is a
+-- comma-separated list of enabled FEATURE MODULES ("tax_copilot,services"),
+-- not a single tenant key — see ProjectConfig.parseProjectCodes, which is how
+-- every other consumer in this codebase reads it. Matching the raw string
+-- against `namespaces.project_code` can therefore never hit a row on any
+-- multi-module deploy, which is what broke registration outright.
+--
+-- "all" is dropped: it is the "no project selected" sentinel that
+-- ProjectConfig.getProjectCode returns when the env var is unset, never a
+-- real tenant.
+-- @param project_code string|nil per-request tenant hint
+-- @return table list of candidate codes (possibly empty)
+local function candidateProjectCodes(project_code)
+    if project_code then
+        local trimmed = tostring(project_code):match("^%s*(.-)%s*$")
+        if trimmed ~= "" and trimmed ~= "all" then
+            return { trimmed }
+        end
+    end
+
+    local codes = {}
+    for _, code in ipairs(ProjectConfig.parseProjectCodes()) do
+        if code ~= "all" then
+            table.insert(codes, code)
+        end
+    end
+    return codes
+end
+
+--- Resolve a project_code hint to an active namespace id.
+-- Tries each candidate in priority order and returns the first that matches
+-- an active namespace. Only codes the deploy explicitly declares are ever
+-- tried — there is deliberately no "first active tenant" fallback, which was
+-- the silent mis-routing this resolution path exists to prevent.
+-- @param project_code string|nil per-request tenant hint
+-- @return integer|nil namespace_id
+-- @return string|nil reason ("no_project_code" / "project_code_not_found:<codes>")
+function M.resolveProjectNamespaceId(project_code)
+    local codes = candidateProjectCodes(project_code)
+    if #codes == 0 then
+        return nil, "no_project_code"
+    end
+
+    for _, code in ipairs(codes) do
+        local ns = db.query([[
+            SELECT id FROM namespaces
+            WHERE status = 'active' AND project_code = ?
+            ORDER BY id ASC LIMIT 1
+        ]], code)
+        if ns and #ns > 0 then
+            return ns[1].id
+        end
+    end
+
+    return nil, "project_code_not_found:" .. table.concat(codes, ",")
+end
 
 --- Auto-assign a newly-created user to the tenant identified by project_code.
 -- @param user_id integer  users.id of the freshly-created user
 -- @param user_uuid string users.uuid of the same user (for log breadcrumbs)
 -- @param project_code string|nil  per-request tenant hint (from X-Project-Code
 --                                 header, or OAuth query param). If nil or
---                                 empty, falls back to the PROJECT_CODE env
---                                 var. If both are missing / unresolvable,
+--                                 empty, falls back to the codes listed in the
+--                                 PROJECT_CODE env var. If nothing resolves,
 --                                 returns nil + reason and does NOT insert.
+--                                 See M.resolveProjectNamespaceId.
 -- @return integer|nil resolved namespace_id (nil on failure)
--- @return string|nil reason ("no_project_code" / "project_code_not_found:<code>"
+-- @return string|nil reason ("no_project_code" / "project_code_not_found:<codes>"
 --                             / "internal_error:<err>"), nil on success
 function M.assignUserToProjectNamespace(user_id, user_uuid, project_code)
     local resolved_ns_id, resolved_reason
     local ok, err = pcall(function()
-        local effective_code = project_code
-        if not effective_code or effective_code == "" then
-            effective_code = os.getenv("PROJECT_CODE")
-        end
-        if not effective_code or effective_code == "" or effective_code == "all" then
-            resolved_reason = "no_project_code"
+        local namespace_id, reason = M.resolveProjectNamespaceId(project_code)
+        if not namespace_id then
+            resolved_reason = reason
             return
         end
-
-        local ns = db.query([[
-            SELECT id FROM namespaces
-            WHERE status = 'active' AND project_code = ?
-            ORDER BY id ASC LIMIT 1
-        ]], effective_code)
-
-        if not ns or #ns == 0 then
-            resolved_reason = "project_code_not_found:" .. tostring(effective_code)
-            return
-        end
-        local namespace_id = ns[1].id
 
         -- Membership (status = 'active', is_owner = false).
         db.query([[

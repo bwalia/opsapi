@@ -54,8 +54,9 @@ function UserQueries.create(params)
     --   2. Per-request `params.project_code` (from X-Project-Code header on
     --      register.lua). Matches on `namespaces.project_code` — the SAME
     --      column NamespaceAssignment uses, so both writes hit one tenant.
-    --   3. Pod-level `PROJECT_CODE` env var. Legacy fallback for server-side
-    --      user creation that doesn't ride HTTP (CLI, background jobs).
+    --   3. The codes listed in the pod-level `PROJECT_CODE` env var (a
+    --      comma-separated module list), tried in order. Legacy fallback for
+    --      server-side user creation that doesn't ride HTTP (CLI, jobs).
     --
     -- No `slug='system'` fallback. No "first active namespace" fallback.
     -- If none of the above resolves, we leave `target_namespace_id` nil
@@ -65,19 +66,13 @@ function UserQueries.create(params)
     -- silent mis-routing into a loud failure.
     local target_namespace_id = namespace_id
     if not target_namespace_id then
-        local project_code = override_project_code
-        if not project_code or project_code == "" then
-            project_code = os.getenv("PROJECT_CODE")
-        end
-        if project_code and project_code ~= "" and project_code ~= "all" then
-            local project_ns = db.select(
-                "id FROM namespaces WHERE project_code = ? AND status = 'active' ORDER BY id ASC LIMIT 1",
-                project_code
-            )
-            if project_ns and #project_ns > 0 then
-                target_namespace_id = project_ns[1].id
-            end
-        end
+        -- Delegated to NamespaceAssignment so the two paths cannot drift:
+        -- this used to carry its own copy of the lookup, and when that copy
+        -- read PROJECT_CODE as a single tenant key instead of the comma-
+        -- separated module list it is, both copies had to be fixed to fix
+        -- registration. One resolver now, not two.
+        local NamespaceAssignment = require "helper.namespace_assignment"
+        target_namespace_id = NamespaceAssignment.resolveProjectNamespaceId(override_project_code)
     end
 
     if target_namespace_id then
