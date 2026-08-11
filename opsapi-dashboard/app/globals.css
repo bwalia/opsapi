@@ -71,8 +71,8 @@
   --color-surface: #ffffff;
   --color-surface-elevated: #f8fafc;
 
-  /* Font Configuration - Inter with system fallback */
-  --font-sans: var(--font-inter), 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* Font Configuration - Plus Jakarta Sans with system fallback */
+  --font-sans: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
   /* Border Radius */
@@ -104,12 +104,17 @@ body {
   background-color: var(--color-secondary-50);
   color: var(--color-foreground);
   font-family: var(--font-sans);
-  font-size: 1rem;
+  font-size: 1.0625rem; /* 17px — a touch larger for a more legible, modern feel */
   line-height: 1.6;
-  letter-spacing: -0.011em;
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* Crisper, tighter headings that scale with the larger base. */
+h1, h2, h3, h4 {
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 /* Skip to content link - visible only on focus for keyboard users */

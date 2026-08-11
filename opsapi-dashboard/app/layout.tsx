@@ -1,19 +1,29 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
 import './globals.css';
 
-const inter = Inter({
+// Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height,
+// so it reads clearer/bigger than Inter at the same size. Loaded via next/font
+// (self-hosted, zero layout shift). Exposed as --font-jakarta; globals.css maps
+// it into --font-sans with a system fallback stack.
+const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
   display: 'swap',
-  variable: '--font-inter',
+  variable: '--font-jakarta',
+  weight: ['400', '500', '600', '700', '800'],
 });
 
 export const metadata: Metadata = {
-  title: 'OpsAPI Dashboard',
-  description: 'Professional admin dashboard for OpsAPI',
+  title: {
+    default: 'OpsAPI — Operations Platform',
+    template: '%s · OpsAPI',
+  },
+  description: 'OpsAPI — the multi-tenant operations platform. One API for your whole business, from CRM to tax filing to edge routing.',
   icons: {
-    icon: '/favicon.ico',
+    icon: [{ url: '/opsapi-logo.svg', type: 'image/svg+xml' }],
+    shortcut: '/opsapi-logo.svg',
+    apple: '/opsapi-logo.svg',
   },
 };
 
@@ -23,7 +33,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={jakarta.variable}>
       <body className="antialiased">
         {/* Skip to main content link for keyboard/screen reader users */}
         <a

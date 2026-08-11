@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo, useState, useEffect, useCallback, useRef } from 'react';
-import { Bell, Mail, Check, X, Clock, Building2, Loader2 } from 'lucide-react';
+import { Mail, Check, X, Clock, Building2, Loader2 } from 'lucide-react';
 import { Button, Badge } from '@/components/ui';
 import { namespaceService } from '@/services';
 import type { NamespaceInvitation } from '@/types';
@@ -141,8 +141,9 @@ export const InvitationNotificationBell = memo(function InvitationNotificationBe
           pendingCount > 0 && 'text-primary-600'
         )}
         aria-label={`${pendingCount} pending invitations`}
+        title="Invitations"
       >
-        <Bell className="w-5 h-5" />
+        <Mail className="w-5 h-5" />
         {pendingCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-error-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
             {pendingCount > 9 ? '9+' : pendingCount}
