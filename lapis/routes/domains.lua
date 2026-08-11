@@ -599,6 +599,9 @@ return function(app)
                 wslproxy_root = data.wslproxy_root or "/var/www/html",
                 listen_ports = data.listen_ports or "80",
                 proxy_target = data.proxy_target,
+                -- WSL Proxy rule match path (default "/"). The rule id itself is
+                -- auto-generated (opsapi-<domain>) by the renderer.
+                rule_path = data.rule_path or "/",
                 metadata = metadata or "{}",
             })
             if not created then return err_resp(500, "Failed to create domain") end

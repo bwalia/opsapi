@@ -35,6 +35,7 @@ export interface Domain {
   wslproxy_root?: string;
   listen_ports?: string;
   proxy_target?: string;
+  rule_path?: string;
   created_at: string;
   updated_at: string;
 }

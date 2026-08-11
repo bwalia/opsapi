@@ -65,7 +65,7 @@ WslproxyServer.DEFAULT_RULE_TEMPLATE = [[{
   "priority": 1,
   "rules_tags": ["opsapi", "domains"],
   "match": {
-    "rules": { "path": "/", "path_key": "starts_with" },
+    "rules": { "path": "{{rule_path}}", "path_key": "starts_with" },
     "response": {
       "code": 305,
       "redirect_uri": "{{backend}}",
@@ -196,14 +196,17 @@ end
 -- @param backend string  backend address (host:port)
 -- @param servers table   list of server ids ("host:<domain>") referencing it
 -- @return string json, string filename, string|nil err
-function WslproxyServer.render_rule(rule_id, backend, servers, env, opts)
+function WslproxyServer.render_rule(rule_id, backend, servers, env, opts, rule_path)
     opts = opts or {}
     local tpl = (opts.rule_template and trim(opts.rule_template) ~= "" and opts.rule_template)
         or WslproxyServer.DEFAULT_RULE_TEMPLATE
+    local path = trim(rule_path)
+    if path == "" then path = "/" end
     local vars = {
         rule_id      = json_escape(rule_id),
         profile_id   = json_escape(env),
         backend      = json_escape(backend),
+        rule_path    = json_escape(path),
         servers_json = cjson.encode(servers or {}),
     }
     local json = fill(tpl, vars)
@@ -264,10 +267,15 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
                 -- Accumulate the rule this server references.
                 local rid = WslproxyServer.effective_rule_id(d, opts)
                 if not rules[rid] then
-                    rules[rid] = { backend = effective_backend(d, opts), servers = {} }
+                    rules[rid] = { backend = effective_backend(d, opts), servers = {}, path = trim(d.rule_path) }
                     table.insert(rule_order, rid)
-                elseif trim(rules[rid].backend) == "" then
-                    rules[rid].backend = effective_backend(d, opts)
+                else
+                    if trim(rules[rid].backend) == "" then
+                        rules[rid].backend = effective_backend(d, opts)
+                    end
+                    if trim(rules[rid].path) == "" then
+                        rules[rid].path = trim(d.rule_path)
+                    end
                 end
                 table.insert(rules[rid].servers, "host:" .. d.domain_name)
             end
@@ -282,7 +290,7 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
                 table.insert(warnings, "rule '" .. rid .. "' skipped: no proxy_target/default_backend "
                     .. "— set one to generate its backend")
             else
-                local json, filename, rerr = WslproxyServer.render_rule(rid, r.backend, r.servers, env, opts)
+                local json, filename, rerr = WslproxyServer.render_rule(rid, r.backend, r.servers, env, opts, r.path)
                 if not json then
                     table.insert(warnings, rerr or ("could not render rule " .. rid))
                 else
