@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, Trash2, Edit, Mail, Phone, MapPin } from 'lucide-react';
+import { Plus, Search, Trash2, Edit, Mail, Phone, MapPin, Users } from 'lucide-react';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Input, Table, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { AddCustomerModal } from '@/components/customers';
 import { ProtectedPage } from '@/components/permissions';
@@ -219,20 +220,18 @@ function CustomersPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Customers</h1>
-          <p className="text-secondary-500 mt-1">Manage your customer database</p>
-        </div>
-        {canCreate('customers') && (
-          <Button
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => setIsAddModalOpen(true)}
-          >
-            Add Customer
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Customers"
+        description="Manage your customer database"
+        icon={<Users className="h-5 w-5" />}
+        actions={
+          canCreate('customers') ? (
+            <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setIsAddModalOpen(true)}>
+              Add Customer
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Filters */}
       <Card padding="md">

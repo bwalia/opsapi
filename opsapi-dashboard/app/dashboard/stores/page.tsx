@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Store as StoreIcon, MapPin, Phone, Mail } from 'lucide-react';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -230,15 +231,12 @@ function StoresPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Stores</h1>
-          <p className="text-secondary-500 mt-1">Manage your store locations</p>
-        </div>
-        {canCreate('stores') && (
-          <Button leftIcon={<Plus className="w-4 h-4" />}>Add Store</Button>
-        )}
-      </div>
+      <PageHeader
+        title="Stores"
+        description="Manage your store locations"
+        icon={<StoreIcon className="h-5 w-5" />}
+        actions={canCreate('stores') ? <Button leftIcon={<Plus className="w-4 h-4" />}>Add Store</Button> : undefined}
+      />
 
       {/* Filters */}
       <Card padding="md">

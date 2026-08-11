@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Search, Trash2, Edit, Mail } from "lucide-react";
+import { Plus, Search, Trash2, Edit, Mail, Users } from "lucide-react";
 import {
   Button,
   Input,
@@ -11,6 +11,7 @@ import {
   Card,
   ConfirmDialog,
 } from "@/components/ui";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { AddUserModal } from "@/components/users";
 import { RoleBadge, ProtectedPage } from "@/components/permissions";
 import { usePermissions } from "@/contexts/PermissionsContext";
@@ -205,17 +206,18 @@ function UsersPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Users</h1>
-          <p className="text-secondary-500 mt-1">Manage your user accounts</p>
-        </div>
-        {canCreate("users") && (
-          <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setAddUserModalOpen(true)}>
-            Add User
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Users"
+        description="Manage your user accounts"
+        icon={<Users className="h-5 w-5" />}
+        actions={
+          canCreate("users") ? (
+            <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setAddUserModalOpen(true)}>
+              Add User
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Filters */}
       <Card padding="md">

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Plus, Search, Trash2, Edit, Shield, Users, Settings } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import {
   Button,
   Input,
@@ -232,22 +233,18 @@ function RolesPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Roles & Permissions</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage user roles and their access permissions
-          </p>
-        </div>
-        {canCreate("roles") && (
-          <Button
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => setAddRoleModalOpen(true)}
-          >
-            Add Role
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Roles & Permissions"
+        description="Manage user roles and their access permissions"
+        icon={<Shield className="h-5 w-5" />}
+        actions={
+          canCreate("roles") ? (
+            <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setAddRoleModalOpen(true)}>
+              Add Role
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Info Card */}
       <Card padding="md" className="bg-primary-50 border-primary-200">
