@@ -735,6 +735,26 @@ return function(app)
     -- NAMESPACE MEMBERS ROUTES
     -- ============================================================
 
+    -- Current-namespace stats (members + roles, and — when ecommerce is enabled
+    -- — stores/orders/customers/products/revenue). The dashboard's namespace
+    -- page reads this; previously only /api/v2/admin/namespaces/:id/stats
+    -- existed, so GET /api/v2/namespace/stats 500'd (no route). Any namespace
+    -- member may read it. Response shape is { stats } to match the frontend.
+    app:get("/api/v2/namespace/stats", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            -- pcall so a stats failure (e.g. a namespace missing an optional
+            -- feature's tables) degrades to a clean error instead of a 500.
+            local ok, stats = pcall(NamespaceQueries.getStats, self.namespace.id)
+            if not ok then
+                return { status = 500, json = { success = false, error = "Failed to load namespace stats" } }
+            end
+            if not stats then
+                return { status = 404, json = { success = false, error = "Namespace not found" } }
+            end
+            return { json = { success = true, stats = stats } }
+        end)
+    ))
+
     -- List namespace members
     app:get("/api/v2/namespace/members", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("users", "read", function(self)

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Table, Modal, Pagination } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import {
   taxService,
   type TaxStatement,
@@ -427,42 +428,44 @@ function StatementsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-secondary-900">Bank Statements</h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchStatements}
-            className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          <a
-            href="/dashboard/tax/settings"
-            className="flex items-center gap-2 px-4 py-2 border border-secondary-300 text-secondary-700 rounded-lg hover:bg-secondary-100"
-          >
-            <Link2 className="w-4 h-4" />
-            HMRC
-          </a>
-          {statements.length > 0 && (
+      <PageHeader
+        title="Bank Statements"
+        icon={<FileText className="h-5 w-5" />}
+        actions={
+          <>
             <button
-              onClick={handleDeleteAll}
-              disabled={isDeletingAll}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+              onClick={fetchStatements}
+              className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
             >
-              <Trash2 className="w-4 h-4" />
-              {isDeletingAll ? 'Deleting…' : 'Delete All'}
+              <RefreshCw className="w-4 h-4" />
             </button>
-          )}
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-          >
-            <Upload className="w-4 h-4" />
-            Upload Statement
-          </button>
-        </div>
-      </div>
+            <a
+              href="/dashboard/tax/settings"
+              className="flex items-center gap-2 px-4 py-2 border border-secondary-300 text-secondary-700 rounded-lg hover:bg-secondary-100"
+            >
+              <Link2 className="w-4 h-4" />
+              HMRC
+            </a>
+            {statements.length > 0 && (
+              <button
+                onClick={handleDeleteAll}
+                disabled={isDeletingAll}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                {isDeletingAll ? 'Deleting…' : 'Delete All'}
+              </button>
+            )}
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+            >
+              <Upload className="w-4 h-4" />
+              Upload Statement
+            </button>
+          </>
+        }
+      />
 
       {/* Business profile — classification runs as this profile (saved default, overridable per run) */}
       <div className="flex flex-wrap items-center gap-3 bg-secondary-50 border border-secondary-200 rounded-xl p-4">

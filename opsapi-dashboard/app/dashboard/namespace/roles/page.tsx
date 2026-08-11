@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
+  Shield,
   ShieldCheck,
   Plus,
   Edit,
@@ -12,6 +13,7 @@ import {
   Star,
 } from 'lucide-react';
 import { Button, Card, Badge, ConfirmDialog } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
 import type { NamespaceRole, NamespacePermissions, NamespaceModuleMeta, NamespaceActionMeta, PermissionAction } from '@/types';
@@ -122,22 +124,19 @@ export default function NamespaceRolesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Roles & Permissions</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage roles for {currentNamespace.name}
-          </p>
-        </div>
-
-        {canManageRoles && (
-          <Button onClick={() => setCreateModalOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Create Role
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Roles & Permissions"
+        description={`Manage roles for ${currentNamespace.name}`}
+        icon={<Shield className="h-5 w-5" />}
+        actions={
+          canManageRoles ? (
+            <Button onClick={() => setCreateModalOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Create Role
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Roles Grid */}
       {isLoading ? (

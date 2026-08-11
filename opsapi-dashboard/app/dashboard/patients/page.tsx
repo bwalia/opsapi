@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, Trash2, Edit, User, Phone, Bed, Calendar } from 'lucide-react';
+import { Plus, Search, Trash2, Edit, User, Users, Phone, Bed, Calendar } from 'lucide-react';
 import { Button, Input, Table, Pagination, Card, Badge, ConfirmDialog } from '@/components/ui';
 import { AddPatientModal } from '@/components/patients';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { patientsService } from '@/services';
 import { formatDate, getInitials } from '@/lib/utils';
@@ -250,14 +251,11 @@ function PatientsPageContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Patients</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage patient records, care plans, and medical history
-          </p>
-        </div>
-        {canCreate('patients') && (
+      <PageHeader
+        title="Patients"
+        description="Manage patient records, care plans, and medical history"
+        icon={<Users className="h-5 w-5" />}
+        actions={canCreate('patients') ? (
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => {
@@ -267,8 +265,8 @@ function PatientsPageContent() {
           >
             Add Patient
           </Button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       <Card padding="md">
         <div className="flex flex-wrap items-center gap-4">

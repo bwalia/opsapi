@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Plus, RefreshCw, Download, PoundSterling, TrendingUp, FileCheck } from 'lucide-react';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { cn, formatCurrency, generateId } from '@/lib/utils';
 import { SpreadsheetGrid } from '@/components/accounting';
 import type { GridColumn, GridRow } from '@/components/accounting';
@@ -285,39 +286,36 @@ export default function MoneyInPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/accounting"
-            className="p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
-            aria-label="Back to accounting"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-secondary-900">Money In</h1>
-            <p className="text-sm text-secondary-500 mt-0.5">
-              Record sales, receipts and income - spreadsheet style
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleAddRow}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors text-sm font-medium shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Row
-          </button>
-          <button
-            onClick={fetchData}
-            className="p-2.5 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
-            aria-label="Refresh data"
-          >
-            <RefreshCw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
-          </button>
-        </div>
-      </div>
+      <Link
+        href="/dashboard/accounting"
+        className="inline-flex p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
+        aria-label="Back to accounting"
+      >
+        <ArrowLeft className="w-5 h-5" />
+      </Link>
+      <PageHeader
+        title="Money In"
+        description="Record sales, receipts and income - spreadsheet style"
+        icon={<TrendingUp className="h-5 w-5" />}
+        actions={
+          <>
+            <button
+              onClick={handleAddRow}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors text-sm font-medium shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add Row
+            </button>
+            <button
+              onClick={fetchData}
+              className="p-2.5 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
+              aria-label="Refresh data"
+            >
+              <RefreshCw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
+            </button>
+          </>
+        }
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

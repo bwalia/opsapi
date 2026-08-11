@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Package } from 'lucide-react';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -209,15 +210,12 @@ function ProductsPageContent() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Products</h1>
-          <p className="text-secondary-500 mt-1">Manage your product catalog</p>
-        </div>
-        {canCreate('products') && (
-          <Button leftIcon={<Plus className="w-4 h-4" />}>Add Product</Button>
-        )}
-      </div>
+      <PageHeader
+        title="Products"
+        description="Manage your product catalog"
+        icon={<Package className="h-5 w-5" />}
+        actions={canCreate('products') ? <Button leftIcon={<Plus className="w-4 h-4" />}>Add Product</Button> : undefined}
+      />
 
       {/* Filters */}
       <Card padding="md">

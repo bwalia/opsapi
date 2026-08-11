@@ -5,6 +5,7 @@ import { Plus, Search, Trash2, Edit, Building2, MapPin, Phone, Bed } from 'lucid
 import { Button, Input, Table, Pagination, Card, Badge, ConfirmDialog } from '@/components/ui';
 import { AddHospitalModal } from '@/components/hospitals';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { hospitalsService } from '@/services';
 import { formatDate } from '@/lib/utils';
@@ -232,12 +233,11 @@ function HospitalsPageContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Hospitals &amp; Care Homes</h1>
-          <p className="text-secondary-500 mt-1">Manage facilities, departments, and wards</p>
-        </div>
-        {canCreate('hospitals') && (
+      <PageHeader
+        title="Hospitals & Care Homes"
+        description="Manage facilities, departments, and wards"
+        icon={<Building2 className="h-5 w-5" />}
+        actions={canCreate('hospitals') ? (
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => {
@@ -247,8 +247,8 @@ function HospitalsPageContent() {
           >
             Add Hospital
           </Button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       <Card padding="md">
         <div className="flex flex-wrap items-center gap-4">

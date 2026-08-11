@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Input, Table, Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService, type TaxBankAccount } from '@/services/tax.service';
 import { formatDate } from '@/lib/utils';
 import type { TableColumn } from '@/types';
@@ -261,25 +262,27 @@ function BankAccountsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-secondary-900">Bank Accounts</h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchAccounts}
-            className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => { resetForm(); setShowCreateModal(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-          >
-            <Plus className="w-4 h-4" />
-            Add Account
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Bank Accounts"
+        icon={<Landmark className="h-5 w-5" />}
+        actions={
+          <>
+            <button
+              onClick={fetchAccounts}
+              className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => { resetForm(); setShowCreateModal(true); }}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+            >
+              <Plus className="w-4 h-4" />
+              Add Account
+            </button>
+          </>
+        }
+      />
 
       {/* Search */}
       <Card padding="md">
