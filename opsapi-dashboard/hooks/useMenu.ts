@@ -57,15 +57,41 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Landmark: icons.Landmark,
     FileUp: icons.FileUp,
     ArrowLeftRight: icons.ArrowLeftRight,
+    // Previously-missing icons the backend menu uses (Domains=Globe,
+    // Categories=Tags, etc.) — without these they fell back to a "?" icon.
+    Globe: icons.Globe,
+    Tags: icons.Tags,
+    Briefcase: icons.Briefcase,
+    Building: icons.Building,
+    GraduationCap: icons.GraduationCap,
+    Home: icons.Home,
+    Phone: icons.Phone,
+    User: icons.User,
+    PoundSterling: icons.PoundSterling,
+    // Explicit alias — "pound-sign" normalizes to "poundsign", which doesn't
+    // match "PoundSterling", so it needs its own key.
+    'pound-sign': icons.PoundSterling,
     HelpCircle: icons.HelpCircle,
   };
+  NORMALIZED_MAP = {};
+  for (const key of Object.keys(ICON_MAP)) {
+    NORMALIZED_MAP[normalizeIconName(key)] = ICON_MAP[key];
+  }
   return ICON_MAP;
+}
+
+// Normalize an icon name for tolerant matching: lower-case, strip non-alphanum.
+// So "Globe"/"globe", "graduation-cap"/"GraduationCap" all resolve to the same
+// entry — the backend menu seeds mix PascalCase, kebab-case and lower-case.
+let NORMALIZED_MAP: Record<string, LucideIcon> | null = null;
+function normalizeIconName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 // Synchronous icon getter - returns default if map not loaded yet
 function getIconFromMap(iconName: string): LucideIcon {
   if (!ICON_MAP) return DEFAULT_ICON;
-  return ICON_MAP[iconName] ?? DEFAULT_ICON;
+  return ICON_MAP[iconName] ?? NORMALIZED_MAP?.[normalizeIconName(iconName)] ?? DEFAULT_ICON;
 }
 
 /**

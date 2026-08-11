@@ -10,10 +10,15 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'OpsAPI Dashboard',
-  description: 'Professional admin dashboard for OpsAPI',
+  title: {
+    default: 'OpsAPI — Operations Platform',
+    template: '%s · OpsAPI',
+  },
+  description: 'OpsAPI — the multi-tenant operations platform. One API for your whole business, from CRM to tax filing to edge routing.',
   icons: {
-    icon: '/favicon.ico',
+    icon: [{ url: '/opsapi-logo.svg', type: 'image/svg+xml' }],
+    shortcut: '/opsapi-logo.svg',
+    apple: '/opsapi-logo.svg',
   },
 };
 
