@@ -4,6 +4,7 @@ import React, { useMemo, useCallback } from 'react';
 import { Users, ShoppingCart, Package, Store, DollarSign } from 'lucide-react';
 import { StatsCard, RecentOrdersTable, OrdersChart, HealthStatus } from '@/components/dashboard';
 import { PendingInvitationsBanner } from '@/components/namespace/invitations';
+import { Stagger, RevealItem } from '@/components/motion/Reveal';
 import { dashboardService } from '@/services';
 import { formatCurrency } from '@/lib/utils';
 import { useDataFetch } from '@/hooks';
@@ -97,62 +98,67 @@ export default function DashboardPage() {
   }, [refetch]);
 
   return (
-    <div className="space-y-5 sm:space-y-6">
+    <Stagger className="space-y-5 sm:space-y-6">
       {/* Pending Invitations Banner */}
       <PendingInvitationsBanner />
 
       {/* Hero header — brand gradient welcome */}
-      <div className="relative overflow-hidden rounded-2xl gradient-primary text-white p-6 sm:p-8 shadow-lg shadow-primary-500/20">
-        <div className="pointer-events-none absolute -top-16 -right-10 w-72 h-72 rounded-full bg-white/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-24 -left-12 w-72 h-72 rounded-full bg-black/10 blur-3xl" />
-        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome back 👋</h1>
-            <p className="text-white/85 mt-1.5 text-sm sm:text-base max-w-xl">
-              Here&apos;s what&apos;s happening with your business today.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs sm:text-sm">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 backdrop-blur-sm px-3 py-1.5 font-medium ring-1 ring-white/20">
-              <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-              {health?.status === 'healthy' ? 'All systems operational' : 'Live overview'}
-            </span>
+      <RevealItem>
+        <div className="relative overflow-hidden rounded-2xl gradient-primary text-white p-6 sm:p-8 shadow-lg shadow-primary-500/20">
+          <div className="pointer-events-none absolute -top-16 -right-10 w-72 h-72 rounded-full bg-white/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 -left-12 w-72 h-72 rounded-full bg-black/10 blur-3xl" />
+          <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Welcome back 👋</h1>
+              <p className="text-white/85 mt-2 text-base max-w-xl">
+                Here&apos;s what&apos;s happening with your business today.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs sm:text-sm">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/15 backdrop-blur-sm px-3 py-1.5 font-semibold ring-1 ring-white/20">
+                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+                {health?.status === 'healthy' ? 'All systems operational' : 'Live overview'}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      </RevealItem>
 
-      {/* Stats Cards - Responsive grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
+      {/* Stats Cards — responsive grid, each card staggers in */}
+      <Stagger
+        className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 lg:gap-6"
+        gap={0.06}
+      >
         {statsCards.map((card) => (
-          <StatsCard
-            key={card.id}
-            title={card.title}
-            value={card.value}
-            icon={card.icon}
-            trend={card.trend}
-            description={card.description}
-            isLoading={isLoading}
-          />
+          <RevealItem key={card.id}>
+            <StatsCard
+              title={card.title}
+              value={card.value}
+              icon={card.icon}
+              trend={card.trend}
+              description={card.description}
+              isLoading={isLoading}
+            />
+          </RevealItem>
         ))}
-      </div>
+      </Stagger>
 
       {/* Charts and Health Status — equal-height columns on desktop, health scrolls internally */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 xl:h-[480px]">
-        {/* Revenue Chart - Full width on mobile/tablet, 2/3 on desktop */}
-        <div className="xl:col-span-2 order-2 xl:order-1 min-h-0">
-          <OrdersChart data={chartData} isLoading={isLoading} />
+      <RevealItem>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 xl:h-[480px]">
+          <div className="xl:col-span-2 order-2 xl:order-1 min-h-0">
+            <OrdersChart data={chartData} isLoading={isLoading} />
+          </div>
+          <div className="order-1 xl:order-2 min-h-0">
+            <HealthStatus health={health} isLoading={isLoading} onRefresh={handleRefresh} />
+          </div>
         </div>
-
-        {/* Health Status - Full width on mobile/tablet, 1/3 on desktop */}
-        <div className="order-1 xl:order-2 min-h-0">
-          <HealthStatus health={health} isLoading={isLoading} onRefresh={handleRefresh} />
-        </div>
-      </div>
+      </RevealItem>
 
       {/* Recent Orders */}
-      <div>
+      <RevealItem>
         <RecentOrdersTable orders={recentOrders} isLoading={isLoading} />
-      </div>
-    </div>
+      </RevealItem>
+    </Stagger>
   );
 }
