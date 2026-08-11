@@ -37,10 +37,44 @@ export const InvitationNotificationBell = memo(function InvitationNotificationBe
   }, []);
 
   useEffect(() => {
+    // Visibility-aware polling: only hit the API while the tab is actually
+    // visible, and refetch immediately when the user returns. A backgrounded
+    // tab makes zero requests (the old code polled every 60s forever, even
+    // when nobody was looking), and on focus the list refreshes instantly —
+    // so it feels live without a persistent socket connection.
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const startPolling = () => {
+      if (intervalId) return;
+      intervalId = setInterval(fetchInvitations, 120000);
+    };
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchInvitations();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+
     fetchInvitations();
-    // Poll for new invitations every 60 seconds
-    const interval = setInterval(fetchInvitations, 60000);
-    return () => clearInterval(interval);
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      startPolling();
+    }
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [fetchInvitations]);
 
   // Close dropdown when clicking outside
