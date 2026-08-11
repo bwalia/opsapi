@@ -72,6 +72,14 @@ function StatCard({ icon, label, value, tone }: { icon: React.ReactNode; label: 
   );
 }
 
+// Mirror of the backend auto rule id (helper/wslproxy-server.lua): a domain with
+// no explicit rule id gets rule "opsapi-<sanitized-domain>" — so the user never
+// has to know or type a "rule id".
+function ruleSlug(domainName: string): string {
+  const slug = (domainName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return 'opsapi-' + (slug || 'domain');
+}
+
 const EMPTY_FORM = {
   domain_name: '',
   registrar: '',
@@ -79,11 +87,11 @@ const EMPTY_FORM = {
   cloudflare_zone_id: '',
   alert_threshold_days: 30,
   notes: '',
-  // WSL Proxy vhost fields
+  // WSL Proxy routing fields (the rule id is auto-generated: opsapi-<domain>)
   environment: 'prod',
-  wslproxy_rule_id: '',
   ssl_email: '',
   proxy_target: '',
+  rule_path: '/',
 };
 
 function DomainsPageContent() {
@@ -150,9 +158,9 @@ function DomainsPageContent() {
       alert_threshold_days: d.alert_threshold_days || 30,
       notes: d.notes || '',
       environment: d.environment || 'prod',
-      wslproxy_rule_id: d.wslproxy_rule_id || '',
       ssl_email: d.ssl_email || '',
       proxy_target: d.proxy_target || '',
+      rule_path: d.rule_path || '/',
     });
     setFormOpen(true);
   };
@@ -169,8 +177,12 @@ function DomainsPageContent() {
       }
       setFormOpen(false);
       load(); loadStats();
-    } catch {
-      toast.error('Save failed');
+    } catch (err) {
+      // Surface the backend message (e.g. the 409 "A domain with this name
+      // already exists in this namespace") instead of a generic failure.
+      const serverMsg = (err as { response?: { data?: { error?: string } } })
+        ?.response?.data?.error;
+      toast.error(serverMsg || (err instanceof Error ? err.message : 'Save failed'));
     }
   };
 
@@ -381,7 +393,7 @@ function DomainsPageContent() {
             </div>
           </div>
           <div className="rounded border border-secondary-200 p-3 space-y-3">
-            <div className="text-xs font-semibold uppercase text-secondary-500">WSL Proxy vhost (for repo sync)</div>
+            <div className="text-xs font-semibold uppercase text-secondary-500">WSL Proxy routing (repo sync)</div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium">Environment</label>
@@ -390,19 +402,27 @@ function DomainsPageContent() {
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium">WSL Proxy rule id</label>
-                <Input placeholder="e.g. academy-prod-default" value={form.wslproxy_rule_id} onChange={(e) => setForm({ ...form, wslproxy_rule_id: e.target.value })} />
+                <label className="text-sm font-medium">Backend</label>
+                <Input placeholder="193.237.176.232:8888" value={form.proxy_target} onChange={(e) => setForm({ ...form, proxy_target: e.target.value })} />
+                <p className="mt-1 text-xs text-secondary-500">Where this domain routes — the rule&apos;s backend. Blank = the Sync Settings default backend.</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
+                <label className="text-sm font-medium">Path</label>
+                <Input placeholder="/" value={form.rule_path} onChange={(e) => setForm({ ...form, rule_path: e.target.value })} />
+              </div>
+              <div>
                 <label className="text-sm font-medium">SSL email</label>
                 <Input placeholder="admin@example.com" value={form.ssl_email} onChange={(e) => setForm({ ...form, ssl_email: e.target.value })} />
               </div>
-              <div>
-                <label className="text-sm font-medium">Proxy / DNS target</label>
-                <Input placeholder="pop1.diytaxreturn.co.uk" value={form.proxy_target} onChange={(e) => setForm({ ...form, proxy_target: e.target.value })} />
-              </div>
+            </div>
+            {/* Live preview of the rule that will be auto-created on sync — the
+                user never types a "rule id". */}
+            <div className="rounded bg-secondary-50 border border-secondary-200 p-2 text-xs text-secondary-600">
+              Auto-created rule: <span className="font-mono text-secondary-800">{ruleSlug(form.domain_name)}</span>
+              {' '}— path <span className="font-mono text-secondary-800">{form.rule_path || '/'}</span>
+              {' '}→ <span className="font-mono text-secondary-800">{form.proxy_target || '(Sync Settings default backend)'}</span>
             </div>
           </div>
           <div>

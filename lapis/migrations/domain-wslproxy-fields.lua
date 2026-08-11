@@ -38,4 +38,13 @@ return {
         -- Index by environment for per-env export.
         add_column([[CREATE INDEX IF NOT EXISTS domains_namespace_env_idx ON domains (namespace_id, environment)]])
     end,
+
+    -- [2] The WSL Proxy rule's match path (default "/"). Lets a user build
+    -- path-based rules from the domain form instead of the path being hardcoded
+    -- to "/" in the renderer. See helper/wslproxy-server.lua (rule template).
+    [2] = function()
+        local exists = db.query("SELECT to_regclass('public.domains') IS NOT NULL AS ok")
+        if not (exists and exists[1] and exists[1].ok) then return end
+        add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS rule_path TEXT DEFAULT '/']])
+    end,
 }
