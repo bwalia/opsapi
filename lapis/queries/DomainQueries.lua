@@ -23,7 +23,7 @@ local WRITABLE_FIELDS = {
     -- WSL Proxy vhost rendering fields (see helper/wslproxy-server.lua)
     "environment", "wslproxy_rule_id", "ssl_email", "ssl_enabled",
     "ssl_auto_renew", "ssl_force_https", "ssl_staging", "wslproxy_root",
-    "listen_ports", "proxy_target",
+    "listen_ports", "proxy_target", "rule_path",
 }
 
 --------------------------------------------------------------------------------
