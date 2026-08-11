@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
   Plus,
+  Tag,
   Tags,
   Trash2,
   Edit2,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Input, Table, Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService, type TaxCategory, type TaxCategoryInput } from '@/services/tax.service';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
@@ -261,30 +263,28 @@ function CategoriesContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Categories</h1>
-          <p className="text-sm text-secondary-500 mt-1">
-            Manage your custom tax categories. Global categories are shared and read-only.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchCategories}
-            className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => { resetForm(); setShowCreateModal(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-          >
-            <Plus className="w-4 h-4" />
-            Add Category
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Categories"
+        description="Manage your custom tax categories. Global categories are shared and read-only."
+        icon={<Tag className="h-5 w-5" />}
+        actions={
+          <>
+            <button
+              onClick={fetchCategories}
+              className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => { resetForm(); setShowCreateModal(true); }}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+            >
+              <Plus className="w-4 h-4" />
+              Add Category
+            </button>
+          </>
+        }
+      />
 
       {/* Filters */}
       <Card padding="md">

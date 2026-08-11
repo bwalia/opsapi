@@ -15,6 +15,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
 import { formatDate, getInitials } from '@/lib/utils';
@@ -224,22 +225,19 @@ export default function NamespaceMembersPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Namespace Members</h1>
-          <p className="text-secondary-500 mt-1">
-            Manage members of {currentNamespace.name}
-          </p>
-        </div>
-
-        {canManageMembers && (
-          <Button onClick={() => setInviteModalOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Invite Member
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Namespace Members"
+        description={`Manage members of ${currentNamespace.name}`}
+        icon={<Users className="h-5 w-5" />}
+        actions={
+          canManageMembers ? (
+            <Button onClick={() => setInviteModalOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Invite Member
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Search */}
       <Card className="p-4">

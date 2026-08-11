@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Card } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import {
   taxService,
   type TaxReportCategoryBreakdown,
@@ -82,27 +83,29 @@ function ReportsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-secondary-900">Tax Reports</h1>
-        <div className="flex items-center gap-3">
-          <select
-            value={taxYear}
-            onChange={(e) => setTaxYear(e.target.value)}
-            className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-          >
-            {taxYears.map((y) => (
-              <option key={y} value={y}>Tax Year {y}/{Number(y) + 1}</option>
-            ))}
-          </select>
-          <button
-            onClick={fetchData}
-            className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Tax Reports"
+        icon={<BarChart3 className="h-5 w-5" />}
+        actions={
+          <>
+            <select
+              value={taxYear}
+              onChange={(e) => setTaxYear(e.target.value)}
+              className="px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
+            >
+              {taxYears.map((y) => (
+                <option key={y} value={y}>Tax Year {y}/{Number(y) + 1}</option>
+              ))}
+            </select>
+            <button
+              onClick={fetchData}
+              className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </>
+        }
+      />
 
       {/* Tabs */}
       <div className="border-b border-secondary-200">

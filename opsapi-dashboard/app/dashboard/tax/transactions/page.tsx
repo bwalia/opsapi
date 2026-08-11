@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Search,
+  ArrowLeftRight,
   RefreshCw,
   CheckCircle,
   XCircle,
@@ -13,6 +14,7 @@ import {
 import Link from 'next/link';
 import { Input, Table, Card, Pagination, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import {
   taxService,
   type TaxTransaction,
@@ -362,22 +364,19 @@ function TransactionsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">Transactions</h1>
-          <p className="text-sm text-secondary-500 mt-1">
-            {total} transactions
-            {summary && summary.pending_classification > 0 && ` (${summary.pending_classification} pending)`}
-          </p>
-        </div>
-        <button
-          onClick={() => { fetchTransactions(); fetchSummary(); }}
-          className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      </div>
+      <PageHeader
+        title="Transactions"
+        description={`${total} transactions${summary && summary.pending_classification > 0 ? ` (${summary.pending_classification} pending)` : ''}`}
+        icon={<ArrowLeftRight className="h-5 w-5" />}
+        actions={
+          <button
+            onClick={() => { fetchTransactions(); fetchSummary(); }}
+            className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        }
+      />
 
       {/* Stats row — server-side aggregate over ALL records */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

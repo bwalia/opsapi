@@ -13,9 +13,11 @@ import {
   Calculator,
   Building2,
   KeyRound,
+  Settings,
 } from 'lucide-react';
 import { Card } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { taxService } from '@/services/tax.service';
 import { formatDateTime, formatCurrency, extractApiError } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -140,21 +142,20 @@ function HmrcSettingsContent() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-secondary-900">HMRC Filing</h1>
-          <p className="text-sm text-secondary-500 mt-1">
-            Connect to HMRC and preview your Self Assessment calculation (Making Tax Digital).
-          </p>
-        </div>
-        <button
-          onClick={fetchStatus}
-          className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
-          title="Refresh status"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      </div>
+      <PageHeader
+        title="HMRC Filing"
+        description="Connect to HMRC and preview your Self Assessment calculation (Making Tax Digital)."
+        icon={<Settings className="h-5 w-5" />}
+        actions={
+          <button
+            onClick={fetchStatus}
+            className="p-2 text-secondary-600 hover:bg-secondary-100 rounded-lg"
+            title="Refresh status"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        }
+      />
 
       {/* Connection */}
       <Card padding="lg">

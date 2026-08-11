@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Shield, Cloud, Server, Lock, FileText, Plus, RefreshCw, Trash2, Settings, ArrowLeft, CheckCircle, XCircle, Loader2, Upload, Download } from 'lucide-react';
 import { vaultProvidersService, VaultProvider, ProviderType, SyncLog } from '@/services/vault-providers.service';
 import { getVaultKey } from '@/services/vault.service';
+import { PageHeader } from '@/components/layout/PageHeader';
 
 const PROVIDER_ICONS: Record<string, typeof Shield> = {
   hashicorp_vault: Shield,
@@ -216,26 +217,29 @@ export default function VaultProvidersPage() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/dashboard/namespace/vault')} className="p-2 hover:bg-gray-100 rounded-lg">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold">External Providers</h1>
-            <p className="text-gray-500 text-sm">Connect to HashiCorp Vault, AWS, Azure, Kubernetes, and more</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowImportModal(true)} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
-            <Upload size={16} /> Import .env
-          </button>
-          <button onClick={handleExportEnv} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
-            <Download size={16} /> Export .env
-          </button>
-          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
-            <Plus size={16} /> Connect Provider
-          </button>
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={() => router.push('/dashboard/namespace/vault')} className="p-2 hover:bg-gray-100 rounded-lg">
+          <ArrowLeft size={20} />
+        </button>
+        <div className="flex-1">
+          <PageHeader
+            title="External Providers"
+            description="Connect to HashiCorp Vault, AWS, Azure, Kubernetes, and more"
+            icon={<Cloud className="h-5 w-5" />}
+            actions={
+              <>
+                <button onClick={() => setShowImportModal(true)} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
+                  <Upload size={16} /> Import .env
+                </button>
+                <button onClick={handleExportEnv} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
+                  <Download size={16} /> Export .env
+                </button>
+                <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
+                  <Plus size={16} /> Connect Provider
+                </button>
+              </>
+            }
+          />
         </div>
       </div>
 

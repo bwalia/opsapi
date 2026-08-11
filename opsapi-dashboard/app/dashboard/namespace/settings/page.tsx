@@ -12,6 +12,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { Button, Input, Card, Badge } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { namespaceService } from '@/services';
 import type { UpdateNamespaceDto } from '@/types';
@@ -98,13 +99,11 @@ export default function NamespaceSettingsPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-secondary-900">Namespace Settings</h1>
-        <p className="text-secondary-500 mt-1">
-          Configure settings for {currentNamespace.name}
-        </p>
-      </div>
+      <PageHeader
+        title="Namespace Settings"
+        description={`Configure settings for ${currentNamespace.name}`}
+        icon={<Settings className="h-5 w-5" />}
+      />
 
       {/* Settings Form */}
       <form onSubmit={handleSubmit} className="space-y-6">

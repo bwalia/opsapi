@@ -4,8 +4,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, RefreshCw, Search, PoundSterling, AlertTriangle,
-  TrendingDown, Clock,
+  TrendingDown, Clock, ShoppingCart,
 } from 'lucide-react';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { cn, formatCurrency, formatDate } from '@/lib/utils';
 import Badge from '@/components/ui/Badge';
 import Pagination from '@/components/ui/Pagination';
@@ -121,30 +122,27 @@ export default function PurchaseLedgerPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/accounting"
-            className="p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
-            aria-label="Back to accounting"
+      <Link
+        href="/dashboard/accounting"
+        className="inline-flex p-2 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors"
+        aria-label="Back to accounting"
+      >
+        <ArrowLeft className="w-5 h-5" />
+      </Link>
+      <PageHeader
+        title="Purchase Ledger"
+        description="Supplier invoices, expenses and payment tracking"
+        icon={<ShoppingCart className="h-5 w-5" />}
+        actions={
+          <button
+            onClick={fetchExpenses}
+            className="p-2.5 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors self-end"
+            aria-label="Refresh data"
           >
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-secondary-900">Purchase Ledger</h1>
-            <p className="text-sm text-secondary-500 mt-0.5">
-              Supplier invoices, expenses and payment tracking
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={fetchExpenses}
-          className="p-2.5 text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 rounded-lg transition-colors self-end"
-          aria-label="Refresh data"
-        >
-          <RefreshCw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
-        </button>
-      </div>
+            <RefreshCw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
+          </button>
+        }
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
