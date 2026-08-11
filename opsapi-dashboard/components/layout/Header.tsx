@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { NamespaceSwitcher } from '@/components/namespace/NamespaceSwitcher';
 import { InvitationNotificationBell } from '@/components/namespace/invitations';
 import { NotificationBell } from '@/components/notifications';
+import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -181,6 +182,9 @@ const Header: React.FC<HeaderProps> = memo(function Header({ onMenuClick }) {
             <div className="hidden sm:block">
               <NamespaceSwitcher variant="header" />
             </div>
+
+            {/* Theme toggle */}
+            <ThemeToggle />
 
             {/* Invitation Notifications */}
             <InvitationNotificationBell />

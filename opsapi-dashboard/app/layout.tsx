@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
+import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import './globals.css';
 
 // Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height,
@@ -33,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={jakarta.variable}>
+    <html lang="en" className={jakarta.variable} suppressHydrationWarning>
       <body className="antialiased">
         {/* Skip to main content link for keyboard/screen reader users */}
         <a
@@ -42,7 +43,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
         <Toaster
           position="top-right"
           toastOptions={{
