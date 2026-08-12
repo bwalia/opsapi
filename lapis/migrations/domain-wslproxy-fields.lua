@@ -47,4 +47,14 @@ return {
         if not (exists and exists[1] and exists[1].ok) then return end
         add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS rule_path TEXT DEFAULT '/']])
     end,
+
+    -- [3] Per-domain template choice: which render_templates (domain_wslproxy /
+    -- domain_rule) format this domain's server & rule JSON files use at sync.
+    -- Chosen on the domain form; empty -> the sync-level pick / built-in default.
+    [3] = function()
+        local exists = db.query("SELECT to_regclass('public.domains') IS NOT NULL AS ok")
+        if not (exists and exists[1] and exists[1].ok) then return end
+        add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS server_template_uuid TEXT]])
+        add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS rule_template_uuid TEXT]])
+    end,
 }

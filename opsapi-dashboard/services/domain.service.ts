@@ -36,6 +36,8 @@ export interface Domain {
   listen_ports?: string;
   proxy_target?: string;
   rule_path?: string;
+  server_template_uuid?: string;
+  rule_template_uuid?: string;
   created_at: string;
   updated_at: string;
 }

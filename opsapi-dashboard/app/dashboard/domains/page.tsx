@@ -93,6 +93,9 @@ const EMPTY_FORM = {
   ssl_email: '',
   proxy_target: '',
   rule_path: '/',
+  // Per-domain template choice (blank = sync-level pick / built-in default)
+  server_template_uuid: '',
+  rule_template_uuid: '',
 };
 
 function DomainsPageContent() {
@@ -117,6 +120,9 @@ function DomainsPageContent() {
   const [repoSyncOpen, setRepoSyncOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Domain server/rule format templates for the per-domain pickers in the form.
+  const [serverTemplates, setServerTemplates] = useState<RenderTemplate[]>([]);
+  const [ruleTemplates, setRuleTemplates] = useState<RenderTemplate[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,6 +153,10 @@ function DomainsPageContent() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => {
+    renderTemplatesService.list('domain_wslproxy').then(setServerTemplates).catch(() => setServerTemplates([]));
+    renderTemplatesService.list('domain_rule').then(setRuleTemplates).catch(() => setRuleTemplates([]));
+  }, []);
 
   const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM }); setFormOpen(true); };
   const openEdit = (d: Domain) => {
@@ -162,6 +172,8 @@ function DomainsPageContent() {
       ssl_email: d.ssl_email || '',
       proxy_target: d.proxy_target || '',
       rule_path: d.rule_path || '/',
+      server_template_uuid: d.server_template_uuid || '',
+      rule_template_uuid: d.rule_template_uuid || '',
     });
     setFormOpen(true);
   };
@@ -416,6 +428,29 @@ function DomainsPageContent() {
               <div>
                 <label className="text-sm font-medium">SSL email</label>
                 <Input placeholder="admin@example.com" value={form.ssl_email} onChange={(e) => setForm({ ...form, ssl_email: e.target.value })} />
+              </div>
+            </div>
+            {/* Per-domain template choice — which saved JSON format this domain's
+                server + rule files use at sync. Manage them in Templates → Layouts
+                & Formats. Blank uses the built-in default. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">Server template</label>
+                <select className="w-full rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.server_template_uuid} onChange={(e) => setForm({ ...form, server_template_uuid: e.target.value })}>
+                  <option value="">Default (built-in format)</option>
+                  {serverTemplates.map((t) => (
+                    <option key={t.uuid} value={t.uuid}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Rule template</label>
+                <select className="w-full rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.rule_template_uuid} onChange={(e) => setForm({ ...form, rule_template_uuid: e.target.value })}>
+                  <option value="">Default (built-in format)</option>
+                  {ruleTemplates.map((t) => (
+                    <option key={t.uuid} value={t.uuid}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                  ))}
+                </select>
               </div>
             </div>
             {/* Live preview of the rule that will be auto-created on sync — the

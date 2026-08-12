@@ -1740,6 +1740,7 @@ local _migrations = {
     ['606_enable_domain_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_menu_items_migrations, 4),
     ['607_domain_wslproxy_fields'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 1),
     ['613_domain_rule_path'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 2),
+    ['614_domain_template_uuids'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 3),
     ['608_domain_pipeline_runs'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_pipeline_runs_migrations, 1),
     ['609_domain_sync_settings'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_sync_settings_migrations, 1),
     ['612_domain_sync_templates'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_sync_settings_migrations, 2),
@@ -1799,6 +1800,7 @@ local _migrations = {
     ['574_doc_template_menu_item'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 1),
     ['575_doc_template_menu_enable'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 2),
     ['576_doc_template_menu_relabel'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 3),
+    ['577_doc_template_menu_unify'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 4),
 
     -- =========================================================================
     -- VAULT INTEGRATIONS (580-582)

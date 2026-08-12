@@ -199,6 +199,12 @@ return function(app)
                 default_rule_id = eff.default_rule_id,
                 default_backend = eff.default_backend,
                 sync_rules      = eff.sync_rules,
+                -- Per-domain templates: each domain's server_template_uuid /
+                -- rule_template_uuid (chosen on the domain form) wins over the
+                -- sync-level pick above. This resolver turns a uuid into content.
+                resolve_template = function(uuid, want_type)
+                    return template_content(uuid, want_type)
+                end,
             })
             local files = built.files
             local rendered = built.rendered
