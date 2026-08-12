@@ -281,7 +281,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local body = parse_json_body()
 
-            local valid, err = validate_required(body, { "name", "type", "template_html" })
+            local valid, err = validate_required(body, { "name", "type" })
             if not valid then
                 return api_response(400, nil, err)
             end
@@ -290,6 +290,15 @@ return function(app)
             local valid_types = { invoice = true, timesheet = true, receipt = true, report = true }
             if not valid_types[body.type] then
                 return api_response(400, nil, "Invalid template type. Must be one of: invoice, timesheet, receipt, report")
+            end
+
+            -- The Create dialog only collects metadata (name/type/page setup); the
+            -- HTML body is authored afterwards in the template editor. So don't
+            -- require template_html here — seed a minimal starter when it's absent
+            -- so a template can be created first and filled in later.
+            if not body.template_html or body.template_html == "" then
+                body.template_html =
+                    "<h1>{{title}}</h1>\n<p>Start building your " .. tostring(body.type) .. " template…</p>"
             end
 
             body.namespace_id = self.namespace.id
