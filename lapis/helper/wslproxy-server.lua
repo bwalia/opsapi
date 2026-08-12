@@ -36,45 +36,81 @@ local WslproxyServer = {}
 -- JSON-escaped string. Raw placeholders (arrays/booleans) sit OUTSIDE quotes
 -- and receive a ready-made JSON fragment ({{listens_json}}, {{ssl_enabled}}…).
 
+-- Default WSL Proxy SERVER (vhost) format. Placeholders are filled per-domain by
+-- render_server(); everything else is a sensible static default. Runtime-only
+-- fields the edge fills itself (nginx_status*, created_at) are neutral here so a
+-- re-sync doesn't churn the file.
 WslproxyServer.DEFAULT_SERVER_TEMPLATE = [[{
   "id": "host:{{server_name}}",
   "server_name": "{{server_name}}",
-  "proxy_server_name": "{{server_name}}",
+  "proxy_server_name": null,
   "root": "{{root}}",
   "index": "index.html",
-  "access_log": "logs/{{server_name}}.access.log",
-  "error_log": "logs/{{server_name}}.error.log",
-  "config_status": false,
+  "access_log": "logs/access.log",
+  "error_log": "logs/error.log",
+  "proxy_pass": "http://localhost",
   "profile_id": "{{profile_id}}",
   "rules": "{{rules}}",
   "listens": {{listens_json}},
   "ssl_enabled": {{ssl_enabled}},
+  "ssl_email": "{{ssl_email}}",
   "ssl_force_https": {{ssl_force_https}},
   "ssl_staging": {{ssl_staging}},
   "ssl_auto_renew": {{ssl_auto_renew}},
-  "ssl_email": "{{ssl_email}}",
+  "dns_record_type": "CNAME",
+  "dns_cname_target": "pop1.diytaxreturn.co.uk",
+  "waf_enabled": false,
   "cache_enabled": false,
+  "varnish_enabled": false,
+  "rate_limit_enabled": false,
+  "cache_bypass_auth": false,
+  "cache_docker_blobs": false,
+  "cache_docker_blobs_ttl": "2592000",
+  "cache_docker_manifests": false,
+  "cache_docker_manifests_ttl": "3600",
+  "cache_docker_serve_stale": false,
+  "cache_docker_stale_ttl": "31536000",
+  "proxy_timeouts": { "connect_timeout": "600", "send_timeout": "600", "read_timeout": "600" },
+  "nginx_status_check": "",
+  "nginx_status": "",
   "match_cases": {},
-  "custom_headers": []
+  "custom_headers": {},
+  "config": "{{config}}",
+  "config_status": false,
+  "created_at": 0
 }]]
 
+-- Default WSL Proxy RULE format. The backend goes in redirect_uri (backends is
+-- an empty object in this schema); servers_json is the list of server ids.
 WslproxyServer.DEFAULT_RULE_TEMPLATE = [[{
   "id": "{{rule_id}}",
   "name": "{{rule_id}}",
   "profile_id": "{{profile_id}}",
   "priority": 1,
-  "rules_tags": ["opsapi", "domains"],
+  "version": 1,
+  "_schema_version": 2,
   "match": {
-    "rules": { "path": "{{rule_path}}", "path_key": "starts_with" },
+    "rules": {
+      "path": "{{rule_path}}",
+      "path_key": "starts_with",
+      "jwt_token_validation": "equals",
+      "client_ip_key": "equals",
+      "country_key": "equals"
+    },
     "response": {
-      "code": 305,
-      "redirect_uri": "{{backend}}",
+      "message": "",
+      "backends": {},
       "strip_path": false,
-      "backends": [ { "address": "{{backend}}", "weight": 100, "label": "opsapi-managed domain backend" } ],
+      "auto_redirect_https": false,
+      "redirect_uri": "{{backend}}",
+      "code": 305,
+      "is_consul": false,
+      "allow": true,
       "routing": { "mode": "least_conn" }
     }
   },
-  "servers": {{servers_json}}
+  "servers": {{servers_json}},
+  "created_at": 0
 }]]
 
 -- ── small helpers ─────────────────────────────────────────────────────────
@@ -171,7 +207,13 @@ end
 function WslproxyServer.render_server(domain, env, opts)
     opts = opts or {}
     local name = domain.domain_name
-    local tpl = (opts.server_template and trim(opts.server_template) ~= "" and opts.server_template)
+    -- Template precedence: the domain's own chosen server template (resolved by
+    -- the injected opts.resolve_template) > a sync-level server_template > the
+    -- built-in default.
+    local per_domain = opts.resolve_template and trim(domain.server_template_uuid or "") ~= ""
+        and opts.resolve_template(domain.server_template_uuid, "domain_wslproxy") or nil
+    local tpl = per_domain
+        or (opts.server_template and trim(opts.server_template) ~= "" and opts.server_template)
         or WslproxyServer.DEFAULT_SERVER_TEMPLATE
     local vars = {
         server_name    = json_escape(name),
@@ -184,6 +226,8 @@ function WslproxyServer.render_server(domain, env, opts)
         ssl_force_https = bool_json(domain.ssl_force_https, true),
         ssl_staging     = bool_json(domain.ssl_staging, false),
         ssl_auto_renew  = bool_json(domain.ssl_auto_renew, true),
+        -- Per-domain nginx config blob (base64); empty when the domain has none.
+        config          = json_escape(domain.config or ""),
     }
     local json = fill(tpl, vars)
     local ok, err = validate_json(json)
@@ -196,9 +240,14 @@ end
 -- @param backend string  backend address (host:port)
 -- @param servers table   list of server ids ("host:<domain>") referencing it
 -- @return string json, string filename, string|nil err
-function WslproxyServer.render_rule(rule_id, backend, servers, env, opts, rule_path)
+function WslproxyServer.render_rule(rule_id, backend, servers, env, opts, rule_path, rule_template_uuid)
     opts = opts or {}
-    local tpl = (opts.rule_template and trim(opts.rule_template) ~= "" and opts.rule_template)
+    -- Precedence: the owning domain's chosen rule template > a sync-level
+    -- rule_template > the built-in default.
+    local per_domain = opts.resolve_template and trim(rule_template_uuid or "") ~= ""
+        and opts.resolve_template(rule_template_uuid, "domain_rule") or nil
+    local tpl = per_domain
+        or (opts.rule_template and trim(opts.rule_template) ~= "" and opts.rule_template)
         or WslproxyServer.DEFAULT_RULE_TEMPLATE
     local path = trim(rule_path)
     if path == "" then path = "/" end
@@ -267,7 +316,8 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
                 -- Accumulate the rule this server references.
                 local rid = WslproxyServer.effective_rule_id(d, opts)
                 if not rules[rid] then
-                    rules[rid] = { backend = effective_backend(d, opts), servers = {}, path = trim(d.rule_path) }
+                    rules[rid] = { backend = effective_backend(d, opts), servers = {},
+                        path = trim(d.rule_path), rule_template_uuid = trim(d.rule_template_uuid or "") }
                     table.insert(rule_order, rid)
                 else
                     if trim(rules[rid].backend) == "" then
@@ -290,7 +340,7 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
                 table.insert(warnings, "rule '" .. rid .. "' skipped: no proxy_target/default_backend "
                     .. "— set one to generate its backend")
             else
-                local json, filename, rerr = WslproxyServer.render_rule(rid, r.backend, r.servers, env, opts, r.path)
+                local json, filename, rerr = WslproxyServer.render_rule(rid, r.backend, r.servers, env, opts, r.path, r.rule_template_uuid)
                 if not json then
                     table.insert(warnings, rerr or ("could not render rule " .. rid))
                 else

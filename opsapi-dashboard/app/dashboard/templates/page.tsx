@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Search,
   FileText,
@@ -14,10 +14,12 @@ import {
   ChevronDown,
   X,
   LayoutTemplate,
+  Loader2,
 } from 'lucide-react';
 import { Input, Table, Pagination, Card, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
+import RenderTemplatesLibrary from '@/components/templates/RenderTemplatesLibrary';
 import {
   templatesService,
   type TemplateFilters,
@@ -268,7 +270,7 @@ const CloneTemplateModal: React.FC<CloneModalProps> = ({ isOpen, template, onClo
   );
 };
 
-function TemplatesPageContent() {
+function TemplatesPageContent({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
 
   // State
@@ -500,32 +502,42 @@ function TemplatesPageContent() {
     [handleEditTemplate, handleSetDefault, handleDelete]
   );
 
+  const headerActions = (
+    <>
+      <button
+        onClick={() => fetchTemplates()}
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
+      >
+        <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+        Refresh
+      </button>
+      <button
+        onClick={() => setIsCreateModalOpen(true)}
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+      >
+        <Plus className="w-4 h-4" />
+        Create Template
+      </button>
+    </>
+  );
+
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <PageHeader
-        title="Document Templates"
-        description="Manage invoice and timesheet templates"
-        icon={<LayoutTemplate className="h-5 w-5" />}
-        actions={
-          <>
-            <button
-              onClick={() => fetchTemplates()}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Create Template
-            </button>
-          </>
-        }
-      />
+      {/* When embedded in the Templates hub the hub owns the page title; show
+          just a caption + the actions. Standalone keeps the full PageHeader. */}
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-secondary-500">Invoice &amp; timesheet templates rendered to PDF.</p>
+          <div className="flex items-center gap-2">{headerActions}</div>
+        </div>
+      ) : (
+        <PageHeader
+          title="Document Templates"
+          description="Manage invoice and timesheet templates"
+          icon={<LayoutTemplate className="h-5 w-5" />}
+          actions={headerActions}
+        />
+      )}
 
       {/* Filters */}
       <Card padding="md">
@@ -621,10 +633,74 @@ function TemplatesPageContent() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Templates hub — one home for every template kind. Document (PDF) templates and
+// the {{slot}} layout/format library (page layouts + domain server/rule JSON)
+// live under a single Templates section; other modules just select from them.
+// ---------------------------------------------------------------------------
+type HubTab = 'documents' | 'layouts';
+
+const HUB_TABS: { key: HubTab; label: string; icon: React.ReactNode }[] = [
+  { key: 'documents', label: 'Document Templates', icon: <FileText className="h-4 w-4" /> },
+  { key: 'layouts', label: 'Layouts & Formats', icon: <LayoutTemplate className="h-4 w-4" /> },
+];
+
+function TemplatesHub() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initial: HubTab = searchParams.get('tab') === 'layouts' ? 'layouts' : 'documents';
+  const [tab, setTab] = useState<HubTab>(initial);
+
+  const setActive = (key: HubTab) => {
+    setTab(key);
+    router.replace(`/dashboard/templates?tab=${key}`);
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Templates"
+        description="One home for every template — PDF documents, website page layouts, and domain sync formats. Create them here, then pick them in the relevant module."
+        icon={<LayoutTemplate className="h-6 w-6" />}
+      />
+
+      <div className="border-b border-secondary-200">
+        <nav className="-mb-px flex flex-wrap gap-1" aria-label="Template categories">
+          {HUB_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setActive(t.key)}
+              className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                tab === t.key
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-secondary-500 hover:border-secondary-300 hover:text-secondary-700'
+              }`}
+              aria-current={tab === t.key ? 'page' : undefined}
+            >
+              {t.icon}
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {tab === 'documents' ? <TemplatesPageContent embedded /> : <RenderTemplatesLibrary />}
+    </div>
+  );
+}
+
 export default function TemplatesPage() {
   return (
-    <ProtectedPage module="templates" title="Document Templates">
-      <TemplatesPageContent />
+    <ProtectedPage module="templates" title="Templates">
+      <Suspense
+        fallback={
+          <div className="flex justify-center py-24">
+            <Loader2 className="h-6 w-6 animate-spin text-secondary-400" />
+          </div>
+        }
+      >
+        <TemplatesHub />
+      </Suspense>
     </ProtectedPage>
   );
 }

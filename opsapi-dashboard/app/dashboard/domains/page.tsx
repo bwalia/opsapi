@@ -93,6 +93,9 @@ const EMPTY_FORM = {
   ssl_email: '',
   proxy_target: '',
   rule_path: '/',
+  // Per-domain template choice (blank = sync-level pick / built-in default)
+  server_template_uuid: '',
+  rule_template_uuid: '',
 };
 
 function DomainsPageContent() {
@@ -117,6 +120,9 @@ function DomainsPageContent() {
   const [repoSyncOpen, setRepoSyncOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Domain server/rule format templates for the per-domain pickers in the form.
+  const [serverTemplates, setServerTemplates] = useState<RenderTemplate[]>([]);
+  const [ruleTemplates, setRuleTemplates] = useState<RenderTemplate[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,6 +153,10 @@ function DomainsPageContent() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => {
+    renderTemplatesService.list('domain_wslproxy').then(setServerTemplates).catch(() => setServerTemplates([]));
+    renderTemplatesService.list('domain_rule').then(setRuleTemplates).catch(() => setRuleTemplates([]));
+  }, []);
 
   const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM }); setFormOpen(true); };
   const openEdit = (d: Domain) => {
@@ -162,6 +172,8 @@ function DomainsPageContent() {
       ssl_email: d.ssl_email || '',
       proxy_target: d.proxy_target || '',
       rule_path: d.rule_path || '/',
+      server_template_uuid: d.server_template_uuid || '',
+      rule_template_uuid: d.rule_template_uuid || '',
     });
     setFormOpen(true);
   };
@@ -416,6 +428,29 @@ function DomainsPageContent() {
               <div>
                 <label className="text-sm font-medium">SSL email</label>
                 <Input placeholder="admin@example.com" value={form.ssl_email} onChange={(e) => setForm({ ...form, ssl_email: e.target.value })} />
+              </div>
+            </div>
+            {/* Per-domain template choice — which saved JSON format this domain's
+                server + rule files use at sync. Manage them in Templates → Layouts
+                & Formats. Blank uses the built-in default. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">Server template</label>
+                <select className="w-full rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.server_template_uuid} onChange={(e) => setForm({ ...form, server_template_uuid: e.target.value })}>
+                  <option value="">Default (built-in format)</option>
+                  {serverTemplates.map((t) => (
+                    <option key={t.uuid} value={t.uuid}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Rule template</label>
+                <select className="w-full rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.rule_template_uuid} onChange={(e) => setForm({ ...form, rule_template_uuid: e.target.value })}>
+                  <option value="">Default (built-in format)</option>
+                  {ruleTemplates.map((t) => (
+                    <option key={t.uuid} value={t.uuid}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                  ))}
+                </select>
               </div>
             </div>
             {/* Live preview of the rule that will be auto-created on sync — the
@@ -762,13 +797,14 @@ function s_error(run: PipelineRun): string | null {
 // ============================================================
 // Sync-to-repo modal (render wslproxy vhost files → commit to GitHub)
 // ============================================================
-const EMPTY_REPO = { environment: 'prod', repo_url: '', branch: 'main', github_integration_id: '', template_uuid: '' };
+const EMPTY_REPO = { environment: 'prod', repo_url: '', branch: 'main', github_integration_id: '', template_uuid: '', rule_template_uuid: '' };
 
 function RepoSyncModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ ...EMPTY_REPO });
   const [preview, setPreview] = useState<SyncToRepoResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [templates, setTemplates] = useState<RenderTemplate[]>([]);
+  const [ruleTemplates, setRuleTemplates] = useState<RenderTemplate[]>([]);
 
   // Prefill from saved Sync Settings so no re-entry is needed.
   useEffect(() => {
@@ -782,9 +818,10 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
         github_integration_id: s.settings?.github_integration_id || '',
       }));
     }).catch(() => {});
-    // Domain JSON-format templates for the picker (falls back to the built-in
-    // default when none is chosen).
+    // Domain server + rule JSON-format templates for the pickers (each falls
+    // back to the built-in default when none is chosen).
     renderTemplatesService.list('domain_wslproxy').then(setTemplates).catch(() => setTemplates([]));
+    renderTemplatesService.list('domain_rule').then(setRuleTemplates).catch(() => setRuleTemplates([]));
   }, []);
 
   const dryRun = async () => {
@@ -828,15 +865,30 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
           <Input placeholder="target branch (PR base, default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
           <RepoUrlField className="col-span-2" value={form.repo_url} onChange={(v) => setForm({ ...form, repo_url: v })} />
           <Input className="col-span-2" placeholder="GitHub integration id (uuid)" value={form.github_integration_id} onChange={(e) => setForm({ ...form, github_integration_id: e.target.value })} />
-          <div className="col-span-2">
+          <div>
             <Select
-              label="JSON format template"
+              label="Server JSON template"
               value={form.template_uuid}
               onChange={(e) => setForm({ ...form, template_uuid: e.target.value })}
-              helperText="Pick a saved domain template, or leave as the built-in default format."
+              helperText="Server file format."
             >
-              <option value="">Default (built-in WSL Proxy format)</option>
+              <option value="">Default (built-in)</option>
               {templates.map((t) => (
+                <option key={t.uuid} value={t.uuid}>
+                  {t.name}{t.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Select
+              label="Rule JSON template"
+              value={form.rule_template_uuid}
+              onChange={(e) => setForm({ ...form, rule_template_uuid: e.target.value })}
+              helperText="Rule file format (path/backend)."
+            >
+              <option value="">Default (built-in)</option>
+              {ruleTemplates.map((t) => (
                 <option key={t.uuid} value={t.uuid}>
                   {t.name}{t.is_default ? ' (default)' : ''}
                 </option>

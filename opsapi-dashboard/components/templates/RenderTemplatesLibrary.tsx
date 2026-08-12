@@ -9,13 +9,15 @@ import {
   renderTemplateTypeLabel,
   type RenderTemplate,
   type RenderTemplateType,
+  type TemplateDefaults,
 } from '@/services/render-templates.service';
 import toast from 'react-hot-toast';
 
 const TYPE_FILTERS: { value: '' | RenderTemplateType; label: string }[] = [
   { value: '', label: 'All types' },
   { value: 'cms_page', label: 'Page layouts' },
-  { value: 'domain_wslproxy', label: 'Domain (WSL Proxy JSON)' },
+  { value: 'domain_wslproxy', label: 'Domain server (JSON)' },
+  { value: 'domain_rule', label: 'Domain rule (JSON)' },
 ];
 
 const SAMPLE_CONTENT: Record<RenderTemplateType, string> = {
@@ -23,10 +25,14 @@ const SAMPLE_CONTENT: Record<RenderTemplateType, string> = {
     '<article class="page">\n  <h1>{{title}}</h1>\n  <div class="excerpt">{{excerpt}}</div>\n  <main>{{content}}</main>\n</article>',
   domain_wslproxy:
     '{\n  "id": "host:{{server_name}}",\n  "root": "{{root}}",\n  "ssl_enabled": {{ssl_enabled}}\n}',
+  domain_rule:
+    '{\n  "id": "{{rule_id}}",\n  "priority": 1,\n  "match": {\n    "rules": { "path": "{{rule_path}}", "path_key": "starts_with" },\n    "response": {\n      "backends": [ { "address": "{{backend}}", "weight": 100 } ]\n    }\n  },\n  "servers": {{servers_json}}\n}',
 };
 const SAMPLE_DATA: Record<RenderTemplateType, string> = {
   cms_page: '{\n  "title": "About Us",\n  "excerpt": "Who we are",\n  "content": "<p>Body…</p>"\n}',
   domain_wslproxy: '{\n  "server_name": "acme.com",\n  "root": "/var/www",\n  "ssl_enabled": true\n}',
+  domain_rule:
+    '{\n  "rule_id": "acme-rule",\n  "rule_path": "/",\n  "backend": "77.68.126.63:80",\n  "servers_json": ["host:acme.com"]\n}',
 };
 
 interface EditorState {
@@ -48,7 +54,7 @@ const emptyEditor = (type: RenderTemplateType = 'cms_page'): EditorState => ({
   is_default: false,
 });
 
-export default function TemplatesTab() {
+export default function RenderTemplatesLibrary() {
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission('templates', 'update');
   const canDelete = hasPermission('templates', 'delete');
@@ -63,6 +69,9 @@ export default function TemplatesTab() {
   const [previewing, setPreviewing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<RenderTemplate | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Production default starters per type (fetched from the backend so the
+  // domain formats always match the live sync engine).
+  const [defaults, setDefaults] = useState<TemplateDefaults>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,10 +87,21 @@ export default function TemplatesTab() {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    renderTemplatesService.getDefaults().then(setDefaults).catch(() => {});
+  }, []);
+
+  // Starter content/sample for a type — the fetched production default, or the
+  // built-in fallback if it hasn't loaded yet.
+  const starterFor = (type: RenderTemplateType) => ({
+    content: defaults[type]?.content ?? SAMPLE_CONTENT[type],
+    sample_data: defaults[type]?.sample_data ?? SAMPLE_DATA[type],
+  });
 
   const openNew = () => {
     setPreview(null);
-    setEditor(emptyEditor((typeFilter as RenderTemplateType) || 'cms_page'));
+    const type = (typeFilter as RenderTemplateType) || 'cms_page';
+    setEditor({ ...emptyEditor(type), ...starterFor(type) });
   };
   const openEdit = (t: RenderTemplate) => {
     setPreview(null);
@@ -282,18 +302,22 @@ export default function TemplatesTab() {
                 value={editor.template_type}
                 onChange={(e) => {
                   const nt = e.target.value as RenderTemplateType;
-                  // Swap the starter samples only when the fields are still the defaults/empty.
+                  // Swap to the new type's default starter, but keep the user's
+                  // edits if they've diverged from the previous type's starter.
+                  const prev = starterFor(editor.template_type);
+                  const next = starterFor(nt);
                   setEditor({
                     ...editor,
                     template_type: nt,
-                    content: editor.content && editor.content !== SAMPLE_CONTENT[editor.template_type] ? editor.content : SAMPLE_CONTENT[nt],
-                    sample_data: editor.sample_data && editor.sample_data !== SAMPLE_DATA[editor.template_type] ? editor.sample_data : SAMPLE_DATA[nt],
+                    content: editor.content && editor.content !== prev.content ? editor.content : next.content,
+                    sample_data: editor.sample_data && editor.sample_data !== prev.sample_data ? editor.sample_data : next.sample_data,
                   });
                 }}
                 disabled={Boolean(editor.uuid)}
               >
                 <option value="cms_page">Page layout</option>
-                <option value="domain_wslproxy">Domain (WSL Proxy JSON)</option>
+                <option value="domain_wslproxy">Domain server (WSL Proxy JSON)</option>
+                <option value="domain_rule">Domain rule (WSL Proxy JSON)</option>
               </Select>
             </div>
 

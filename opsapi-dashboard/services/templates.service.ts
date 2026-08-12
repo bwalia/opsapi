@@ -1,5 +1,14 @@
 import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
 
+// The API wraps single objects as { success, data }. Unwrap to the inner object
+// (tolerating a already-unwrapped body). Returning the envelope was leaving every
+// field undefined on the client (empty PROPERTIES, uncontrolled inputs, blank
+// preview, broken save).
+function unwrap<T>(response: { data?: unknown }): T {
+  const body = response.data as { data?: T } | undefined;
+  return (body && 'data' in body ? (body.data as T) : (body as unknown as T));
+}
+
 // Template type
 export type TemplateType = 'invoice' | 'timesheet';
 
@@ -117,7 +126,7 @@ export const templatesService = {
    */
   async getTemplate(uuid: string): Promise<DocumentTemplate> {
     const response = await apiClient.get(`/api/v2/templates/${uuid}`);
-    return response.data;
+    return unwrap<DocumentTemplate>(response);
   },
 
   /**
@@ -128,7 +137,7 @@ export const templatesService = {
       '/api/v2/templates',
       toFormData(data as unknown as Record<string, unknown>)
     );
-    return response.data;
+    return unwrap<DocumentTemplate>(response);
   },
 
   /**
@@ -139,7 +148,7 @@ export const templatesService = {
       `/api/v2/templates/${uuid}`,
       toFormData(data as unknown as Record<string, unknown>)
     );
-    return response.data;
+    return unwrap<DocumentTemplate>(response);
   },
 
   /**
@@ -157,7 +166,7 @@ export const templatesService = {
       `/api/v2/templates/${uuid}/clone`,
       toFormData({ name })
     );
-    return response.data;
+    return unwrap<DocumentTemplate>(response);
   },
 
   /**
@@ -165,7 +174,7 @@ export const templatesService = {
    */
   async setDefault(uuid: string): Promise<DocumentTemplate> {
     const response = await apiClient.post(`/api/v2/templates/${uuid}/set-default`);
-    return response.data;
+    return unwrap<DocumentTemplate>(response);
   },
 
   /**
@@ -183,7 +192,7 @@ export const templatesService = {
     const response = await apiClient.post(
       `/api/v2/templates/${uuid}/versions/${version}/restore`
     );
-    return response.data;
+    return unwrap<DocumentTemplate>(response);
   },
 
   /**
@@ -192,9 +201,10 @@ export const templatesService = {
   async previewTemplate(uuid: string, data?: Record<string, unknown>): Promise<{ html: string }> {
     const response = await apiClient.post(
       `/api/v2/templates/${uuid}/preview`,
-      data ? toFormData(data) : undefined
+      toFormData({ data: JSON.stringify(data ?? {}) }),
     );
-    return response.data;
+    const d = unwrap<{ rendered_html?: string; html?: string }>(response);
+    return { html: d?.rendered_html ?? d?.html ?? '' };
   },
 
   /**
@@ -203,9 +213,10 @@ export const templatesService = {
   async previewRaw(html: string, data: Record<string, unknown>): Promise<{ html: string }> {
     const response = await apiClient.post(
       '/api/v2/templates/preview-raw',
-      toFormData({ html, ...data })
+      toFormData({ template_html: html, data: JSON.stringify(data ?? {}) }),
     );
-    return response.data;
+    const d = unwrap<{ rendered_html?: string; html?: string }>(response);
+    return { html: d?.rendered_html ?? d?.html ?? '' };
   },
 
   /**

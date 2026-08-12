@@ -140,4 +140,22 @@ return {
             db.update("namespace_roles", { permissions = cjson.encode(perms) }, { id = role.id })
         end
     end,
+
+    -- ========================================================================
+    -- [3] Widen the template_type CHECK to also allow 'domain_rule' (the WSL
+    --     Proxy *rule* JSON format, alongside the server format domain_wslproxy).
+    --     Idempotent: drop-if-exists then recreate with the full set.
+    -- ========================================================================
+    [3] = function()
+        pcall(function()
+            db.query("ALTER TABLE render_templates DROP CONSTRAINT IF EXISTS render_templates_type_check")
+        end)
+        pcall(function()
+            db.query([[
+                ALTER TABLE render_templates
+                ADD CONSTRAINT render_templates_type_check
+                CHECK (template_type IN ('cms_page', 'domain_wslproxy', 'domain_rule'))
+            ]])
+        end)
+    end,
 }
