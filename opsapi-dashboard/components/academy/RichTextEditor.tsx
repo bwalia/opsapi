@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
@@ -155,7 +155,11 @@ const Divider: React.FC = () => <span className={styles.divider} aria-hidden="tr
 // Toolbar
 // ------------------------------------------------------------
 
-const Toolbar: React.FC<{ editor: Editor }> = ({ editor }) => {
+const Toolbar: React.FC<{
+  editor: Editor;
+  sourceMode?: boolean;
+  onToggleSource?: () => void;
+}> = ({ editor, sourceMode, onToggleSource }) => {
   const setLink = useCallback(() => {
     const previous = editor.getAttributes('link').href as string | undefined;
     const url = window.prompt('Link URL', previous ?? 'https://');
@@ -215,6 +219,20 @@ const Toolbar: React.FC<{ editor: Editor }> = ({ editor }) => {
   };
 
   const currentColor = (editor.getAttributes('textStyle').color as string) || '#111827';
+
+  // In HTML source mode the rich buttons would act on a hidden editor, so show
+  // a slim toolbar with just the toggle back to the visual editor. (Placed after
+  // all hooks above so the Rules of Hooks are respected.)
+  if (sourceMode) {
+    return (
+      <div className={styles.toolbar} role="toolbar" aria-label="HTML source">
+        <TbButton title="Back to visual editor" active onClick={() => onToggleSource?.()}>
+          <Code2 size={16} />
+        </TbButton>
+        <span className="ml-2 text-xs font-medium text-secondary-500">Editing HTML source</span>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.toolbar} role="toolbar" aria-label="Formatting">
@@ -341,6 +359,15 @@ const Toolbar: React.FC<{ editor: Editor }> = ({ editor }) => {
       >
         <RemoveFormatting size={16} />
       </TbButton>
+
+      {onToggleSource && (
+        <>
+          <Divider />
+          <TbButton title="View / edit HTML source" onClick={() => onToggleSource()}>
+            <Code2 size={16} />
+          </TbButton>
+        </>
+      )}
     </div>
   );
 };
@@ -383,18 +410,55 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     },
   });
 
-  // Sync external value changes (e.g. async-loaded lesson) without disrupting typing.
-  useEffect(() => {
+  // HTML source ("code view") mode — lets you paste/edit raw HTML directly, the
+  // way CKEditor's source view does. sourceValue holds the raw textarea text.
+  const [sourceMode, setSourceMode] = useState(false);
+  const [sourceValue, setSourceValue] = useState('');
+
+  const toggleSource = useCallback(() => {
     if (!editor) return;
+    if (sourceMode) {
+      // Leaving source view: push the edited HTML back into the editor. TipTap
+      // parses/sanitises it and emitUpdate fires onChange with normalised HTML+JSON.
+      editor.commands.setContent(sourceValue || '', { emitUpdate: true });
+      setSourceMode(false);
+    } else {
+      setSourceValue(editor.getHTML());
+      setSourceMode(true);
+    }
+  }, [editor, sourceMode, sourceValue]);
+
+  // Sync external value changes (e.g. async-loaded content) without disrupting
+  // typing — and never while the user is hand-editing HTML in source view.
+  useEffect(() => {
+    if (!editor || sourceMode) return;
     if (value !== editor.getHTML() && !editor.isFocused) {
       editor.commands.setContent(value || '', { emitUpdate: false });
     }
-  }, [value, editor]);
+  }, [value, editor, sourceMode]);
 
   return (
     <div className={styles.editorShell}>
-      {editor && <Toolbar editor={editor} />}
-      <EditorContent editor={editor} className={styles.editorContent} />
+      {editor && <Toolbar editor={editor} sourceMode={sourceMode} onToggleSource={toggleSource} />}
+      {sourceMode ? (
+        <textarea
+          className="block w-full min-h-80 resize-y bg-surface p-4 font-mono text-[13px] leading-relaxed text-secondary-900 focus:outline-none"
+          value={sourceValue}
+          spellCheck={false}
+          readOnly={!editable}
+          aria-label="HTML source"
+          placeholder="<p>Paste or write raw HTML here…</p>"
+          onChange={(e) => {
+            const html = e.target.value;
+            setSourceValue(html);
+            // Keep the parent form in sync as you type raw HTML. content_json is
+            // rebuilt from HTML on load, so an empty JSON here is fine.
+            onChange?.(html, '');
+          }}
+        />
+      ) : (
+        <EditorContent editor={editor} className={styles.editorContent} />
+      )}
     </div>
   );
 };

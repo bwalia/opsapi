@@ -142,6 +142,10 @@ local academy_enrollment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACA
 local academy_payment_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-payments") or {}
 local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADEMY, "migrations.academy-progress") or {}
 
+-- CMS (website pages + blog: articles, categories, tags — namespace-scoped)
+local cms_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-system") or {}
+local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-menu-items") or {}
+
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
@@ -2275,6 +2279,23 @@ local _migrations = {
     -- Academy learner progress (completed lessons -> dashboard progress bars)
     ['819_create_academy_lesson_progress'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 1),
     ['820_academy_lesson_progress_indexes'] = conditional_array(ProjectConfig.FEATURES.ACADEMY, academy_progress_migrations, 2),
+
+    -- =========================================================================
+    -- CMS (website pages + blog). Feature-gated, so these only run when
+    -- PROJECT_CODE enables `cms`. Tables are ordered so FK targets exist first:
+    -- categories -> tags -> posts -> pages -> post_tags.
+    -- =========================================================================
+    ['833_create_cms_categories'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 1),
+    ['834_create_cms_tags'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 2),
+    ['835_create_cms_posts'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 3),
+    ['836_cms_posts_indexes'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 4),
+    ['837_create_cms_pages'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 5),
+    ['838_create_cms_post_tags'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 6),
+    -- CMS sidebar menu item + RBAC module ("cms") + role grants + enable for namespaces
+    ['839_seed_cms_menu_items'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 1),
+    ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),
+    ['841_grant_cms_permissions'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 3),
+    ['842_enable_cms_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
