@@ -5,7 +5,7 @@ import {
   Search, Plus, Trash2, Edit, RefreshCw, Globe, ShieldCheck, AlertTriangle,
   Clock, X, Cloud, GitBranch, Download, Play, KeyRound, Settings,
 } from 'lucide-react';
-import { Input, Table, Badge, Pagination, Card, Modal, Button, ConfirmDialog } from '@/components/ui';
+import { Input, Table, Badge, Pagination, Card, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import {
   domainService,
@@ -18,6 +18,7 @@ import {
   type PipelineRun,
   type GithubIntegrationLite,
 } from '@/services/domain.service';
+import { renderTemplatesService, type RenderTemplate } from '@/services/render-templates.service';
 import { formatDate } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
@@ -761,12 +762,13 @@ function s_error(run: PipelineRun): string | null {
 // ============================================================
 // Sync-to-repo modal (render wslproxy vhost files → commit to GitHub)
 // ============================================================
-const EMPTY_REPO = { environment: 'prod', repo_url: '', branch: 'main', github_integration_id: '' };
+const EMPTY_REPO = { environment: 'prod', repo_url: '', branch: 'main', github_integration_id: '', template_uuid: '' };
 
 function RepoSyncModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ ...EMPTY_REPO });
   const [preview, setPreview] = useState<SyncToRepoResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [templates, setTemplates] = useState<RenderTemplate[]>([]);
 
   // Prefill from saved Sync Settings so no re-entry is needed.
   useEffect(() => {
@@ -780,6 +782,9 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
         github_integration_id: s.settings?.github_integration_id || '',
       }));
     }).catch(() => {});
+    // Domain JSON-format templates for the picker (falls back to the built-in
+    // default when none is chosen).
+    renderTemplatesService.list('domain_wslproxy').then(setTemplates).catch(() => setTemplates([]));
   }, []);
 
   const dryRun = async () => {
@@ -823,6 +828,21 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
           <Input placeholder="target branch (PR base, default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
           <RepoUrlField className="col-span-2" value={form.repo_url} onChange={(v) => setForm({ ...form, repo_url: v })} />
           <Input className="col-span-2" placeholder="GitHub integration id (uuid)" value={form.github_integration_id} onChange={(e) => setForm({ ...form, github_integration_id: e.target.value })} />
+          <div className="col-span-2">
+            <Select
+              label="JSON format template"
+              value={form.template_uuid}
+              onChange={(e) => setForm({ ...form, template_uuid: e.target.value })}
+              helperText="Pick a saved domain template, or leave as the built-in default format."
+            >
+              <option value="">Default (built-in WSL Proxy format)</option>
+              {templates.map((t) => (
+                <option key={t.uuid} value={t.uuid}>
+                  {t.name}{t.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
 
         {preview && (

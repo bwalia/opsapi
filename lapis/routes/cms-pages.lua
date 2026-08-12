@@ -20,6 +20,7 @@
 ]]
 
 local CmsPageQueries = require "queries.CmsPageQueries"
+local RenderTemplateQueries = require "queries.RenderTemplateQueries"
 local CmsHttp = require "helper.cms-http"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
@@ -149,6 +150,21 @@ return function(app)
         if not ns then return api_response(404, nil, "Namespace not found") end
         local page = CmsPageQueries.getPublishedBySlug(ns.id, self.params.slug)
         if not page then return api_response(404, nil, "Page not found") end
-        return { status = 200, json = { success = true, data = public_page(page) } }
+
+        local out = public_page(page)
+        -- Compose the page into its chosen layout template (if any). `template`
+        -- holds a render_templates slug; "default"/unknown -> raw content_html.
+        local rendered = RenderTemplateQueries.renderBySlug(ns.id, "cms_page", page.template, {
+            title = page.title or "",
+            slug = page.slug or "",
+            excerpt = page.excerpt or "",
+            content = page.content_html or "",
+            featured_image_url = page.featured_image_url or "",
+            seo_title = page.seo_title or "",
+            seo_description = page.seo_description or "",
+        })
+        out.template = page.template
+        out.rendered_html = rendered or page.content_html
+        return { status = 200, json = { success = true, data = out } }
     end)
 end

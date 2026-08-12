@@ -146,6 +146,10 @@ local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADE
 local cms_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-system") or {}
 local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-menu-items") or {}
 
+-- Render Templates (namespace {{slot}} template library). Core/always-on:
+-- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
+local render_template_migrations = require("migrations.render-templates")
+
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
@@ -2296,6 +2300,11 @@ local _migrations = {
     ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),
     ['841_grant_cms_permissions'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 3),
     ['842_enable_cms_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 4),
+
+    -- Render Templates library (namespace-scoped {{slot}} templates). Always-run
+    -- (core): table + the "templates" RBAC module + owner/admin grants.
+    ['843_create_render_templates'] = render_template_migrations[1],
+    ['844_register_templates_module'] = render_template_migrations[2],
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

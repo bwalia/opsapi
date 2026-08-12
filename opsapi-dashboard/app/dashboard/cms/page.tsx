@@ -15,7 +15,9 @@ import {
   Tag as TagIcon,
   Newspaper,
   Files,
+  LayoutTemplate,
 } from 'lucide-react';
+import TemplatesTab from '@/components/cms/TemplatesTab';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -43,13 +45,14 @@ import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
 const PER_PAGE = 20;
-type TabKey = 'posts' | 'pages' | 'categories' | 'tags';
+type TabKey = 'posts' | 'pages' | 'categories' | 'tags' | 'templates';
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'posts', label: 'Blog Posts', icon: <Newspaper className="h-4 w-4" /> },
   { key: 'pages', label: 'Pages', icon: <Files className="h-4 w-4" /> },
   { key: 'categories', label: 'Categories', icon: <FolderTree className="h-4 w-4" /> },
   { key: 'tags', label: 'Tags', icon: <TagIcon className="h-4 w-4" /> },
+  { key: 'templates', label: 'Templates', icon: <LayoutTemplate className="h-4 w-4" /> },
 ];
 
 function statusVariant(status: string): 'success' | 'warning' | 'secondary' | 'info' | 'default' {
@@ -743,6 +746,7 @@ function CmsHub() {
         {tab === 'pages' && <PagesTab />}
         {tab === 'categories' && <CategoriesTab />}
         {tab === 'tags' && <TagsTab />}
+        {tab === 'templates' && <TemplatesTab />}
       </div>
     </div>
   );

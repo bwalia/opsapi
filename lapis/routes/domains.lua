@@ -172,11 +172,25 @@ return function(app)
             -- (+ the opsapi-managed manifest used by the DNS reconcile).
             local WslproxyServer = require("helper.wslproxy-server")
             local rows = DomainQueries.getAllForNamespace(self.namespace.id)
+
+            -- A chosen Template (type domain_wslproxy) from the library overrides
+            -- the raw server_template string, so the JSON format is picked from a
+            -- named, reusable template instead of pasted inline.
+            local server_template = eff.server_template
+            if data.template_uuid and data.template_uuid ~= "" then
+                local RTQ = require("queries.RenderTemplateQueries")
+                local tpl = RTQ.getByUuid(self.namespace.id, data.template_uuid)
+                if tpl and tpl.template_type == "domain_wslproxy"
+                    and tpl.content and tpl.content ~= "" then
+                    server_template = tpl.content
+                end
+            end
+
             -- Pass the namespace's template + rule defaults so rendering is
             -- data-driven (dashboard-configurable), not hardcoded. Also emits a
             -- rule file per referenced rule id so a synced domain actually routes.
             local built = WslproxyServer.build_sync_files(rows, env, eff.data_base, {
-                server_template = eff.server_template,
+                server_template = server_template,
                 rule_template   = eff.rule_template,
                 default_rule_id = eff.default_rule_id,
                 default_backend = eff.default_backend,
