@@ -80,6 +80,23 @@ export {
   type LessonStatus,
 } from './academy.service';
 
+// CMS (website pages + blog: articles, categories, tags)
+export {
+  cmsService,
+  type CmsPost,
+  type CmsPage,
+  type CmsCategory,
+  type CmsTag,
+  type CmsTaxonomyRef,
+  type PostStatus,
+  type PostVisibility,
+  type PageStatus,
+  type PostInput,
+  type PageInput,
+  type PostListParams,
+  type PostListResult,
+} from './cms.service';
+
 // Hospital & Care Home Management
 export { hospitalsService } from './hospitals.service';
 export { patientsService } from './patients.service';

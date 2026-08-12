@@ -40,6 +40,7 @@ ProjectConfig.FEATURES = {
     INVOICING = "invoicing",           -- Invoice generation and payments
     ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
     ACADEMY = "academy",               -- LMS: courses, lessons, rich (WYSIWYG) content
+    CMS = "cms",                       -- Content: website pages + blog (articles, categories, tags)
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -67,6 +68,17 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.ACCOUNTING,
         ProjectConfig.FEATURES.ACADEMY,
+        ProjectConfig.FEATURES.CMS,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
+    -- CMS - Website content (static pages + blog). Installs only the cms tables;
+    -- tenants are isolated by namespace, so it can safely share a database with
+    -- any other project. Also included in the `all` preset.
+    cms = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.CMS,
+        ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -465,6 +477,11 @@ ProjectConfig.PROJECT_MODULES = {
     -- Academy (LMS) modules — RBAC module that routes/academy.lua gates on ("courses")
     academy = {
         { machine_name = "courses", name = "Courses", description = "Course and lesson content management (rich WYSIWYG)", category = "Academy" },
+    },
+
+    -- CMS modules — RBAC module the routes/cms-*.lua gate on ("cms")
+    cms = {
+        { machine_name = "cms", name = "Content", description = "Website pages, blog articles, categories and tags (rich WYSIWYG)", category = "Content" },
     },
 
     -- Theme system (platform-level; always on)

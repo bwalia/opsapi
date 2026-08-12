@@ -587,6 +587,13 @@ load_if("academy", "routes.academy-stripe-webhook")
 load_if("academy", "routes.academy-admin")
 
 -- ============================================
+-- CMS (website pages + blog: articles, categories, tags)
+-- ============================================
+load_if("cms", "routes.cms-posts")
+load_if("cms", "routes.cms-pages")
+load_if("cms", "routes.cms-taxonomy")
+
+-- ============================================
 -- PROJECT MODULE ROUTES (auto-loaded from /projects/)
 -- ============================================
 local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")
