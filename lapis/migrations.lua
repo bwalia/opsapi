@@ -343,6 +343,7 @@ local invoicing_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.I
 
 -- Document Templates (loaded with invoicing feature)
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
+local document_template_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-template-menu") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -1794,6 +1795,9 @@ local _migrations = {
     ['571_doc_create_versions'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 2),
     ['572_doc_create_generated'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 3),
     ['573_doc_seed_defaults'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_migrations, 4),
+    -- Document Templates sidebar menu item (+ enable for existing namespaces)
+    ['574_doc_template_menu_item'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 1),
+    ['575_doc_template_menu_enable'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 2),
 
     -- =========================================================================
     -- VAULT INTEGRATIONS (580-582)

@@ -361,7 +361,12 @@ safe_load_routes("routes.render-templates")
 safe_load_routes("routes.documents")
 safe_load_routes("routes.secrets")
 safe_load_routes("routes.tags")
-safe_load_routes("routes.templates")
+-- DISABLED: the legacy generic templates CRUD (empty `templates` table, no
+-- consumer) registered /api/v2/templates/:id BEFORE routes.document-templates
+-- registers /api/v2/templates/:uuid, so it shadowed GET/PUT/DELETE and every
+-- document-template load 404'd (looked up the wrong, empty table). The invoicing
+-- Document Templates feature owns /api/v2/templates now.
+-- safe_load_routes("routes.templates")
 safe_load_routes("routes.projects")
 safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
