@@ -124,6 +124,10 @@ jobs:
           RP_BASE: https://ring-promoter.diytaxreturn.co.uk
           RP_TOKEN: ${{ secrets.RING_PROMOTER_TOKEN }}
           SHA: ${{ github.sha }}
+          # The poll below runs `git ls-remote` up to 40 times; never let one of
+          # those sit on an interactive credential prompt on the self-hosted
+          # runner (the repo is public, so there is nothing to prompt for).
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -euo pipefail
           if [ -z "${RP_TOKEN:-}" ]; then
@@ -131,26 +135,65 @@ jobs:
             exit 1
           fi
 
+          # The only thing that actually matters is whether a tag now points at
+          # THIS commit — that, not the HTTP status, is what `git describe` in
+          # the build job reads. `git ls-remote` prints the peeled `<sha> ^{}`
+          # line for annotated tags, so a match works for both tag kinds.
+          tag_on_sha() {
+            git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}" 2>/dev/null \
+              | awk -v sha="${SHA}" '$1 == sha { print $2 }' \
+              | sed 's#refs/tags/##; s#\^{}##' | head -n1
+          }
+
+          EXISTING=$(tag_on_sha || true)
+          if [ -n "$EXISTING" ]; then
+            echo "::notice::${SHA} is already tagged ${EXISTING} (re-run, or a previous attempt whose response was lost) — nothing to cut"
+            exit 0
+          fi
+
           echo "Requesting patch tag on ${SHA}"
           # SYNCHRONOUS on purpose (no async=true): the build job runs
           # `git describe`, so the tag must exist before it starts. The k8s Job
-          # caps itself at 10m; 15m here leaves room for pod scheduling without
-          # hanging the runner indefinitely.
+          # caps itself at 10m. curl waits 5m — the edge in front of Ring
+          # Promoter gives up at ~60s anyway, so a longer wait buys nothing and
+          # the 504/dropped-connection path below is the one that does the work.
           BODY=$(mktemp)
-          CODE=$(curl -sS --max-time 900 -o "$BODY" -w "%{http_code}" \
+          CODE=$(curl -sS --max-time 300 -o "$BODY" -w "%{http_code}" \
             -X POST "${RP_BASE}/api/apps/opsapi-autotag/seed" \
             -H "Authorization: Bearer ${RP_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"ring\":\"int\",\"version\":\"patch@${SHA}\"}" || echo 000)
 
           echo "HTTP $CODE"
-          cat "$BODY"; echo
+          # The edge serves a full styled HTML error page on 5xx; dumping it
+          # buries the actual failure under 300 lines of CSS.
+          if head -c 200 "$BODY" | grep -qi '<!doctype html\|<html'; then
+            echo "(response body is an HTML error page from the edge, not Ring Promoter — suppressed)"
+          else
+            cat "$BODY"; echo
+          fi
+
           case "$CODE" in
             200)
               echo "::notice::opsapi tagged — the build below will describe a clean version"
               ;;
-            000)
-              echo "::error::could not reach ${RP_BASE}. Not building: an untagged build would ship a describe-based image tag."
+            000|502|503|504)
+              # We lost the RESPONSE, not necessarily the operation: the tag job
+              # outlives the edge's 60s gateway timeout, so a 504 here routinely
+              # accompanies a tag that was cut successfully (run 31595230817
+              # 504'd after 64s and 1.0.62 landed on the commit regardless).
+              # Decide on the outcome instead of the status code: poll for a tag
+              # on this SHA until the k8s Job's own 10m cap has elapsed.
+              echo "::warning::no usable response from ${RP_BASE} (HTTP ${CODE}) — the tag job may still be running. Polling for a tag on ${SHA}."
+              for _ in $(seq 1 40); do
+                sleep 15
+                TAG=$(tag_on_sha || true)
+                if [ -n "$TAG" ]; then
+                  echo "::notice::opsapi tagged ${TAG} (confirmed by polling; the HTTP response was lost at the edge)"
+                  exit 0
+                fi
+              done
+              echo "::error::no tag appeared on ${SHA} within 10m of an unanswered seed. Not building: an untagged build would ship a describe-based image tag. Check the opsapi-autotag job log in Ring Promoter."
               exit 1
               ;;
             *)
