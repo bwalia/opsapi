@@ -119,6 +119,7 @@ function DocumentTemplateQueries.list(namespace_id, params)
         SELECT
             dt.id as internal_id,
             dt.uuid as id,
+            dt.uuid as uuid,
             dt.namespace_id,
             dt.type,
             dt.name,
@@ -159,6 +160,7 @@ function DocumentTemplateQueries.get(uuid)
         SELECT
             dt.id as internal_id,
             dt.uuid as id,
+            dt.uuid as uuid,
             dt.namespace_id,
             dt.type,
             dt.name,
