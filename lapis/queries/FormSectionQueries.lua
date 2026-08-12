@@ -1295,20 +1295,49 @@ function FormSectionQueries.card_summary(user)
         fold_in(slot.key, slot.total, slot.count)
     end
 
-    -- ── Tax relief tables (rebranded pension_payments hub) ──────────
-    -- The four relief categories seeded 2026-08-06 (Gift Aid, gifts to
-    -- charity, VCT/EIS/SEIS subscriptions) live under the SAME context
-    -- as pension payments but use their own repeating-group question
-    -- keys, so the pp_* pension sum above never sees them and the
-    -- "Tax relief" card stayed on "Nothing recorded yet" after a user
-    -- filled a whole table. Headline money column per table matches
-    -- the seed's hmrc_mapping.total_field (keys hardcoded here for the
-    -- same malformed-config_json reason as the dividend branch — keep
-    -- in step with 20260806_002_seed_tax_relief_questions.lua in the
-    -- diy-tax-return-uk consumer migrations).
+    -- ── Tax relief tables ───────────────────────────────────────────
+    -- The relief categories seeded 2026-08-06 (Gift Aid, gifts to
+    -- charity, VCT/EIS/SEIS subscriptions) hold their money inside
+    -- repeating-group JSON arrays, which neither the generic
+    -- profile-builder branch nor the pp_* pension sum above can see —
+    -- so their hub cards stayed on "Nothing recorded yet" after a user
+    -- filled a whole table.
+    --
+    -- Each table now belongs to its OWN income type: 20260812_005 (in
+    -- the diy-tax-return-uk consumer migrations) split the single
+    -- relief hub into gift_aid / gifts_to_charity / pension_payments /
+    -- vct_subscriptions / eis_subscriptions, one page each. Summing
+    -- them into one bucket would put every charity donation and share
+    -- subscription on the Pension contributions card and leave the
+    -- other four empty, so the total is grouped by question and folded
+    -- into the type that owns it.
+    --
+    -- Headline money column per table matches the seed's
+    -- hmrc_mapping.total_field (keys hardcoded here for the same
+    -- malformed-config_json reason as the dividend branch — keep in
+    -- step with 20260806_002_seed_tax_relief_questions.lua).
     -- Count = table rows entered across all years, pension convention.
-    local relief_row = db.query(string.format([[
+    --
+    -- The four new keys are deliberately NOT added to the generic
+    -- branch's NOT IN list, unlike pension_payments. That exclusion
+    -- exists because the generic sum runs AFTER the pension branch and
+    -- ASSIGNS, wiping it. This branch runs after the generic one and
+    -- folds in ADDITIVELY, so the two compose: a repeating-group table
+    -- summed here, plus any plain currency question an admin later
+    -- adds to the same category, counted there. Nothing double-counts
+    -- — answer_number is null for repeating-group answers, so the
+    -- generic sum cannot see the rows this branch reads.
+    local RELIEF_QUESTION_TYPE = {
+        sa100_gift_aid_payments          = "gift_aid",
+        sa100_shares_gifted_to_charity   = "gifts_to_charity",
+        sa100_property_gifted_to_charity = "gifts_to_charity",
+        sa101_vct_subscriptions          = "vct_subscriptions",
+        sa101_eis_subscriptions          = "eis_subscriptions",
+        sa101_seis_subscriptions         = "eis_subscriptions",
+    }
+    local relief_rows = db.query(string.format([[
         SELECT
+          q.question_key,
           COALESCE(SUM(CASE q.question_key
             WHEN 'sa100_gift_aid_payments'          THEN %s
             WHEN 'sa100_shares_gifted_to_charity'   THEN %s
@@ -1329,13 +1358,18 @@ function FormSectionQueries.card_summary(user)
           AND a.answer_json IS NOT NULL
           AND a.answer_json <> ''
           AND jsonb_typeof(a.answer_json::jsonb) = 'array'
+        GROUP BY q.question_key
     ]], money_cell("amount"), money_cell("net_benefit"), money_cell("net_benefit"),
         money_cell("amount_subscribed"), money_cell("relief_claimed"),
-        money_cell("relief_claimed")), internal_user_id)
-    if relief_row and relief_row[1] then
-        fold_in("pension_payments",
-            tonumber(relief_row[1].total) or 0,
-            tonumber(relief_row[1].row_count) or 0)
+        money_cell("relief_claimed")), internal_user_id) or {}
+    for _, r in ipairs(relief_rows) do
+        -- Two tables share gifts_to_charity and two share
+        -- eis_subscriptions; fold_in is additive, so the second row
+        -- for a key tops up the first rather than replacing it.
+        local key = RELIEF_QUESTION_TYPE[r.question_key]
+        if key then
+            fold_in(key, tonumber(r.total) or 0, tonumber(r.row_count) or 0)
+        end
     end
 
     return out
