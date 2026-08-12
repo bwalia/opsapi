@@ -53,7 +53,7 @@ const emptyEditor = (type: RenderTemplateType = 'cms_page'): EditorState => ({
   is_default: false,
 });
 
-export default function TemplatesTab() {
+export default function RenderTemplatesLibrary() {
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission('templates', 'update');
   const canDelete = hasPermission('templates', 'delete');

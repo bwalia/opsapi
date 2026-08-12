@@ -21,7 +21,7 @@ return {
             db.insert("menu_items", {
                 uuid = MigrationUtils.generateUUID(),
                 key = "document_templates",
-                name = "Document Templates",
+                name = "Templates",
                 icon = "LayoutTemplate",
                 path = "/dashboard/templates",
                 module = "invoices",
@@ -65,13 +65,23 @@ return {
         end
     end,
 
-    -- [3] Relabel the item to "Document Templates" on deployments where an
-    -- earlier run seeded it as "Templates" (disambiguates it from the CMS
-    -- Content → Templates library). Idempotent.
+    -- [3] Point the item at the unified Templates hub (the /dashboard/templates
+    -- page now hosts BOTH the PDF document templates and the {{slot}} layout/
+    -- format library in tabs, so it's just "Templates"). Idempotent — also
+    -- corrects any deployment where an earlier build labelled it differently.
     [3] = function()
         db.query([[
-            UPDATE menu_items SET name = 'Document Templates', updated_at = NOW()
-            WHERE key = 'document_templates' AND name <> 'Document Templates'
+            UPDATE menu_items SET name = 'Templates', updated_at = NOW()
+            WHERE key = 'document_templates' AND name <> 'Templates'
+        ]])
+    end,
+
+    -- [4] Same rename, as a fresh step so a deployment that already ran [3] with
+    -- a previous label picks up "Templates" too (a run-once step won't re-run).
+    [4] = function()
+        db.query([[
+            UPDATE menu_items SET name = 'Templates', updated_at = NOW()
+            WHERE key = 'document_templates' AND name <> 'Templates'
         ]])
     end,
 }
