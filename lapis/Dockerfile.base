@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1.7
+# ===========================================================================
+# OpsAPI dependency BASE image
+# ===========================================================================
+# OpenResty + luarocks + every Lua rock + the runtime system packages OpsAPI
+# needs. These are ~600 MB that essentially NEVER change with app work, yet the
+# old single-stage lapis/Dockerfile recompiled all of it (luarocks-from-source
+# + 12 `luarocks install` C builds) on EVERY deploy — ~12 min per build.
+#
+# This image is built ONLY when its inputs change (via the "Build OpsAPI Base
+# Image" workflow, triggered on edits to this file). The app image
+# (lapis/Dockerfile) does `FROM bwalia/opsapi-base:latest` and just COPYs the
+# Lua source in, so a normal deploy skips the whole compile step.
+#
+# When you add/remove a rock or system package: edit this file and push — the
+# base workflow rebuilds & pushes bwalia/opsapi-base:latest, then the next app
+# build picks it up automatically.
+# ===========================================================================
+FROM openresty/openresty:1.31-alpine-fat
+
+# --- luarocks (built from source) + all Lua rocks ------------------------
+# Kept as two RUN layers (toolchain, then rocks) so the rock list can change
+# without re-fetching/building luarocks itself. The build toolchain (gcc etc.)
+# is only needed to COMPILE the rocks; it stays in this base image, which is
+# acceptable — the base is a build/runtime dependency layer, not the shipped
+# app surface, and keeping it means the app image needs no compiler.
+RUN apk add --no-cache wget make gcc libc-dev openssl-dev \
+    && wget https://luarocks.github.io/luarocks/releases/luarocks-3.12.0.tar.gz \
+    && tar zxpf luarocks-3.12.0.tar.gz \
+    && cd luarocks-3.12.0 \
+    && ./configure \
+    && make \
+    && make install \
+    && cd .. \
+    && rm -rf luarocks-3.12.0 luarocks-3.12.0.tar.gz
+
+RUN luarocks install luaossl \
+    && luarocks install luasec \
+    && luarocks install lapis \
+    && luarocks install bcrypt \
+    && luarocks install tableshape \
+    && luarocks install lua-resty-http \
+    && luarocks install lua-resty-openidc \
+    && luarocks install lua-resty-string \
+    && luarocks install base64 \
+    && luarocks install lua-resty-jwt \
+    && luarocks install payments \
+    && luarocks install lua-resty-mail
+
+# --- runtime system tools ------------------------------------------------
+# DB clients, curl, poppler-utils (pdftotext/pdftoppm for lib/tax-extraction.lua
+# PDF bank-statement parsing), and the MinIO `mc` client.
+RUN apk add --no-cache mysql-client postgresql-client curl poppler-utils \
+    && wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc \
+       --tries=3 --timeout=30 \
+    && chmod +x /usr/local/bin/mc
+
+WORKDIR /app

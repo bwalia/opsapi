@@ -244,21 +244,21 @@ jobs:
           # `TAG=latest` retained for existing consumers. New APP_VERSION /
           # BUILD_NUMBER / BUILD_TIME args are what app.lua reads via
           # os.getenv() so `/`, `/health`, `/metrics` surface the same
-          # version string in every environment.
+          # version string in every environment. OPSAPI_BASE points the app
+          # image at the prebuilt dependency base (built by the "Build OpsAPI
+          # Base Image" workflow) so this build skips the ~12 min luarocks compile.
           build-args: |
             TAG=latest
+            OPSAPI_BASE=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}-base:latest
             APP_VERSION=${{ steps.version.outputs.APP_VERSION }}
             BUILD_NUMBER=${{ steps.version.outputs.BUILD_NUMBER }}
             BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
-          cache-from: type=gha
-          # ignore-error: the GitHub Actions Cache export is a pure build-speed
-          # optimisation. When that service has a blip it returns an HTML error
-          # page instead of JSON, buildx fails to parse it, and the WHOLE build
-          # aborts (cancelling the already-successful image push) — which then
-          # skips smoke + deploy. A build whose image built and pushed fine must
-          # not fail because the cache backend was briefly unavailable, so make
-          # the export non-fatal: on error it logs a warning and continues.
-          cache-to: type=gha,mode=max,ignore-error=true
+          # No layer cache here on purpose. With the heavy dependencies now in
+          # bwalia/opsapi-base, this image is just a handful of tiny COPY layers
+          # on top — it rebuilds in seconds. The old `type=gha` cache was pure
+          # overhead: ~6 min importing a manifest that produced ZERO cache hits
+          # plus ~4 min exporting mode=max every run. Dropping it is what makes
+          # the app build fast; the base image is where dependency caching lives.
 
   # =========================================================================
   # 2. SMOKE TEST
