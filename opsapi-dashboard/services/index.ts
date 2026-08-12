@@ -97,6 +97,16 @@ export {
   type PostListResult,
 } from './cms.service';
 
+// Render Templates (namespace {{slot}} template library — CMS pages + domains)
+export {
+  renderTemplatesService,
+  renderTemplateTypeLabel,
+  type RenderTemplate,
+  type RenderTemplateType,
+  type RenderTemplateInput,
+  type RenderPreview,
+} from './render-templates.service';
+
 // Hospital & Care Home Management
 export { hospitalsService } from './hospitals.service';
 export { patientsService } from './patients.service';

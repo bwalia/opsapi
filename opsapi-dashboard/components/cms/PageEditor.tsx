@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { Button, Input, Textarea, Select, Card } from '@/components/ui';
 import { RichTextEditor } from '@/components/academy';
 import { cmsService, type CmsPage, type PageInput, type PageStatus } from '@/services/cms.service';
+import { renderTemplatesService, type RenderTemplate } from '@/services/render-templates.service';
 import toast from 'react-hot-toast';
 
 function slugify(text: string): string {
@@ -52,6 +53,15 @@ export default function PageEditor({ page }: PageEditorProps) {
   const [contentJson, setContentJson] = useState(page?.content_json ?? '');
   const [status, setStatus] = useState<PageStatus>(page?.status ?? 'draft');
   const [template, setTemplate] = useState(page?.template ?? 'default');
+  const [pageTemplates, setPageTemplates] = useState<RenderTemplate[]>([]);
+
+  // Load the namespace's page-layout templates for the picker.
+  useEffect(() => {
+    renderTemplatesService
+      .list('cms_page')
+      .then(setPageTemplates)
+      .catch(() => setPageTemplates([]));
+  }, []);
   const [menuOrder, setMenuOrder] = useState<number>(page?.menu_order ?? 0);
   const [showInNav, setShowInNav] = useState<boolean>(page?.show_in_nav ?? false);
   const [featuredImage, setFeaturedImage] = useState(page?.featured_image_url ?? '');
@@ -230,12 +240,21 @@ export default function PageEditor({ page }: PageEditorProps) {
 
           <Card>
             <h3 className="mb-3 font-semibold text-secondary-900">Template</h3>
-            <Input
-              value={template}
-              onChange={(e) => setTemplate(e.target.value)}
-              placeholder="default"
-              helperText="Theme template hint for the public site."
-            />
+            <Select value={template} onChange={(e) => setTemplate(e.target.value)}>
+              <option value="default">Default (raw content)</option>
+              {pageTemplates.map((t) => (
+                <option key={t.uuid} value={t.slug}>
+                  {t.name}
+                  {t.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1.5 text-sm text-secondary-500">
+              The layout the public site renders this page into.{' '}
+              <a href="/dashboard/cms?tab=templates" className="text-primary-600 hover:underline">
+                Manage templates
+              </a>
+            </p>
           </Card>
 
           <Card>

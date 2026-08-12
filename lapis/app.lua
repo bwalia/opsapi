@@ -355,6 +355,9 @@ safe_load_routes("routes.groups")
 safe_load_routes("routes.roles")
 safe_load_routes("routes.permissions")
 safe_load_routes("routes.module")
+-- Namespace template library ({{slot}} templates for CMS pages + domain sync).
+-- Always on (core): namespace-scoped, RBAC-gated on the "templates" module.
+safe_load_routes("routes.render-templates")
 safe_load_routes("routes.documents")
 safe_load_routes("routes.secrets")
 safe_load_routes("routes.tags")

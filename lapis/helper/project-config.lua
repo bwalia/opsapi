@@ -394,6 +394,7 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "roles", name = "Roles", description = "Role management within namespace", category = "Core", is_system = true },
         { machine_name = "settings", name = "Settings", description = "Namespace settings", category = "Core", is_system = true },
         { machine_name = "reports", name = "Reports", description = "Analytics and reports", category = "Core", allowed_actions = {"access"} },
+        { machine_name = "templates", name = "Templates", description = "Reusable {{slot}} templates for CMS pages and domain sync formats", category = "Content" },
     },
 
     -- Ecommerce modules
