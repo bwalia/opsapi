@@ -9,6 +9,7 @@ import {
   renderTemplateTypeLabel,
   type RenderTemplate,
   type RenderTemplateType,
+  type TemplateDefaults,
 } from '@/services/render-templates.service';
 import toast from 'react-hot-toast';
 
@@ -68,6 +69,9 @@ export default function RenderTemplatesLibrary() {
   const [previewing, setPreviewing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<RenderTemplate | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Production default starters per type (fetched from the backend so the
+  // domain formats always match the live sync engine).
+  const [defaults, setDefaults] = useState<TemplateDefaults>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,10 +87,21 @@ export default function RenderTemplatesLibrary() {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    renderTemplatesService.getDefaults().then(setDefaults).catch(() => {});
+  }, []);
+
+  // Starter content/sample for a type — the fetched production default, or the
+  // built-in fallback if it hasn't loaded yet.
+  const starterFor = (type: RenderTemplateType) => ({
+    content: defaults[type]?.content ?? SAMPLE_CONTENT[type],
+    sample_data: defaults[type]?.sample_data ?? SAMPLE_DATA[type],
+  });
 
   const openNew = () => {
     setPreview(null);
-    setEditor(emptyEditor((typeFilter as RenderTemplateType) || 'cms_page'));
+    const type = (typeFilter as RenderTemplateType) || 'cms_page';
+    setEditor({ ...emptyEditor(type), ...starterFor(type) });
   };
   const openEdit = (t: RenderTemplate) => {
     setPreview(null);
@@ -287,12 +302,15 @@ export default function RenderTemplatesLibrary() {
                 value={editor.template_type}
                 onChange={(e) => {
                   const nt = e.target.value as RenderTemplateType;
-                  // Swap the starter samples only when the fields are still the defaults/empty.
+                  // Swap to the new type's default starter, but keep the user's
+                  // edits if they've diverged from the previous type's starter.
+                  const prev = starterFor(editor.template_type);
+                  const next = starterFor(nt);
                   setEditor({
                     ...editor,
                     template_type: nt,
-                    content: editor.content && editor.content !== SAMPLE_CONTENT[editor.template_type] ? editor.content : SAMPLE_CONTENT[nt],
-                    sample_data: editor.sample_data && editor.sample_data !== SAMPLE_DATA[editor.template_type] ? editor.sample_data : SAMPLE_DATA[nt],
+                    content: editor.content && editor.content !== prev.content ? editor.content : next.content,
+                    sample_data: editor.sample_data && editor.sample_data !== prev.sample_data ? editor.sample_data : next.sample_data,
                   });
                 }}
                 disabled={Boolean(editor.uuid)}

@@ -36,6 +36,12 @@ export interface RenderPreview {
   placeholders: string[];
 }
 
+export interface TemplateTypeDefault {
+  content: string;
+  sample_data: string;
+}
+export type TemplateDefaults = Partial<Record<RenderTemplateType, TemplateTypeDefault>>;
+
 const TYPE_LABELS: Record<RenderTemplateType, string> = {
   cms_page: 'Page layout',
   domain_wslproxy: 'Domain server (WSL Proxy JSON)',
@@ -55,6 +61,13 @@ function unwrap<T>(response: { data?: unknown }): T {
 // ============================================================
 
 export const renderTemplatesService = {
+  // Starter content + sample data per type (the current production defaults),
+  // used to pre-fill the "New template" dialog.
+  async getDefaults(): Promise<TemplateDefaults> {
+    const response = await apiClient.get('/api/v2/render-templates/defaults');
+    return unwrap<TemplateDefaults>(response);
+  },
+
   async list(type?: RenderTemplateType, search?: string): Promise<RenderTemplate[]> {
     const qs = buildQueryString({ type, search });
     const response = await apiClient.get(`/api/v2/render-templates${qs}`);
