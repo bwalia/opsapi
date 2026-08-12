@@ -321,7 +321,7 @@ function TemplateBuilderContent() {
       setTemplate(data);
       setTemplateHtml(data.template_html || '');
       setTemplateCss(data.template_css || '');
-      setTemplateName(data.name);
+      setTemplateName(data.name || '');
       setDescription(data.description || '');
       setPageSize(data.page_size || 'A4');
       setPageOrientation(data.page_orientation || 'portrait');
@@ -414,21 +414,19 @@ function TemplateBuilderContent() {
     if (!uuid) return;
     setIsPreviewLoading(true);
     try {
-      const result = await templatesService.previewTemplate(uuid, {
-        template_html: templateHtml,
-        template_css: templateCss,
-        primary_color: primaryColor,
-        secondary_color: secondaryColor,
-        font_family: fontFamily,
-      });
-      setPreviewHtml(result.html || '');
+      // Preview the CURRENT editor content (not the last-saved version) so edits
+      // show immediately. previewRaw renders the {{placeholders}} server-side; we
+      // wrap with the current CSS.
+      const result = await templatesService.previewRaw(templateHtml, {});
+      const rendered = result.html || templateHtml;
+      setPreviewHtml(`<style>${templateCss}</style>${rendered}`);
     } catch {
       // Fallback: render raw HTML with CSS in an iframe-compatible wrapper
       setPreviewHtml(`<style>${templateCss}</style>${templateHtml}`);
     } finally {
       setIsPreviewLoading(false);
     }
-  }, [uuid, templateHtml, templateCss, primaryColor, secondaryColor, fontFamily]);
+  }, [uuid, templateHtml, templateCss]);
 
   const handleSave = useCallback(async () => {
     if (!template) return;

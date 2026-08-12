@@ -1798,6 +1798,7 @@ local _migrations = {
     -- Document Templates sidebar menu item (+ enable for existing namespaces)
     ['574_doc_template_menu_item'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 1),
     ['575_doc_template_menu_enable'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 2),
+    ['576_doc_template_menu_relabel'] = conditional_array(ProjectConfig.FEATURES.INVOICING, document_template_menu_migrations, 3),
 
     -- =========================================================================
     -- VAULT INTEGRATIONS (580-582)

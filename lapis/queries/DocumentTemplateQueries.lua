@@ -15,6 +15,26 @@ local cjson = require("cjson")
 
 local DocumentTemplateQueries = {}
 
+-- Coerce a config/variables value into a jsonb literal, whatever shape it
+-- arrives in: a decoded jsonb Lua TABLE (what the model returns on read — passing
+-- it straight back into create/update throws "unknown table passed to
+-- escape_literal"), a JSON string (form-posted), or nil. Returns a db.raw cast.
+local function jsonb_value(val, default_literal)
+    if val == nil then return db.raw(default_literal) end
+    if type(val) == "table" then
+        -- lapis' db.NULL is also a table; treat it as the default.
+        if val == db.NULL then return db.raw(default_literal) end
+        return db.raw(db.interpolate_query("?::jsonb", cjson.encode(val)))
+    end
+    if type(val) == "string" then
+        if val == "" then return db.raw(default_literal) end
+        local ok = pcall(cjson.decode, val)
+        if ok then return db.raw(db.interpolate_query("?::jsonb", val)) end
+        return db.raw(default_literal)
+    end
+    return db.raw(default_literal)
+end
+
 -- ============================================================
 -- Templates
 -- ============================================================
@@ -36,8 +56,8 @@ function DocumentTemplateQueries.create(params)
         template_css = params.template_css,
         header_html = params.header_html,
         footer_html = params.footer_html,
-        config = params.config or db.raw("'{}'::jsonb"),
-        variables = params.variables or db.raw("'[]'::jsonb"),
+        config = jsonb_value(params.config, "'{}'::jsonb"),
+        variables = jsonb_value(params.variables, "'[]'::jsonb"),
         page_size = params.page_size or "A4",
         page_orientation = params.page_orientation or "portrait",
         margin_top = params.margin_top or "20mm",
@@ -208,20 +228,31 @@ function DocumentTemplateQueries.update(uuid, params)
     local old_version = template.version or 1
     local new_version = old_version + 1
 
-    -- Save old content as a version record
-    DocumentTemplateVersionModel:create({
-        uuid = Global.generateUUID(),
-        template_id = template.id,
-        version = old_version,
-        template_html = template.template_html,
-        template_css = template.template_css,
-        header_html = template.header_html,
-        footer_html = template.footer_html,
-        config = template.config or db.raw("'{}'::jsonb"),
-        change_notes = params.change_notes,
-        created_by_uuid = params.updated_by_uuid,
-        created_at = db.raw("NOW()")
-    })
+    -- Snapshot the old content as a version record. Wrapped in pcall + guarded
+    -- on (template_id, version) so it can never abort the save: an earlier
+    -- failed update may have already inserted this version's snapshot, and a
+    -- duplicate there must not block the user from saving.
+    local exists = db.query([[
+        SELECT 1 FROM document_template_versions WHERE template_id = ? AND version = ? LIMIT 1
+    ]], template.id, old_version)
+    if not (exists and exists[1]) then
+        pcall(function()
+            DocumentTemplateVersionModel:create({
+                uuid = Global.generateUUID(),
+                template_id = template.id,
+                version = old_version,
+                template_html = template.template_html,
+                template_css = template.template_css,
+                header_html = template.header_html,
+                footer_html = template.footer_html,
+                -- template.config is a decoded jsonb TABLE on read — re-encode.
+                config = jsonb_value(template.config, "'{}'::jsonb"),
+                change_notes = params.change_notes,
+                created_by_uuid = params.updated_by_uuid,
+                created_at = db.raw("NOW()")
+            })
+        end)
+    end
 
     -- Build update fields
     local update_fields = {
@@ -231,7 +262,7 @@ function DocumentTemplateQueries.update(uuid, params)
 
     local allowed = {
         "name", "description", "template_html", "template_css",
-        "header_html", "footer_html", "config", "variables",
+        "header_html", "footer_html",
         "page_size", "page_orientation",
         "margin_top", "margin_bottom", "margin_left", "margin_right",
         "is_active"
@@ -240,6 +271,13 @@ function DocumentTemplateQueries.update(uuid, params)
         if params[field] ~= nil then
             update_fields[field] = params[field]
         end
+    end
+    -- jsonb columns: encode explicitly (a form-posted string, or a table).
+    if params.config ~= nil then
+        update_fields.config = jsonb_value(params.config, "'{}'::jsonb")
+    end
+    if params.variables ~= nil then
+        update_fields.variables = jsonb_value(params.variables, "'[]'::jsonb")
     end
 
     template:update(update_fields, { returning = "*" })

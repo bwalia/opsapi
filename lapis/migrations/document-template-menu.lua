@@ -21,7 +21,7 @@ return {
             db.insert("menu_items", {
                 uuid = MigrationUtils.generateUUID(),
                 key = "document_templates",
-                name = "Templates",
+                name = "Document Templates",
                 icon = "LayoutTemplate",
                 path = "/dashboard/templates",
                 module = "invoices",
@@ -63,5 +63,15 @@ return {
                 })
             end
         end
+    end,
+
+    -- [3] Relabel the item to "Document Templates" on deployments where an
+    -- earlier run seeded it as "Templates" (disambiguates it from the CMS
+    -- Content → Templates library). Idempotent.
+    [3] = function()
+        db.query([[
+            UPDATE menu_items SET name = 'Document Templates', updated_at = NOW()
+            WHERE key = 'document_templates' AND name <> 'Document Templates'
+        ]])
     end,
 }
