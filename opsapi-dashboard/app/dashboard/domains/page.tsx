@@ -796,27 +796,31 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
     if (!parsed) { toast.error('Enter a valid GitHub repository URL'); return; }
     if (!form.github_integration_id) { toast.error('Select a GitHub integration id'); return; }
     setBusy(true);
-    const tid = toast.loading('Committing to repo…');
+    const tid = toast.loading('Opening pull request…');
     try {
       const r = await domainService.syncToRepo({ ...form, owner: parsed.owner, repo: parsed.repo, branch: parsed.branch || form.branch });
-      toast.success(`Committed ${r.count} file(s) — ${r.commit?.slice(0, 7)}`, { id: tid });
+      toast.success(
+        r.pr_number ? `PR #${r.pr_number} opened — ${r.count} file(s)` : `Synced ${r.count} file(s)`,
+        { id: tid },
+      );
       setPreview(r);
-    } catch { toast.error('Commit failed — check integration & permissions', { id: tid }); } finally { setBusy(false); }
+    } catch { toast.error('Sync failed — check integration & permissions', { id: tid }); } finally { setBusy(false); }
   };
 
   return (
     <Modal isOpen onClose={onClose} title="Sync domains → repo (WSL Proxy vhosts)">
       <div className="space-y-3">
         <p className="text-sm text-secondary-500">
-          Renders each domain in the selected environment as a WSL Proxy server file and commits them
-          in one atomic commit (add/update only — existing files are never touched). The GitHub token
+          Renders each domain in the selected environment as a WSL Proxy server file, commits them to a
+          new branch off the target branch, and opens a pull request (add/update only — existing files
+          are never touched, and nothing lands on the target branch without review). The GitHub token
           comes from a services GitHub integration.
         </p>
         <div className="grid grid-cols-2 gap-2">
           <select className="rounded-md border border-secondary-200 px-3 py-2 text-sm" value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>
             {['prod', 'acc', 'test', 'int', 'dev'].map((x) => <option key={x} value={x}>{x}</option>)}
           </select>
-          <Input placeholder="branch (default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+          <Input placeholder="target branch (PR base, default main)" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
           <RepoUrlField className="col-span-2" value={form.repo_url} onChange={(v) => setForm({ ...form, repo_url: v })} />
           <Input className="col-span-2" placeholder="GitHub integration id (uuid)" value={form.github_integration_id} onChange={(e) => setForm({ ...form, github_integration_id: e.target.value })} />
         </div>
@@ -824,9 +828,22 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
         {preview && (
           <div className="rounded border border-secondary-200 p-2 text-sm">
             <div className="mb-1 font-medium">
-              {preview.dry_run ? 'Preview' : `Committed ${preview.commit?.slice(0, 7)}`} — {preview.count} file(s)
+              {preview.dry_run
+                ? 'Preview'
+                : (preview.pr_number ? `PR #${preview.pr_number} opened` : 'Synced')} — {preview.count} file(s)
               {typeof preview.rules === 'number' && <span className="ml-1 font-normal text-secondary-500">({preview.rules} rule{preview.rules === 1 ? '' : 's'})</span>}
             </div>
+            {!preview.dry_run && preview.pr_url && (
+              <div className="mb-2 rounded bg-emerald-50 border border-emerald-200 p-2 text-xs">
+                <a href={preview.pr_url} target="_blank" rel="noopener noreferrer" className="font-medium text-emerald-700 underline">
+                  Review &amp; merge pull request #{preview.pr_number} →
+                </a>
+                <div className="mt-0.5 text-emerald-700/80">
+                  branch <code>{preview.branch}</code> → <code>{preview.base_branch}</code>
+                  {preview.commit && <> · commit {preview.commit.slice(0, 7)}</>}
+                </div>
+              </div>
+            )}
             <ul className="max-h-40 overflow-auto text-xs text-secondary-600">
               {preview.files.map((f) => <li key={f.path}>{f.path}</li>)}
             </ul>
@@ -845,7 +862,7 @@ function RepoSyncModal({ onClose }: { onClose: () => void }) {
           <Button variant="secondary" onClick={dryRun} disabled={busy}><Download className="h-4 w-4 mr-1" /> Preview</Button>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose}>Close</Button>
-            <Button onClick={commit} disabled={busy}><GitBranch className="h-4 w-4 mr-1" /> Commit</Button>
+            <Button onClick={commit} disabled={busy}><GitBranch className="h-4 w-4 mr-1" /> Sync &amp; open PR</Button>
           </div>
         </div>
       </div>

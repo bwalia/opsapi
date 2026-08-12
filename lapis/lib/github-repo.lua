@@ -134,6 +134,89 @@ function GithubRepo.commit_files(opts)
     return newcommit.sha, nil
 end
 
+--- Create a new branch (ref) pointing at another branch's current head.
+-- @param opts { token, owner, repo, base_branch, new_branch }
+-- @return base_head_sha, nil OR nil, err
+function GithubRepo.create_branch(opts)
+    assert(opts and opts.token and opts.owner and opts.repo and opts.base_branch and opts.new_branch,
+        "token/owner/repo/base_branch/new_branch required")
+    local base = "/repos/" .. opts.owner .. "/" .. opts.repo
+
+    local ref, _, err = api(opts.token, "GET", base .. "/git/ref/heads/" .. opts.base_branch)
+    if err then return nil, "get base ref: " .. err end
+    local base_sha = ref and ref.object and ref.object.sha
+    if not base_sha then return nil, "could not resolve base branch head sha" end
+
+    local _, _, cerr = api(opts.token, "POST", base .. "/git/refs", {
+        ref = "refs/heads/" .. opts.new_branch,
+        sha = base_sha,
+    })
+    -- 422 here usually means the ref already exists — caller picks unique names.
+    if cerr then return nil, "create branch '" .. opts.new_branch .. "': " .. cerr end
+    return base_sha, nil
+end
+
+--- Open a pull request.
+-- @param opts { token, owner, repo, head, base, title?, body? }
+-- @return { url, number }, nil OR nil, err
+function GithubRepo.open_pull_request(opts)
+    assert(opts and opts.token and opts.owner and opts.repo and opts.head and opts.base,
+        "token/owner/repo/head/base required")
+    local base = "/repos/" .. opts.owner .. "/" .. opts.repo
+    local pr, _, err = api(opts.token, "POST", base .. "/pulls", {
+        title = opts.title or "chore(domains): sync from opsapi",
+        head = opts.head,
+        base = opts.base,
+        body = opts.body or "",
+        maintainer_can_modify = true,
+    })
+    if err then return nil, "open pull request: " .. err end
+    if not (pr and pr.html_url) then return nil, "open pull request: no PR returned" end
+    return { url = pr.html_url, number = pr.number }, nil
+end
+
+--- Sync files via a pull request instead of committing straight to the base
+--- branch: branch off `base_branch`, commit the files there, and open a PR back
+--- to `base_branch`. Never fast-forwards the base branch itself, so nothing
+--- lands on (e.g.) main without review.
+-- @param opts { token, owner, repo, base_branch, new_branch, message, files,
+--               author_name?, author_email?, pr_title?, pr_body? }
+-- @return { commit, branch, base, pr_url, pr_number }, nil OR nil, err
+function GithubRepo.sync_via_pull_request(opts)
+    assert(opts and opts.token and opts.owner and opts.repo and opts.base_branch and opts.new_branch,
+        "token/owner/repo/base_branch/new_branch required")
+
+    local _, berr = GithubRepo.create_branch({
+        token = opts.token, owner = opts.owner, repo = opts.repo,
+        base_branch = opts.base_branch, new_branch = opts.new_branch,
+    })
+    if berr then return nil, berr end
+
+    local sha, cerr = GithubRepo.commit_files({
+        token = opts.token, owner = opts.owner, repo = opts.repo,
+        branch = opts.new_branch, message = opts.message, files = opts.files,
+        author_name = opts.author_name, author_email = opts.author_email,
+    })
+    if not sha then return nil, "commit to branch: " .. tostring(cerr) end
+
+    local pr, perr = GithubRepo.open_pull_request({
+        token = opts.token, owner = opts.owner, repo = opts.repo,
+        head = opts.new_branch, base = opts.base_branch,
+        title = opts.pr_title, body = opts.pr_body,
+    })
+    if not pr then
+        -- Branch + commit succeeded; only the PR call failed. Surface both so
+        -- the user can open the PR manually from the pushed branch.
+        return nil, "committed to branch '" .. opts.new_branch ..
+            "' but opening the PR failed: " .. tostring(perr)
+    end
+
+    return {
+        commit = sha, branch = opts.new_branch, base = opts.base_branch,
+        pr_url = pr.url, pr_number = pr.number,
+    }, nil
+end
+
 --- Dispatch a workflow_dispatch event (thin wrapper; the services module has a
 --- fuller one, but the pipeline reuses this for a uniform token path).
 -- @param opts { token, owner, repo, workflow (file name or id), ref?, inputs? }

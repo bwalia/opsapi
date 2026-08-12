@@ -43,8 +43,14 @@ export interface Domain {
 export interface SyncToRepoResult {
   environment: string;
   repo?: string;
+  /** The head branch the sync committed to (created off base_branch). */
   branch?: string;
+  /** The PR target branch (e.g. main) — changes are never pushed here directly. */
+  base_branch?: string;
   commit?: string;
+  /** URL of the pull request opened back to base_branch. */
+  pr_url?: string;
+  pr_number?: number;
   count: number;
   rules?: number;
   warnings?: string[];
