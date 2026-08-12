@@ -27,6 +27,13 @@ services:
     env_file: ".env"
     environment:
       - NODE_ENV=development
+      # Cypress is an e2e-only devDependency. Its post-install downloads a
+      # ~200 MB binary from download.cypress.io, which across the Colima/virtiofs
+      # bridge is slow and often stalls — blocking `npm install`, so `next dev`
+      # never starts and localhost:8039 refuses connections. The dev server does
+      # not need Cypress, so skip the binary download (run `npm run cy:*`
+      # separately when you actually want e2e tests).
+      - CYPRESS_INSTALL_BINARY=0
       # Fall back to localhost only if .env didn't define it.
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://127.0.0.1:4010}
       - FRONTEND_URL=${FRONTEND_URL:-http://127.0.0.1:8039}
