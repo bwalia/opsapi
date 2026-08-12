@@ -15,6 +15,14 @@
 FROM node:24.14-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+# Cypress is an e2e-only devDependency (used by `npm run cy:*` on a dev/CI box),
+# never inside this image. Its post-install otherwise downloads a ~200 MB binary
+# from download.cypress.io on every deps cache-miss — slow, and a single CDN
+# hiccup fails the whole build (as it did on the #554 deploy). Skip that binary
+# download: the npm package still installs so the lockfile stays valid and
+# `next build` is unaffected; the final runner image ships only the Next.js
+# standalone output, so nothing dev-only reaches production anyway.
+ENV CYPRESS_INSTALL_BINARY=0
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 
