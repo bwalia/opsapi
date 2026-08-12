@@ -13,7 +13,7 @@ local db = require("lapis.db")
 
 local RenderTemplateQueries = {}
 
-local VALID_TYPES = { cms_page = true, domain_wslproxy = true }
+local VALID_TYPES = { cms_page = true, domain_wslproxy = true, domain_rule = true }
 RenderTemplateQueries.VALID_TYPES = VALID_TYPES
 
 local function slugify(text)

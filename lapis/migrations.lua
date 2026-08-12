@@ -2310,6 +2310,7 @@ local _migrations = {
     -- (core): table + the "templates" RBAC module + owner/admin grants.
     ['843_create_render_templates'] = render_template_migrations[1],
     ['844_register_templates_module'] = render_template_migrations[2],
+    ['845_render_templates_allow_domain_rule'] = render_template_migrations[3],
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

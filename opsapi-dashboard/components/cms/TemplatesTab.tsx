@@ -15,7 +15,8 @@ import toast from 'react-hot-toast';
 const TYPE_FILTERS: { value: '' | RenderTemplateType; label: string }[] = [
   { value: '', label: 'All types' },
   { value: 'cms_page', label: 'Page layouts' },
-  { value: 'domain_wslproxy', label: 'Domain (WSL Proxy JSON)' },
+  { value: 'domain_wslproxy', label: 'Domain server (JSON)' },
+  { value: 'domain_rule', label: 'Domain rule (JSON)' },
 ];
 
 const SAMPLE_CONTENT: Record<RenderTemplateType, string> = {
@@ -23,10 +24,14 @@ const SAMPLE_CONTENT: Record<RenderTemplateType, string> = {
     '<article class="page">\n  <h1>{{title}}</h1>\n  <div class="excerpt">{{excerpt}}</div>\n  <main>{{content}}</main>\n</article>',
   domain_wslproxy:
     '{\n  "id": "host:{{server_name}}",\n  "root": "{{root}}",\n  "ssl_enabled": {{ssl_enabled}}\n}',
+  domain_rule:
+    '{\n  "id": "{{rule_id}}",\n  "priority": 1,\n  "match": {\n    "rules": { "path": "{{rule_path}}", "path_key": "starts_with" },\n    "response": {\n      "backends": [ { "address": "{{backend}}", "weight": 100 } ]\n    }\n  },\n  "servers": {{servers_json}}\n}',
 };
 const SAMPLE_DATA: Record<RenderTemplateType, string> = {
   cms_page: '{\n  "title": "About Us",\n  "excerpt": "Who we are",\n  "content": "<p>Body…</p>"\n}',
   domain_wslproxy: '{\n  "server_name": "acme.com",\n  "root": "/var/www",\n  "ssl_enabled": true\n}',
+  domain_rule:
+    '{\n  "rule_id": "acme-rule",\n  "rule_path": "/",\n  "backend": "77.68.126.63:80",\n  "servers_json": ["host:acme.com"]\n}',
 };
 
 interface EditorState {
@@ -293,7 +298,8 @@ export default function TemplatesTab() {
                 disabled={Boolean(editor.uuid)}
               >
                 <option value="cms_page">Page layout</option>
-                <option value="domain_wslproxy">Domain (WSL Proxy JSON)</option>
+                <option value="domain_wslproxy">Domain server (WSL Proxy JSON)</option>
+                <option value="domain_rule">Domain rule (WSL Proxy JSON)</option>
               </Select>
             </div>
 

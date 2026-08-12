@@ -4,7 +4,7 @@ import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
 // Types
 // ============================================================
 
-export type RenderTemplateType = 'cms_page' | 'domain_wslproxy';
+export type RenderTemplateType = 'cms_page' | 'domain_wslproxy' | 'domain_rule';
 
 export interface RenderTemplate {
   uuid: string;
@@ -38,7 +38,8 @@ export interface RenderPreview {
 
 const TYPE_LABELS: Record<RenderTemplateType, string> = {
   cms_page: 'Page layout',
-  domain_wslproxy: 'Domain (WSL Proxy JSON)',
+  domain_wslproxy: 'Domain server (WSL Proxy JSON)',
+  domain_rule: 'Domain rule (WSL Proxy JSON)',
 };
 export function renderTemplateTypeLabel(t: RenderTemplateType): string {
   return TYPE_LABELS[t] ?? t;

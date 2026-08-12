@@ -173,25 +173,29 @@ return function(app)
             local WslproxyServer = require("helper.wslproxy-server")
             local rows = DomainQueries.getAllForNamespace(self.namespace.id)
 
-            -- A chosen Template (type domain_wslproxy) from the library overrides
-            -- the raw server_template string, so the JSON format is picked from a
-            -- named, reusable template instead of pasted inline.
-            local server_template = eff.server_template
-            if data.template_uuid and data.template_uuid ~= "" then
-                local RTQ = require("queries.RenderTemplateQueries")
-                local tpl = RTQ.getByUuid(self.namespace.id, data.template_uuid)
-                if tpl and tpl.template_type == "domain_wslproxy"
-                    and tpl.content and tpl.content ~= "" then
-                    server_template = tpl.content
+            -- Chosen library Templates override the raw strings, so both the
+            -- server JSON (domain_wslproxy) and the rule JSON (domain_rule) formats
+            -- are picked from named, reusable templates instead of pasted inline.
+            -- The domain's own fields (server_name, root, rule_path, backend, …)
+            -- fill the {{placeholders}} at sync time.
+            local RTQ = require("queries.RenderTemplateQueries")
+            local function template_content(uuid, want_type)
+                if not uuid or uuid == "" then return nil end
+                local tpl = RTQ.getByUuid(self.namespace.id, uuid)
+                if tpl and tpl.template_type == want_type and tpl.content and tpl.content ~= "" then
+                    return tpl.content
                 end
+                return nil
             end
+            local server_template = template_content(data.template_uuid, "domain_wslproxy") or eff.server_template
+            local rule_template = template_content(data.rule_template_uuid, "domain_rule") or eff.rule_template
 
             -- Pass the namespace's template + rule defaults so rendering is
             -- data-driven (dashboard-configurable), not hardcoded. Also emits a
             -- rule file per referenced rule id so a synced domain actually routes.
             local built = WslproxyServer.build_sync_files(rows, env, eff.data_base, {
                 server_template = server_template,
-                rule_template   = eff.rule_template,
+                rule_template   = rule_template,
                 default_rule_id = eff.default_rule_id,
                 default_backend = eff.default_backend,
                 sync_rules      = eff.sync_rules,
