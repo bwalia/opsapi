@@ -1,0 +1,56 @@
+name: Build OpsAPI Base Image
+
+# Builds the OpsAPI dependency base image (lapis/Dockerfile.base): OpenResty +
+# luarocks + all Lua rocks + runtime system packages. This is the slow,
+# rarely-changing part of the build (~12 min of luarocks compilation), so it is
+# split out and rebuilt ONLY when its inputs change — the app image
+# (lapis/Dockerfile) then does `FROM bwalia/opsapi-base:latest` and builds in
+# seconds.
+#
+# Triggers:
+#   - push touching lapis/Dockerfile.base or this workflow (ANY branch, so a PR
+#     that introduces/edits the base publishes it BEFORE the app build needs it)
+#   - manual dispatch (rebuild on demand, e.g. to pick up a new upstream rock)
+on:
+  push:
+    paths:
+      - 'lapis/Dockerfile.base'
+      - '.github/workflows/build-opsapi-base.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE_REGISTRY: bwalia
+  IMAGE_NAME: opsapi-base
+
+jobs:
+  build-base:
+    name: Build & push opsapi-base
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push opsapi-base
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lapis
+          file: ./lapis/Dockerfile.base
+          push: true
+          # :latest is what lapis/Dockerfile's `FROM` defaults to; the
+          # commit-SHA tag lets you pin/roll back a specific dependency set.
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # Registry cache (durable, no GHA 10 GB eviction) so an unchanged
+          # base rebuilds from cached layers in ~1 min instead of recompiling.
+          cache-from: type=registry,ref=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max,ignore-error=true

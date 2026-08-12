@@ -1,4 +1,18 @@
-FROM openresty/openresty:1.31-alpine-fat
+# syntax=docker/dockerfile:1.7
+# ===========================================================================
+# OpsAPI APP image — thin layer on top of the prebuilt dependency base.
+# ===========================================================================
+# The heavy, rarely-changing dependencies (OpenResty + luarocks + all rocks +
+# system packages) live in bwalia/opsapi-base, built separately by the
+# "Build OpsAPI Base Image" workflow. This image just COPYs the Lua source on
+# top, so a normal deploy is a handful of tiny COPY layers + push (~1 min)
+# instead of a ~12 min luarocks recompile every time.
+#
+# OPSAPI_BASE is overridable (e.g. pin a digest for reproducibility); it
+# defaults to the :latest base. Declared before FROM so it can parameterise it.
+# ===========================================================================
+ARG OPSAPI_BASE=bwalia/opsapi-base:latest
+FROM ${OPSAPI_BASE}
 
 ARG TARGET_NGINX_CONF=nginx.conf
 ARG TAG=latest
@@ -23,40 +37,11 @@ LABEL org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.created="${BUILD_TIME}" \
       opsapi.build.number="${BUILD_NUMBER}"
 
-RUN apk add --no-cache wget make gcc libc-dev \
-    && wget https://luarocks.github.io/luarocks/releases/luarocks-3.12.0.tar.gz \
-    && tar zxpf luarocks-3.12.0.tar.gz \
-    && cd luarocks-3.12.0 \
-    && ./configure \
-    && make \
-    && make install \
-    && cd .. \
-    && rm -rf luarocks-3.12.0 luarocks.tar.gz
-
-RUN apk add --no-cache openssl-dev
-RUN luarocks install luaossl
-RUN luarocks install luasec
-RUN luarocks install lapis
-RUN luarocks install bcrypt
-RUN luarocks install tableshape
-RUN luarocks install lua-resty-http
-RUN luarocks install lua-resty-openidc
-RUN luarocks install lua-resty-string
-RUN luarocks install base64
-RUN luarocks install lua-resty-jwt
-RUN luarocks install payments
-RUN luarocks install lua-resty-mail
-
-RUN apk add mysql-client
-RUN apk add postgresql-client
-RUN apk add curl
-# poppler-utils provides pdftotext + pdftoppm, used by lib/tax-extraction.lua to
-# pull transactions out of uploaded PDF bank statements (and rasterise scanned
-# PDFs for the Vision fallback). Without it, the "Extract" action fails on PDFs.
-RUN apk add --no-cache poppler-utils
-RUN wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc \
-    --tries=3 --timeout=30 && \
-    chmod +x /usr/local/bin/mc
+# NOTE: OpenResty, luarocks + all Lua rocks (luaossl, luasec, lapis, bcrypt,
+# tableshape, lua-resty-*, base64, payments, lua-resty-mail) and the runtime
+# system tools (mysql-client, postgresql-client, curl, poppler-utils, MinIO mc)
+# are all provided by the bwalia/opsapi-base image this builds FROM. To change
+# a dependency, edit lapis/Dockerfile.base (which rebuilds the base image).
 
 WORKDIR /app
 
