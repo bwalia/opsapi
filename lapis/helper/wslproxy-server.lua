@@ -291,14 +291,18 @@ end
 -- @param env string      environment/profile
 -- @param data_base string|nil  data root (default .github/wslproxy/data)
 -- @param opts table|nil  { server_template, rule_template, default_rule_id,
---                          default_backend, sync_rules (default true) }
+--                          default_backend, sync_rules (default true),
+--                          resolve_template(uuid, type),
+--                          -- Attached shared rules (a domain with wslproxy_rule_id):
+--                          fetch_rule(rule_id) -> content, err       (canonical JSON from WSL Proxy)
+--                          rule_exists_in_repo(path) -> bool, err     (skip if already committed) }
 -- @return { files={{path,content}...}, rendered={{path,server_name,content}...},
---           count, rules_count, warnings={...} }
+--           count, rules_count, warnings={...}, skipped={{rule_id,path,reason}...} }
 function WslproxyServer.build_sync_files(domains, env, data_base, opts)
     opts = opts or {}
     local sync_rules = opts.sync_rules ~= false -- default ON
-    local files, rendered, manifest, warnings = {}, {}, {}, {}
-    -- rule_id -> { backend, servers = {server-id...} }
+    local files, rendered, manifest, warnings, skipped = {}, {}, {}, {}, {}
+    -- rule_id -> { backend, servers = {server-id...}, attached }
     local rules = {}
     local rule_order = {}
 
@@ -313,13 +317,19 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
                 table.insert(rendered, { path = path, server_name = d.domain_name, content = json })
                 table.insert(manifest, { server_name = d.domain_name, target = d.proxy_target or "" })
 
-                -- Accumulate the rule this server references.
+                -- Accumulate the rule this server references. A domain with an
+                -- explicit wslproxy_rule_id has ATTACHED a shared WSL Proxy rule
+                -- (chosen from the live API) — that rule is fetched + reused, not
+                -- generated. Any contributing domain marking it attached wins.
                 local rid = WslproxyServer.effective_rule_id(d, opts)
+                local attached = trim(d.wslproxy_rule_id) ~= ""
                 if not rules[rid] then
                     rules[rid] = { backend = effective_backend(d, opts), servers = {},
-                        path = trim(d.rule_path), rule_template_uuid = trim(d.rule_template_uuid or "") }
+                        path = trim(d.rule_path), rule_template_uuid = trim(d.rule_template_uuid or ""),
+                        attached = attached }
                     table.insert(rule_order, rid)
                 else
+                    if attached then rules[rid].attached = true end
                     if trim(rules[rid].backend) == "" then
                         rules[rid].backend = effective_backend(d, opts)
                     end
@@ -336,7 +346,41 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
     if sync_rules then
         for _, rid in ipairs(rule_order) do
             local r = rules[rid]
-            if trim(r.backend) == "" then
+            local rule_file_path = WslproxyServer.rule_repo_path(env, rid .. ".json", data_base)
+
+            if r.attached and opts.fetch_rule then
+                -- Attached shared rule: never generate it. Skip if it is already
+                -- committed (don't overwrite a rule that may be owned elsewhere);
+                -- otherwise fetch the canonical JSON from WSL Proxy and push it so
+                -- the server's dependency exists.
+                local present = false
+                if opts.rule_exists_in_repo then
+                    local exists, exerr = opts.rule_exists_in_repo(rule_file_path)
+                    if exists == true then
+                        present = true
+                    elseif exists == nil and exerr then
+                        -- Couldn't confirm: fall through and push the canonical
+                        -- rule (safe — it IS the source of truth), but flag it.
+                        table.insert(warnings, "rule '" .. rid .. "' existence check failed ("
+                            .. tostring(exerr) .. "); pushing the WSL Proxy copy")
+                    end
+                end
+                if present then
+                    table.insert(skipped, { rule_id = rid, path = rule_file_path, reason = "already in repo" })
+                else
+                    local content, ferr = opts.fetch_rule(rid)
+                    if content and content ~= "" then
+                        table.insert(files, { path = rule_file_path, content = content })
+                        table.insert(rendered, { path = rule_file_path,
+                            server_name = "(rule from wslproxy) " .. rid, content = content })
+                        rules_count = rules_count + 1
+                    else
+                        table.insert(warnings, "attached rule '" .. rid
+                            .. "' could not be fetched from WSL Proxy (" .. tostring(ferr)
+                            .. "); its server(s) will not route until it is present")
+                    end
+                end
+            elseif trim(r.backend) == "" then
                 table.insert(warnings, "rule '" .. rid .. "' skipped: no proxy_target/default_backend "
                     .. "— set one to generate its backend")
             else
@@ -371,6 +415,7 @@ function WslproxyServer.build_sync_files(domains, env, data_base, opts)
         count = #manifest,
         rules_count = rules_count,
         warnings = warnings,
+        skipped = skipped, -- attached rules already present in the repo (not re-pushed)
     }
 end
 

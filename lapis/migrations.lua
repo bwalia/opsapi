@@ -332,6 +332,8 @@ local domain_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.SERV
 local domain_wslproxy_fields_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-wslproxy-fields") or {}
 local domain_pipeline_runs_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-pipeline-runs") or {}
 local domain_sync_settings_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-sync-settings") or {}
+local wslproxy_connection_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.wslproxy-connection") or {}
+local domain_sync_repos_migrations = load_if_enabled(ProjectConfig.FEATURES.SERVICES, "migrations.domain-sync-repos") or {}
 
 -- Timesheets
 local timesheet_system_migrations = load_if_enabled(ProjectConfig.FEATURES.TIMESHEETS, "migrations.timesheet-system") or {}
@@ -1741,6 +1743,9 @@ local _migrations = {
     ['607_domain_wslproxy_fields'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 1),
     ['613_domain_rule_path'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 2),
     ['614_domain_template_uuids'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 3),
+    ['615_domain_sync_repo_uuid'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_wslproxy_fields_migrations, 4),
+    ['616_wslproxy_connection'] = conditional_array(ProjectConfig.FEATURES.SERVICES, wslproxy_connection_migrations, 1),
+    ['617_domain_sync_repos'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_sync_repos_migrations, 1),
     ['608_domain_pipeline_runs'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_pipeline_runs_migrations, 1),
     ['609_domain_sync_settings'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_sync_settings_migrations, 1),
     ['612_domain_sync_templates'] = conditional_array(ProjectConfig.FEATURES.SERVICES, domain_sync_settings_migrations, 2),

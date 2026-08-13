@@ -38,26 +38,66 @@ export interface Domain {
   rule_path?: string;
   server_template_uuid?: string;
   rule_template_uuid?: string;
+  // Which managed repo this domain syncs to (blank -> namespace default repo).
+  sync_repo_uuid?: string;
   created_at: string;
   updated_at: string;
 }
 
-export interface SyncToRepoResult {
-  environment: string;
-  repo?: string;
-  /** The head branch the sync committed to (created off base_branch). */
+/** A managed GitHub repo a namespace can sync domains to (beyond the default). */
+export interface DomainSyncRepo {
+  uuid: string;
+  name?: string;
+  owner: string;
+  repo: string;
   branch?: string;
-  /** The PR target branch (e.g. main) — changes are never pushed here directly. */
+  github_integration_id?: string;
+}
+
+/** One repo group's result — the sync groups domains by resolved repo and opens
+ *  one PR per repo, so each entry is an independent success/failure. */
+export interface RepoSyncResult {
+  repo: string;
+  repo_name?: string;
+  branch: string;
+  ok: boolean;
+  error?: string;
+  /** The PR target (base) branch — changes are never pushed here directly. */
   base_branch?: string;
+  /** The head branch the sync committed to (created off base). */
+  head_branch?: string;
   commit?: string;
-  /** URL of the pull request opened back to base_branch. */
   pr_url?: string;
   pr_number?: number;
-  count: number;
+  count?: number;
   rules?: number;
   warnings?: string[];
+  /** Attached rules already present in the repo (reused, not re-pushed). */
+  skipped?: { rule_id: string; path: string; reason: string }[];
+  files?: { path: string; server_name: string; content?: string }[];
+}
+
+export interface SyncToRepoResult {
+  environment: string;
   dry_run?: boolean;
-  files: { path: string; server_name: string; content?: string }[];
+  any_failed?: boolean;
+  repos: RepoSyncResult[];
+}
+
+export interface WslproxyStatus {
+  connected: boolean;
+  api_url?: string;
+  email?: string;
+  has_secret?: boolean;
+  connected_at?: string;
+}
+
+/** A shared WSL Proxy rule, as returned by the control-plane API. */
+export interface WslproxyRule {
+  id: string;
+  name?: string;
+  profile_id?: string;
+  [key: string]: unknown;
 }
 
 export interface DomainStats {
@@ -246,6 +286,13 @@ export const domainService = {
     return unwrap<Domain>(response);
   },
 
+  // Every domain (uuid, name, environment, assigned repo) with no page cap —
+  // for the sync modal's assignment matrix.
+  async listAllDomains(): Promise<Pick<Domain, 'uuid' | 'domain_name' | 'environment' | 'sync_repo_uuid'>[]> {
+    const response = await apiClient.get('/api/v2/domains/all');
+    return unwrap<Pick<Domain, 'uuid' | 'domain_name' | 'environment' | 'sync_repo_uuid'>[]>(response);
+  },
+
   async createDomain(data: Record<string, unknown>): Promise<Domain> {
     const response = await apiClient.post('/api/v2/domains', toFormData(data));
     return unwrap<Domain>(response);
@@ -275,8 +322,24 @@ export const domainService = {
     return unwrap<DomainStats>(response);
   },
 
-  async syncToRepo(data: Record<string, unknown>): Promise<SyncToRepoResult> {
-    const response = await apiClient.post('/api/v2/domains/sync-to-repo', toFormData(data));
+  // Sync selected domains, each to its assigned repo (one PR per repo). The
+  // api-client posts form-urlencoded, so the structured fields (domain_uuids
+  // array, assignments map) are sent as JSON STRINGS — the backend decodes them.
+  async syncToRepo(data: {
+    environment?: string;
+    dry_run?: boolean;
+    domain_uuids?: string[];
+    assignments?: Record<string, string>;
+    message?: string;
+  }): Promise<SyncToRepoResult> {
+    const payload: Record<string, unknown> = {
+      environment: data.environment,
+      dry_run: data.dry_run ? 'true' : 'false',
+      domain_uuids: JSON.stringify(data.domain_uuids ?? []),
+      assignments: JSON.stringify(data.assignments ?? {}),
+    };
+    if (data.message) payload.message = data.message;
+    const response = await apiClient.post('/api/v2/domains/sync-to-repo', toFormData(payload));
     return unwrap<SyncToRepoResult>(response);
   },
 
@@ -386,6 +449,49 @@ export const domainService = {
   async listGithubIntegrations(): Promise<GithubIntegrationLite[]> {
     const response = await apiClient.get('/api/v2/domains/github-integrations');
     return unwrap<GithubIntegrationLite[]>(response);
+  },
+
+  // ---- Managed sync repos (multi-repo targets) ----
+  async listSyncRepos(): Promise<DomainSyncRepo[]> {
+    const response = await apiClient.get('/api/v2/domains/sync-repos');
+    return unwrap<DomainSyncRepo[]>(response);
+  },
+
+  async createSyncRepo(data: { name?: string; repo_url?: string; owner?: string; repo?: string; branch?: string; github_integration_id?: string }): Promise<DomainSyncRepo> {
+    const response = await apiClient.post('/api/v2/domains/sync-repos', toFormData(data));
+    return unwrap<DomainSyncRepo>(response);
+  },
+
+  async updateSyncRepo(uuid: string, data: Record<string, unknown>): Promise<DomainSyncRepo> {
+    const response = await apiClient.put(`/api/v2/domains/sync-repos/${uuid}`, toFormData(data));
+    return unwrap<DomainSyncRepo>(response);
+  },
+
+  async deleteSyncRepo(uuid: string): Promise<void> {
+    await apiClient.delete(`/api/v2/domains/sync-repos/${uuid}`);
+  },
+
+  // ---- WSL Proxy connection + shared rules ----
+  async getWslproxyStatus(): Promise<WslproxyStatus> {
+    const response = await apiClient.get('/api/v2/domains/wslproxy/status');
+    return unwrap<WslproxyStatus>(response);
+  },
+
+  async connectWslproxy(data: { api_url: string; email?: string; password: string }): Promise<WslproxyStatus> {
+    const response = await apiClient.post('/api/v2/domains/wslproxy/connect', toFormData(data));
+    return unwrap<WslproxyStatus>(response);
+  },
+
+  async disconnectWslproxy(): Promise<void> {
+    await apiClient.delete('/api/v2/domains/wslproxy/disconnect');
+  },
+
+  /** Searchable list of shared rules for the domain form's rule dropdown,
+   *  optionally scoped to an environment (rule profile_id). */
+  async listWslproxyRules(search?: string, environment?: string): Promise<WslproxyRule[]> {
+    const qs = buildQueryString({ search: search || undefined, environment: environment || undefined });
+    const response = await apiClient.get(`/api/v2/domains/wslproxy/rules${qs}`);
+    return unwrap<WslproxyRule[]>(response);
   },
 };
 
