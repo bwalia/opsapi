@@ -77,6 +77,10 @@ return function(app)
         return { status = status, json = { success = false, error = msg } }
     end
 
+    local function trim(s)
+        return (tostring(s == nil and "" or s):gsub("^%s+", ""):gsub("%s+$", ""))
+    end
+
     -- Load a domain and enforce namespace ownership (platform admins bypass).
     local function load_owned_domain(self, uuid)
         local domain = DomainQueries.getDomain(uuid)
@@ -128,6 +132,22 @@ return function(app)
         end)
     ))
 
+    -- Minimal list of EVERY domain (no pagination cap) for the sync modal's
+    -- domain -> repo assignment matrix.
+    app:get("/api/v2/domains/all", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "read", function(self)
+            local rows = DomainQueries.getAllForNamespace(self.namespace.id)
+            local out = {}
+            for _, d in ipairs(rows or {}) do
+                table.insert(out, {
+                    uuid = d.uuid, domain_name = d.domain_name,
+                    environment = d.environment or "prod", sync_repo_uuid = d.sync_repo_uuid or "",
+                })
+            end
+            return ok_resp(out)
+        end)
+    ))
+
     -- Export: a bare JSON array consumed by the k3s sync job.
     app:get("/api/v2/domains/export", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("domains", "read", function(self)
@@ -157,27 +177,70 @@ return function(app)
     app:post("/api/v2/domains/sync-to-repo", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("domains", "update", function(self)
             local data = parse_body(self)
-            -- Resolve target from saved Sync Settings; request params override.
+            -- The single Sync Settings row is the DEFAULT repo + namespace defaults
+            -- (backend, rule id, sync_rules, data_base, environment, templates).
             local SyncSettings = require("queries.DomainSyncSettingsQueries")
-            local eff, missing = SyncSettings.resolve(self.namespace.id, data)
-            if #missing > 0 then
-                return err_resp(400, "Missing " .. table.concat(missing, ", ")
-                    .. " — set them here or configure Sync Settings once")
-            end
+            local eff = SyncSettings.resolve(self.namespace.id, data)
             local env = eff.environment
-            local owner = eff.owner
-            local repo = eff.repo
+            local default_repo = {
+                name = "Default", owner = eff.owner, repo = eff.repo, branch = eff.branch or "main",
+                github_integration_id = eff.github_integration_id,
+            }
+            local is_dry = data.dry_run == true or data.dry_run == "true"
 
-            -- Render every domain in this namespace+env to a WSL Proxy server file
-            -- (+ the opsapi-managed manifest used by the DNS reconcile).
+            -- domain_uuids (array) and assignments (map) may arrive as real JSON
+            -- (JSON body) OR as a JSON string inside a form field (the dashboard's
+            -- api-client defaults to form-urlencoded). Accept both.
+            local function as_table(v)
+                if type(v) == "table" then return v end
+                if type(v) == "string" and v ~= "" then
+                    local ok, decoded = pcall(cjson.decode, v)
+                    if ok and type(decoded) == "table" then return decoded end
+                end
+                return nil
+            end
+            local req_assignments = as_table(data.assignments) or {}
+            local req_domain_uuids = as_table(data.domain_uuids)
+
+            -- Persist the domain -> repo assignments the user made in the sync
+            -- modal, so the mapping is remembered next time. A dry-run is a pure
+            -- PREVIEW and must not mutate anything.
+            if not is_dry then
+                for dom_uuid, repo_uuid in pairs(req_assignments) do
+                    local dom = DomainQueries.getDomain(dom_uuid)
+                    if dom and tonumber(dom.namespace_id) == tonumber(self.namespace.id) then
+                        DomainQueries.updateDomain(dom_uuid,
+                            { sync_repo_uuid = (type(repo_uuid) == "string" and repo_uuid) or "" })
+                    end
+                end
+            end
+
+            -- Managed repos (uuid -> repo). A domain resolves to its assigned
+            -- managed repo, else the default repo above.
+            local RepoQ = require("queries.DomainSyncRepoQueries")
+            local repo_by_uuid = {}
+            for _, r in ipairs(RepoQ.list(self.namespace.id)) do repo_by_uuid[r.uuid] = r end
+            local function resolve_repo(d)
+                -- Prefer the in-flight assignment from the request (the user's
+                -- current, possibly-unsaved choice); fall back to the stored one.
+                local uuid = req_assignments[d.uuid] ~= nil and trim(req_assignments[d.uuid]) or trim(d.sync_repo_uuid)
+                if uuid ~= "" and repo_by_uuid[uuid] then return repo_by_uuid[uuid] end
+                return default_repo
+            end
+
             local WslproxyServer = require("helper.wslproxy-server")
             local rows = DomainQueries.getAllForNamespace(self.namespace.id)
 
-            -- Chosen library Templates override the raw strings, so both the
-            -- server JSON (domain_wslproxy) and the rule JSON (domain_rule) formats
-            -- are picked from named, reusable templates instead of pasted inline.
-            -- The domain's own fields (server_name, root, rule_path, backend, …)
-            -- fill the {{placeholders}} at sync time.
+            -- Only sync the selected domains (the sync modal sends the checked
+            -- set). Omitted -> every domain in the environment (backward compat).
+            local selected = nil
+            if req_domain_uuids and #req_domain_uuids > 0 then
+                selected = {}
+                for _, u in ipairs(req_domain_uuids) do selected[tostring(u)] = true end
+            end
+
+            -- Named, reusable JSON-format templates (per-domain choice wins; else
+            -- the Sync Settings default; else the built-in format).
             local RTQ = require("queries.RenderTemplateQueries")
             local function template_content(uuid, want_type)
                 if not uuid or uuid == "" then return nil end
@@ -187,105 +250,167 @@ return function(app)
                 end
                 return nil
             end
-            local server_template = template_content(data.template_uuid, "domain_wslproxy") or eff.server_template
-            local rule_template = template_content(data.rule_template_uuid, "domain_rule") or eff.rule_template
 
-            -- Pass the namespace's template + rule defaults so rendering is
-            -- data-driven (dashboard-configurable), not hardcoded. Also emits a
-            -- rule file per referenced rule id so a synced domain actually routes.
-            local built = WslproxyServer.build_sync_files(rows, env, eff.data_base, {
-                server_template = server_template,
-                rule_template   = rule_template,
+            -- Attached shared rules are fetched LIVE from WSL Proxy (if connected)
+            -- and pushed only when missing; otherwise domains fall back to
+            -- template-generated rules (backward compatible).
+            local fetch_rule = nil
+            do
+                local WslproxyClient = require("lib.wslproxy-client")
+                local wc = WslproxyClient.for_namespace(self.namespace.id)
+                if wc then
+                    fetch_rule = function(rid)
+                        local _, raw, ferr = wc.get_rule(rid)
+                        if raw and raw ~= "" then return raw, nil end
+                        return nil, ferr or "fetch failed"
+                    end
+                end
+            end
+
+            -- Group the (selected) domains by their resolved repo.
+            local groups, order = {}, {}
+            for _, d in ipairs(rows or {}) do
+                if (d.environment or "prod") == env and (not selected or selected[tostring(d.uuid)]) then
+                    local rp = resolve_repo(d)
+                    local key = tostring(rp.owner) .. "/" .. tostring(rp.repo) .. "@" .. tostring(rp.branch)
+                    if not groups[key] then
+                        groups[key] = { repo = rp, rows = {} }
+                        table.insert(order, key)
+                    end
+                    table.insert(groups[key].rows, d)
+                end
+            end
+            if #order == 0 then
+                return err_resp(400, "No domains selected for environment '" .. env .. "'")
+            end
+
+            local base_opts = {
                 default_rule_id = eff.default_rule_id,
                 default_backend = eff.default_backend,
                 sync_rules      = eff.sync_rules,
-                -- Per-domain templates: each domain's server_template_uuid /
-                -- rule_template_uuid (chosen on the domain form) wins over the
-                -- sync-level pick above. This resolver turns a uuid into content.
-                resolve_template = function(uuid, want_type)
-                    return template_content(uuid, want_type)
-                end,
-            })
-            local files = built.files
-            local rendered = built.rendered
+                resolve_template = function(uuid, want_type) return template_content(uuid, want_type) end,
+                fetch_rule = fetch_rule,
+            }
+            -- Per-group server/rule template = the repo has none, so use the
+            -- namespace default (per-domain choice still wins inside the renderer).
+            base_opts.server_template = eff.server_template
+            base_opts.rule_template = eff.rule_template
 
-            if built.count == 0 then
-                return err_resp(400, "No domains for environment '" .. env .. "' to sync")
+            -- DRY RUN: render each group; no token, no commit, no existence check.
+            if is_dry then
+                local out = {}
+                for _, key in ipairs(order) do
+                    local g = groups[key]
+                    local built = WslproxyServer.build_sync_files(g.rows, env, eff.data_base, base_opts)
+                    table.insert(out, { repo = g.repo.owner .. "/" .. g.repo.repo, branch = g.repo.branch,
+                        repo_name = g.repo.name, count = #built.files, rules = built.rules_count,
+                        warnings = built.warnings, skipped = built.skipped, files = built.rendered })
+                end
+                return ok_resp({ dry_run = true, environment = env, repos = out })
             end
 
-            -- Dry-run: return the rendered files without committing.
-            if data.dry_run == true or data.dry_run == "true" then
-                return ok_resp({ dry_run = true, environment = env, count = #files,
-                    rules = built.rules_count, warnings = built.warnings, files = rendered })
-            end
-
-            -- Resolve the GitHub token from the linked services integration.
-            if not eff.github_integration_id then
-                return err_resp(400, "No GitHub integration linked — configure Sync Settings (repo + GitHub auth)")
-            end
+            -- Resolve + decrypt a GitHub token PER repo (each repo carries its own
+            -- integration). Memoised so repos sharing an integration decrypt once.
             local ok_sq, ServiceQueries = pcall(require, "queries.ServiceQueries")
-            if not ok_sq then return err_resp(500, "services module unavailable") end
-            local integration = ServiceQueries.getGithubIntegration(eff.github_integration_id, true)
-            if not integration then return err_resp(404, "GitHub integration not found") end
-            if tonumber(integration.namespace_id) ~= tonumber(self.namespace.id) then
-                return err_resp(403, "Integration belongs to another namespace")
-            end
-            local token = integration.github_token_decrypted
-            if not token or token == "" then
-                return err_resp(400, "Could not decrypt the GitHub integration token")
+            local token_cache = {}
+            local function resolve_token(integration_id)
+                if not integration_id or integration_id == "" then
+                    return nil, "no GitHub integration set for this repo — configure it in Sync Settings"
+                end
+                if token_cache[integration_id] then
+                    return token_cache[integration_id].token, token_cache[integration_id].err
+                end
+                local tok, err
+                if not ok_sq then
+                    err = "services module unavailable"
+                else
+                    local integ = ServiceQueries.getGithubIntegration(integration_id, true)
+                    if not integ then err = "GitHub integration not found"
+                    elseif tonumber(integ.namespace_id) ~= tonumber(self.namespace.id) then
+                        err = "Integration belongs to another namespace"
+                    else
+                        tok = integ.github_token_decrypted
+                        if not tok or tok == "" then err = "Could not decrypt the GitHub integration token" end
+                    end
+                end
+                token_cache[integration_id] = { token = tok, err = err }
+                return tok, err
             end
 
-            -- Never fast-forward the base branch (e.g. main) directly. Branch off
-            -- it, commit the rendered files there, and open a PR back to it so a
-            -- human reviews + merges. base_branch is the configured target
-            -- (eff.branch, usually main); the head branch is unique per sync.
             local GithubRepo = require("lib.github-repo")
             local Global = require("helper.global")
-            local base_branch = eff.branch or "main"
-            local short = tostring(Global.generateUUID()):gsub("%-", ""):sub(1, 6)
-            local new_branch = "opsapi-domains/sync-" .. env .. "-"
-                .. os.date("!%Y%m%d-%H%M%S") .. "-" .. short
-            local commit_msg = data.message
-                or ("chore(domains): sync " .. #files .. " " .. env .. " domains from opsapi")
-            local pr_body = table.concat({
-                "Automated domain sync from opsapi — please review and merge.",
-                "",
-                "- Environment: `" .. env .. "`",
-                "- Files: " .. #files .. " (rules: " .. tostring(built.rules_count) .. ")",
-                "- Target branch: `" .. base_branch .. "`",
-                "",
-                "Generated by the domains module. Merging applies these WSL Proxy"
-                    .. " vhost changes to `" .. base_branch .. "`.",
-            }, "\n")
 
-            local result, gerr = GithubRepo.sync_via_pull_request({
-                token = token,
-                owner = owner,
-                repo = repo,
-                base_branch = base_branch,
-                new_branch = new_branch,
-                message = commit_msg,
-                files = files,
-                author_name = "opsapi-domain-sync",
-                author_email = "domain-sync@opsapi",
-                pr_title = data.pr_title or commit_msg,
-                pr_body = pr_body,
-            })
-            if not result then return err_resp(502, "GitHub sync failed: " .. tostring(gerr)) end
+            -- One PR per repo group. Never fast-forwards a base branch directly.
+            local results, any_ok, any_fail = {}, false, false
+            for _, key in ipairs(order) do
+                local g = groups[key]
+                local repo_label = tostring(g.repo.owner) .. "/" .. tostring(g.repo.repo)
 
-            return ok_resp({
-                environment = env,
-                repo = owner .. "/" .. repo,
-                base_branch = result.base,
-                branch = result.branch,
-                commit = result.commit,
-                pr_url = result.pr_url,
-                pr_number = result.pr_number,
-                count = #files,
-                rules = built.rules_count,
-                warnings = built.warnings,
-                files = rendered,
-            })
+                -- Guard: a repo must have owner/repo and a usable token.
+                if not g.repo.owner or g.repo.owner == "" or not g.repo.repo or g.repo.repo == "" then
+                    table.insert(results, { repo = repo_label, branch = g.repo.branch, repo_name = g.repo.name,
+                        ok = false, error = "repo not configured — assign these domains to a repo or set a default in Sync Settings" })
+                    any_fail = true
+                else
+                    local token, terr = resolve_token(g.repo.github_integration_id)
+                    if not token then
+                        table.insert(results, { repo = repo_label, branch = g.repo.branch, repo_name = g.repo.name,
+                            ok = false, error = terr })
+                        any_fail = true
+                    else
+                        local opts = {}
+                        for k, v in pairs(base_opts) do opts[k] = v end
+                        opts.rule_exists_in_repo = function(path)
+                            return GithubRepo.file_exists({ token = token, owner = g.repo.owner, repo = g.repo.repo, branch = g.repo.branch }, path)
+                        end
+
+                        local built = WslproxyServer.build_sync_files(g.rows, env, eff.data_base, opts)
+                        if #built.files == 0 then
+                            table.insert(results, { repo = repo_label, branch = g.repo.branch, repo_name = g.repo.name,
+                                ok = false, error = "nothing to sync (rules skipped or unrenderable)", warnings = built.warnings })
+                            any_fail = true
+                        else
+                            local short = tostring(Global.generateUUID()):gsub("%-", ""):sub(1, 6)
+                            local new_branch = "opsapi-domains/sync-" .. env .. "-"
+                                .. os.date("!%Y%m%d-%H%M%S") .. "-" .. short
+                            local commit_msg = data.message
+                                or ("chore(domains): sync " .. #built.files .. " " .. env .. " domains from opsapi")
+                            local pr_body = table.concat({
+                                "Automated domain sync from opsapi — please review and merge.",
+                                "",
+                                "- Environment: `" .. env .. "`",
+                                "- Repo: `" .. repo_label .. "` → `" .. g.repo.branch .. "`",
+                                "- Files: " .. #built.files .. " (rules: " .. tostring(built.rules_count) .. ")",
+                                "",
+                                "Generated by the domains module.",
+                            }, "\n")
+
+                            local result, gerr = GithubRepo.sync_via_pull_request({
+                                token = token, owner = g.repo.owner, repo = g.repo.repo,
+                                base_branch = g.repo.branch, new_branch = new_branch,
+                                message = commit_msg, files = built.files,
+                                author_name = "opsapi-domain-sync", author_email = "domain-sync@opsapi",
+                                pr_title = data.pr_title or commit_msg, pr_body = pr_body,
+                            })
+                            if not result then
+                                table.insert(results, { repo = repo_label, branch = g.repo.branch, repo_name = g.repo.name,
+                                    ok = false, error = tostring(gerr), warnings = built.warnings })
+                                any_fail = true
+                            else
+                                table.insert(results, { repo = repo_label, branch = g.repo.branch, repo_name = g.repo.name,
+                                    ok = true, base_branch = result.base, head_branch = result.branch, commit = result.commit,
+                                    pr_url = result.pr_url, pr_number = result.pr_number,
+                                    count = #built.files, rules = built.rules_count,
+                                    warnings = built.warnings, skipped = built.skipped, files = built.rendered })
+                                any_ok = true
+                            end
+                        end
+                    end
+                end
+            end
+
+            return { status = any_ok and 200 or 502,
+                json = { success = any_ok, data = { environment = env, any_failed = any_fail, repos = results } } }
         end)
     ))
 
@@ -424,6 +549,112 @@ return function(app)
             if not ok_sq then return ok_resp({}) end
             local list = ServiceQueries.getGithubIntegrations(self.namespace.id) or {}
             return ok_resp(list)
+        end)
+    ))
+
+    -- ========================================================================
+    -- SYNC REPOS (managed multi-repo targets; the settings row is the default)
+    -- ========================================================================
+
+    app:get("/api/v2/domains/sync-repos", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "read", function(self)
+            local Q = require("queries.DomainSyncRepoQueries")
+            return ok_resp(Q.list(self.namespace.id))
+        end)
+    ))
+
+    app:post("/api/v2/domains/sync-repos", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "update", function(self)
+            local data = parse_body(self)
+            local Q = require("queries.DomainSyncRepoQueries")
+            local repo, err = Q.create(self.namespace.id, {
+                name = data.name, repo_url = data.repo_url,
+                owner = data.owner, repo = data.repo, branch = data.branch,
+                github_integration_id = data.github_integration_id,
+            })
+            if not repo then return err_resp(400, err or "Failed to add repo") end
+            return { status = 201, json = { success = true, data = repo } }
+        end)
+    ))
+
+    app:put("/api/v2/domains/sync-repos/:uuid", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "update", function(self)
+            local data = parse_body(self)
+            local Q = require("queries.DomainSyncRepoQueries")
+            local repo, err = Q.update(self.namespace.id, self.params.uuid, {
+                name = data.name, repo_url = data.repo_url,
+                owner = data.owner, repo = data.repo, branch = data.branch,
+                github_integration_id = data.github_integration_id,
+            })
+            if not repo then return err_resp(err == "Repo not found" and 404 or 400, err or "Update failed") end
+            return ok_resp(repo)
+        end)
+    ))
+
+    app:delete("/api/v2/domains/sync-repos/:uuid", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "delete", function(self)
+            require("queries.DomainSyncRepoQueries").delete(self.namespace.id, self.params.uuid)
+            return ok_resp({ deleted = true })
+        end)
+    ))
+
+    -- ========================================================================
+    -- WSL PROXY CONNECTION + shared rules (before /:uuid)
+    --
+    -- A namespace connects its WSL Proxy control plane once (URL + email +
+    -- password, stored AES-encrypted). Domains then ATTACH a shared rule chosen
+    -- from that live API (see the /wslproxy/rules dropdown) instead of minting
+    -- one rule per domain. The password is never returned; it is decrypted
+    -- server-side only to log in and list/fetch rules.
+    -- ========================================================================
+
+    app:get("/api/v2/domains/wslproxy/status", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "read", function(self)
+            local WC = require("queries.WslproxyConnectionQueries")
+            return ok_resp(WC.status(self.namespace.id))
+        end)
+    ))
+
+    -- Connect (or replace) — validates by a LIVE login before persisting, so a
+    -- bad URL/credential fails fast and nothing invalid is stored.
+    app:post("/api/v2/domains/wslproxy/connect", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "update", function(self)
+            local data = parse_body(self)
+            local api_url = trim(data.api_url)
+            local email = trim(data.email)
+            local password = data.password
+            if api_url == "" then return err_resp(400, "api_url is required") end
+            if not password or password == "" then return err_resp(400, "password is required") end
+
+            local WslproxyClient = require("lib.wslproxy-client")
+            local ok, verr = WslproxyClient.verify({ api_url = api_url, email = email, password = password })
+            if not ok then return err_resp(400, verr or "Could not connect to WSL Proxy") end
+
+            local WC = require("queries.WslproxyConnectionQueries")
+            local saved, serr = WC.save({
+                namespace_id = self.namespace.id, api_url = api_url, email = email, password = password,
+            })
+            if not saved then return err_resp(500, serr or "Failed to save connection") end
+            return ok_resp(saved)
+        end)
+    ))
+
+    app:delete("/api/v2/domains/wslproxy/disconnect", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "delete", function(self)
+            require("queries.WslproxyConnectionQueries").delete(self.namespace.id)
+            return ok_resp({ disconnected = true })
+        end)
+    ))
+
+    -- Searchable list of shared rules for the domain form's rule dropdown.
+    app:get("/api/v2/domains/wslproxy/rules", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("domains", "read", function(self)
+            local WslproxyClient = require("lib.wslproxy-client")
+            local client, cerr = WslproxyClient.for_namespace(self.namespace.id)
+            if not client then return err_resp(409, cerr or "Connect WSL Proxy first") end
+            local rules, rerr = client.list_rules(self.params.search, self.params.environment)
+            if not rules then return err_resp(502, rerr or "Failed to list WSL Proxy rules") end
+            return ok_resp(rules)
         end)
     ))
 
@@ -654,6 +885,10 @@ return function(app)
                 -- WSL Proxy rule match path (default "/"). The rule id itself is
                 -- auto-generated (opsapi-<domain>) by the renderer.
                 rule_path = data.rule_path or "/",
+                -- Per-domain template choice + assigned sync repo (blank -> default).
+                server_template_uuid = data.server_template_uuid,
+                rule_template_uuid = data.rule_template_uuid,
+                sync_repo_uuid = data.sync_repo_uuid,
                 metadata = metadata or "{}",
             })
             if not created then

@@ -26,6 +26,8 @@ local WRITABLE_FIELDS = {
     "listen_ports", "proxy_target", "rule_path",
     -- Per-domain template choice (render_templates uuids)
     "server_template_uuid", "rule_template_uuid",
+    -- Which managed repo this domain syncs to (blank -> namespace default repo)
+    "sync_repo_uuid",
 }
 
 --------------------------------------------------------------------------------

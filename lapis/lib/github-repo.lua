@@ -67,6 +67,25 @@ local function api(token, method, path, body)
     return decoded, res.status, nil
 end
 
+--- Does a file path already exist on a branch? Used by the domain sync to skip
+--- pushing a shared rule that is already committed (never overwrite a rule that
+--- may be owned by another repo/domain).
+-- @param opts { token, owner, repo, branch? }
+-- @param path string  repo-relative path
+-- @return true|false, nil  OR  nil, err  (nil only on a genuine API error)
+function GithubRepo.file_exists(opts, path)
+    assert(opts and opts.token and opts.owner and opts.repo, "token/owner/repo required")
+    local branch = opts.branch or "main"
+    -- Escape each path SEGMENT but keep the slashes as real separators.
+    local encoded = tostring(path):gsub("[^/]+", function(seg) return ngx.escape_uri(seg) end)
+    local url = "/repos/" .. opts.owner .. "/" .. opts.repo .. "/contents/" .. encoded
+        .. "?ref=" .. ngx.escape_uri(branch)
+    local _, status, err = api(opts.token, "GET", url)
+    if status == 200 then return true, nil end
+    if status == 404 then return false, nil end
+    return nil, err or ("unexpected status " .. tostring(status))
+end
+
 --- Commit files atomically. add/update-only (base_tree preserves everything else).
 -- @param opts { token, owner, repo, branch, message, files={{path,content}...}, author_name?, author_email? }
 -- @return commit_sha, nil OR nil, err

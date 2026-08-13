@@ -57,4 +57,14 @@ return {
         add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS server_template_uuid TEXT]])
         add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS rule_template_uuid TEXT]])
     end,
+
+    -- [4] Which managed repo a domain syncs to (domain_sync_repos.uuid). Blank ->
+    -- the namespace's default repo (Sync Settings). Domains are assigned to repos
+    -- in the sync modal; the sync groups by repo and opens one PR per repo. See
+    -- migrations/domain-sync-repos.lua and routes/domains.lua (sync-to-repo).
+    [4] = function()
+        local exists = db.query("SELECT to_regclass('public.domains') IS NOT NULL AS ok")
+        if not (exists and exists[1] and exists[1].ok) then return end
+        add_column([[ALTER TABLE domains ADD COLUMN IF NOT EXISTS sync_repo_uuid TEXT]])
+    end,
 }
