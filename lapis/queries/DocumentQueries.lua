@@ -7,6 +7,7 @@ local TagsModel = require "models.TagsModel"
 local ImageModel = require "models.ImageModel"
 local cJson = require "cjson"
 local db = require("lapis.db")
+local WebsiteRevalidate = require "lib.website-revalidate"
 
 local DocumentQueries = {}
 
@@ -142,6 +143,7 @@ function DocumentQueries.create(data)
     end
     savedDocument.internal_id = savedDocument.id
     savedDocument.id = savedDocument.uuid
+    WebsiteRevalidate.notify("document.created")
     return {
         data = savedDocument
     }
@@ -305,6 +307,7 @@ function DocumentQueries.update(id, params)
         returning = "*"
     })
     if updateDoc then
+        WebsiteRevalidate.notify("document.updated")
         return { data = params }
     end
     return { data = nil }
@@ -314,7 +317,9 @@ function DocumentQueries.destroy(id)
     local record = DocumentModel:find({
         uuid = id
     })
-    return record:delete()
+    local deleted = record:delete()
+    if deleted then WebsiteRevalidate.notify("document.deleted") end
+    return deleted
 end
 
 function DocumentQueries.deleteMultiple(params)
@@ -324,6 +329,7 @@ function DocumentQueries.deleteMultiple(params)
         for _, record in ipairs(deleteAble) do
             record:delete()
         end
+        if #deleteAble > 0 then WebsiteRevalidate.notify("document.deleted") end
     end
     return {
         data = deleteAble
