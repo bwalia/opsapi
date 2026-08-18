@@ -251,6 +251,25 @@ function GithubRepo.dispatch_workflow(opts)
     return status == 204 or status == 200, nil
 end
 
+--- Fire a repository_dispatch event (POST /repos/{owner}/{repo}/dispatches).
+--- Triggers any workflow listening on `on: repository_dispatch: types: [...]`.
+--- Unlike workflow_dispatch this needs no workflow file/ref and carries a free
+--- `client_payload`, which suits "content changed, please rebuild" signals.
+-- @param opts { token, owner, repo, event_type, client_payload? }
+-- @return true, nil  OR  nil, err
+function GithubRepo.repository_dispatch(opts)
+    assert(opts and opts.token and opts.owner and opts.repo and opts.event_type,
+        "token/owner/repo/event_type required")
+    local path = string.format("/repos/%s/%s/dispatches", opts.owner, opts.repo)
+    local _, status, err = api(opts.token, "POST", path, {
+        event_type = opts.event_type,
+        client_payload = opts.client_payload or nil,
+    })
+    if err then return nil, err end
+    -- GitHub returns 204 No Content on success.
+    return status == 204, nil
+end
+
 --- Find the workflow run created by a dispatch. workflow_dispatch returns no run
 --- id, so we poll the workflow's runs and pick the newest created at/after
 --- `since_iso` (an ISO-8601 UTC string captured just before dispatch). Retries a
