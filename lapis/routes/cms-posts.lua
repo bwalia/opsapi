@@ -47,6 +47,7 @@ local function public_post(p)
         view_count = p.view_count,
         is_featured = p.is_featured,
         category = p.category,
+        categories = p.categories or {},
         tags = p.tags or {},
         seo_title = p.seo_title,
         seo_description = p.seo_description,
@@ -67,6 +68,7 @@ local function public_post_summary(p)
         reading_minutes = p.reading_minutes,
         is_featured = p.is_featured,
         category = p.category,
+        categories = p.categories or {},
         tags = p.tags or {},
     }
 end
@@ -121,6 +123,7 @@ return function(app)
                 visibility = visibility,
                 is_featured = to_bool(body.is_featured, false),
                 category_uuid = body.category_uuid,
+                category_uuids = coerce_list(body.category_uuids),
                 tags = coerce_list(body.tags),
                 author_uuid = user.uuid,
                 author_name = author_name,
@@ -156,6 +159,7 @@ return function(app)
                 if body[k] ~= nil then fields[k] = body[k] end
             end
             if body.is_featured ~= nil then fields.is_featured = to_bool(body.is_featured, false) end
+            if body.category_uuids ~= nil then fields.category_uuids = coerce_list(body.category_uuids) end
             if body.tags ~= nil then fields.tags = coerce_list(body.tags) end
 
             local post = CmsPostQueries.update(self.namespace.id, self.params.uuid, fields)

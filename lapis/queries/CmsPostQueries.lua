@@ -91,12 +91,38 @@ local function tagsForPosts(post_ids)
 end
 CmsPostQueries.tagsForPosts = tagsForPosts
 
---- Attach hydrated tags[] (and category slug/name) to a list of post rows.
+--- Fetch category rows ({name, slug, uuid}) attached to a set of post ids via
+--- the cms_post_categories join. Returns a map post_id -> array of categories.
+local function categoriesForPosts(post_ids)
+    local map = {}
+    for _, id in ipairs(post_ids) do map[id] = {} end
+    if #post_ids == 0 then return map end
+    local ph = {}
+    for i = 1, #post_ids do ph[i] = "?" end
+    local rows = db.query([[
+        SELECT pc.post_id, c.uuid, c.name, c.slug
+        FROM cms_post_categories pc
+        JOIN cms_categories c ON c.id = pc.category_id AND c.deleted_at IS NULL
+        WHERE pc.post_id IN (]] .. table.concat(ph, ", ") .. [[)
+        ORDER BY c.name ASC
+    ]], table.unpack(post_ids)) or {}
+    for _, r in ipairs(rows) do
+        local bucket = map[r.post_id]
+        if bucket then
+            table.insert(bucket, { uuid = r.uuid, name = r.name, slug = r.slug })
+        end
+    end
+    return map
+end
+CmsPostQueries.categoriesForPosts = categoriesForPosts
+
+--- Attach hydrated tags[], categories[] (and the primary category) to post rows.
 local function hydrate(namespace_id, posts)
     if #posts == 0 then return posts end
     local ids = {}
     for _, p in ipairs(posts) do ids[#ids + 1] = p.id end
     local tagMap = tagsForPosts(ids)
+    local catMap = categoriesForPosts(ids)
 
     -- Category lookup (one query for the referenced categories).
     local catRows = db.query([[
@@ -108,6 +134,9 @@ local function hydrate(namespace_id, posts)
 
     for _, p in ipairs(posts) do
         p.tags = tagMap[p.id] or {}
+        -- Full set of categories (many-to-many).
+        p.categories = catMap[p.id] or {}
+        -- Primary category kept for backward compatibility (category_id FK).
         if p.category_id and catById[p.category_id] then
             local c = catById[p.category_id]
             p.category = { uuid = c.uuid, name = c.name, slug = c.slug }
@@ -148,15 +177,80 @@ local function syncTags(namespace_id, post_id, tag_names)
 end
 CmsPostQueries.syncTags = syncTags
 
+--- Re-sync a post's category join rows from an array of category uuids (scoped).
+--- Categories must already exist in the namespace — unlike tags, we never
+--- auto-create them here. Duplicates and unknown/foreign uuids are ignored.
+--- @return the resolved primary category_id (first valid uuid), or nil.
+local function syncCategories(namespace_id, post_id, category_uuids)
+    if type(category_uuids) ~= "table" then return nil end
+    local wanted = {}       -- category_id -> true
+    local ordered = {}      -- resolved ids in input order (to pick a primary)
+    for _, uuid in ipairs(category_uuids) do
+        local cid = resolveCategoryId(namespace_id, uuid)
+        if cid and not wanted[cid] then
+            wanted[cid] = true
+            ordered[#ordered + 1] = cid
+        end
+    end
+
+    -- Existing join rows.
+    local existing = db.query("SELECT category_id FROM cms_post_categories WHERE post_id = ?", post_id) or {}
+    local have = {}
+    for _, r in ipairs(existing) do have[r.category_id] = true end
+
+    -- Insert missing.
+    for cid in pairs(wanted) do
+        if not have[cid] then
+            db.query("INSERT INTO cms_post_categories (post_id, category_id, created_at) VALUES (?, ?, NOW()) " ..
+                "ON CONFLICT (post_id, category_id) DO NOTHING", post_id, cid)
+        end
+    end
+    -- Remove stale.
+    for cid in pairs(have) do
+        if not wanted[cid] then
+            db.query("DELETE FROM cms_post_categories WHERE post_id = ? AND category_id = ?", post_id, cid)
+        end
+    end
+
+    return ordered[1]
+end
+CmsPostQueries.syncCategories = syncCategories
+
+--- Normalise category inputs: `category_uuids` (array) is authoritative when
+--- present; otherwise fall back to the legacy single `category_uuid`. Returns
+--- an array (possibly empty) or nil when neither field was supplied (caller
+--- then leaves categories untouched).
+local function normaliseCategoryUuids(params)
+    if type(params.category_uuids) == "table" then return params.category_uuids end
+    if params.category_uuid ~= nil then
+        return (params.category_uuid ~= "") and { params.category_uuid } or {}
+    end
+    return nil
+end
+
 function CmsPostQueries.create(namespace_id, params)
     local base = slugify((params.slug and params.slug ~= "") and params.slug or params.title)
     local status = params.status or "draft"
+
+    -- Multi-category: category_uuids (array) is authoritative; category_uuid
+    -- (single, legacy) is treated as a one-element list. The primary category_id
+    -- FK is the first resolvable uuid (kept for backward compatibility); the full
+    -- set is written to the join by syncCategories after the post row exists.
+    local category_uuids = normaliseCategoryUuids(params)
+    local primary_category_id
+    if category_uuids then
+        for _, uuid in ipairs(category_uuids) do
+            local cid = resolveCategoryId(namespace_id, uuid)
+            if cid then primary_category_id = cid; break end
+        end
+    end
+
     local insert = {
         uuid = Global.generateUUID(),
         namespace_id = namespace_id,
         -- Nullable FK: explicit NULL when unset (column has a DEFAULT 0 from
         -- lapis types.integer, which would violate the category FK).
-        category_id = resolveCategoryId(namespace_id, params.category_uuid) or db.NULL,
+        category_id = primary_category_id or db.NULL,
         title = params.title,
         slug = uniqueSlug(namespace_id, base),
         excerpt = params.excerpt,
@@ -183,6 +277,7 @@ function CmsPostQueries.create(namespace_id, params)
     end
 
     local post = CmsPostModel:create(insert, { returning = "*" })
+    if category_uuids then syncCategories(namespace_id, post.id, category_uuids) end
     if params.tags ~= nil then syncTags(namespace_id, post.id, params.tags) end
     return hydrate(namespace_id, { post })[1]
 end
@@ -202,7 +297,13 @@ function CmsPostQueries.list(namespace_id, params)
         table.insert(where, "p.status = ?"); table.insert(values, params.status)
     end
     if params.category_uuid and params.category_uuid ~= "" then
-        table.insert(where, "p.category_id = (SELECT id FROM cms_categories WHERE namespace_id = ? AND uuid = ? LIMIT 1)")
+        -- Match via the many-to-many join so a post shows under any of its
+        -- categories (the backfilled join includes each post's primary category).
+        table.insert(where, [[p.id IN (
+            SELECT pc.post_id FROM cms_post_categories pc
+            JOIN cms_categories c ON c.id = pc.category_id
+            WHERE c.namespace_id = ? AND c.uuid = ?
+        )]])
         table.insert(values, namespace_id); table.insert(values, params.category_uuid)
     end
     if params.is_featured ~= nil then
@@ -268,9 +369,9 @@ function CmsPostQueries.update(namespace_id, uuid, params)
     end
     if params.visibility ~= nil then fields.visibility = params.visibility end
     if params.is_featured ~= nil then fields.is_featured = params.is_featured and true or false end
-    if params.category_uuid ~= nil then
-        fields.category_id = resolveCategoryId(namespace_id, params.category_uuid) or db.NULL
-    end
+    -- Categories are synced to the join after the main update (which also sets
+    -- the primary category_id); nil = neither field supplied, leave untouched.
+    local category_uuids = normaliseCategoryUuids(params)
     if params.content_html ~= nil then
         fields.reading_minutes = readingMinutes(params.content_html)
     end
@@ -286,6 +387,10 @@ function CmsPostQueries.update(namespace_id, uuid, params)
     end
 
     row:update(fields)
+    if category_uuids then
+        local primary = syncCategories(namespace_id, row.id, category_uuids)
+        row:update({ category_id = primary or db.NULL, updated_at = db.raw("NOW()") })
+    end
     if params.tags ~= nil then syncTags(namespace_id, row.id, params.tags) end
     return CmsPostQueries.getByUuid(namespace_id, uuid)
 end
@@ -313,7 +418,13 @@ function CmsPostQueries.listPublished(namespace_id, params)
     local values = { namespace_id }
 
     if params.category and params.category ~= "" then
-        table.insert(where, "p.category_id = (SELECT id FROM cms_categories WHERE namespace_id = ? AND slug = ? LIMIT 1)")
+        -- Match via the many-to-many join (by category slug) so a post is served
+        -- under any of its categories, not only its primary one.
+        table.insert(where, [[p.id IN (
+            SELECT pc.post_id FROM cms_post_categories pc
+            JOIN cms_categories c ON c.id = pc.category_id
+            WHERE c.namespace_id = ? AND c.slug = ?
+        )]])
         table.insert(values, namespace_id); table.insert(values, params.category)
     end
     if params.tag and params.tag ~= "" then

@@ -56,7 +56,8 @@ export interface CmsPost {
   reading_minutes?: number;
   view_count?: number;
   category_id?: number | null;
-  category?: CmsTaxonomyRef | null;
+  category?: CmsTaxonomyRef | null; // primary category (back-compat)
+  categories?: CmsTaxonomyRef[]; // full set (many-to-many)
   tags?: CmsTaxonomyRef[];
   created_at?: string;
   updated_at?: string;
@@ -116,7 +117,8 @@ export interface PostInput {
   status?: PostStatus;
   visibility?: PostVisibility;
   is_featured?: boolean;
-  category_uuid?: string;
+  category_uuid?: string; // legacy single category (still accepted)
+  category_uuids?: string[]; // multi-category (authoritative when present)
   tags?: string[];
   author_name?: string;
   scheduled_at?: string;
@@ -156,6 +158,7 @@ function unwrapData<T>(response: { data?: unknown }): T {
 function serializePost(data: Partial<PostInput>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...data };
   if (data.tags !== undefined) out.tags = JSON.stringify(data.tags ?? []);
+  if (data.category_uuids !== undefined) out.category_uuids = JSON.stringify(data.category_uuids ?? []);
   if (data.is_featured !== undefined) out.is_featured = data.is_featured ? 'true' : 'false';
   return out;
 }
