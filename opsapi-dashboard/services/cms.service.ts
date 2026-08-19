@@ -331,6 +331,15 @@ export const cmsService = {
   async deleteWebhook(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/cms/webhooks/${uuid}`);
   },
+
+  // Manually deliver a webhook now (user-controlled). Returns the receiver status.
+  async triggerWebhook(
+    uuid: string,
+    payload?: { event?: string; slug?: string; uuid?: string; status?: string },
+  ): Promise<{ success?: boolean; status?: number; error?: string }> {
+    const response = await apiClient.post(`/api/v2/cms/webhooks/${uuid}/trigger`, toFormData(payload ?? {}));
+    return (response.data ?? {}) as { success?: boolean; status?: number; error?: string };
+  },
 };
 
 export default cmsService;

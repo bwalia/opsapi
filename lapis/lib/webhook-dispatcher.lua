@@ -1,15 +1,11 @@
 --[[
-    Webhook dispatcher
-    ==================
-    Generic outgoing webhooks. On a content event, POST a signed (HMAC-SHA256)
-    payload to every active webhook a tenant registered for that event. This is
-    how a consumer (e.g. a website) learns a post changed — OPSAPI knows nothing
-    about the consumer beyond the URL + secret it stored.
-
-    Guarantees (it runs on the content-save path):
-      * Non-blocking — deliveries run in ngx.timer(0), AFTER the response, so a
-        slow/down consumer never delays or fails saving a post.
-      * Never throws — pcall-wrapped; a bug here can't break a create/update/delete.
+    Webhook dispatcher — manual, user-controlled delivery
+    =====================================================
+    Content changes do NOT fire webhooks automatically. Instead a person triggers
+    a webhook deliberately (e.g. from the post editor's publish modal, or the
+    Webhooks tab) so they can batch several edits and notify once. `trigger()`
+    delivers ONE signed webhook synchronously and returns the result, so the UI
+    can show success/failure.
 
     Signature: header `X-Opsapi-Signature-256: sha256=<hex>` = HMAC-SHA256 of the
     raw JSON body with the webhook's secret. The receiver recomputes and compares.
@@ -30,11 +26,24 @@ local function sign(secret, body)
     return "sha256=" .. resty_string.to_hex(h:final())
 end
 
--- ngx.timer callback: one delivery, outside the request.
-local function deliver(premature, webhook, event, body, signature)
-    if premature then return end
+--- Deliver one signed webhook synchronously.
+-- @param webhook table  a cms_webhooks row (url, secret, namespace_id, id)
+-- @param event string   e.g. "post.published"
+-- @param data table     payload data (e.g. { uuid, slug, status })
+-- @return ok (boolean), status (number|nil), err (string|nil)
+function WebhookDispatcher.trigger(webhook, event, data)
+    event = event or "manual.trigger"
+    local body = cjson.encode({
+        event = event,
+        namespace_id = webhook.namespace_id,
+        data = data or {},
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    })
+    local signature = sign(webhook.secret, body)
+    if not signature then return false, nil, "could not sign payload" end
+
     local ok, http = pcall(require, "resty.http")
-    if not ok then return end
+    if not ok then return false, nil, "resty.http not available" end
     local httpc = http.new()
     httpc:set_timeout(10000)
     local res, err = httpc:request_uri(webhook.url, {
@@ -52,42 +61,14 @@ local function deliver(premature, webhook, event, body, signature)
     CmsWebhookQueries.recordDelivery(webhook.id, status)
     if not res then
         ngx.log(ngx.ERR, "webhook: POST ", webhook.url, " failed: ", tostring(err))
-    elseif status >= 400 then
+        return false, nil, tostring(err)
+    end
+    if status >= 400 then
         ngx.log(ngx.WARN, "webhook: ", webhook.url, " -> HTTP ", status, " (", event, ")")
-    else
-        ngx.log(ngx.NOTICE, "webhook: delivered ", event, " -> ", webhook.url, " (", status, ")")
+        return false, status, "receiver returned HTTP " .. status
     end
-end
-
---- Emit an event to every active webhook for a namespace. Never blocks/throws.
--- @param namespace_id number
--- @param event string   one of post.created | post.updated | post.deleted
--- @param data table     the payload's `data` field (e.g. { uuid, slug, status })
-function WebhookDispatcher.emit(namespace_id, event, data)
-    local ok, err = pcall(function()
-        if not (ngx and ngx.timer and ngx.timer.at) then return end
-        local webhooks = CmsWebhookQueries.activeForEvent(namespace_id, event)
-        if #webhooks == 0 then return end
-
-        local body = cjson.encode({
-            event = event,
-            namespace_id = namespace_id,
-            data = data or {},
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        })
-
-        for _, w in ipairs(webhooks) do
-            local signature = sign(w.secret, body)
-            if signature then
-                ngx.timer.at(0, deliver, w, event, body, signature)
-            else
-                ngx.log(ngx.ERR, "webhook: could not sign payload for ", tostring(w.url))
-            end
-        end
-    end)
-    if not ok then
-        ngx.log(ngx.ERR, "webhook dispatcher error: ", tostring(err))
-    end
+    ngx.log(ngx.NOTICE, "webhook: delivered ", event, " -> ", webhook.url, " (", status, ")")
+    return true, status, nil
 end
 
 return WebhookDispatcher

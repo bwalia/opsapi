@@ -18,6 +18,7 @@ import {
   Webhook,
   Copy,
   Check,
+  Send,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ProtectedPage } from '@/components/permissions';
@@ -717,6 +718,7 @@ function WebhooksTab() {
   const [confirmDelete, setConfirmDelete] = useState<CmsWebhook | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [triggering, setTriggering] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -805,6 +807,20 @@ function WebhooksTab() {
     }
   };
 
+  const trigger = async (w: CmsWebhook) => {
+    setTriggering(w.uuid);
+    try {
+      const res = await cmsService.triggerWebhook(w.uuid, { event: 'manual.trigger' });
+      if (res.success) toast.success(`Triggered (HTTP ${res.status ?? 200})`);
+      else toast.error(res.error || `Webhook failed${res.status ? ` (HTTP ${res.status})` : ''}`);
+      load();
+    } catch {
+      toast.error('Failed to trigger webhook');
+    } finally {
+      setTriggering(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -842,6 +858,11 @@ function WebhooksTab() {
                   <div className="truncate text-xs text-secondary-400">{w.url}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  {canWrite && (
+                    <button onClick={() => trigger(w)} disabled={triggering === w.uuid} className="rounded p-1.5 text-secondary-500 hover:bg-primary-50 hover:text-primary-600 disabled:opacity-50" aria-label="Trigger now" title="Trigger now">
+                      {triggering === w.uuid ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </button>
+                  )}
                   {canWrite && (
                     <button onClick={() => openEdit(w)} className="rounded p-1.5 text-secondary-500 hover:bg-secondary-100 hover:text-primary-600" aria-label="Edit">
                       <Edit className="h-4 w-4" />

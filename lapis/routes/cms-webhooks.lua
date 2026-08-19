@@ -1,8 +1,10 @@
 --[[
     CMS Webhook API Routes
     ======================
-    Per-tenant outgoing webhooks: register a URL + events, OPSAPI POSTs a signed
-    payload on content changes. Namespace-scoped, RBAC-gated (module "cms").
+    Per-tenant outgoing webhooks: register a URL + events + secret. Delivery is
+    USER-CONTROLLED — /trigger fires a webhook on demand (from the post editor's
+    publish modal or the Webhooks tab); content changes never fire it
+    automatically. Namespace-scoped, RBAC-gated (module "cms").
 
     Admin (auth + namespace + RBAC module "cms"):
       GET    /api/v2/cms/webhooks
@@ -10,6 +12,7 @@
       GET    /api/v2/cms/webhooks/:uuid
       PUT    /api/v2/cms/webhooks/:uuid
       DELETE /api/v2/cms/webhooks/:uuid
+      POST   /api/v2/cms/webhooks/:uuid/trigger   { event?, uuid?, slug?, status? }
 
     Events: post.created | post.updated | post.deleted (comma string or array).
     The response includes `secret` so the operator can configure the receiver;
@@ -17,6 +20,7 @@
 ]]
 
 local CmsWebhookQueries = require "queries.CmsWebhookQueries"
+local WebhookDispatcher = require "lib.webhook-dispatcher"
 local CmsHttp = require "helper.cms-http"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
@@ -97,5 +101,24 @@ return function(app)
             local w = CmsWebhookQueries.softDelete(self.namespace.id, self.params.uuid)
             if not w then return api_response(404, nil, "Webhook not found") end
             return api_response(200, { deleted = true })
+        end)))
+
+    -- Manual trigger: deliver this webhook now (user-controlled). Synchronous, so
+    -- the response carries the receiver's status. Optional body: event, uuid,
+    -- slug, status (become the payload's `data`).
+    app:post("/api/v2/cms/webhooks/:uuid/trigger", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("cms", "update", function(self)
+            local w = CmsWebhookQueries.getByUuid(self.namespace.id, self.params.uuid)
+            if not w then return api_response(404, nil, "Webhook not found") end
+            local body = parse_body()
+            local data = {}
+            if body.uuid then data.uuid = body.uuid end
+            if body.slug then data.slug = body.slug end
+            if body.status then data.status = body.status end
+            local ok, status, err = WebhookDispatcher.trigger(w, body.event or "post.published", data)
+            if not ok then
+                return { status = 502, json = { success = false, error = err, status = status } }
+            end
+            return { status = 200, json = { success = true, status = status } }
         end)))
 end
