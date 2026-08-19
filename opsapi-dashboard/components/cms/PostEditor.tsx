@@ -2,13 +2,14 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Save, X, Eye, Star, Loader2 } from 'lucide-react';
-import { Button, Input, Textarea, Select, Card } from '@/components/ui';
+import { ArrowLeft, Save, X, Eye, Star, Loader2, Send } from 'lucide-react';
+import { Button, Input, Textarea, Select, Card, Modal } from '@/components/ui';
 import { RichTextEditor } from '@/components/academy';
 import {
   cmsService,
   type CmsPost,
   type CmsCategory,
+  type CmsWebhook,
   type PostInput,
   type PostStatus,
   type PostVisibility,
@@ -55,6 +56,12 @@ export default function PostEditor({ post }: PostEditorProps) {
 
   const [categories, setCategories] = useState<CmsCategory[]>([]);
   const [saving, setSaving] = useState(false);
+  // Publish → optional webhook trigger (user-controlled, never automatic).
+  const [webhooks, setWebhooks] = useState<CmsWebhook[]>([]);
+  const [selectedHooks, setSelectedHooks] = useState<string[]>([]);
+  const [showWebhookModal, setShowWebhookModal] = useState(false);
+  const [triggeringHooks, setTriggeringHooks] = useState(false);
+  const [savedRef, setSavedRef] = useState<{ slug?: string; uuid?: string } | null>(null);
 
   const [title, setTitle] = useState(post?.title ?? '');
   const [slug, setSlug] = useState(post?.slug ?? '');
@@ -129,6 +136,45 @@ export default function PostEditor({ post }: PostEditorProps) {
   const toggleCategory = (uuid: string) =>
     setCategoryUuids((prev) => (prev.includes(uuid) ? prev.filter((u) => u !== uuid) : [...prev, uuid]));
 
+  useEffect(() => {
+    cmsService
+      .getWebhooks()
+      .then((w) => {
+        setWebhooks(w);
+        setSelectedHooks(w.filter((h) => h.active).map((h) => h.uuid));
+      })
+      .catch(() => {});
+  }, []);
+
+  const leave = () => router.push('/dashboard/cms?tab=posts');
+  const toggleHook = (uuid: string) =>
+    setSelectedHooks((prev) => (prev.includes(uuid) ? prev.filter((u) => u !== uuid) : [...prev, uuid]));
+
+  const triggerSelected = async () => {
+    setTriggeringHooks(true);
+    try {
+      const results = await Promise.allSettled(
+        selectedHooks.map((uuid) =>
+          cmsService.triggerWebhook(uuid, {
+            event: 'post.published',
+            slug: savedRef?.slug,
+            uuid: savedRef?.uuid,
+            status: 'published',
+          }),
+        ),
+      );
+      const ok = results.filter(
+        (r) => r.status === 'fulfilled' && (r.value as { success?: boolean }).success,
+      ).length;
+      if (ok > 0) toast.success(`Triggered ${ok} webhook${ok > 1 ? 's' : ''}`);
+      if (ok < selectedHooks.length) toast.error(`${selectedHooks.length - ok} webhook(s) failed`);
+    } finally {
+      setTriggeringHooks(false);
+      setShowWebhookModal(false);
+      leave();
+    }
+  };
+
   const buildPayload = (): PostInput => ({
     title: title.trim(),
     slug: slug.trim() || undefined,
@@ -157,14 +203,22 @@ export default function PostEditor({ post }: PostEditorProps) {
     try {
       const payload = buildPayload();
       if (overrideStatus) payload.status = overrideStatus;
+      let saved: CmsPost;
       if (isEdit && post) {
-        await cmsService.updatePost(post.uuid, payload);
+        saved = await cmsService.updatePost(post.uuid, payload);
         toast.success('Post updated');
       } else {
-        await cmsService.createPost(payload);
+        saved = await cmsService.createPost(payload);
         toast.success('Post created');
       }
-      router.push('/dashboard/cms?tab=posts');
+      // On publish, ask whether to trigger a webhook (never automatic).
+      const effectiveStatus = overrideStatus || status;
+      if (effectiveStatus === 'published' && webhooks.length > 0) {
+        setSavedRef({ slug: saved?.slug, uuid: saved?.uuid });
+        setShowWebhookModal(true);
+      } else {
+        router.push('/dashboard/cms?tab=posts');
+      }
     } catch (err) {
       const serverMsg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       toast.error(serverMsg || (err instanceof Error ? err.message : 'Save failed'));
@@ -175,6 +229,58 @@ export default function PostEditor({ post }: PostEditorProps) {
 
   return (
     <div className="space-y-6">
+      {/* Publish → optional webhook trigger */}
+      <Modal
+        isOpen={showWebhookModal}
+        onClose={() => {
+          setShowWebhookModal(false);
+          leave();
+        }}
+        title="Notify webhooks?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-secondary-500">
+            The post is published. Trigger a webhook now to notify your site, or skip and
+            trigger later from Content → Webhooks (e.g. after a batch of edits).
+          </p>
+          {webhooks.length === 0 ? (
+            <p className="text-sm text-secondary-400">No webhooks configured.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {webhooks.map((w) => (
+                <label key={w.uuid} className="flex items-center gap-2 text-sm text-secondary-800">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={selectedHooks.includes(w.uuid)}
+                    onChange={() => toggleHook(w.uuid)}
+                    disabled={!w.active}
+                  />
+                  <span className="truncate">{w.name || w.url}</span>
+                  {!w.active && <span className="text-xs text-secondary-400">(paused)</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowWebhookModal(false);
+                leave();
+              }}
+              disabled={triggeringHooks}
+            >
+              Skip
+            </Button>
+            <Button onClick={triggerSelected} disabled={triggeringHooks || selectedHooks.length === 0}>
+              {triggeringHooks ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4" />}
+              Trigger
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Top bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">

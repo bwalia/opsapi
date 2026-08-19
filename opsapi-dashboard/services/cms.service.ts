@@ -35,6 +35,30 @@ export interface CmsTag {
   updated_at?: string;
 }
 
+export const WEBHOOK_EVENTS = ['post.created', 'post.updated', 'post.deleted'] as const;
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export interface CmsWebhook {
+  uuid: string;
+  name?: string;
+  url: string;
+  secret: string;         // HMAC signing secret (shown so the operator can configure the receiver)
+  events: string;         // comma-separated
+  active: boolean;
+  last_status?: number | null;
+  last_triggered_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WebhookInput {
+  name?: string;
+  url: string;
+  events?: string[] | string;
+  secret?: string;
+  active?: boolean;
+}
+
 export interface CmsPost {
   uuid: string;
   title: string;
@@ -169,6 +193,14 @@ function serializePage(data: Partial<PageInput>): Record<string, unknown> {
   return out;
 }
 
+// events → comma string (backend's normalize_events splits on comma); active → 'true'/'false'.
+function serializeWebhook(data: WebhookInput): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...data };
+  if (Array.isArray(data.events)) out.events = data.events.join(',');
+  if (data.active !== undefined) out.active = data.active ? 'true' : 'false';
+  return out;
+}
+
 // ============================================================
 // Service
 // ============================================================
@@ -278,6 +310,35 @@ export const cmsService = {
 
   async deleteTag(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/cms/tags/${uuid}`);
+  },
+
+  // ---------------- Webhooks ----------------
+  async getWebhooks(): Promise<CmsWebhook[]> {
+    const response = await apiClient.get('/api/v2/cms/webhooks');
+    return unwrapData<CmsWebhook[]>(response);
+  },
+
+  async createWebhook(data: WebhookInput): Promise<CmsWebhook> {
+    const response = await apiClient.post('/api/v2/cms/webhooks', toFormData(serializeWebhook(data)));
+    return unwrapData<CmsWebhook>(response);
+  },
+
+  async updateWebhook(uuid: string, data: WebhookInput): Promise<CmsWebhook> {
+    const response = await apiClient.put(`/api/v2/cms/webhooks/${uuid}`, toFormData(serializeWebhook(data)));
+    return unwrapData<CmsWebhook>(response);
+  },
+
+  async deleteWebhook(uuid: string): Promise<void> {
+    await apiClient.delete(`/api/v2/cms/webhooks/${uuid}`);
+  },
+
+  // Manually deliver a webhook now (user-controlled). Returns the receiver status.
+  async triggerWebhook(
+    uuid: string,
+    payload?: { event?: string; slug?: string; uuid?: string; status?: string },
+  ): Promise<{ success?: boolean; status?: number; error?: string }> {
+    const response = await apiClient.post(`/api/v2/cms/webhooks/${uuid}/trigger`, toFormData(payload ?? {}));
+    return (response.data ?? {}) as { success?: boolean; status?: number; error?: string };
   },
 };
 
