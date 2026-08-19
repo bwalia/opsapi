@@ -906,6 +906,69 @@ local function getClientIp()
     return ngx.var.remote_addr or "unknown"
 end
 
+-- ─── Catalogue-sourced question options ──────────────────────────────────
+-- A question can pull its options live from a catalogue via config_json
+-- {"options_source":"income_types"}, keeping a single source of truth
+-- instead of duplicating catalogue rows into profile_question_options.
+-- An optional config_json.options_filter narrows the catalogue by
+-- linked_form_title, e.g.
+--   {"options_filter":{"linked_form_title_in":     ["SA100 TR4", ...]}}
+--   {"options_filter":{"linked_form_title_not_in": ["SA100 TR4", ...]}}
+-- `not_in` keeps NULL-titled rows (COALESCE), so income types without a
+-- form mapping stay visible on the income-sources question. Absent or
+-- malformed filters fall back to the full active catalogue, which also
+-- covers configs written before this filter existed.
+-- Returns the resolved option list, or nil when the question does not use
+-- a catalogue source (caller keeps its profile_question_options rows).
+local function resolve_catalogue_options(config_json)
+    if not config_json or config_json == "" then return nil end
+    local ok_cfg, cfg = pcall(cjson.decode, config_json)
+    if not ok_cfg or type(cfg) ~= "table" or cfg.options_source ~= "income_types" then
+        return nil
+    end
+
+    local function escaped_list(list)
+        if type(list) ~= "table" or #list == 0 then return nil end
+        local parts = {}
+        for _, v in ipairs(list) do
+            if type(v) == "string" and v ~= "" then
+                table.insert(parts, db.escape_literal(v))
+            end
+        end
+        if #parts == 0 then return nil end
+        return table.concat(parts, ", ")
+    end
+
+    local filter_sql = ""
+    if type(cfg.options_filter) == "table" then
+        local in_list = escaped_list(cfg.options_filter.linked_form_title_in)
+        if in_list then
+            filter_sql = filter_sql .. " AND linked_form_title IN (" .. in_list .. ")"
+        end
+        local not_in_list = escaped_list(cfg.options_filter.linked_form_title_not_in)
+        if not_in_list then
+            filter_sql = filter_sql
+                .. " AND COALESCE(linked_form_title, '') NOT IN (" .. not_in_list .. ")"
+        end
+    end
+
+    local ok_it, it_rows = pcall(db.query, [[
+        SELECT uuid, income_type_key AS value, display_name AS label, display_order
+        FROM income_types WHERE is_active = true]] .. filter_sql .. [[
+        ORDER BY display_order ASC, display_name ASC
+    ]])
+    if not ok_it or not it_rows then return nil end
+
+    local opt_list = {}
+    for _, it in ipairs(it_rows) do
+        table.insert(opt_list, {
+            uuid = it.uuid, value = it.value, label = it.label,
+            display_order = it.display_order, is_active = true,
+        })
+    end
+    return opt_list
+end
+
 local PREFIX = "/api/v2/profile-builder"
 
 -- =========================================================================
@@ -1208,29 +1271,10 @@ return function(app)
                     })
                 end
 
-                -- Catalogue-sourced options: a question can pull its options live
-                -- from a catalogue via config_json {"options_source":"income_types"},
-                -- keeping a single source of truth instead of duplicating catalogue
-                -- rows into profile_question_options.
-                if q.config_json and q.config_json ~= "" then
-                    local ok_cfg, cfg = pcall(cjson.decode, q.config_json)
-                    if ok_cfg and type(cfg) == "table" and cfg.options_source == "income_types" then
-                        local ok_it, it_rows = pcall(db.query, [[
-                            SELECT uuid, income_type_key AS value, display_name AS label, display_order
-                            FROM income_types WHERE is_active = true
-                            ORDER BY display_order ASC, display_name ASC
-                        ]])
-                        if ok_it and it_rows then
-                            opt_list = {}
-                            for _, it in ipairs(it_rows) do
-                                table.insert(opt_list, {
-                                    uuid = it.uuid, value = it.value, label = it.label,
-                                    display_order = it.display_order, is_active = true,
-                                })
-                            end
-                        end
-                    end
-                end
+                -- Catalogue-sourced options, with optional linked_form_title
+                -- filtering — see resolve_catalogue_options.
+                local catalogue_opts = resolve_catalogue_options(q.config_json)
+                if catalogue_opts then opt_list = catalogue_opts end
 
                 -- Identity-lock per-user computed flag. For NINO/UTR
                 -- question_keys, resolves to true iff the user has already
@@ -1854,27 +1898,10 @@ return function(app)
                     })
                 end
 
-                -- Catalogue-sourced options (see GET /schema) — resolve live from
-                -- the income_types catalogue when the question opts in via config_json.
-                if q.config_json and q.config_json ~= "" then
-                    local ok_cfg, cfg = pcall(cjson.decode, q.config_json)
-                    if ok_cfg and type(cfg) == "table" and cfg.options_source == "income_types" then
-                        local ok_it, it_rows = pcall(db.query, [[
-                            SELECT uuid, income_type_key AS value, display_name AS label, display_order
-                            FROM income_types WHERE is_active = true
-                            ORDER BY display_order ASC, display_name ASC
-                        ]])
-                        if ok_it and it_rows then
-                            opt_list = {}
-                            for _, it in ipairs(it_rows) do
-                                table.insert(opt_list, {
-                                    uuid = it.uuid, value = it.value, label = it.label,
-                                    display_order = it.display_order, is_active = true,
-                                })
-                            end
-                        end
-                    end
-                end
+                -- Catalogue-sourced options (see GET /schema) — resolved via the
+                -- shared helper so both endpoints honour config_json.options_filter.
+                local catalogue_opts = resolve_catalogue_options(q.config_json)
+                if catalogue_opts then opt_list = catalogue_opts end
 
                 table.insert(q_list, {
                     uuid = q.uuid, question_key = q.question_key, label = q.label,
