@@ -68,22 +68,29 @@ ingress:
 nodeSelector:
   kubernetes.io/hostname: debworker00
 
-# DATABASE ISOLATION.
-#   `host` is intentionally left UNSET so the chart's ExternalSecret falls back
-#   to the Vault POSTGRES_HOST (diy-tax-db.int.svc — the correct in-cluster
-#   Postgres). `name` points this release at its OWN database on that same
-#   server, isolating its data from the diytaxreturn-lapis release which shares
-#   the Vault secret. Without `name`, both releases would read/write the single
-#   `opsapi` database (verified 2026-08-10: identical 810-user DB). The chart
-#   turns `name` into a POSTGRES_DB env override (see deployment.yaml).
-#   PREREQUISITE: the database must exist before deploy (pguser has no CREATEDB):
-#     kubectl exec -n int diy-tax-db-0 -- psql -U postgres \
-#       -c 'CREATE DATABASE workstation_opsapi OWNER pguser'
-#   The postStart bootstrap then migrates it fresh (projectCode=all) and seeds
-#   the admin below. Other envs (acc/test/prod) need their own DB + this same
-#   block before they are stood up, or they will share that env's diytax DB.
+# DATABASE — dedicated Postgres on the LAN (moved here 2026-08-19).
+#   `host` points this release at its OWN `workstation-db` Postgres
+#   (devops/k8s/workstation-db.yaml — pgvector/pgvector:pg15 pinned to
+#   debworker00), NOT the shared Zalando `diy-tax-db`. Why the move: diy-tax-db
+#   runs on a cloud edge node (cloud002) whose `local-path` volume was wiped on
+#   reschedule — dropping workstation_opsapi — and the cloud<->LAN WireGuard mesh
+#   is down, so a LAN-pinned app (nodeSelector debworker00) cannot reach a
+#   cloud-pinned DB. A dedicated LAN DB co-located with the app + wslproxy
+#   ingress removes that cross-segment dependency entirely (data isolation AND
+#   partition-independence). The chart bakes `host` into config.lua (see
+#   externalsecret.yaml) and `name` into a POSTGRES_DB env override (see
+#   deployment.yaml). pguser reuses the Vault password; the database, the
+#   `vector` pgvector extension (needed by the tax-classifier migration), and an
+#   initdb self-heal for that extension are all provisioned by the manifest.
 database:
   name: workstation_opsapi
+  host: workstation-db.int.svc.cluster.local
+
+# The dedicated workstation-db is a PLAIN Postgres with NO TLS, unlike the
+# Zalando diy-tax-db which enforced it (hostnossl reject). config.lua reads
+# POSTGRES_SSL (default "true" in the chart) to switch on pgmoon SSL — force it
+# OFF here or every DB call is rejected with "no encryption" and the API 500s.
+postgresSsl: "false"
 
 externalSecret:
   enabled: true

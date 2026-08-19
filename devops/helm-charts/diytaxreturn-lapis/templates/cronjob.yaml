@@ -94,10 +94,18 @@ spec:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_BUCKET
                 - name: POSTGRES_HOST
+                  {{- if and .Values.database .Values.database.host }}
+                  # Isolation: back up from THIS release's own Postgres host
+                  # (database.host — the dedicated workstation-db), not the
+                  # shared Vault POSTGRES_HOST, so the dump targets the same
+                  # server the app writes to.
+                  value: {{ .Values.database.host | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: POSTGRES_HOST
+                  {{- end }}
                 - name: POSTGRES_USER
                   valueFrom:
                     secretKeyRef:
@@ -229,10 +237,18 @@ spec:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_BUCKET
                 - name: POSTGRES_HOST
+                  {{- if and .Values.database .Values.database.host }}
+                  # Isolation: back up from THIS release's own Postgres host
+                  # (database.host — the dedicated workstation-db), not the
+                  # shared Vault POSTGRES_HOST, so the dump targets the same
+                  # server the app writes to.
+                  value: {{ .Values.database.host | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: POSTGRES_HOST
+                  {{- end }}
                 - name: POSTGRES_USER
                   valueFrom:
                     secretKeyRef:
