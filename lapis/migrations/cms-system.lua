@@ -402,4 +402,61 @@ return {
             db.query("CREATE INDEX idx_cms_post_tags_tag ON cms_post_tags (tag_id)")
         end
     end,
+
+    -- ========================================================================
+    -- [7] Create cms_post_categories (post <-> category many-to-many)
+    --     Adds multi-category support without dropping cms_posts.category_id,
+    --     which stays as the optional "primary" category (back-compat). The
+    --     join is the source of truth for the full set; existing category_id
+    --     values are backfilled so category filtering can rely on the join.
+    -- ========================================================================
+    [7] = function()
+        if table_exists("cms_post_categories") then return end
+
+        schema.create_table("cms_post_categories", {
+            { "id", types.serial },
+            { "post_id", types.integer },
+            { "category_id", types.integer },
+            { "created_at", types.time({ default = db.raw("NOW()") }) },
+            "PRIMARY KEY (id)"
+        })
+
+        pcall(function()
+            db.query([[
+                ALTER TABLE cms_post_categories
+                ADD CONSTRAINT cms_post_categories_post_fk
+                FOREIGN KEY (post_id) REFERENCES cms_posts(id) ON DELETE CASCADE
+            ]])
+        end)
+
+        pcall(function()
+            db.query([[
+                ALTER TABLE cms_post_categories
+                ADD CONSTRAINT cms_post_categories_category_fk
+                FOREIGN KEY (category_id) REFERENCES cms_categories(id) ON DELETE CASCADE
+            ]])
+        end)
+
+        pcall(function()
+            db.query([[
+                CREATE UNIQUE INDEX cms_post_categories_unique
+                ON cms_post_categories (post_id, category_id)
+            ]])
+        end)
+
+        if not index_exists("idx_cms_post_categories_category") then
+            db.query("CREATE INDEX idx_cms_post_categories_category ON cms_post_categories (category_id)")
+        end
+
+        -- Backfill: mirror each existing post's primary category_id into the
+        -- join so a category filter over the join returns pre-existing posts too.
+        pcall(function()
+            db.query([[
+                INSERT INTO cms_post_categories (post_id, category_id, created_at)
+                SELECT id, category_id, NOW() FROM cms_posts
+                WHERE category_id IS NOT NULL
+                ON CONFLICT (post_id, category_id) DO NOTHING
+            ]])
+        end)
+    end,
 }

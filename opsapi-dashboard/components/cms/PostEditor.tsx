@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Save, X, Eye, Star, Loader2 } from 'lucide-react';
 import { Button, Input, Textarea, Select, Card } from '@/components/ui';
@@ -65,7 +65,13 @@ export default function PostEditor({ post }: PostEditorProps) {
   const [status, setStatus] = useState<PostStatus>(post?.status ?? 'draft');
   const [visibility, setVisibility] = useState<PostVisibility>(post?.visibility ?? 'public');
   const [isFeatured, setIsFeatured] = useState<boolean>(post?.is_featured ?? false);
-  const [categoryUuid, setCategoryUuid] = useState<string>(post?.category?.uuid ?? '');
+  const [categoryUuids, setCategoryUuids] = useState<string[]>(
+    post?.categories?.length
+      ? post.categories.map((c) => c.uuid)
+      : post?.category
+        ? [post.category.uuid]
+        : [],
+  );
   const [featuredImage, setFeaturedImage] = useState(post?.featured_image_url ?? '');
   const [authorName, setAuthorName] = useState(post?.author_name ?? '');
   const [scheduledAt, setScheduledAt] = useState(post?.scheduled_at ?? '');
@@ -120,10 +126,8 @@ export default function PostEditor({ post }: PostEditorProps) {
     }
   };
 
-  const categoryOptions = useMemo(
-    () => [{ value: '', label: 'No category' }, ...categories.map((c) => ({ value: c.uuid, label: c.name }))],
-    [categories],
-  );
+  const toggleCategory = (uuid: string) =>
+    setCategoryUuids((prev) => (prev.includes(uuid) ? prev.filter((u) => u !== uuid) : [...prev, uuid]));
 
   const buildPayload = (): PostInput => ({
     title: title.trim(),
@@ -135,7 +139,7 @@ export default function PostEditor({ post }: PostEditorProps) {
     status,
     visibility,
     is_featured: isFeatured,
-    category_uuid: categoryUuid || '',
+    category_uuids: categoryUuids,
     tags,
     author_name: authorName.trim() || undefined,
     scheduled_at: status === 'scheduled' ? scheduledAt || undefined : undefined,
@@ -304,14 +308,29 @@ export default function PostEditor({ post }: PostEditorProps) {
           </Card>
 
           <Card>
-            <h3 className="mb-3 font-semibold text-secondary-900">Category</h3>
-            <Select value={categoryUuid} onChange={(e) => setCategoryUuid(e.target.value)}>
-              {categoryOptions.map((o) => (
-                <option key={o.value || 'none'} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
+            <h3 className="mb-3 font-semibold text-secondary-900">Categories</h3>
+            {categories.length === 0 ? (
+              <p className="text-sm text-secondary-500">
+                No categories yet — create one under Categories first.
+              </p>
+            ) : (
+              <div className="flex max-h-56 flex-col gap-2 overflow-y-auto">
+                {categories.map((c) => (
+                  <label key={c.uuid} className="flex items-center gap-2 text-sm text-secondary-800">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={categoryUuids.includes(c.uuid)}
+                      onChange={() => toggleCategory(c.uuid)}
+                    />
+                    {c.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-xs text-secondary-500">
+              A post can belong to multiple categories.
+            </p>
           </Card>
 
           <Card>

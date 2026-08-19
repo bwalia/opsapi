@@ -2307,6 +2307,9 @@ local _migrations = {
     ['836_cms_posts_indexes'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 4),
     ['837_create_cms_pages'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 5),
     ['838_create_cms_post_tags'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 6),
+    -- Multi-category support: post <-> category join (numbered 997 so it runs
+    -- after cms_posts/cms_categories exist; keys 839-996 are already taken).
+    ['997_create_cms_post_categories'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 7),
     -- CMS sidebar menu item + RBAC module ("cms") + role grants + enable for namespaces
     ['839_seed_cms_menu_items'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 1),
     ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),
