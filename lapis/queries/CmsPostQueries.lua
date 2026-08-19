@@ -14,7 +14,7 @@ local CmsPostModel = require "models.CmsPostModel"
 local CmsTagQueries = require "queries.CmsTagQueries"
 local Global = require "helper.global"
 local db = require("lapis.db")
-local WebsiteRevalidate = require "lib.website-revalidate"
+local WebhookDispatcher = require "lib.webhook-dispatcher"
 
 local CmsPostQueries = {}
 
@@ -280,7 +280,8 @@ function CmsPostQueries.create(namespace_id, params)
     local post = CmsPostModel:create(insert, { returning = "*" })
     if category_uuids then syncCategories(namespace_id, post.id, category_uuids) end
     if params.tags ~= nil then syncTags(namespace_id, post.id, params.tags) end
-    WebsiteRevalidate.notify("cms_post.created", namespace_id)
+    WebhookDispatcher.emit(namespace_id, "post.created",
+        { uuid = post.uuid, slug = post.slug, title = post.title, status = post.status })
     return hydrate(namespace_id, { post })[1]
 end
 
@@ -394,7 +395,8 @@ function CmsPostQueries.update(namespace_id, uuid, params)
         row:update({ category_id = primary or db.NULL, updated_at = db.raw("NOW()") })
     end
     if params.tags ~= nil then syncTags(namespace_id, row.id, params.tags) end
-    WebsiteRevalidate.notify("cms_post.updated", namespace_id)
+    WebhookDispatcher.emit(namespace_id, "post.updated",
+        { uuid = row.uuid, slug = row.slug, title = row.title, status = row.status })
     return CmsPostQueries.getByUuid(namespace_id, uuid)
 end
 
@@ -402,7 +404,7 @@ function CmsPostQueries.softDelete(namespace_id, uuid)
     local row = findScoped(namespace_id, uuid)
     if not row then return nil end
     row:update({ deleted_at = db.raw("NOW()"), updated_at = db.raw("NOW()") })
-    WebsiteRevalidate.notify("cms_post.deleted", namespace_id)
+    WebhookDispatcher.emit(namespace_id, "post.deleted", { uuid = row.uuid, slug = row.slug })
     return row
 end
 

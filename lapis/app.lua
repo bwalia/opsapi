@@ -600,6 +600,7 @@ load_if("academy", "routes.academy-admin")
 load_if("cms", "routes.cms-posts")
 load_if("cms", "routes.cms-pages")
 load_if("cms", "routes.cms-taxonomy")
+load_if("cms", "routes.cms-webhooks")
 
 -- ============================================
 -- PROJECT MODULE ROUTES (auto-loaded from /projects/)

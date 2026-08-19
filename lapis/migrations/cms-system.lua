@@ -459,4 +459,51 @@ return {
             ]])
         end)
     end,
+
+    -- ========================================================================
+    -- [8] Create cms_webhooks (generic per-namespace outgoing webhooks)
+    --     A tenant registers a URL + secret + the events it wants; on a content
+    --     change OPSAPI POSTs a signed (HMAC-SHA256) payload to each active
+    --     webhook. This is how a consumer (e.g. a website) learns a post was
+    --     published/updated/deleted without OPSAPI knowing anything about it.
+    -- ========================================================================
+    [8] = function()
+        if table_exists("cms_webhooks") then return end
+
+        schema.create_table("cms_webhooks", {
+            { "id", types.serial },
+            { "uuid", types.varchar({ unique = true }) },
+            { "namespace_id", types.integer },
+            { "name", types.varchar({ null = true }) },
+            { "url", types.varchar },
+            { "secret", types.varchar },                       -- HMAC-SHA256 signing key
+            { "events", types.text({ default = "post.created,post.updated,post.deleted" }) },
+            { "active", types.boolean({ default = true }) },
+            { "last_status", types.integer({ null = true }) }, -- last delivery HTTP status
+            { "last_triggered_at", types.time({ null = true }) },
+            { "created_at", types.time({ default = db.raw("NOW()") }) },
+            { "updated_at", types.time({ default = db.raw("NOW()") }) },
+            { "deleted_at", types.time({ null = true }) },
+            "PRIMARY KEY (id)"
+        })
+
+        pcall(function()
+            db.query([[
+                ALTER TABLE cms_webhooks
+                ADD CONSTRAINT cms_webhooks_namespace_fk
+                FOREIGN KEY (namespace_id) REFERENCES namespaces(id) ON DELETE CASCADE
+            ]])
+        end)
+
+        if not index_exists("idx_cms_webhooks_uuid") then
+            db.query("CREATE UNIQUE INDEX idx_cms_webhooks_uuid ON cms_webhooks (uuid)")
+        end
+        if not index_exists("idx_cms_webhooks_ns_active") then
+            db.query([[
+                CREATE INDEX idx_cms_webhooks_ns_active
+                ON cms_webhooks (namespace_id, active)
+                WHERE deleted_at IS NULL
+            ]])
+        end
+    end,
 }
