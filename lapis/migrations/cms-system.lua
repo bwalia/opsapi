@@ -506,4 +506,24 @@ return {
             ]])
         end
     end,
+
+    -- ========================================================================
+    -- [9] Search indexing: pg_trgm GIN indexes so listPublished's
+    --     `title ILIKE '%q%' OR excerpt ILIKE '%q%'` is index-backed (a plain
+    --     btree can't serve a leading-wildcard LIKE). All guarded, so a lack of
+    --     the extension/privilege degrades to a seq scan rather than failing.
+    -- ========================================================================
+    [9] = function()
+        pcall(function() db.query("CREATE EXTENSION IF NOT EXISTS pg_trgm") end)
+        if not index_exists("idx_cms_posts_title_trgm") then
+            pcall(function()
+                db.query("CREATE INDEX idx_cms_posts_title_trgm ON cms_posts USING gin (title gin_trgm_ops)")
+            end)
+        end
+        if not index_exists("idx_cms_posts_excerpt_trgm") then
+            pcall(function()
+                db.query("CREATE INDEX idx_cms_posts_excerpt_trgm ON cms_posts USING gin (excerpt gin_trgm_ops)")
+            end)
+        end
+    end,
 }
