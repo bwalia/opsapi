@@ -13,6 +13,15 @@ metadata:
     reloader.stakater.com/auto: "true"
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- with .Values.strategy }}
+  # Default kube RollingUpdate with replicaCount=1 uses maxUnavailable=0 and
+  # maxSurge=1, so a node-pinned release needs a free pod slot on that node
+  # before the old pod can terminate. On a full node (Too many pods) that
+  # deadlocks the rollout — use Recreate (or maxUnavailable:1) for pinned
+  # single-replica releases. See values-workstation-int.yaml.
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}

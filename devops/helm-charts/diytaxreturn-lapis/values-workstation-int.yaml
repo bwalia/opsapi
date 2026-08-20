@@ -37,6 +37,13 @@ image:
 
 replicaCount: 1
 
+# Recreate (not RollingUpdate): debworker00 is often at max-pods (110), and a
+# 1-replica RollingUpdate needs a surge slot on the same node before the old
+# pod can die — CI then times out at "1 old replicas are pending termination".
+# Brief cutover downtime is preferable to stuck Pending rollouts.
+strategy:
+  type: Recreate
+
 service:
   type: ClusterIP
   port: 80
