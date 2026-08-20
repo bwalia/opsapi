@@ -73,6 +73,47 @@ end
 -- @return function Wrapped handler
 function NamespaceMiddleware.requireNamespace(handler)
     return function(self)
+        -- API-key principals are bound to exactly one namespace and have no
+        -- namespace_members row: their namespace comes from the key itself and
+        -- their permissions are the key's scopes. Namespace headers are allowed
+        -- only when they match the key's namespace — a key can never reach
+        -- another tenant. Keys are never owners or platform admins.
+        if self.current_user and self.current_user.api_key then
+            local ns = self.current_user.namespace or {}
+
+            local header_id = self.req.headers["x-namespace-id"]
+            local header_slug = self.req.headers["x-namespace-slug"]
+            if (header_id and header_id ~= "" and
+                    header_id ~= tostring(ns.id) and header_id ~= ns.uuid)
+                or (header_slug and header_slug ~= "" and header_slug ~= ns.slug) then
+                ngx.log(ngx.WARN, "API key ", self.current_user.key_uuid,
+                    " used with a namespace it does not belong to")
+                return {
+                    json = { error = "API key is not valid for the requested namespace" },
+                    status = 403
+                }
+            end
+
+            if ns.status ~= "active" then
+                return {
+                    json = { error = "Namespace is not accessible", status = ns.status },
+                    status = 403
+                }
+            end
+
+            self.namespace = ns
+            self.namespace_membership = nil
+            self.namespace_member = nil
+            self.namespace_permissions = self.current_user.scopes or {}
+            self.is_namespace_owner = false
+            self.is_platform_admin = false
+            self.api_key_auth = true
+
+            ngx.log(ngx.INFO, "Namespace context set: ", ns.slug,
+                " for API key: ", self.current_user.key_uuid)
+            return handler(self)
+        end
+
         -- Extract namespace identifier
         local namespace_identifier = extractNamespaceIdentifier(self)
 

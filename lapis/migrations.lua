@@ -150,6 +150,10 @@ local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrati
 -- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
 local render_template_migrations = require("migrations.render-templates")
 
+-- API keys (namespace-scoped machine credentials). Core/always-on: any
+-- project may grant server-to-server access, so it isn't feature-gated.
+local api_key_migrations = require("migrations.api-keys")
+
 -- Core enhancements (always load for namespace/rbac)
 local rbac_enhancements_migrations = require("migrations.rbac-enhancements")
 local namespace_system_migrations = require("migrations.namespace-system")
@@ -2323,6 +2327,9 @@ local _migrations = {
     ['843_create_render_templates'] = render_template_migrations[1],
     ['844_register_templates_module'] = render_template_migrations[2],
     ['845_render_templates_allow_domain_rule'] = render_template_migrations[3],
+
+    -- API keys (core): namespace-scoped machine credentials.
+    ['845_create_api_keys'] = api_key_migrations[1],
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
