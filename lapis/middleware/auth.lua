@@ -15,6 +15,24 @@ function AuthMiddleware.authenticate(self)
         return nil, { error = "Invalid authorization format", status = 401 }
     end
 
+    -- API keys ("opsk_...") are opaque credentials, not JWTs. The global
+    -- before_filter usually verified this request already — reuse its result
+    -- instead of hitting the database again.
+    local ApiKeyHelper = require("helper.api-key")
+    if ApiKeyHelper.is_api_key(token) then
+        if ngx.ctx.api_key_auth and ngx.ctx.user then
+            return ngx.ctx.user, nil
+        end
+        local principal, err_msg, err_status = ApiKeyHelper.authenticate(token)
+        if not principal then
+            ngx.log(ngx.WARN, "API key authentication failed: ", err_msg or "unknown")
+            return nil, { error = err_msg or "Invalid API key", status = err_status or 401 }
+        end
+        ngx.ctx.user = principal
+        ngx.ctx.api_key_auth = true
+        return principal, nil
+    end
+
     local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
     if not JWT_SECRET_KEY then
         return nil, { error = "JWT secret not configured", status = 500 }
@@ -56,6 +74,7 @@ function AuthMiddleware.requireAuth(handler)
 
         ngx.log(ngx.INFO, "Authentication successful for user: " .. (user.uuid or user.sub or "unknown"))
         self.current_user = user
+        self.api_key_auth = user.api_key == true or nil
         return handler(self)
     end
 end
@@ -82,6 +101,7 @@ function AuthMiddleware.requireAuthBefore(self)
 
     ngx.log(ngx.INFO, "Authentication successful for user: " .. (user and (user.uuid or user.sub) or "unknown"))
     self.current_user = user
+    self.api_key_auth = (user and user.api_key == true) or nil
 end
 
 function AuthMiddleware.requireRole(role, handler)

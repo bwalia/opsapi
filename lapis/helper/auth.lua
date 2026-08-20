@@ -76,6 +76,36 @@ function _M.authenticate()
         ngx.exit(401)
     end
 
+    -- API keys ("opsk_...") are opaque credentials, not JWTs — authenticate
+    -- against the api_keys table instead of verifying a signature.
+    local ApiKeyHelper = require("helper.api-key")
+    if ApiKeyHelper.is_api_key(token) then
+        local principal, err_msg, err_status = ApiKeyHelper.authenticate(token)
+        if not principal then
+            ngx.log(ngx.WARN, "API key authentication failed: ", err_msg or "unknown")
+            ngx.status = err_status or 401
+            ngx.header.content_type = "application/json"
+            ngx.say('{"error":"' .. (err_msg or "Invalid API key") .. '"}')
+            ngx.exit(err_status or 401)
+        end
+        -- Confine the key to the modules it is scoped for. Routes that use
+        -- requireAuth without namespace middleware never check scopes, so
+        -- without this a cms-only key would reach them.
+        if not ApiKeyHelper.permits_uri(principal, uri) then
+            ngx.log(ngx.WARN, "API key ", principal.key_uuid, " denied for out-of-scope URI: ", uri)
+            ngx.status = 403
+            ngx.header.content_type = "application/json"
+            ngx.say('{"error":"API key is not scoped for this endpoint"}')
+            ngx.exit(403)
+        end
+
+        ngx.ctx.user = principal
+        ngx.ctx.api_key_auth = true
+        ngx.log(ngx.NOTICE, "API key authentication successful: ", principal.key_uuid,
+            " (namespace ", tostring(principal.namespace.slug), ")")
+        return
+    end
+
     -- Verify JWT
     local JWT_SECRET_KEY = Global.getEnvVar("JWT_SECRET_KEY")
     if not JWT_SECRET_KEY then

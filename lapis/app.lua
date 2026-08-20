@@ -289,10 +289,15 @@ app:before_filter(function(self)
         -- Populate self.current_user from ngx.ctx.user for Lapis routes
         if ngx.ctx.user then
             self.current_user = ngx.ctx.user
-            -- Ensure user has a default namespace (lazy assignment on first request)
-            local ns_ok, ns_resolver = pcall(require, "helper.namespace-resolver")
-            if ns_ok then
-                pcall(ns_resolver.resolve, self.current_user)
+            self.api_key_auth = ngx.ctx.api_key_auth or nil
+            -- Ensure user has a default namespace (lazy assignment on first
+            -- request). API-key principals are not users — resolving one would
+            -- create membership rows for them, so skip it.
+            if not ngx.ctx.api_key_auth then
+                local ns_ok, ns_resolver = pcall(require, "helper.namespace-resolver")
+                if ns_ok then
+                    pcall(ns_resolver.resolve, self.current_user)
+                end
             end
         end
     end
@@ -371,6 +376,7 @@ safe_load_routes("routes.projects")
 safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
+safe_load_routes("routes.api-keys")
 safe_load_routes("routes.email")
 safe_load_routes("routes.project-dashboard")
 
