@@ -108,8 +108,16 @@ return function(app)
             if not scopes then
                 return { json = { error = scopes_err }, status = 400 }
             end
-            if body.expires_at ~= nil and type(body.expires_at) ~= "string" then
-                return { json = { error = "expires_at must be a timestamp string" }, status = 400 }
+            -- Passed straight into the INSERT, so anything Postgres cannot read
+            -- as a timestamp would surface as a 500. Check the shape here.
+            if body.expires_at ~= nil then
+                if type(body.expires_at) ~= "string"
+                    or not body.expires_at:match("^%d%d%d%d%-%d%d%-%d%d") then
+                    return {
+                        json = { error = "expires_at must be a timestamp string, e.g. 2027-01-31 or 2027-01-31T09:00:00Z" },
+                        status = 400
+                    }
+                end
             end
 
             -- The acting user's DB id, for the audit trail. The JWT carries
@@ -161,7 +169,8 @@ return function(app)
             for _, row in ipairs(rows or {}) do
                 data[#data + 1] = present(row)
             end
-            return { json = { success = true, data = data } }
+            -- cjson encodes an empty Lua table as {}; a list must stay a list.
+            return { json = { success = true, data = #data > 0 and data or cjson.empty_array } }
         end)))
 
     app:delete("/api/v2/api-keys/:uuid", AuthMiddleware.requireAuth(

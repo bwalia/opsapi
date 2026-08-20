@@ -35,6 +35,25 @@ function ApiKey.is_api_key(token)
     return type(token) == "string" and token:sub(1, #ApiKey.PREFIX) == ApiKey.PREFIX
 end
 
+--- May a key principal touch this URI?
+--
+-- Scope enforcement proper lives in the namespace middleware, but plenty of
+-- routes authenticate with requireAuth alone and never establish a namespace —
+-- on those, nothing would check a key's scopes at all. So keys are confined
+-- here, centrally and fail-closed: a key may only reach /api/v2/<module>/...
+-- for a module it is actually scoped for. Anything else is refused before the
+-- handler runs, including any route added later.
+-- @param principal table from ApiKey.authenticate
+-- @param uri string ngx.var.uri
+-- @return boolean
+function ApiKey.permits_uri(principal, uri)
+    if type(uri) ~= "string" then return false end
+    local module_name = uri:match("^/api/v2/([^/]+)/")
+    if not module_name then return false end
+    local scopes = principal and principal.scopes or {}
+    return scopes[module_name] ~= nil
+end
+
 --- Hash a raw key with SHA-256 for storage/lookup.
 -- @param raw string
 -- @return string Hex-encoded SHA-256 hash

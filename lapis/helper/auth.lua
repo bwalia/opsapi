@@ -88,6 +88,17 @@ function _M.authenticate()
             ngx.say('{"error":"' .. (err_msg or "Invalid API key") .. '"}')
             ngx.exit(err_status or 401)
         end
+        -- Confine the key to the modules it is scoped for. Routes that use
+        -- requireAuth without namespace middleware never check scopes, so
+        -- without this a cms-only key would reach them.
+        if not ApiKeyHelper.permits_uri(principal, uri) then
+            ngx.log(ngx.WARN, "API key ", principal.key_uuid, " denied for out-of-scope URI: ", uri)
+            ngx.status = 403
+            ngx.header.content_type = "application/json"
+            ngx.say('{"error":"API key is not scoped for this endpoint"}')
+            ngx.exit(403)
+        end
+
         ngx.ctx.user = principal
         ngx.ctx.api_key_auth = true
         ngx.log(ngx.NOTICE, "API key authentication successful: ", principal.key_uuid,
