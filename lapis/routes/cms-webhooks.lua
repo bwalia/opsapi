@@ -57,11 +57,8 @@ return function(app)
     app:post("/api/v2/cms/webhooks", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("cms", "create", function(self)
             local body = parse_body()
-            if not body.url or body.url == "" then
-                return api_response(400, nil, "url is required")
-            end
-            if not body.url:match("^https?://") then
-                return api_response(400, nil, "url must be http(s)")
+            if type(body.url) ~= "string" or not body.url:match("^https?://") then
+                return api_response(400, nil, "url must be a valid http(s) URL")
             end
             local webhook = CmsWebhookQueries.create(self.namespace.id, {
                 name = body.name,
@@ -83,8 +80,8 @@ return function(app)
     app:put("/api/v2/cms/webhooks/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("cms", "update", function(self)
             local body = parse_body()
-            if body.url ~= nil and body.url ~= "" and not body.url:match("^https?://") then
-                return api_response(400, nil, "url must be http(s)")
+            if body.url ~= nil and (type(body.url) ~= "string" or not body.url:match("^https?://")) then
+                return api_response(400, nil, "url must be a valid http(s) URL")
             end
             local fields = {}
             for _, k in ipairs({ "name", "url", "secret", "events" }) do

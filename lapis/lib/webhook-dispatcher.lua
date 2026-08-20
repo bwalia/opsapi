@@ -45,7 +45,7 @@ function WebhookDispatcher.trigger(webhook, event, data)
     local ok, http = pcall(require, "resty.http")
     if not ok then return false, nil, "resty.http not available" end
     local httpc = http.new()
-    httpc:set_timeout(10000)
+    httpc:set_timeouts(2000, 5000, 5000)
     local res, err = httpc:request_uri(webhook.url, {
         method = "POST",
         headers = {
