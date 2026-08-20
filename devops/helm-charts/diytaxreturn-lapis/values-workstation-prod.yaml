@@ -23,6 +23,11 @@ image:
 
 replicaCount: 1
 
+# Same as values-workstation-int.yaml: Recreate avoids surge deadlock on a
+# full nodeSelector-pinned node (debworker00 max-pods).
+strategy:
+  type: Recreate
+
 service:
   type: ClusterIP
   port: 80
