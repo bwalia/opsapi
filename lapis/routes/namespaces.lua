@@ -345,23 +345,24 @@ return function(app)
     end)))
 
     -- Get user's namespace settings
-    app:get("/api/v2/user/namespace-settings", AuthMiddleware.requireAuth(function(self)
-        local user = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
-        if not user or #user == 0 then
-            return error_response(404, "User not found")
-        end
-
-        local settings = NamespaceQueries.getUserSettings(user[1].id)
-        local default_namespace = NamespaceQueries.getUserDefaultNamespace(user[1].id)
-
-        return success_response({
-            settings = settings,
-            default_namespace = default_namespace
-        })
-    end))
-
-    -- Update user's namespace settings (default namespace)
+    -- GET + PUT share ONE route so both methods register on the same path.
+    -- A separate app:get() used to shadow the PUT ("don't know how to respond to PUT").
     app:match("user_namespace_settings", "/api/v2/user/namespace-settings", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            local user = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
+            if not user or #user == 0 then
+                return error_response(404, "User not found")
+            end
+
+            local settings = NamespaceQueries.getUserSettings(user[1].id)
+            local default_namespace = NamespaceQueries.getUserDefaultNamespace(user[1].id)
+
+            return success_response({
+                settings = settings,
+                default_namespace = default_namespace
+            })
+        end),
+
         PUT = AuthMiddleware.requireAuth(function(self)
             local params = RequestParser.parse_request(self)
             local user = db.select("id FROM users WHERE uuid = ?", self.current_user.uuid)
@@ -441,38 +442,41 @@ return function(app)
     -- ============================================================
 
     -- Get current namespace details
-    app:get("/api/v2/namespace", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requireNamespace(function(self)
-            local namespace = self.namespace
-
-            -- Parse settings
-            if namespace.settings and type(namespace.settings) == "string" then
-                local ok, parsed = pcall(cjson.decode, namespace.settings)
-                if ok then
-                    namespace.settings = parsed
-                end
-            end
-
-            -- Get stats if user has permission
-            local stats = nil
-            if NamespaceMiddleware.hasPermission(self, "dashboard", "read") then
-                stats = NamespaceQueries.getStats(namespace.id)
-            end
-
-            return success_response({
-                namespace = namespace,
-                membership = {
-                    is_owner = self.is_namespace_owner,
-                    roles = self.namespace_roles,
-                    permissions = self.namespace_permissions
-                },
-                stats = stats
-            })
-        end)
-    ))
-
-    -- Update current namespace
+    -- GET + PUT for the current namespace share ONE route so every method is
+    -- registered on the same path. A separate app:get() used to shadow the PUT
+    -- here (Lapis matches the first route by path), so saving namespace settings
+    -- 500'd with "don't know how to respond to PUT".
     app:match("update_namespace", "/api/v2/namespace", respond_to({
+        GET = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requireNamespace(function(self)
+                local namespace = self.namespace
+
+                -- Parse settings
+                if namespace.settings and type(namespace.settings) == "string" then
+                    local ok, parsed = pcall(cjson.decode, namespace.settings)
+                    if ok then
+                        namespace.settings = parsed
+                    end
+                end
+
+                -- Get stats if user has permission
+                local stats = nil
+                if NamespaceMiddleware.hasPermission(self, "dashboard", "read") then
+                    stats = NamespaceQueries.getStats(namespace.id)
+                end
+
+                return success_response({
+                    namespace = namespace,
+                    membership = {
+                        is_owner = self.is_namespace_owner,
+                        roles = self.namespace_roles,
+                        permissions = self.namespace_permissions
+                    },
+                    stats = stats
+                })
+            end)
+        ),
+
         PUT = AuthMiddleware.requireAuth(
             NamespaceMiddleware.requirePermission("namespace", "update", function(self)
                 local params = RequestParser.parse_request(self)
@@ -771,22 +775,9 @@ return function(app)
     ))
 
     -- Get single member
-    app:get("/api/v2/namespace/members/:id", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requirePermission("users", "read", function(self)
-            local member = NamespaceMemberQueries.getWithDetails(self.params.id)
-
-            if not member then
-                return error_response(404, "Member not found")
-            end
-
-            -- Verify member belongs to this namespace
-            if member.namespace_id ~= self.namespace.id then
-                return error_response(404, "Member not found in this namespace")
-            end
-
-            return success_response(member)
-        end)
-    ))
+    -- GET /api/v2/namespace/members/:id is defined in the respond_to() block below
+    -- (with PUT/DELETE) so all methods share one route. A separate app:get() here
+    -- used to shadow PUT/DELETE ("don't know how to respond to PUT/DELETE").
 
     -- Add member to namespace
     app:post("/api/v2/namespace/members", AuthMiddleware.requireAuth(
@@ -841,8 +832,25 @@ return function(app)
         end)
     ))
 
-    -- Update member
+    -- Get / update / remove a member (all methods on one route)
     app:match("update_namespace_member", "/api/v2/namespace/members/:id", respond_to({
+        GET = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requirePermission("users", "read", function(self)
+                local member = NamespaceMemberQueries.getWithDetails(self.params.id)
+
+                if not member then
+                    return error_response(404, "Member not found")
+                end
+
+                -- Verify member belongs to this namespace
+                if member.namespace_id ~= self.namespace.id then
+                    return error_response(404, "Member not found in this namespace")
+                end
+
+                return success_response(member)
+            end)
+        ),
+
         PUT = AuthMiddleware.requireAuth(
             NamespaceMiddleware.requirePermission("users", "update", function(self)
                 local member = NamespaceMemberQueries.show(self.params.id)
@@ -996,22 +1004,9 @@ return function(app)
     ))
 
     -- Get single invitation
-    app:get("/api/v2/namespace/invitations/:id", AuthMiddleware.requireAuth(
-        NamespaceMiddleware.requirePermission("users", "read", function(self)
-            local invitation = NamespaceInvitationQueries.show(self.params.id)
-
-            if not invitation then
-                return error_response(404, "Invitation not found")
-            end
-
-            -- Verify invitation belongs to this namespace
-            if invitation.namespace_id ~= self.namespace.id then
-                return error_response(404, "Invitation not found in this namespace")
-            end
-
-            return success_response({ invitation = invitation })
-        end)
-    ))
+    -- GET /api/v2/namespace/invitations/:id is defined in the respond_to() block
+    -- below (with DELETE) so all methods share one route. A separate app:get() here
+    -- used to shadow DELETE ("don't know how to respond to DELETE").
 
     -- Create invitation (invite member by email)
     app:post("/api/v2/namespace/invitations", RateLimit.wrap(NS_INVITE_LIMIT, AuthMiddleware.requireAuth(
@@ -1109,6 +1104,23 @@ return function(app)
 
     -- Revoke invitation
     app:match("revoke_namespace_invitation", "/api/v2/namespace/invitations/:id", respond_to({
+        GET = AuthMiddleware.requireAuth(
+            NamespaceMiddleware.requirePermission("users", "read", function(self)
+                local invitation = NamespaceInvitationQueries.show(self.params.id)
+
+                if not invitation then
+                    return error_response(404, "Invitation not found")
+                end
+
+                -- Verify invitation belongs to this namespace
+                if invitation.namespace_id ~= self.namespace.id then
+                    return error_response(404, "Invitation not found in this namespace")
+                end
+
+                return success_response({ invitation = invitation })
+            end)
+        ),
+
         DELETE = AuthMiddleware.requireAuth(
             NamespaceMiddleware.requirePermission("users", "delete", function(self)
                 local invitation = NamespaceInvitationQueries.show(self.params.id)
@@ -1479,26 +1491,10 @@ return function(app)
     end))
 
     -- Get single namespace details (platform admin)
-    app:get("/api/v2/admin/namespaces/:id", AuthMiddleware.requireAuth(function(self)
-        if not check_platform_admin(self.current_user) then
-            return error_response(403, "Platform admin access required")
-        end
-
-        local namespace = NamespaceQueries.show(self.params.id)
-        if not namespace then
-            return error_response(404, "Namespace not found")
-        end
-
-        -- Get member count (core table, always exists)
-        local member_count = db.query([[
-            SELECT COUNT(*) as count FROM namespace_members
-            WHERE namespace_id = ? AND status = 'active'
-        ]], namespace.id)
-
-        namespace.member_count = member_count and member_count[1] and member_count[1].count or 0
-
-        return success_response({ namespace = namespace })
-    end))
+    -- GET /api/v2/admin/namespaces/:id is defined together with PUT/DELETE in the
+    -- respond_to() block below. A separate app:get() for the same path used to
+    -- shadow that block, so PUT/DELETE hit the GET-only route and Lapis raised
+    -- "don't know how to respond to PUT" (500). One route per path avoids that.
 
     -- Create namespace (platform admin or users with namespace create permission)
     app:post("/api/v2/admin/namespaces", AuthMiddleware.requireAuth(function(self)
@@ -1563,6 +1559,27 @@ return function(app)
 
     -- Update namespace (platform admin)
     app:match("admin_namespace_update", "/api/v2/admin/namespaces/:id", respond_to({
+        GET = AuthMiddleware.requireAuth(function(self)
+            if not check_platform_admin(self.current_user) then
+                return error_response(403, "Platform admin access required")
+            end
+
+            local namespace = NamespaceQueries.show(self.params.id)
+            if not namespace then
+                return error_response(404, "Namespace not found")
+            end
+
+            -- Get member count (core table, always exists)
+            local member_count = db.query([[
+                SELECT COUNT(*) as count FROM namespace_members
+                WHERE namespace_id = ? AND status = 'active'
+            ]], namespace.id)
+
+            namespace.member_count = member_count and member_count[1] and member_count[1].count or 0
+
+            return success_response({ namespace = namespace })
+        end),
+
         PUT = AuthMiddleware.requireAuth(function(self)
             if not check_platform_admin(self.current_user) then
                 return error_response(403, "Platform admin access required")
