@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
-import { Building2, Crown, ArrowLeft, Edit, Settings, MoreVertical } from 'lucide-react';
+import { Building2, Crown, ArrowLeft, Edit, Settings, Key } from 'lucide-react';
 import { Button, Badge } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
@@ -11,6 +11,7 @@ export interface NamespaceHeaderProps {
   namespace: Namespace;
   onEdit?: () => void;
   onSettings?: () => void;
+  onApiKeys?: () => void;
   isLoading?: boolean;
 }
 
@@ -32,6 +33,7 @@ const NamespaceHeader: React.FC<NamespaceHeaderProps> = memo(function NamespaceH
   namespace,
   onEdit,
   onSettings,
+  onApiKeys,
   isLoading,
 }) {
   const statusConfig = STATUS_CONFIG[namespace.status] || STATUS_CONFIG.active;
@@ -99,6 +101,16 @@ const NamespaceHeader: React.FC<NamespaceHeaderProps> = memo(function NamespaceH
                 onClick={onEdit}
               >
                 Edit
+              </Button>
+            )}
+            {onApiKeys && (
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Key className="w-4 h-4" />}
+                onClick={onApiKeys}
+              >
+                API Keys
               </Button>
             )}
             {onSettings && (

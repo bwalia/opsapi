@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { Key, Plus, Trash2, Loader2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Key, Plus, Trash2, Loader2, ShieldCheck } from 'lucide-react';
 import { Button, Card, Badge, ConfirmDialog, Table } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiKeysService } from '@/services';
 import type { ApiKey, TableColumn } from '@/types';
 import toast from 'react-hot-toast';
@@ -17,8 +18,23 @@ const fmtDate = (s?: string | null) =>
 
 export default function ApiKeysPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentNamespace, isNamespaceOwner, hasPermission } = useNamespace();
-  const canManage = isNamespaceOwner || hasPermission('api_keys', 'manage');
+  const { isAdmin } = usePermissions();
+
+  // Optional target namespace (?ns=<uuid>&nsName=<name>) lets a platform admin
+  // manage another tenant's keys without switching their whole context.
+  const targetNsId = searchParams.get('ns') || undefined;
+  const targetNsName = searchParams.get('nsName') || undefined;
+  const isForeign = !!targetNsId && targetNsId !== currentNamespace?.uuid;
+  const nsId = targetNsId || currentNamespace?.uuid;
+  const nsName = isForeign ? (targetNsName || 'this namespace') : currentNamespace?.name;
+  const canManage = isForeign ? isAdmin : isNamespaceOwner || hasPermission('api_keys', 'manage');
+
+  // Carry the target-namespace params onto the create page.
+  const newHref = isForeign
+    ? `${NEW_PATH}?ns=${encodeURIComponent(targetNsId!)}&nsName=${encodeURIComponent(targetNsName || '')}`
+    : NEW_PATH;
 
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,16 +42,16 @@ export default function ApiKeysPage() {
   const [isRevoking, setIsRevoking] = useState(false);
 
   const fetchKeys = useCallback(async () => {
-    if (!currentNamespace) return;
+    if (!nsId) return;
     setIsLoading(true);
     try {
-      setKeys(await apiKeysService.list());
+      setKeys(await apiKeysService.list(isForeign ? targetNsId : undefined));
     } catch {
       toast.error('Failed to load API keys');
     } finally {
       setIsLoading(false);
     }
-  }, [currentNamespace]);
+  }, [nsId, isForeign, targetNsId]);
 
   useEffect(() => {
     fetchKeys();
@@ -45,7 +61,7 @@ export default function ApiKeysPage() {
     if (!keyToRevoke) return;
     setIsRevoking(true);
     try {
-      await apiKeysService.revoke(keyToRevoke.uuid);
+      await apiKeysService.revoke(keyToRevoke.uuid, isForeign ? targetNsId : undefined);
       toast.success('API key revoked');
       setKeyToRevoke(null);
       fetchKeys();
@@ -56,7 +72,7 @@ export default function ApiKeysPage() {
     }
   };
 
-  if (!currentNamespace) {
+  if (!nsId) {
     return (
       <Card className="p-8 text-center text-secondary-500">
         Select a namespace to manage its API keys.
@@ -129,16 +145,26 @@ export default function ApiKeysPage() {
     <div className="space-y-6">
       <PageHeader
         title="API Keys"
-        description={`Machine credentials for ${currentNamespace.name}. Keys authenticate as "Authorization: Bearer opsk_…" and only do what their scopes allow — within this namespace.`}
+        description={`Machine credentials for ${nsName}. Keys authenticate as "Authorization: Bearer opsk_…" and only do what their scopes allow — within this namespace.`}
         icon={<Key className="w-6 h-6" />}
         actions={
           canManage ? (
-            <Button onClick={() => router.push(NEW_PATH)} leftIcon={<Plus className="w-4 h-4" />}>
+            <Button onClick={() => router.push(newHref)} leftIcon={<Plus className="w-4 h-4" />}>
               Create API key
             </Button>
           ) : undefined
         }
       />
+
+      {isForeign && (
+        <Card className="p-4 flex items-start gap-2.5 bg-primary-500/[0.06] border-primary-500/20">
+          <ShieldCheck className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-secondary-600">
+            You are managing keys for <strong className="text-secondary-900">{targetNsName || 'another namespace'}</strong> as a
+            platform administrator. Keys you create here belong to that namespace, not your own.
+          </p>
+        </Card>
+      )}
 
       {isLoading ? (
         <div className="flex justify-center py-16">
@@ -152,7 +178,7 @@ export default function ApiKeysPage() {
             Create a key to let scripts and services call the API without a user login.
           </p>
           {canManage && (
-            <Button className="mt-4" onClick={() => router.push(NEW_PATH)} leftIcon={<Plus className="w-4 h-4" />}>
+            <Button className="mt-4" onClick={() => router.push(newHref)} leftIcon={<Plus className="w-4 h-4" />}>
               Create API key
             </Button>
           )}

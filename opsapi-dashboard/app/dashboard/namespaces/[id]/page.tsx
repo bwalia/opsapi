@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { Card, Button } from '@/components/ui';
 import {
   NamespaceHeader,
@@ -11,7 +11,6 @@ import {
   NamespaceSettingsCard,
   NamespaceActivityCard,
 } from '@/components/namespace';
-import { RequireAdmin } from '@/components/permissions/PermissionGate';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { namespaceService } from '@/services';
 import type { Namespace, NamespaceStats } from '@/types';
@@ -67,9 +66,12 @@ export default function NamespaceDetailsPage() {
     router.push(`/dashboard/namespaces/${namespaceId}/edit`);
   }, [router, namespaceId]);
 
-  const handleSettings = useCallback(() => {
-    router.push(`/dashboard/namespaces/${namespaceId}/settings`);
-  }, [router, namespaceId]);
+  const handleApiKeys = useCallback(() => {
+    if (!namespace) return;
+    // Target this namespace explicitly so an admin manages ITS keys, not their own.
+    const qs = new URLSearchParams({ ns: namespace.uuid, nsName: namespace.name });
+    router.push(`/dashboard/namespace/api-keys?${qs.toString()}`);
+  }, [router, namespace]);
 
   const handleInviteMember = useCallback(() => {
     // Could open a modal or navigate to members page with invite modal open
@@ -138,7 +140,7 @@ export default function NamespaceDetailsPage() {
             {error || 'Namespace Not Found'}
           </h2>
           <p className="text-secondary-500 mb-4">
-            The namespace you're looking for doesn't exist or you don't have permission to view it.
+            The namespace you&apos;re looking for doesn&apos;t exist or you don&apos;t have permission to view it.
           </p>
           <div className="flex items-center justify-center gap-3">
             <Link href="/dashboard/namespaces">
@@ -157,7 +159,7 @@ export default function NamespaceDetailsPage() {
       <NamespaceHeader
         namespace={namespace}
         onEdit={handleEdit}
-        onSettings={handleSettings}
+        onApiKeys={handleApiKeys}
       />
 
       {/* Main content grid */}

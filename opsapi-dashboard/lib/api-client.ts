@@ -105,9 +105,11 @@ apiClient.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
 
-      // Add namespace header from localStorage (user's current namespace context)
+      // Add namespace header from localStorage (user's current namespace context).
+      // A caller may pre-set X-Namespace-Id to target a specific namespace
+      // (e.g. an admin managing another tenant's API keys) — don't clobber it.
       const namespaceData = localStorage.getItem(NAMESPACE_KEY);
-      if (namespaceData && config.headers) {
+      if (namespaceData && config.headers && !config.headers['X-Namespace-Id']) {
         try {
           const namespace = JSON.parse(namespaceData);
           if (namespace?.uuid) {
