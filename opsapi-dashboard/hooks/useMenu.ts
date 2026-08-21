@@ -45,6 +45,8 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     BarChart3: icons.BarChart3,
     UserCircle: icons.UserCircle,
     Shield: icons.Shield,
+    Key: icons.Key,
+    KeyRound: icons.KeyRound,
     Building2: icons.Building2,
     Rocket: icons.Rocket,
     Kanban: icons.Kanban,

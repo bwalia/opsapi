@@ -1275,6 +1275,7 @@ local _migrations = {
         menu_system_migrations, 7),
     ['270_init_namespace_menu_configs'] = conditional_array(ProjectConfig.FEATURES.MENU, menu_system_migrations, 8),
     ['288_add_vault_menu_item'] = conditional_array(ProjectConfig.FEATURES.VAULT, menu_system_migrations, 9),
+    ['1000_add_api_keys_menu_item'] = conditional_array(ProjectConfig.FEATURES.MENU, menu_system_migrations, 10),
 
     -- Secret Vault (conditional)
     ['272_create_namespace_secret_vaults_table'] = conditional_array(ProjectConfig.FEATURES.VAULT,

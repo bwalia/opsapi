@@ -498,4 +498,58 @@ return {
             end
         end
     end,
+
+    -- ========================================
+    -- [10] Add API Keys menu item (namespace machine credentials)
+    -- Gated on "settings":read like the Settings item, so it shows to namespace
+    -- admins; the backend (routes/api-keys.lua) enforces owner/namespace.manage.
+    -- ========================================
+    [10] = function()
+        local MigrationUtils = require("helper.migration-utils")
+        local timestamp = MigrationUtils.getCurrentTimestamp()
+
+        -- Idempotent: skip if already seeded.
+        local existing = db.select("* FROM menu_items WHERE key = ?", "api-keys")
+        if #existing == 0 then
+            db.insert("menu_items", {
+                uuid = MigrationUtils.generateUUID(),
+                key = "api-keys",
+                name = "API Keys",
+                icon = "Key",
+                path = "/dashboard/namespace/api-keys",
+                module = "settings",
+                required_action = "read",
+                priority = 101,  -- Secondary nav, next to Settings
+                is_active = true,
+                is_admin_only = false,
+                always_show = false,
+                settings = "{}",
+                created_at = timestamp,
+                updated_at = timestamp
+            })
+        end
+
+        -- Enable for all existing namespaces.
+        local api_menu = db.select("* FROM menu_items WHERE key = ?", "api-keys")
+        if #api_menu > 0 then
+            local namespaces = db.select("* FROM namespaces")
+            for _, namespace in ipairs(namespaces) do
+                local config_exists = db.select([[
+                    * FROM namespace_menu_config
+                    WHERE namespace_id = ? AND menu_item_id = ?
+                ]], namespace.id, api_menu[1].id)
+
+                if #config_exists == 0 then
+                    db.insert("namespace_menu_config", {
+                        uuid = MigrationUtils.generateUUID(),
+                        namespace_id = namespace.id,
+                        menu_item_id = api_menu[1].id,
+                        is_enabled = true,
+                        created_at = timestamp,
+                        updated_at = timestamp
+                    })
+                end
+            end
+        end
+    end,
 }
