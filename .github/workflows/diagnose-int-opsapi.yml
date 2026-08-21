@@ -21,6 +21,20 @@ jobs:
           echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
           chmod 600 kubeconfig
           echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+      - name: Node capacity
+        run: |
+          set +e
+          echo "=================== NODES: pod capacity vs used ==================="
+          kubectl get nodes -o custom-columns='NODE:.metadata.name,SCHEDULABLE:.spec.unschedulable,PODS_CAPACITY:.status.capacity.pods,PODS_ALLOCATABLE:.status.allocatable.pods'
+          echo "--- running pods per node (count) ---"
+          kubectl get pods -A --field-selector=status.phase=Running -o wide --no-headers | awk '{print $8}' | sort | uniq -c | sort -rn
+          echo "--- node taints ---"
+          kubectl get nodes -o custom-columns='NODE:.metadata.name,TAINTS:.spec.taints[*].key'
+          echo "=================== opsapi pod placement rules ==================="
+          echo "--- nodeSelector ---"; kubectl -n int get deploy workstation-opsapi -o jsonpath='{.spec.template.spec.nodeSelector}{"\n"}'
+          echo "--- affinity ---";     kubectl -n int get deploy workstation-opsapi -o jsonpath='{.spec.template.spec.affinity}{"\n"}'
+          echo "--- tolerations ---";  kubectl -n int get deploy workstation-opsapi -o jsonpath='{.spec.template.spec.tolerations}{"\n"}'
+
       - name: Diagnose
         run: |
           set +e
