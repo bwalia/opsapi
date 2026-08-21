@@ -1275,7 +1275,11 @@ local _migrations = {
         menu_system_migrations, 7),
     ['270_init_namespace_menu_configs'] = conditional_array(ProjectConfig.FEATURES.MENU, menu_system_migrations, 8),
     ['288_add_vault_menu_item'] = conditional_array(ProjectConfig.FEATURES.VAULT, menu_system_migrations, 9),
-    ['1000_add_api_keys_menu_item'] = conditional_array(ProjectConfig.FEATURES.MENU, menu_system_migrations, 10),
+    -- Key MUST sort after 263_create_menu_items_table etc. Lapis orders migrations
+    -- lexicographically, so '1000' sorted BEFORE '263' and ran before menu_items
+    -- existed. '295' sorts after the menu-table migrations. (Never applied under
+    -- the old key — the fresh-DB gate rejected it before any deploy recorded it.)
+    ['295_add_api_keys_menu_item'] = conditional_array(ProjectConfig.FEATURES.MENU, menu_system_migrations, 10),
 
     -- Secret Vault (conditional)
     ['272_create_namespace_secret_vaults_table'] = conditional_array(ProjectConfig.FEATURES.VAULT,
