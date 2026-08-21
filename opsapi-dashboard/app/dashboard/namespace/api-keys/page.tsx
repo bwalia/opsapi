@@ -9,6 +9,7 @@ import {
   Check,
   Loader2,
   ShieldAlert,
+  ShieldCheck,
   AlertTriangle,
 } from 'lucide-react';
 import { Button, Card, Badge, Modal, ConfirmDialog, Table } from '@/components/ui';
@@ -180,6 +181,7 @@ export default function ApiKeysPage() {
 
       {createOpen && (
         <CreateApiKeyModal
+          namespaceName={currentNamespace.name}
           onClose={() => setCreateOpen(false)}
           onCreated={(created) => {
             setCreateOpen(false);
@@ -210,9 +212,11 @@ export default function ApiKeysPage() {
 // ---------------------------------------------------------------------------
 
 function CreateApiKeyModal({
+  namespaceName,
   onClose,
   onCreated,
 }: {
+  namespaceName: string;
   onClose: () => void;
   onCreated: (created: CreatedApiKey) => void;
 }) {
@@ -278,6 +282,14 @@ function CreateApiKeyModal({
   return (
     <Modal isOpen onClose={onClose} title="Create API key" size="lg">
       <div className="space-y-5">
+        <div className="flex items-start gap-2 rounded-lg bg-primary-500/5 border border-primary-500/20 p-3">
+          <ShieldCheck className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-secondary-600">
+            This key is locked to the <strong className="text-secondary-900">{namespaceName}</strong> namespace —
+            it can never access another. It can do <strong>only</strong> what you grant below, nothing more.
+          </p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-secondary-700 mb-1.5">Name</label>
           <input
