@@ -21,6 +21,18 @@ jobs:
           echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
           chmod 600 kubeconfig
           echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+      - name: Current schedule reason + resources
+        run: |
+          set +e
+          echo "=================== opsapi pod: CURRENT scheduling reason ==================="
+          POD=$(kubectl -n int get pods -l app=workstation-opsapi -o name | tail -1)
+          echo "pod=$POD  status=$(kubectl -n int get $POD -o jsonpath='{.status.phase}')"
+          kubectl -n int describe $POD 2>&1 | sed -n '/Events:/,$p' | tail -8
+          echo "--- pod resource REQUESTS ---"
+          kubectl -n int get $POD -o jsonpath='{range .spec.containers[*]}{.name}{": "}{.resources}{"\n"}{end}'
+          echo "--- node allocatable cpu/mem + top talkers ---"
+          kubectl get nodes -o custom-columns='NODE:.metadata.name,CPU:.status.allocatable.cpu,MEM:.status.allocatable.memory' 2>&1 | head -20
+
       - name: Node capacity
         run: |
           set +e
