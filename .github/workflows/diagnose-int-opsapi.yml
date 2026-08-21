@@ -1,0 +1,42 @@
+name: Diagnose int opsapi
+
+# One-shot: dump why workstation-opsapi's new pod won't become Ready on int.
+# Runs on the self-hosted runner that has cluster access (same as the deploy).
+on:
+  push:
+    branches: [diag/int-opsapi]
+    paths: ['.github/workflows/diagnose-int-opsapi.yml']
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode kubeconfig
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::KUBE_CONFIG_DATA_K3S empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+      - name: Diagnose
+        run: |
+          set +e
+          NS=int; REL=workstation-opsapi
+          echo "=================== PODS ==================="
+          kubectl -n $NS get pods -l app=$REL -o wide
+          echo "=================== DEPLOY / RS ============"
+          kubectl -n $NS get deploy $REL -o wide
+          kubectl -n $NS get rs -l app=$REL -o wide
+          POD=$(kubectl -n $NS get pods -l app=$REL --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
+          echo "=================== DESCRIBE $POD ==========="
+          kubectl -n $NS describe pod "$POD" 2>&1 | tail -50
+          echo "=================== LOGS (current) ========="
+          kubectl -n $NS logs "$POD" --all-containers --tail=150 2>&1
+          echo "=================== LOGS (previous) ========"
+          kubectl -n $NS logs "$POD" --all-containers --previous --tail=150 2>&1
+          echo "=================== EVENTS ================="
+          kubectl -n $NS get events --sort-by=.lastTimestamp 2>&1 | tail -30
+          echo "=================== END ===================="
