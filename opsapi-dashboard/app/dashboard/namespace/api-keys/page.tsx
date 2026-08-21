@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   AlertTriangle,
+  Search,
 } from 'lucide-react';
 import { Button, Card, Badge, Modal, ConfirmDialog, Table } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -222,6 +223,7 @@ function CreateApiKeyModal({
 }) {
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<ApiKeyScopes>({});
+  const [scopeQuery, setScopeQuery] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [modules, setModules] = useState<NamespaceModuleMeta[]>([]);
   const [actions, setActions] = useState<NamespaceActionMeta[]>([]);
@@ -259,6 +261,15 @@ function CreateApiKeyModal({
   };
 
   const scopeCount = Object.keys(scopes).length;
+
+  const q = scopeQuery.trim().toLowerCase();
+  const filteredModules = q
+    ? modules.filter((m) =>
+        [m.display_name, m.name, m.category, m.description]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(q)),
+      )
+    : modules;
 
   const submit = async () => {
     if (!name.trim()) return toast.error('Give the key a name');
@@ -313,29 +324,57 @@ function CreateApiKeyModal({
           ) : modules.length === 0 ? (
             <p className="text-sm text-secondary-500">No scopable modules available in this namespace.</p>
           ) : (
-            <div className="border border-secondary-200 rounded-lg divide-y divide-secondary-100 max-h-64 overflow-y-auto">
-              {modules.map((mod) => (
-                <div key={mod.name} className="px-3 py-2.5">
-                  <div className="text-sm font-medium text-secondary-800">{mod.display_name || mod.name}</div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-1.5">
-                    {actions.map((a) => {
-                      const checked = (scopes[mod.name] || []).includes(a.name);
-                      return (
-                        <label key={a.name} className="flex items-center gap-1.5 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggle(mod.name, a.name)}
-                            className="w-4 h-4 text-primary-600 border-secondary-300 rounded focus:ring-primary-500"
-                          />
-                          <span className="text-sm text-secondary-600">{a.display_name || a.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <>
+              <div className="relative mb-2">
+                <Search className="w-4 h-4 text-secondary-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={scopeQuery}
+                  onChange={(e) => setScopeQuery(e.target.value)}
+                  placeholder={`Search ${modules.length} modules…`}
+                  className="w-full rounded-lg border border-secondary-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  aria-label="Search permissions"
+                />
+              </div>
+              <div className="border border-secondary-200 rounded-lg divide-y divide-secondary-100 max-h-64 overflow-y-auto">
+                {filteredModules.length === 0 ? (
+                  <p className="text-sm text-secondary-500 px-3 py-6 text-center">
+                    No modules match “{scopeQuery}”.
+                  </p>
+                ) : (
+                  filteredModules.map((mod) => {
+                    const modSelected = (scopes[mod.name] || []).length;
+                    return (
+                      <div key={mod.name} className="px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-secondary-800">
+                            {mod.display_name || mod.name}
+                          </span>
+                          {modSelected > 0 && (
+                            <Badge variant="info">{modSelected}</Badge>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-1.5">
+                          {actions.map((a) => {
+                            const checked = (scopes[mod.name] || []).includes(a.name);
+                            return (
+                              <label key={a.name} className="flex items-center gap-1.5 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggle(mod.name, a.name)}
+                                  className="w-4 h-4 text-primary-600 border-secondary-300 rounded focus:ring-primary-500"
+                                />
+                                <span className="text-sm text-secondary-600">{a.display_name || a.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </>
           )}
           {scopeCount > 0 && (
             <p className="text-xs text-secondary-500 mt-1">{scopeCount} module{scopeCount > 1 ? 's' : ''} scoped.</p>
