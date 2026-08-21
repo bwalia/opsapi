@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Key,
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiKeysService, rolesService } from '@/services';
 import type {
   CreatedApiKey,
@@ -31,8 +32,23 @@ const KEYS_PATH = '/dashboard/namespace/api-keys';
 
 export default function NewApiKeyPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentNamespace, isNamespaceOwner, hasPermission } = useNamespace();
-  const canManage = isNamespaceOwner || hasPermission('api_keys', 'manage');
+  const { isAdmin } = usePermissions();
+
+  // Optional target namespace (?ns=<uuid>&nsName=<name>) — a platform admin
+  // creating a key for another tenant without switching their whole context.
+  const targetNsId = searchParams.get('ns') || undefined;
+  const targetNsName = searchParams.get('nsName') || undefined;
+  const isForeign = !!targetNsId && targetNsId !== currentNamespace?.uuid;
+  const nsId = targetNsId || currentNamespace?.uuid;
+  const nsName = isForeign ? (targetNsName || 'this namespace') : currentNamespace?.name;
+  const canManage = isForeign ? isAdmin : isNamespaceOwner || hasPermission('api_keys', 'manage');
+
+  // Preserve the target-namespace params on the back/cancel links.
+  const keysHref = isForeign
+    ? `${KEYS_PATH}?ns=${encodeURIComponent(targetNsId!)}&nsName=${encodeURIComponent(targetNsName || '')}`
+    : KEYS_PATH;
 
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<ApiKeyScopes>({});
@@ -114,7 +130,7 @@ export default function NewApiKeyPage() {
         name: name.trim(),
         scopes,
         expires_at: expiresAt || undefined,
-      });
+      }, isForeign ? targetNsId : undefined);
       setCreated(result);
       toast.success('API key created');
     } catch (err) {
@@ -125,7 +141,7 @@ export default function NewApiKeyPage() {
   };
 
   // ---- Guards --------------------------------------------------------------
-  if (!currentNamespace) {
+  if (!nsId) {
     return (
       <Card className="p-8 text-center text-secondary-500">Select a namespace to create an API key.</Card>
     );
@@ -139,7 +155,7 @@ export default function NewApiKeyPage() {
           <p className="text-secondary-500 text-sm mt-1">
             You need owner or namespace-manage rights to create API keys.
           </p>
-          <Button className="mt-4" variant="outline" onClick={() => router.push(KEYS_PATH)}>
+          <Button className="mt-4" variant="outline" onClick={() => router.push(keysHref)}>
             Back to API keys
           </Button>
         </Card>
@@ -147,14 +163,14 @@ export default function NewApiKeyPage() {
     );
   }
 
-  if (created) return <RevealCreated created={created} onDone={() => router.push(KEYS_PATH)} />;
+  if (created) return <RevealCreated created={created} onDone={() => router.push(keysHref)} />;
 
   // ---- Create form (full-width two-panel) ---------------------------------
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <button
-          onClick={() => router.push(KEYS_PATH)}
+          onClick={() => router.push(keysHref)}
           className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-secondary-200 text-secondary-500 hover:text-secondary-800 hover:border-secondary-300 transition-colors"
           aria-label="Back to API keys"
         >
@@ -306,7 +322,7 @@ export default function NewApiKeyPage() {
           <Card className="p-5 flex items-start gap-2.5 bg-primary-500/[0.06] border-primary-500/20">
             <ShieldCheck className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
             <p className="text-sm text-secondary-600">
-              Locked to <strong className="text-secondary-900">{currentNamespace.name}</strong> — this key can
+              Locked to <strong className="text-secondary-900">{nsName}</strong> — this key can
               never reach another tenant, and can never manage keys, members, or roles.
             </p>
           </Card>
@@ -353,7 +369,7 @@ export default function NewApiKeyPage() {
               <Button onClick={submit} isLoading={submitting} leftIcon={<Key className="w-4 h-4" />} className="w-full justify-center">
                 Create key
               </Button>
-              <Button variant="outline" onClick={() => router.push(KEYS_PATH)} disabled={submitting} className="w-full justify-center">
+              <Button variant="outline" onClick={() => router.push(keysHref)} disabled={submitting} className="w-full justify-center">
                 Cancel
               </Button>
             </div>

@@ -12,6 +12,7 @@ import {
   Star,
   StarOff,
   Loader2,
+  Key,
 } from "lucide-react";
 import { Card, Badge, Button } from "@/components/ui";
 import { useNamespace } from "@/contexts/NamespaceContext";
@@ -28,7 +29,9 @@ export default function NamespacePage() {
     namespaces,
     defaultNamespaceInfo,
     setDefaultNamespace,
+    hasPermission,
   } = useNamespace();
+  const canManageKeys = isNamespaceOwner || hasPermission("api_keys", "manage");
   const [stats, setStats] = useState<NamespaceStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
@@ -267,6 +270,27 @@ export default function NamespacePage() {
             </div>
           </Card>
         </Link>
+
+        {canManageKeys && (
+          <Link href="/dashboard/namespace/api-keys">
+            <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center group-hover:bg-primary-200 transition-colors">
+                    <Key className="w-5 h-5 text-primary-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-secondary-900">API Keys</h3>
+                    <p className="text-sm text-secondary-500">
+                      Machine credentials for scripts &amp; services
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
+              </div>
+            </Card>
+          </Link>
+        )}
 
         {isNamespaceOwner && (
           <Link href="/dashboard/namespace/settings">
