@@ -1,0 +1,44 @@
+name: Repin opsapi int to debian010
+
+# int-opsapi is nodeSelector-pinned to debworker00 which is at its 110/110 pod
+# cap, so the pod is stuck Pending. Re-point the running Deployment to debian010
+# (a LAN node with room that can still reach workstation-db over the cluster
+# network), roll it out, and surface logs so we catch a DB-connectivity crash.
+on:
+  push:
+    branches: [diag/int-opsapi]
+    paths: ['.github/workflows/repin-opsapi-int.yml']
+  workflow_dispatch:
+
+jobs:
+  repin:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode kubeconfig
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig; chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+      - name: Patch nodeSelector -> debian010 and roll out
+        run: |
+          set +e
+          NS=int; REL=workstation-opsapi
+          echo "=== current nodeSelector ==="
+          kubectl -n $NS get deploy $REL -o jsonpath='{.spec.template.spec.nodeSelector}{"\n"}'
+          echo "=== patch -> debian010 ==="
+          kubectl -n $NS patch deployment $REL --type merge \
+            -p '{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"debian010"}}}}}'
+          echo "=== rollout (up to 6m; postStart runs the migration) ==="
+          kubectl -n $NS rollout status deploy/$REL --timeout=6m
+          RC=$?
+          echo "rollout exit=$RC"
+          echo "=== pods ==="
+          kubectl -n $NS get pods -l app=$REL -o wide
+          POD=$(kubectl -n $NS get pods -l app=$REL --field-selector=status.phase!=Succeeded -o name 2>/dev/null | tail -1)
+          echo "=== events for $POD ==="
+          kubectl -n $NS describe $POD 2>/dev/null | sed -n '/Events:/,$p' | tail -12
+          echo "=== logs for $POD (catch DB/migration errors) ==="
+          kubectl -n $NS logs $POD --tail=120 2>&1 | tail -60
+          exit $RC
