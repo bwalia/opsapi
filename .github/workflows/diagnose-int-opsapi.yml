@@ -21,6 +21,17 @@ jobs:
           echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig
           chmod 600 kubeconfig
           echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+      - name: debworker00 focus (opsapi is nodeSelector-pinned here)
+        run: |
+          set +e
+          echo "=== debworker00 pod capacity ==="
+          kubectl get node debworker00 -o jsonpath='{"capacity.pods="}{.status.capacity.pods}{"  allocatable.pods="}{.status.allocatable.pods}{"\n"}'
+          echo "=== pod counts on debworker00 by phase ==="
+          kubectl get pods -A --field-selector spec.nodeName=debworker00 --no-headers 2>/dev/null | awk '{print $4}' | sort | uniq -c
+          echo "  TOTAL on debworker00: $(kubectl get pods -A --field-selector spec.nodeName=debworker00 --no-headers 2>/dev/null | wc -l)"
+          echo "=== terminal/dead pods on debworker00 (reclaimable) ==="
+          kubectl get pods -A --field-selector spec.nodeName=debworker00 --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Pending"{print $1"/"$2" ("$4")"}' | head -30
+
       - name: Current schedule reason + resources
         run: |
           set +e
