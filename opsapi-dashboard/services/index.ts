@@ -122,3 +122,4 @@ export {
   alertsService,
   dementiaService,
 } from './familyAccess.service';
+export { apiKeysService } from './apiKeys.service';

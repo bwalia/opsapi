@@ -697,6 +697,45 @@ export interface NamespaceActionMeta {
 }
 
 // ============================================
+// API Keys (namespace-scoped machine credentials)
+// Backend: lapis/routes/api-keys.lua
+// ============================================
+
+/** scopes shape: { module_machine_name: ["create", "read", ...] } */
+export type ApiKeyScopes = Record<string, string[]>;
+
+export interface ApiKey {
+  uuid: string;
+  name: string;
+  /** Short, non-secret prefix for display, e.g. "opsk_a1b2c3d". */
+  key_prefix: string;
+  scopes: ApiKeyScopes;
+  last_used_at?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  revoked: boolean;
+  created_at: string;
+}
+
+export interface CreateApiKeyDto {
+  name: string;
+  scopes: ApiKeyScopes;
+  /** ISO date/datetime string, e.g. "2027-01-31". Optional = never expires. */
+  expires_at?: string;
+}
+
+/** Returned ONCE from create — carries the raw secret `key`, never retrievable again. */
+export interface CreatedApiKey {
+  uuid: string;
+  name: string;
+  key_prefix: string;
+  scopes: ApiKeyScopes;
+  expires_at?: string | null;
+  /** The full "opsk_…" secret. Shown once; store it now. */
+  key: string;
+}
+
+// ============================================
 // User Namespace Settings (User-First Architecture)
 // Users are GLOBAL, namespaces are assigned to users
 // ============================================
