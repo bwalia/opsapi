@@ -68,12 +68,13 @@ ingress:
           pathType: Prefix
   tls: []
 
-# Pin the pod to debworker00 (a debian node with disk headroom). Combines with
-# the chart's NotIn-lubuntu001 affinity. Routing is independent of pod
-# placement — traefik-edge on the edge nodes reaches this ClusterIP Service
-# wherever the pod runs.
+# Pin the pod to debian010 (a debian LAN node with pod headroom). Moved off
+# debworker00, which hit its 110/110 pod cap and left the pod Pending. debian010
+# still reaches workstation-db (a ClusterIP on the LAN mesh) fine. Combines with
+# the chart's NotIn-lubuntu001 affinity. Routing is independent of pod placement —
+# traefik-edge on the edge nodes reaches this ClusterIP Service wherever it runs.
 nodeSelector:
-  kubernetes.io/hostname: debworker00
+  kubernetes.io/hostname: debian010
 
 # DATABASE — dedicated Postgres on the LAN (moved here 2026-08-19).
 #   `host` points this release at its OWN `workstation-db` Postgres

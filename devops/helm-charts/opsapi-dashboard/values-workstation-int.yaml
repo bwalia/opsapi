@@ -22,5 +22,7 @@ ingress:
   annotations: {}
   tls: []
 
+# Pinned to debian010 alongside the API pod — debworker00 hit its 110/110 pod
+# cap. The UI talks to the API over HTTPS, so placement is routing-independent.
 nodeSelector:
-  kubernetes.io/hostname: debworker00
+  kubernetes.io/hostname: debian010
