@@ -1,0 +1,69 @@
+name: Fix int opsapi scheduling
+
+# One-shot remediation for the workstation-opsapi pod stuck Pending (Too many
+# pods / cordoned node). SAFE actions only: delete terminal pods (Evicted/
+# Completed/Failed) that still occupy per-node pod-count slots, and uncordon any
+# SchedulingDisabled node. Then wait for the opsapi pod to schedule.
+on:
+  push:
+    branches: [diag/int-opsapi]
+    paths: ['.github/workflows/fix-int-scheduling.yml']
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode kubeconfig
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          [ -n "$KUBECONFIG_BASE64" ] || { echo "::error::KUBE_CONFIG_DATA_K3S empty"; exit 1; }
+          echo "$KUBECONFIG_BASE64" | base64 -d > kubeconfig; chmod 600 kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Analyse (per-node eligibility for the opsapi pod)
+        run: |
+          set +e
+          echo "=== nodes: cordoned? taints? (opsapi pod has NO tolerations, affinity = hostname != lubuntu001) ==="
+          kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, ("cordoned="+((.spec.unschedulable // false)|tostring)), ("taints="+(([.spec.taints[]?.key]|join(","))//"-"))] | @tsv'
+          echo ""
+          echo "=== running pods per node ==="
+          kubectl get pods -A --field-selector=status.phase=Running -o wide --no-headers | awk '{print $8}' | sort | uniq -c | sort -rn
+          echo ""
+          echo "=== dead pods occupying slots (will be cleaned) ==="
+          echo "Failed:    $(kubectl get pods -A --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l)"
+          echo "Succeeded: $(kubectl get pods -A --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l)"
+
+      - name: Remediate (reclaim slots + uncordon)
+        run: |
+          set +e
+          echo "=== delete terminal pods (Failed incl. Evicted) ==="
+          kubectl delete pods -A --field-selector=status.phase=Failed 2>&1 | tail -8
+          echo "=== delete terminal pods (Succeeded incl. Completed) ==="
+          kubectl delete pods -A --field-selector=status.phase=Succeeded 2>&1 | tail -8
+          echo "=== uncordon any SchedulingDisabled node ==="
+          for n in $(kubectl get nodes -o json | jq -r '.items[] | select(.spec.unschedulable==true) | .metadata.name'); do
+            echo "uncordon $n"; kubectl uncordon "$n"
+          done
+
+      - name: Nudge + wait for the opsapi pod to schedule
+        run: |
+          set +e
+          NS=int; REL=workstation-opsapi
+          # Delete the stuck Pending pod so the Deployment recreates it against
+          # the now-freed capacity (it's not Running, so nothing is lost).
+          PENDING=$(kubectl -n $NS get pods -l app=$REL --field-selector=status.phase=Pending -o name)
+          [ -n "$PENDING" ] && { echo "recreating $PENDING"; kubectl -n $NS delete $PENDING; }
+          echo "=== waiting up to 5m for a Running/Ready pod ==="
+          for i in $(seq 1 20); do
+            kubectl -n $NS get pods -l app=$REL -o wide --no-headers | tail -2
+            READY=$(kubectl -n $NS get pods -l app=$REL --no-headers 2>/dev/null | grep -c '1/1.*Running')
+            [ "${READY:-0}" -ge 1 ] && { echo "✅ opsapi pod Running+Ready"; break; }
+            sleep 15
+          done
+          echo "=== final pod state ==="
+          kubectl -n $NS get pods -l app=$REL -o wide
+          echo "=== recent events ==="
+          kubectl -n $NS describe $(kubectl -n $NS get pods -l app=$REL -o name | tail -1) 2>/dev/null | sed -n '/Events:/,$p' | tail -10
