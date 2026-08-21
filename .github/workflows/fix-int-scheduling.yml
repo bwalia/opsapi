@@ -1,6 +1,6 @@
 name: Fix int opsapi scheduling
 
-# One-shot remediation for the workstation-opsapi pod stuck Pending (Too many
+# One-shot remediation (rerun) for the workstation-opsapi pod stuck Pending (Too many
 # pods / cordoned node). SAFE actions only: delete terminal pods (Evicted/
 # Completed/Failed) that still occupy per-node pod-count slots, and uncordon any
 # SchedulingDisabled node. Then wait for the opsapi pod to schedule.
