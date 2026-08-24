@@ -131,7 +131,12 @@ setup:
 # Access-Control-Allow-Origin and the browser blocks every call. The bare
 # domain matches the apex AND every subdomain (http/https, any port), so it
 # covers int-opsapi-ui.workstation.co.uk and the other env UI hosts.
-corsAllowedDomains: "workstation.co.uk"
+#
+# workstation.academy is added because the Workstation Academy is now a tenant
+# of this shared opsapi: its instructor dashboard (int-teach.workstation.academy)
+# is a cross-origin browser client of this API. Additive — the existing
+# workstation.co.uk origins are unaffected.
+corsAllowedDomains: "workstation.co.uk,workstation.academy"
 
 autoscaling:
   enabled: false

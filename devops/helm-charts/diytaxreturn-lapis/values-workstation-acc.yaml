@@ -51,6 +51,12 @@ setup:
   adminPassword: ""
   namespaceSlug: ""
 
+# Browser CORS allow-list (consumed by middleware/cors.lua) — git-owned here.
+# workstation.academy lets the Academy tenant's instructor dashboard
+# (acc-teach.workstation.academy) call this shared API cross-origin;
+# workstation.co.uk covers the opsapi admin UI. Additive; matches int.
+corsAllowedDomains: "workstation.co.uk,workstation.academy"
+
 autoscaling:
   enabled: false
   minReplicas: 1
