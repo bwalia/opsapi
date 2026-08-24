@@ -22,7 +22,9 @@ ingress:
   annotations: {}
   tls: []
 
-# Pinned to debian010 alongside the API pod — debworker00 hit its 110/110 pod
-# cap. The UI talks to the API over HTTPS, so placement is routing-independent.
+# Schedule on ANY healthy LAN amd64 node (see the API chart's note for why).
+# A single-node pin (debian010) went NotReady and left the dashboard Pending for
+# ~18h. net-region=home keeps it on the LAN; arch=amd64 keeps it off the arm64 Pi.
 nodeSelector:
-  kubernetes.io/hostname: debian010
+  net-region: home
+  kubernetes.io/arch: amd64

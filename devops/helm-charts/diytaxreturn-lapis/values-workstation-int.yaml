@@ -68,13 +68,23 @@ ingress:
           pathType: Prefix
   tls: []
 
-# Pin the pod to debian010 (a debian LAN node with pod headroom). Moved off
-# debworker00, which hit its 110/110 pod cap and left the pod Pending. debian010
-# still reaches workstation-db (a ClusterIP on the LAN mesh) fine. Combines with
-# the chart's NotIn-lubuntu001 affinity. Routing is independent of pod placement —
-# traefik-edge on the edge nodes reaches this ClusterIP Service wherever it runs.
+# Schedule on ANY healthy LAN amd64 node, not one pinned host. Single-node pins
+# kept breaking this: debworker00 hit its 110/110 pod cap, then debian010 went
+# NotReady (unreachable) and the pinned pods sat Pending for ~18h. The label set
+# below lets the scheduler pick from the whole LAN amd64 pool and skip
+# tainted/unreachable/full nodes on its own — a node dying no longer needs a
+# manual re-pin.
+#   net-region=home       → on the LAN; reaches workstation-db (a ClusterIP on the
+#                           LAN). Excludes cloud nodes (net-region=manchester),
+#                           which are across the down cloud<->LAN WireGuard mesh.
+#   kubernetes.io/arch=amd64 → excludes the arm64 Pi (rpworker99); the amd64 image
+#                           cannot exec there ("exec docker-entrypoint.sh: no such
+#                           file or directory").
+# Combines with the chart's NotIn-lubuntu001 affinity. Routing is independent of
+# placement — traefik-edge reaches this ClusterIP Service wherever the pod runs.
 nodeSelector:
-  kubernetes.io/hostname: debian010
+  net-region: home
+  kubernetes.io/arch: amd64
 
 # DATABASE — dedicated Postgres on the LAN (moved here 2026-08-19).
 #   `host` points this release at its OWN `workstation-db` Postgres
