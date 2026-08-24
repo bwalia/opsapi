@@ -7,6 +7,7 @@
 
     CRUD /api/v2/tax/admin/profiles
     CSV  /api/v2/tax/admin/profiles/:uuid/upload-csv
+         (detect → confirm column mapping → save format → parse)
          /api/v2/tax/admin/profiles/:uuid/save-transactions
          /api/v2/tax/admin/profiles/:uuid/suggest-rules
 ]]
@@ -14,6 +15,7 @@
 local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
+local ClassificationCSV = require("lib.classification-csv")
 
 local function isAdmin(user)
     if not user then return false end
@@ -507,7 +509,12 @@ return function(app)
     )
 
     -- ========================================
-    -- UPLOAD CSV — parse + map categories
+    -- UPLOAD CSV — detect format / confirm mapping / parse + map categories
+    --
+    -- Phase 1 (csv_content only):
+    --   fingerprint → saved format? parse : return needs_mapping + guess
+    -- Phase 2 (csv_content + column_mapping):
+    --   validate → optionally upsert format → parse
     -- ========================================
     app:post("/api/v2/tax/admin/profiles/:uuid/upload-csv",
         AuthMiddleware.requireAuth(function(self)
@@ -528,17 +535,14 @@ return function(app)
                 return { status = 400, json = { error = "csv_content is required" } }
             end
 
-            -- Reject oversized uploads (50MB limit)
             if #csv_content > 50 * 1024 * 1024 then
                 return { status = 413, json = { error = "CSV content too large (max 50MB)" } }
             end
 
-            -- Strip UTF-8 BOM if present
             if csv_content:sub(1, 3) == "\xEF\xBB\xBF" then
                 csv_content = csv_content:sub(4)
             end
 
-            -- Parse custom mappings from profile (JSONB may be string or table)
             local custom_mappings = {}
             if profile.category_mappings then
                 if type(profile.category_mappings) == "table" then
@@ -551,143 +555,230 @@ return function(app)
                 end
             end
 
-            -- Parse CSV lines
-            local lines = {}
-            for line in csv_content:gmatch("[^\r\n]+") do
-                table.insert(lines, line)
-            end
-
+            local lines = ClassificationCSV.splitLines(csv_content)
             if #lines < 2 then
                 return { status = 400, json = { error = "CSV must have a header row + at least 1 data row" } }
             end
 
-            -- Parse header to detect format
-            local header = lines[1]:lower()
-            local is_natwest = header:find("spent") ~= nil
-            local is_lloyds = header:find("amount") ~= nil
+            local headers = ClassificationCSV.parseCSVLine(lines[1])
+            local fingerprint = ClassificationCSV.fingerprint(headers)
 
-            if not is_natwest and not is_lloyds then
-                return { status = 400, json = {
-                    error = "Unrecognized CSV format. Expected Lloyds (DATE, DESCRIPTION, AMOUNT, ...) or NatWest (date, Bank description, Spent, Received, ...)",
-                    accepted_formats = {
-                        { name = "Lloyds", columns = "DATE, DESCRIPTION, AMOUNT, Payee, ADDED OR MATCHED, Rule" },
-                        { name = "NatWest", columns = "date, Bank description, Spent, Received, From/To, Transaction Posted" },
-                    }
-                } }
+            local function lookupFormat(fp)
+                local ok, rows = pcall(function()
+                    return db.query(
+                        "SELECT * FROM classification_csv_formats WHERE header_fingerprint = ? LIMIT 1",
+                        fp)
+                end)
+                if not ok or not rows or #rows == 0 then return nil end
+                return rows[1]
             end
 
-            -- Simple CSV field parser (handles quoted fields with commas)
-            local function parseCSVLine(line)
-                local fields = {}
-                local pos = 1
-                while pos <= #line do
-                    if line:sub(pos, pos) == '"' then
-                        local closing = line:find('"', pos + 1)
-                        while closing and line:sub(closing + 1, closing + 1) == '"' do
-                            closing = line:find('"', closing + 2)
-                        end
-                        if closing then
-                            table.insert(fields, (line:sub(pos + 1, closing - 1):gsub('""', '"')))
-                            pos = closing + 2 -- skip closing quote + comma
-                        else
-                            table.insert(fields, line:sub(pos + 1))
-                            break
-                        end
-                    else
-                        local next_comma = line:find(",", pos)
-                        if next_comma then
-                            table.insert(fields, line:sub(pos, next_comma - 1))
-                            pos = next_comma + 1
-                        else
-                            table.insert(fields, line:sub(pos))
-                            break
-                        end
+            local function touchFormat(fmt_uuid)
+                pcall(function()
+                    db.query(
+                        "UPDATE classification_csv_formats SET last_used_at = NOW(), updated_at = NOW() WHERE uuid = ?",
+                        fmt_uuid)
+                end)
+            end
+
+            local function upsertFormat(name, fp, hdrs, mapping, amount_mode, user_uuid)
+                local ok, result = pcall(function()
+                    local existing = lookupFormat(fp)
+                    local headers_json = cjson.encode(hdrs)
+                    local mapping_json = cjson.encode(mapping)
+                    if existing then
+                        db.query([[
+                            UPDATE classification_csv_formats
+                               SET name = ?, headers = ?::jsonb, column_mapping = ?::jsonb,
+                                   amount_mode = ?, updated_at = NOW(), last_used_at = NOW()
+                             WHERE header_fingerprint = ?
+                        ]], name, headers_json, mapping_json, amount_mode, fp)
+                        return existing.uuid
                     end
+                    local new_uuid
+                    local uuid_rows = db.query("SELECT gen_random_uuid()::text AS u")
+                    if uuid_rows and uuid_rows[1] and uuid_rows[1].u then
+                        new_uuid = uuid_rows[1].u
+                    else
+                        new_uuid = ngx.md5(fp .. tostring(ngx.now()))
+                    end
+                    db.query([[
+                        INSERT INTO classification_csv_formats
+                            (uuid, name, header_fingerprint, headers, column_mapping,
+                             amount_mode, is_builtin, created_by, created_at, updated_at, last_used_at)
+                        VALUES
+                            (?, ?, ?, ?::jsonb, ?::jsonb, ?, false, ?, NOW(), NOW(), NOW())
+                    ]], new_uuid, name, fp, headers_json, mapping_json, amount_mode, user_uuid)
+                    return new_uuid
+                end)
+                if not ok then
+                    ngx.log(ngx.ERR, "[upload-csv] upsert format failed: ", tostring(result))
+                    return nil
                 end
-                return fields
+                return result
             end
 
-            local mapped = {}
-            local unmapped = {}
-            local skipped = 0
+            local function parseRows(column_mapping, amount_mode)
+                local mapped = {}
+                local unmapped = {}
+                local skipped = 0
 
-            for i = 2, #lines do
-                local fields = parseCSVLine(lines[i])
-                if #fields < 3 then
-                    skipped = skipped + 1
-                    goto continue
-                end
-
-                local date_raw, desc_raw, amount, classification_text
-
-                if is_natwest then
-                    -- NatWest: date, Bank description, Spent, Received, From/To, Transaction Posted
-                    date_raw = fields[1]
-                    desc_raw = fields[2]
-                    local spent = parseAmount(fields[3])
-                    local received = parseAmount(fields[4])
-                    if (not spent or spent == 0) and (not received or received == 0) then
+                for i = 2, #lines do
+                    local fields = ClassificationCSV.parseCSVLine(lines[i])
+                    if #fields < 3 then
                         skipped = skipped + 1
                         goto continue
                     end
-                    amount = (received and received > 0) and received or -(spent or 0)
-                    classification_text = fields[6] or fields[5] -- Transaction Posted or From/To
-                else
-                    -- Lloyds: DATE, DESCRIPTION, AMOUNT, Payee, ADDED OR MATCHED, Rule
-                    date_raw = fields[1]
-                    desc_raw = fields[2]
-                    amount = parseAmount(fields[3])
-                    classification_text = fields[5]
+
+                    local date_raw, desc_raw, amount, classification_text =
+                        ClassificationCSV.extractRow(fields, column_mapping, amount_mode)
+
+                    if not desc_raw then
+                        skipped = skipped + 1
+                        goto continue
+                    end
+
+                    local prefix, label = extractCategory(classification_text)
+                    local cat_mapping = mapCategory(prefix, label, custom_mappings)
+                    local cleaned = cleanMerchant(desc_raw)
+                    local is_credit = amount > 0
+                    local tx_type = is_credit and "CREDIT" or "DEBIT"
+
+                    local row = {
+                        description = cleaned,
+                        description_raw = desc_raw,
+                        amount = math.abs(amount),
+                        transaction_type = tx_type,
+                        transaction_date = date_raw or "",
+                        original_label = label or "",
+                        row_index = i,
+                    }
+
+                    if cat_mapping then
+                        row.category = cat_mapping[1]
+                        row.hmrc_category = cat_mapping[2]
+                        row.is_tax_deductible = cat_mapping[3]
+                        row.auto_mapped = true
+                        table.insert(mapped, row)
+                    elseif prefix == "Expense" then
+                        row.auto_mapped = false
+                        table.insert(unmapped, row)
+                    else
+                        -- Also surface rows that have a raw label but no known prefix,
+                        -- so admins can still map unknown accountant formats.
+                        if classification_text and tostring(classification_text):match("%S") then
+                            row.original_label = label or tostring(classification_text):match("^%s*(.-)%s*$")
+                            row.auto_mapped = false
+                            table.insert(unmapped, row)
+                        else
+                            skipped = skipped + 1
+                        end
+                    end
+
+                    ::continue::
                 end
 
-                if not desc_raw or desc_raw == "" or not amount then
-                    skipped = skipped + 1
-                    goto continue
-                end
-
-                local prefix, label = extractCategory(classification_text)
-                local mapping = mapCategory(prefix, label, custom_mappings)
-                local cleaned = cleanMerchant(desc_raw)
-                local is_credit = amount > 0
-                local tx_type = is_credit and "CREDIT" or "DEBIT"
-
-                local row = {
-                    description = cleaned,
-                    description_raw = desc_raw,
-                    amount = math.abs(amount),
-                    transaction_type = tx_type,
-                    transaction_date = date_raw or "",
-                    original_label = label or "",
-                    row_index = i,
-                }
-
-                if mapping then
-                    row.category = mapping[1]
-                    row.hmrc_category = mapping[2]
-                    row.is_tax_deductible = mapping[3]
-                    row.auto_mapped = true
-                    table.insert(mapped, row)
-                elseif prefix == "Expense" then
-                    row.auto_mapped = false
-                    table.insert(unmapped, row)
-                else
-                    skipped = skipped + 1
-                end
-
-                ::continue::
+                return mapped, unmapped, skipped
             end
+
+            local function reviewResponse(format_name, format_uuid, column_mapping, amount_mode, mapped, unmapped, skipped)
+                return {
+                    status = 200,
+                    json = {
+                        needs_mapping = false,
+                        format_detected = format_name,
+                        format_name = format_name,
+                        format_uuid = format_uuid,
+                        fingerprint = fingerprint,
+                        headers = headers,
+                        column_mapping = column_mapping,
+                        amount_mode = amount_mode,
+                        total_rows = #lines - 1,
+                        parsed_count = #mapped + #unmapped,
+                        mapped_count = #mapped,
+                        unmapped_count = #unmapped,
+                        skipped_count = skipped,
+                        mapped = mapped,
+                        unmapped = unmapped,
+                    }
+                }
+            end
+
+            -- ── Phase 2: client supplied a confirmed mapping ─────────────────
+            if body.column_mapping and type(body.column_mapping) == "table" then
+                local column_mapping = ClassificationCSV.normalizeMapping(body.column_mapping)
+                local amount_mode = body.amount_mode
+                if amount_mode ~= "debit_credit" and amount_mode ~= "signed_amount" then
+                    if column_mapping.debit and column_mapping.credit then
+                        amount_mode = "debit_credit"
+                    else
+                        amount_mode = "signed_amount"
+                    end
+                end
+
+                local verr = ClassificationCSV.validateMapping(column_mapping, amount_mode, #headers)
+                if verr then
+                    return { status = 400, json = { error = verr } }
+                end
+
+                local format_name = body.format_name
+                if not format_name or format_name == "" then
+                    format_name = "Custom format"
+                end
+                format_name = tostring(format_name):sub(1, 100)
+
+                local format_uuid = nil
+                local save_format = body.save_format
+                if save_format == nil then save_format = true end
+                if save_format then
+                    local user_uuid = self.current_user and (self.current_user.uuid or self.current_user.id) or nil
+                    format_uuid = upsertFormat(format_name, fingerprint, headers, column_mapping, amount_mode, user_uuid)
+                end
+
+                local mapped, unmapped, skipped = parseRows(column_mapping, amount_mode)
+                return reviewResponse(format_name, format_uuid, column_mapping, amount_mode, mapped, unmapped, skipped)
+            end
+
+            -- ── Phase 1: detect / match saved format ─────────────────────────
+            local saved = lookupFormat(fingerprint)
+            if saved then
+                local column_mapping = ClassificationCSV.decodeJsonField(saved.column_mapping) or {}
+                column_mapping = ClassificationCSV.normalizeMapping(column_mapping)
+                local amount_mode = saved.amount_mode or "signed_amount"
+                touchFormat(saved.uuid)
+                local mapped, unmapped, skipped = parseRows(column_mapping, amount_mode)
+                return reviewResponse(
+                    saved.name or "Saved format",
+                    saved.uuid,
+                    column_mapping,
+                    amount_mode,
+                    mapped,
+                    unmapped,
+                    skipped
+                )
+            end
+
+            -- Unknown fingerprint → ask admin to confirm column mapping
+            local guessed_mapping, amount_mode = ClassificationCSV.guessMapping(headers)
+            local sample_rows = ClassificationCSV.sampleRows(lines, 5)
 
             return {
                 status = 200,
                 json = {
-                    format_detected = is_natwest and "NatWest" or "Lloyds",
+                    needs_mapping = true,
+                    fingerprint = fingerprint,
+                    headers = headers,
+                    guessed_mapping = guessed_mapping,
+                    amount_mode = amount_mode,
+                    sample_rows = sample_rows,
                     total_rows = #lines - 1,
-                    parsed_count = #mapped + #unmapped,
-                    mapped_count = #mapped,
-                    unmapped_count = #unmapped,
-                    skipped_count = skipped,
-                    mapped = mapped,
-                    unmapped = unmapped,
+                    format_detected = nil,
+                    mapped = {},
+                    unmapped = {},
+                    mapped_count = 0,
+                    unmapped_count = 0,
+                    skipped_count = 0,
+                    parsed_count = 0,
                 }
             }
         end)
