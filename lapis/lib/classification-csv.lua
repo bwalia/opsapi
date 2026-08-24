@@ -51,9 +51,14 @@ function M.splitLines(csv_content)
     return lines
 end
 
+--- Lowercase + trim a header cell.
+-- The wrapping parens are load-bearing: `gsub` returns (string, count), and a
+-- bare `return` propagates both. Callers doing `table.insert(t, normalizeHeader(h))`
+-- would then hit the 3-arg `table.insert(list, pos, value)` overload and throw
+-- "bad argument #2 to 'insert' (number expected, got string)".
 function M.normalizeHeader(h)
     if not h then return "" end
-    return tostring(h):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    return (tostring(h):lower():gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
 --- Ordered lowercase headers joined by `|`.
