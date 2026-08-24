@@ -99,6 +99,26 @@ function _M.authenticate()
             ngx.exit(403)
         end
 
+        -- An API key is bound to exactly ONE namespace. Reject any request that
+        -- names a DIFFERENT namespace via header — centrally, here, so it also
+        -- covers routes that resolve the namespace OUTSIDE requireNamespace
+        -- (optionalNamespace, raw X-Namespace-Id reads) and any route added
+        -- later. requireNamespace has its own equivalent check; this closes the
+        -- gap for everything else (fail-closed, same as permits_uri above).
+        local ns = principal.namespace or {}
+        local req_headers = ngx.req.get_headers()
+        local hdr_id = req_headers["x-namespace-id"]
+        local hdr_slug = req_headers["x-namespace-slug"]
+        if (hdr_id and hdr_id ~= "" and hdr_id ~= tostring(ns.id) and hdr_id ~= ns.uuid)
+            or (hdr_slug and hdr_slug ~= "" and hdr_slug ~= ns.slug) then
+            ngx.log(ngx.WARN, "API key ", principal.key_uuid,
+                " used with a namespace it does not belong to")
+            ngx.status = 403
+            ngx.header.content_type = "application/json"
+            ngx.say('{"error":"API key is not valid for the requested namespace"}')
+            ngx.exit(403)
+        end
+
         ngx.ctx.user = principal
         ngx.ctx.api_key_auth = true
         ngx.log(ngx.NOTICE, "API key authentication successful: ", principal.key_uuid,
