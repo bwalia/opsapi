@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User, X, ClipboardCheck, CheckCircle2, XCircle } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User, X, ClipboardCheck, CheckCircle2, XCircle, Send } from 'lucide-react';
 import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -466,6 +466,10 @@ function AcademyCoursesPage() {
   const [editing, setEditing] = useState<AcademyCourse | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AcademyCourse | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Instructor "Submit for review" — a prominent, one-click alternative to
+  // digging the status control out of the edit modal.
+  const [submitTarget, setSubmitTarget] = useState<AcademyCourse | null>(null);
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   // A reviewer (platform admin OR namespace owner) may publish directly and sees
   // the approval queue. `isAdmin` covers the platform admin; ownership comes from
@@ -520,6 +524,32 @@ function AcademyCoursesPage() {
       toast.error('Failed to delete course');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // Send a course into the approval queue. Instructors can't self-publish: the
+  // backend gate turns a `published` request into `pending_review`, so we send
+  // `published` and report the status the server actually persisted.
+  const handleSubmitForReview = async () => {
+    if (!submitTarget) return;
+    setSubmittingReview(true);
+    try {
+      const saved = await academyService.updateCourse(submitTarget.uuid, { status: 'published' });
+      if (saved.status === 'pending_review') {
+        toast.success('Submitted for review — an admin will approve it before it goes live');
+      } else if (saved.status === 'published') {
+        toast.success('Course published');
+      } else {
+        toast.success('Course updated');
+      }
+      setSubmitTarget(null);
+      load();
+      setReviewRefresh((n) => n + 1);
+    } catch (err) {
+      console.error('Submit for review failed:', err);
+      toast.error(academyErrorMessage(err, 'Failed to submit for review'));
+    } finally {
+      setSubmittingReview(false);
     }
   };
 
@@ -579,6 +609,23 @@ function AcademyCoursesPage() {
       header: '',
       render: (c) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+          {/* Instructors (non-reviewers) get an explicit go-live action so it's
+              not buried in the edit modal. Reviewers publish via the modal /
+              approval queue instead. */}
+          {!isReviewer && canUpdate('courses') && (c.status === 'draft' || c.status === 'archived') && (
+            <button
+              title="Submit for admin review"
+              onClick={() => setSubmitTarget(c)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-primary-600 hover:bg-primary-50"
+            >
+              <Send size={14} /> Submit for review
+            </button>
+          )}
+          {!isReviewer && c.status === 'pending_review' && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-warning-600" title="Awaiting admin approval">
+              <ClipboardCheck size={14} /> In review
+            </span>
+          )}
           {canUpdate('courses') && (
             <button title="Edit" onClick={() => { setEditing(c); setModalOpen(true); }} className="p-1.5 rounded-md text-secondary-500 hover:bg-secondary-100 hover:text-secondary-900">
               <Edit size={16} />
@@ -595,6 +642,13 @@ function AcademyCoursesPage() {
   ];
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+
+  // The trap instructors fall into: they publish a LESSON and assume the course
+  // is live. It isn't — lessons only go public once the COURSE is approved. Nudge
+  // them toward "Submit for review" when they have draft courses that hold lessons.
+  const unsubmittedWithLessons = !isReviewer
+    ? courses.filter((c) => c.status === 'draft' && (c.lesson_count ?? 0) > 0)
+    : [];
 
   return (
     <div className="space-y-6">
@@ -645,6 +699,21 @@ function AcademyCoursesPage() {
         </div>
       </div>
 
+      {/* Instructor nudge: lessons aren't public until the course is approved. */}
+      {unsubmittedWithLessons.length > 0 && (
+        <div className="flex items-start gap-3 rounded-xl border border-primary-200 bg-primary-50/50 px-4 py-3">
+          <ClipboardCheck size={18} className="text-primary-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-secondary-700">
+            <p className="font-medium text-secondary-900">Your lessons aren&apos;t live yet</p>
+            <p className="mt-0.5">
+              Publishing a lesson only adds it to the course draft — it does <strong>not</strong> put the course on the public site.
+              When a course is ready, click <strong>Submit for review</strong>; an admin approves it before it goes live.
+              {` You have ${unsubmittedWithLessons.length} course${unsubmittedWithLessons.length === 1 ? '' : 's'} with lessons still in draft.`}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Approval queue — reviewers only (platform admin / namespace owner) */}
       {isReviewer && (
         <PendingReviewPanel
@@ -687,6 +756,17 @@ function AcademyCoursesPage() {
         confirmText="Delete"
         variant="danger"
         isLoading={deleting}
+      />
+
+      <ConfirmDialog
+        isOpen={!!submitTarget}
+        onClose={() => setSubmitTarget(null)}
+        onConfirm={handleSubmitForReview}
+        title="Submit for review"
+        message={`Submit "${submitTarget?.title}" for review? An admin approves it before it appears on the public site — your lessons are not public until then.`}
+        confirmText="Submit for review"
+        variant="info"
+        isLoading={submittingReview}
       />
     </div>
   );
