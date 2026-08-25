@@ -340,6 +340,54 @@ function NamespaceQueries.getForUser(user_id)
     return db.query(query, tostring(user_id), user_id_num or 0)
 end
 
+--- All active namespaces, in the same shape as getForUser, for a PLATFORM ADMIN.
+-- A platform admin (global `administrative` role) has access to every namespace
+-- without being a member, so the switcher must list them all. Each row is marked
+-- is_owner=true and carries that namespace's `owner` role permissions, so the
+-- dashboard grants full control on switch. Namespaces the admin is NOT a member
+-- of therefore appear alongside any they do belong to.
+-- @return table list of namespaces (switcher shape)
+function NamespaceQueries.getAllForPlatformAdmin()
+    local query = [[
+        SELECT
+            n.id, n.uuid, n.name, n.slug, n.description, n.logo_url,
+            n.status, n.plan, n.settings,
+            true as is_owner, 'active' as member_status, NULL as joined_at,
+            (
+                SELECT json_agg(json_build_object(
+                    'id', nr.id,
+                    'uuid', nr.uuid,
+                    'role_name', nr.role_name,
+                    'display_name', nr.display_name,
+                    'permissions', nr.permissions
+                ))
+                FROM namespace_roles nr
+                WHERE nr.namespace_id = n.id AND nr.role_name = 'owner'
+            ) as roles
+        FROM namespaces n
+        WHERE n.status = 'active'
+        ORDER BY n.name ASC
+    ]]
+    return db.query(query)
+end
+
+--- The `owner` role row for a namespace (id + permissions), used to build a
+-- namespace-scoped token when a platform admin switches into a namespace they
+-- are not a member of. Returns nil if the namespace has no owner role defined.
+-- @param namespace_id string|number Namespace ID or UUID
+-- @return table|nil
+function NamespaceQueries.getOwnerRole(namespace_id)
+    local namespace_id_num = tonumber(namespace_id)
+    local rows = db.query([[
+        SELECT nr.id, nr.uuid, nr.role_name, nr.display_name, nr.permissions
+        FROM namespace_roles nr
+        JOIN namespaces n ON n.id = nr.namespace_id
+        WHERE (n.uuid = ? OR n.id = ?) AND nr.role_name = 'owner'
+        LIMIT 1
+    ]], tostring(namespace_id), namespace_id_num or 0)
+    return rows and rows[1]
+end
+
 --- Check if user is member of namespace
 -- @param user_id string|number User ID or UUID
 -- @param namespace_id string|number Namespace ID or UUID

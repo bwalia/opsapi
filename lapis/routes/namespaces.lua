@@ -122,7 +122,16 @@ return function(app)
             return error_response(404, "User not found")
         end
 
-        local namespaces = NamespaceQueries.getForUser(self.current_user.uuid)
+        -- Platform admins (global `administrative` role) have access to every
+        -- namespace without being a member, so the switcher must list them ALL —
+        -- consistent with the /admin/namespaces page. Regular users still see only
+        -- the namespaces they belong to.
+        local namespaces
+        if check_platform_admin(self.current_user) then
+            namespaces = NamespaceQueries.getAllForPlatformAdmin()
+        else
+            namespaces = NamespaceQueries.getForUser(self.current_user.uuid)
+        end
 
         -- Parse roles JSON for each namespace
         for _, ns in ipairs(namespaces or {}) do
@@ -158,12 +167,13 @@ return function(app)
         })
     end))
 
-    -- Get details of a specific namespace (if user is member)
+    -- Get details of a specific namespace (member, or any namespace for a platform admin)
     app:get("/api/v2/user/namespaces/:id", AuthMiddleware.requireAuth(function(self)
         local namespace_id = self.params.id
 
-        -- Check user is member
-        if not NamespaceQueries.isUserMember(self.current_user.uuid, namespace_id) then
+        -- Check user is member (platform admins have access to every namespace)
+        if not check_platform_admin(self.current_user)
+            and not NamespaceQueries.isUserMember(self.current_user.uuid, namespace_id) then
             return error_response(403, "You don't have access to this namespace")
         end
 
@@ -195,8 +205,10 @@ return function(app)
     app:post("/api/v2/user/namespaces/:id/switch", RateLimit.wrap(NS_SWITCH_LIMIT, AuthMiddleware.requireAuth(function(self)
         local namespace_id = self.params.id
 
-        -- Check user is member
-        if not NamespaceQueries.isUserMember(self.current_user.uuid, namespace_id) then
+        -- Members switch into their own namespace; platform admins into ANY.
+        local is_platform_admin = check_platform_admin(self.current_user)
+        if not is_platform_admin
+            and not NamespaceQueries.isUserMember(self.current_user.uuid, namespace_id) then
             return error_response(403, "You don't have access to this namespace")
         end
 
@@ -227,6 +239,18 @@ return function(app)
         local raw_is_owner = membership and membership.is_owner
         local is_owner = raw_is_owner == true or raw_is_owner == 't' or raw_is_owner == 1
 
+        -- Platform admin switching into a namespace they don't belong to: grant
+        -- owner-level context using that namespace's `owner` role, so the scoped
+        -- token carries full permissions without needing a membership row.
+        local pa_owner_role = nil
+        if not membership and is_platform_admin then
+            is_owner = true
+            pa_owner_role = NamespaceQueries.getOwnerRole(namespace_id)
+            if pa_owner_role then
+                permissions = pa_owner_role.permissions
+            end
+        end
+
         -- Fetch platform roles from DB for accurate JWT
         local platform_roles = db.query([[
             SELECT r.id, r.role_name, r.role_name as name FROM roles r
@@ -242,6 +266,15 @@ return function(app)
                 local ok, parsed = pcall(cjson.decode, ns_roles)
                 if ok then ns_roles = parsed end
             end
+        elseif pa_owner_role then
+            -- Platform admin (non-member): present as the namespace owner role.
+            ns_roles = { {
+                id = pa_owner_role.id,
+                uuid = pa_owner_role.uuid,
+                role_name = pa_owner_role.role_name,
+                display_name = pa_owner_role.display_name,
+                permissions = pa_owner_role.permissions
+            } }
         end
 
         -- Generate proper JWT via centralized helper
