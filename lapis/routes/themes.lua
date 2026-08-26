@@ -98,8 +98,25 @@ return function(app)
         return api_err(result.status or 500, result.error or "unknown error", extras)
     end
 
+    -- The project a namespace is pinned to, or nil when it isn't pinned to one.
+    --
+    -- `namespaces.project_code` defaults to "all", which means "not assigned to a
+    -- specific product" — those fall through to the pod's PROJECT_CODE, exactly as
+    -- before. A namespace pinned to a real product (academy, tax_copilot) gets that
+    -- product's presets instead, which is what lets a white-labelled tenant have its
+    -- own default look. (Read `project_code`: `default_project_code` was a typo for a
+    -- column that has never existed, so this branch was dead and every namespace
+    -- silently resolved to the pod's code.)
+    local function namespace_project_code(ns)
+        local code = ns and ns.project_code
+        if type(code) == "string" and code ~= "" and code ~= "all" then
+            return code
+        end
+        return nil
+    end
+
     -- Pick the project_code for this request. Precedence:
-    --   explicit ?project_code=... query/body > namespace default > first enabled feature
+    --   explicit ?project_code=... query/body > namespace's product > first enabled feature
     local function resolve_project_code(self, body)
         if body and body.project_code and body.project_code ~= "" then
             return body.project_code
@@ -107,9 +124,8 @@ return function(app)
         if self.params and self.params.project_code and self.params.project_code ~= "" then
             return self.params.project_code
         end
-        if self.namespace and self.namespace.default_project_code and self.namespace.default_project_code ~= "" then
-            return self.namespace.default_project_code
-        end
+        local ns_code = namespace_project_code(self.namespace)
+        if ns_code then return ns_code end
         local ok_cfg, ProjectConfig = pcall(require, "helper.project-config")
         if ok_cfg then
             local codes = ProjectConfig.parseProjectCodes()
@@ -193,9 +209,10 @@ return function(app)
         local project_code
         if self.params and self.params.project_code and self.params.project_code ~= "" then
             project_code = self.params.project_code
-        elseif ns and ns.default_project_code and ns.default_project_code ~= "" then
-            project_code = ns.default_project_code
         else
+            project_code = namespace_project_code(ns)
+        end
+        if not project_code then
             local ok_cfg, ProjectConfig = pcall(require, "helper.project-config")
             project_code = (ok_cfg and ProjectConfig.parseProjectCodes()[1]) or "default"
         end

@@ -301,6 +301,42 @@ ThemePresets.LIST = {
             "*:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring-color); outline-offset: 2px; }",
         }, "\n"),
     },
+    -- Tenant-branded preset. A preset whose slug equals a project_code becomes
+    -- that project's default look (see ThemeQueries.getDefaultPreset), so an
+    -- academy tenant gets this palette with no activation step. Mirrors the
+    -- learner site's --color-brand-* scale in workstation-academy/app/globals.css.
+    {
+        slug         = "academy",
+        name         = "Workstation Academy",
+        description  = "The Workstation Academy look — indigo on warm neutral, matching the learner site.",
+        project_code = "academy",
+        tokens = build_tokens({
+            primary = {
+                ["50"]  = "#eef2ff", ["100"] = "#e0e7ff", ["200"] = "#c7d2fe",
+                ["300"] = "#a5b4fc", ["400"] = "#818cf8", ["500"] = "#6366f1",
+                ["600"] = "#4f46e5", ["700"] = "#4338ca", ["800"] = "#3730a3",
+                ["900"] = "#312e81",
+            },
+            -- Tailwind `neutral`, which is what the learner site's chrome uses.
+            secondary = {
+                ["50"]  = "#fafafa", ["100"] = "#f5f5f5", ["200"] = "#e5e5e5",
+                ["300"] = "#d4d4d4", ["400"] = "#a3a3a3", ["500"] = "#737373",
+                ["600"] = "#525252", ["700"] = "#404040", ["800"] = "#262626",
+                ["900"] = "#171717",
+            },
+            accent           = "#6366f1",
+            background       = "#ffffff",
+            foreground       = "#171717",
+            surface          = "#ffffff",
+            surface_elevated = "#fafafa",
+            success          = "#10b981",
+            warning          = "#f59e0b",
+            danger           = "#ef4444",
+            info             = "#6366f1",
+        }, {
+            branding = { brand_name = "Workstation Academy", logo_text = "Academy" },
+        }),
+    },
 }
 
 --- Get the full preset list

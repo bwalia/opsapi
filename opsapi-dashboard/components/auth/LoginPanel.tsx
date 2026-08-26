@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { Button, Input } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
+import { useBrand } from '@/components/brand/Logo';
 import toast from 'react-hot-toast';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
@@ -16,6 +17,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
  */
 export default function LoginPanel() {
   const router = useRouter();
+  const brand = useBrand();
   const { login, isLoading, error, clearError } = useAuthStore();
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -65,7 +67,7 @@ export default function LoginPanel() {
     <div className="w-full max-w-sm">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-secondary-900">Welcome back</h1>
-        <p className="mt-1.5 text-sm text-secondary-500">Sign in to your OpsAPI workspace</p>
+        <p className="mt-1.5 text-sm text-secondary-500">Sign in to your {brand.name} workspace</p>
       </div>
 
       {/* Google */}

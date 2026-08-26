@@ -1,16 +1,49 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+import { useNamespaceStore } from '@/store/namespace.store';
 
 /**
- * OpsAPI brand mark.
+ * Brand mark for the dashboard chrome.
  *
- * The glyph reads as an "O" (Ops) built from an orbit ring around a core, with a
- * single API-endpoint node sitting on the ring — "operations orbiting an API".
- * Pure inline SVG so it scales crisply and can be animated / themed.
+ * OpsAPI is white-labelled per tenant: a namespace that sets `logo_url` takes
+ * over the mark AND the wordmark (its own `name`), so an academy instructor
+ * handed off from the learner site sees Academy branding, not OpsAPI. Colors,
+ * fonts and radii come from the tenant's active theme (ThemeStyles), so this
+ * is the only hard-coded piece of identity left.
+ *
+ * No logo_url set => the OpsAPI house brand below.
  */
 
-export function LogoMark({ size = 40, className = '' }: { size?: number; className?: string }) {
+export interface Brand {
+  name: string;
+  logoUrl?: string;
+}
+
+/**
+ * Current tenant's brand. Reads the namespace *store* rather than
+ * NamespaceContext so it also works on pre-auth pages (login, /auth/sso), which
+ * render outside the provider — the store is persisted, so a returning tenant
+ * user keeps their branding on the login screen.
+ */
+export function useBrand(): Brand {
+  const current = useNamespaceStore((s) => s.currentNamespace);
+  const all = useNamespaceStore((s) => s.namespaces);
+  // The namespace baked into the JWT carries only id/name/slug, so fall back to
+  // the full row from the list when it's loaded.
+  const logoUrl =
+    current?.logo_url || all.find((n) => n.uuid === current?.uuid)?.logo_url || undefined;
+
+  if (!logoUrl) return { name: 'OpsAPI' };
+  return { name: current?.name || 'OpsAPI', logoUrl };
+}
+
+/**
+ * OpsAPI house glyph — an "O" (Ops) built from an orbit ring around a core, with
+ * a single API-endpoint node sitting on the ring. Pure inline SVG so it scales
+ * crisply and can be animated / themed.
+ */
+function OpsApiMark({ size, className }: { size: number; className: string }) {
   return (
     <svg
       width={size}
@@ -41,8 +74,34 @@ export function LogoMark({ size = 40, className = '' }: { size?: number; classNa
   );
 }
 
+export function LogoMark({ size = 40, className = '' }: { size?: number; className?: string }) {
+  const { name, logoUrl } = useBrand();
+  // A tenant's logo_url points at an asset on THEIR site, which we don't control
+  // and which may be missing (a namespace branded before its site deployed, a
+  // moved file, an outage). Fall back to the house mark rather than leaving a
+  // broken image in the chrome.
+  // Keyed by URL, not a boolean, so switching namespace retries the new logo.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  if (logoUrl && logoUrl !== failedUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoUrl}
+        alt={name}
+        width={size}
+        height={size}
+        style={{ width: size, height: size }}
+        className={`rounded-xl object-contain ${className}`}
+        onError={() => setFailedUrl(logoUrl)}
+      />
+    );
+  }
+  return <OpsApiMark size={size} className={className} />;
+}
+
 /**
- * Full lockup: mark + "OpsAPI" wordmark. `tone` controls the wordmark color for
+ * Full lockup: mark + wordmark. `tone` controls the wordmark color for
  * placement on dark ("light" text) or light ("dark" text) surfaces.
  */
 export function Logo({
@@ -56,13 +115,14 @@ export function Logo({
   showWordmark?: boolean;
   className?: string;
 }) {
+  const { name, logoUrl } = useBrand();
   const base = tone === 'light' ? 'text-white' : 'text-secondary-900';
   return (
     <span className={`inline-flex items-center gap-2.5 ${className}`}>
       <LogoMark size={size} />
       {showWordmark && (
         <span className={`font-semibold tracking-tight ${base}`} style={{ fontSize: size * 0.6 }}>
-          Ops<span className="text-primary-500">API</span>
+          {logoUrl ? name : <>Ops<span className="text-primary-500">API</span></>}
         </span>
       )}
     </span>

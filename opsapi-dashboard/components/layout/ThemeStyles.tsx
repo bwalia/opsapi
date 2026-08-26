@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { useBrand } from '@/components/brand/Logo';
 import { themesService } from '@/services/themes.service';
 
 const LINK_ID = 'ops-active-theme-css';
@@ -21,6 +22,7 @@ function buildHref(slug: string | undefined, version: string): string {
 
 export default function ThemeStyles() {
   const { currentNamespace } = useNamespace();
+  const { logoUrl } = useBrand();
   const slug = currentNamespace?.slug;
   const [version, setVersion] = useState<string>('0');
 
@@ -84,6 +86,18 @@ export default function ThemeStyles() {
       link.href = href;
     }
   }, [slug, version]);
+
+  // White-labelled tenants get their own favicon too; the OpsAPI one (declared
+  // in app/layout.tsx metadata) stands when the namespace has no logo.
+  useEffect(() => {
+    if (typeof document === 'undefined' || !logoUrl) return;
+    document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((el) => el.remove());
+    const icon = document.createElement('link');
+    icon.rel = 'icon';
+    icon.href = logoUrl;
+    document.head.appendChild(icon);
+    return () => icon.remove();
+  }, [logoUrl]);
 
   return null;
 }

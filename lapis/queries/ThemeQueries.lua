@@ -240,8 +240,13 @@ function ThemeQueries.getActive(namespace_id, project_code)
 end
 
 --------------------------------------------------------------------------------
--- Fallback for namespaces with no active theme: the first platform preset.
--- Used by the renderer to always have something to serve at /active/styles.css.
+-- Fallback for namespaces with no active theme.
+--
+-- A preset whose slug equals the project_code is that project's own look, so it
+-- wins; otherwise the first-seeded preset (OpsAPI Bright) does. That is how a
+-- white-labelled tenant gets its palette out of the box with no activation
+-- step: project_code "academy" resolves the "academy" preset. An explicitly
+-- activated theme still takes precedence: callers try getActive() first.
 --------------------------------------------------------------------------------
 function ThemeQueries.getDefaultPreset(project_code)
     local rows = db.query([[
@@ -255,9 +260,9 @@ function ThemeQueries.getDefaultPreset(project_code)
           AND t.is_system = true
           AND t.project_code = ?
           AND t.deleted_at IS NULL
-        ORDER BY t.id ASC
+        ORDER BY (t.slug = ?) DESC, t.id ASC
         LIMIT 1
-    ]], project_code)
+    ]], project_code, project_code)
     return rows and rows[1] or nil
 end
 
