@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Search, Check, X } from 'lucide-react';
+import { ChevronDown, Search, Check, X, Plus } from 'lucide-react';
 
 export interface SearchableSelectOption {
   value: string;
@@ -28,6 +28,9 @@ export interface SearchableSelectProps {
   autoFocus?: boolean;
   // Called when the dropdown closes without a selection (e.g. on blur/escape).
   onClose?: () => void;
+  // Allow selecting a typed value that isn't in `options` (offers a "Create …"
+  // row and accepts it on Enter). Turns the select into a create-or-pick combobox.
+  creatable?: boolean;
   // Optional server-side search. When provided, the typed query is forwarded
   // (debounced) so the parent can fetch matching options — letting the dropdown
   // reach records beyond a server-side result cap instead of only filtering the
@@ -50,6 +53,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
   autoFocus = false,
   onClose,
   onSearch,
+  creatable = false,
 }) => {
   const [open, setOpen] = useState(autoFocus);
   const [query, setQuery] = useState('');
@@ -71,6 +75,13 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
         o.hint?.toLowerCase().includes(q)
     );
   }, [options, query]);
+
+  // Offer to create the typed value when it matches no existing option.
+  const trimmedQuery = query.trim();
+  const showCreate =
+    creatable &&
+    trimmedQuery.length > 0 &&
+    !options.some((o) => o.value.toLowerCase() === trimmedQuery.toLowerCase());
 
   // Debounced server-side search: forward the typed query to the parent so it
   // can refetch options. Only active when an onSearch handler is supplied.
@@ -130,6 +141,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
       e.preventDefault();
       const opt = filtered[highlight];
       if (opt) pick(opt.value);
+      else if (showCreate) pick(trimmedQuery);
     }
   };
 
@@ -155,11 +167,11 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
           triggerPad
         )}
       >
-        <span className={cn('truncate', !selected && 'text-secondary-400')}>
-          {selected ? selected.label : placeholder}
+        <span className={cn('truncate', !selected && !value && 'text-secondary-400')}>
+          {selected ? selected.label : value ? value : placeholder}
         </span>
         <span className="flex items-center gap-1">
-          {clearable && selected && !disabled && (
+          {clearable && (selected || value) && !disabled && (
             <X
               className="h-3.5 w-3.5 text-secondary-400 hover:text-secondary-600"
               onClick={(e) => {
@@ -189,7 +201,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
             />
           </div>
           <ul className="max-h-60 overflow-y-auto py-1" role="listbox">
-            {filtered.length === 0 ? (
+            {filtered.length === 0 && !showCreate ? (
               <li className="px-3 py-2 text-sm text-secondary-400">{emptyMessage}</li>
             ) : (
               filtered.map((opt, i) => {
@@ -216,6 +228,18 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
                   </li>
                 );
               })
+            )}
+            {showCreate && (
+              <li role="option" aria-selected={false}>
+                <button
+                  type="button"
+                  onClick={() => pick(trimmedQuery)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-primary-600 hover:bg-primary-50"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 truncate">Create &ldquo;{trimmedQuery}&rdquo;</span>
+                </button>
+              </li>
             )}
           </ul>
         </div>
