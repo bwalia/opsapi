@@ -7,6 +7,7 @@ import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select, Searcha
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useAuthStore } from '@/store/auth.store';
+import { BackToAcademy } from '@/components/academy';
 import {
   academyService,
   getCourseStatusVariant,
@@ -683,6 +684,8 @@ function AcademyCoursesPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Only shown to instructors who arrived via the academy site handoff. */}
+          <BackToAcademy />
           {isAdmin && (
             <Button variant="outline" leftIcon={<Banknote size={16} />} onClick={() => router.push('/dashboard/academy/admin')}>Payouts</Button>
           )}
