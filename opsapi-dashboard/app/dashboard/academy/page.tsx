@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus, Trash2, Edit, BookOpen, RefreshCw, Layers, CreditCard, Banknote, GraduationCap, ArrowRight, User, X, ClipboardCheck, CheckCircle2, XCircle, Send } from 'lucide-react';
-import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select } from '@/components/ui';
+import { Table, Badge, Pagination, Modal, Button, ConfirmDialog, Select, SearchableSelect } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
+import { useAuthStore } from '@/store/auth.store';
 import {
   academyService,
   getCourseStatusVariant,
@@ -73,6 +74,16 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDir
   const [categories, setCategories] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState('');
 
+  const { user } = useAuthStore();
+  // The creator is the instructor — no free-text field. Derive a display name
+  // (full name → username → email local-part) for the read-only credit and as
+  // the default `instructor` value on a new course.
+  const currentUserName =
+    [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim() ||
+    user?.username ||
+    (user?.email ? user.email.split('@')[0] : '') ||
+    'You';
+
   useEffect(() => {
     if (course) {
       setForm({
@@ -91,10 +102,10 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDir
         status: course.status,
       });
     } else {
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, instructor: currentUserName });
     }
     setTagDraft('');
-  }, [course, isOpen]);
+  }, [course, isOpen, currentUserName]);
 
   // Fetch the existing category values whenever the modal opens, so the
   // create-or-select control can offer them (falls back to none on error).
@@ -188,23 +199,27 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDir
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Instructor</label>
-            <input className={inputClass} value={form.instructor} onChange={(e) => set('instructor', e.target.value)} placeholder="Instructor name" />
+            {/* The creator IS the instructor (backend sets owner_user_uuid to the
+                current user; the public page credits their profile name). So this
+                is a read-only credit, not a field to fill in. */}
+            <div className="w-full px-3 py-2 border border-secondary-200 rounded-lg text-sm bg-secondary-50 text-secondary-700 truncate">
+              {form.instructor?.trim() || currentUserName}
+            </div>
+            <p className="mt-1 text-xs text-secondary-500">You&apos;re the instructor. Change your public name in My Profile.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Category</label>
-            {/* Create-or-select: pick an existing category or type a brand-new one. */}
-            <input
-              className={inputClass}
-              list="course-category-options"
+            {/* Searchable combobox: pick an existing namespace category or create a new one. */}
+            <SearchableSelect
+              options={categories.map((c) => ({ value: c, label: c }))}
               value={form.category}
-              onChange={(e) => set('category', e.target.value)}
-              placeholder="Pick existing or type a new one"
+              onChange={(v) => set('category', v)}
+              creatable
+              clearable
+              placeholder="Pick existing or create new"
+              searchPlaceholder="Search or type a new category…"
+              emptyMessage="No categories yet — type to create one"
             />
-            <datalist id="course-category-options">
-              {categories.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">Level</label>
@@ -253,32 +268,36 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDir
           </div>
           <div className="col-span-2">
             <label className="block text-sm font-medium text-secondary-700 mb-1">Tags</label>
-            <div className={`${inputClass} flex flex-wrap items-center gap-1.5 min-h-[42px] h-auto`}>
-              {(form.tags ?? []).map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 text-xs font-medium"
-                >
-                  {tag}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(tag)}
-                    className="text-primary-500 hover:text-primary-700"
-                    aria-label={`Remove ${tag}`}
+            {/* Input stays full-width on top; added tags wrap as chips BELOW it so
+                typing never gets pushed around by existing chips. */}
+            <input
+              className={inputClass}
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={handleTagKeyDown}
+              onBlur={() => addTag(tagDraft)}
+              placeholder="Add tags (Enter or comma)…"
+            />
+            {(form.tags ?? []).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(form.tags ?? []).map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full bg-primary-50 text-primary-700 text-xs font-medium"
                   >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
-              <input
-                className="flex-1 min-w-[8rem] border-none outline-none bg-transparent text-sm p-0 focus:ring-0"
-                value={tagDraft}
-                onChange={(e) => setTagDraft(e.target.value)}
-                onKeyDown={handleTagKeyDown}
-                onBlur={() => addTag(tagDraft)}
-                placeholder={(form.tags ?? []).length === 0 ? 'Add tags (Enter or comma)…' : ''}
-              />
-            </div>
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="rounded-full p-0.5 text-primary-400 hover:bg-primary-100 hover:text-primary-700"
+                      aria-label={`Remove ${tag}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <p className="mt-1 text-xs text-secondary-500">Press Enter or comma to add. Used for sorting and filtering. Up to 20 tags.</p>
           </div>
           <div className="col-span-2 flex items-center gap-3">
