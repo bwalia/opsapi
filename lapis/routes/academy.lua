@@ -848,6 +848,14 @@ return function(app)
             if not course or course.status ~= "published" then
                 return api_response(404, nil, "Course not found")
             end
+            -- PAYWALL: self-enrollment is for FREE courses only. Paid access is
+            -- granted EXCLUSIVELY by the Stripe webhook (academy-stripe-webhook),
+            -- which calls EnrollmentQueries.enroll after payment settles. Without
+            -- this gate any authenticated user could enroll into a paid course and
+            -- unlock its content/video for free, bypassing checkout entirely.
+            if not pg_true(course.is_free) then
+                return api_response(403, nil, "This course must be purchased")
+            end
             local ok = pcall(EnrollmentQueries.enroll, ns.id, course.id, self.current_user.uuid)
             if not ok then
                 ngx.log(ngx.ERR, "[academy] enroll failed for course ", course.uuid)
