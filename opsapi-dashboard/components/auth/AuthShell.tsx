@@ -4,7 +4,7 @@ import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ShieldCheck, Boxes, GitBranch } from 'lucide-react';
 import ParticleField from '@/components/auth/ParticleField';
-import { Logo } from '@/components/brand/Logo';
+import { Logo, useBrand } from '@/components/brand/Logo';
 import PublicThemeStyles from '@/components/layout/PublicThemeStyles';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
@@ -23,6 +23,7 @@ const FEATURES = [
  */
 export default function AuthShell({ children }: { children: React.ReactNode }) {
   const reduce = useReducedMotion();
+  const brand = useBrand();
 
   const container = {
     hidden: {},
@@ -95,7 +96,7 @@ export default function AuthShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <motion.p variants={item} className="text-xs text-white/40">
-            © {new Date().getFullYear()} OpsAPI · Secure multi-tenant SaaS platform
+            © {new Date().getFullYear()} {brand.name} · Secure multi-tenant SaaS platform
           </motion.p>
         </motion.div>
       </div>

@@ -45,7 +45,7 @@ show_help() {
     echo "  -h, --help            Show this help message"
     echo ""
     echo -e "${BLUE}Preset Environments:${NC}"
-    echo "  local    - http://127.0.0.1:4010 (default for local development)"
+    echo "  local    - http://127.0.0.1:4020 (default for local development)"
     echo "  dev      - https://dev-api.${BASE_DOMAIN}"
     echo "  test     - https://test-api.${BASE_DOMAIN}"
     echo "  acc      - https://acc-api.${BASE_DOMAIN}"
@@ -292,7 +292,7 @@ get_api_url() {
         local)
             # Local always uses http unless explicitly overridden
             local local_proto="${proto:-http}"
-            echo "${local_proto}://127.0.0.1:4010"
+            echo "${local_proto}://127.0.0.1:4020"
             ;;
         prod)
             # Production uses api.domain.com (no prefix)
@@ -508,7 +508,7 @@ prompt_protocol() {
 # Function to prompt for environment selection
 prompt_environment() {
     echo -e "${CYAN}Select target environment:${NC}" >&2
-    echo "  1) local   - http://127.0.0.1:4010" >&2
+    echo "  1) local   - http://127.0.0.1:4020" >&2
     echo "  2) dev     - https://dev-api.${BASE_DOMAIN}" >&2
     echo "  3) test    - https://test-api.${BASE_DOMAIN}" >&2
     echo "  4) acc     - https://acc-api.${BASE_DOMAIN}" >&2

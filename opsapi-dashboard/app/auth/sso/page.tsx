@@ -63,6 +63,7 @@ export default function SsoAcceptPage(): React.ReactElement {
       const token = params.get('token');
       const ns = params.get('ns');
       const next = params.get('next') || '/dashboard/academy';
+      const academyUrl = params.get('academyUrl');
 
       if (!token) {
         setError('Missing sign-in token. Please sign in.');
@@ -77,6 +78,17 @@ export default function SsoAcceptPage(): React.ReactElement {
 
       // Clear the token from the address bar as soon as we've read it.
       window.history.replaceState(null, '', window.location.pathname);
+
+      // Remember where to send the instructor "back to" — set ONLY on a handoff
+      // from the academy site, so the Back-to-Academy button never shows for a
+      // direct dashboard login. Sanity-check the scheme to avoid javascript: etc.
+      try {
+        if (academyUrl && /^https?:\/\//i.test(academyUrl)) {
+          window.sessionStorage.setItem('academy_return_url', academyUrl);
+        }
+      } catch {
+        // sessionStorage can throw in private/blocked contexts — non-fatal.
+      }
 
       // 1. Adopt the session.
       useAuthStore.getState().setToken(token);

@@ -30,7 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth.store";
 import { useMenu, type MenuItemWithIcon } from "@/hooks";
-import { LogoMark } from "@/components/brand/Logo";
+import { LogoMark, useBrand } from "@/components/brand/Logo";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -156,6 +156,7 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
 }) {
   const pathname = usePathname();
   const logout = useAuthStore((state) => state.logout);
+  const brand = useBrand();
 
   // Use the backend-driven menu hook
   const {
@@ -224,16 +225,16 @@ const Sidebar: React.FC<SidebarProps> = memo(function Sidebar({
             <LogoMark size={40} className="shrink-0" />
             {!isCollapsed && (
               <div className="hidden lg:block">
-                <span className="text-lg font-bold text-secondary-900">
-                  OpsAPI
+                <span className="text-lg font-bold text-secondary-900 line-clamp-1">
+                  {brand.name}
                 </span>
                 <p className="text-xs text-secondary-400">Dashboard</p>
               </div>
             )}
             {/* Always show title on mobile */}
             <div className="lg:hidden">
-              <span className="text-lg font-bold text-secondary-900">
-                OpsAPI
+              <span className="text-lg font-bold text-secondary-900 line-clamp-1">
+                {brand.name}
               </span>
               <p className="text-xs text-secondary-400">Dashboard</p>
             </div>
