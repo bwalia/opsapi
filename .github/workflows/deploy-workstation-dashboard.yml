@@ -5,7 +5,7 @@ name: Deploy Workstation Dashboard
 # workstation-opsapi API at https://int-opsapi.workstation.co.uk.
 #
 # Mirrors deploy-k3s.yml (which deploys the API): same k3s1 cluster
-# (KUBE_CONFIG_DATA_K3S), same WSL Proxy edge (DNS CNAME -> pop0.wslproxy.com +
+# (KUBE_CONFIG_DATA_K3S), same WSL Proxy edge (DNS CNAME -> lon1.pop0.uk +
 # a stub vhost/rule registered on the control plane), same Docker Hub registry.
 #
 # Next.js inlines NEXT_PUBLIC_API_URL into the browser bundle at BUILD time, so
@@ -48,7 +48,7 @@ env:
   # DNS: the UI host is a DNS-only CNAME to the WSL Proxy edge, which terminates
   # TLS and proxies to the k3s ingress entry (same as the API host).
   DNS_ZONE: workstation.co.uk
-  DNS_TARGET: pop0.wslproxy.com
+  DNS_TARGET: lon1.pop0.uk
   DNS_PROXIED: "false"
 
 jobs:

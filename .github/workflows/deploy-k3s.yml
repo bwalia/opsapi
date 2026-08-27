@@ -81,10 +81,10 @@ env:
   # cert-manager is NOT on k3s1, so the edge terminates TLS and traefik serves
   # plain HTTP behind it. The hostname itself is read from the env's values
   # file (`host:`) so DNS can never drift from what the Ingress serves.
-  #   browser -> <host> --(Cloudflare CNAME)--> pop0.wslproxy.com (edge, TLS)
+  #   browser -> <host> --(Cloudflare CNAME)--> lon1.pop0.uk (edge, TLS)
   #           -> 13.42.188.136:80 (k3s1 traefik) -> workstation-opsapi pods
   DNS_ZONE: workstation.co.uk
-  DNS_TARGET: pop0.wslproxy.com
+  DNS_TARGET: lon1.pop0.uk
   DNS_PROXIED: "false"
 
 jobs:

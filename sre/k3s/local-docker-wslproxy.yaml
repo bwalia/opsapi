@@ -10,7 +10,7 @@
 #   1. The demo is up: `cd sre && make demo-up`
 #      (publishes Grafana :3012, Prometheus :9091, Alertmanager :9093, Gatus :8878
 #       on 0.0.0.0 → reachable at 192.168.1.193:<port>)
-#   2. DNS: add a CNAME for each host below → pop0.wslproxy.com
+#   2. DNS: add a CNAME for each host below → lon1.pop0.uk
 #      (there is no wildcard; this matches every existing *.diytaxreturn.co.uk host)
 #   3. Set GRAFANA_ROOT_URL=https://sre-grafana.diytaxreturn.co.uk in sre/.env.sre
 #      and re-run `make demo-up` so Grafana builds correct redirect URLs.
