@@ -3,7 +3,7 @@
 # workstation-opsapi API Ingress and the working beacon *.workstation.co.uk
 # hosts. TLS is terminated at the WSL Proxy edge (ssl_enabled in the committed
 # server JSON); traefik serves plain HTTP :80 behind it and routes by Host
-# header, so NO tls block / NO cert-manager here. DNS (host → pop0.wslproxy.com)
+# header, so NO tls block / NO cert-manager here. DNS (host → lon1.pop0.uk)
 # and the edge vhost/rule are wired by the deploy workflow, not external-dns.
 apiVersion: networking.k8s.io/v1
 kind: Ingress

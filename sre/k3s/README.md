@@ -59,7 +59,7 @@ appear as datasources with trace↔log correlation; the backup CronJob is schedu
 
 Two scenarios, same `wslproxy` ingress class + `cert-manager.io/cluster-issuer:
 main-issuer` TLS pattern used across the platform. **There is no wildcard DNS** —
-every new host needs a CNAME → `pop0.wslproxy.com` (just like every existing
+every new host needs a CNAME → `lon1.pop0.uk` (just like every existing
 `*.diytaxreturn.co.uk` host). Always use a **unique host** (the `sre-` prefix) so
 it never shares a host with the app's own Ingress — that sharing is what caused
 the wslproxy two-Ingress flapping outage on 2026-06-15.

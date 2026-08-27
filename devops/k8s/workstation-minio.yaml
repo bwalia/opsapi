@@ -11,7 +11,7 @@
 # Serves the S3 API for <env>-minio.workstation.co.uk:
 #   <env>-minio.workstation.co.uk
 #     -> Cloudflare (*.workstation.co.uk wildcard CNAMEs to the edge)
-#     -> pop0.wslproxy.com  (vhost ssl_enabled + ssl_auto_renew => real LE cert)
+#     -> lon1.pop0.uk  (vhost ssl_enabled + ssl_auto_renew => real LE cert)
 #     -> 13.42.188.136:80   (k3s1 traefik, wslproxy ingress class)
 #     -> Ingress workstation-minio -> workstation-minio:9000 (S3 API)
 #
