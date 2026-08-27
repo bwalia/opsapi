@@ -302,37 +302,41 @@ ThemePresets.LIST = {
         }, "\n"),
     },
     -- Tenant-branded preset. A preset whose slug equals a project_code becomes
-    -- that project's default look (see ThemeQueries.getDefaultPreset), so an
-    -- academy tenant gets this palette with no activation step. Mirrors the
-    -- learner site's --color-brand-* scale in workstation-academy/app/globals.css.
+    -- that project's default look (see ThemeQueries.getDefaultPreset), so the
+    -- academy tenant gets this palette with no activation step. Uses the opsapi
+    -- red (#ff004e) so the dashboard matches BOTH the platform and the learner
+    -- site (workstation-academy/app/globals.css, re-themed from indigo to red);
+    -- the branding block keeps the tenant's own name + logo text.
     {
         slug         = "academy",
         name         = "Workstation Academy",
-        description  = "The Workstation Academy look — indigo on warm neutral, matching the learner site.",
+        description  = "The Workstation Academy look — opsapi #ff004e red, matching the platform and the learner site.",
         project_code = "academy",
         tokens = build_tokens({
+            -- Brand red scale (mirrors the `light`/OpsAPI Bright preset and the
+            -- learner site's --color-primary-* scale in globals.css).
             primary = {
-                ["50"]  = "#eef2ff", ["100"] = "#e0e7ff", ["200"] = "#c7d2fe",
-                ["300"] = "#a5b4fc", ["400"] = "#818cf8", ["500"] = "#6366f1",
-                ["600"] = "#4f46e5", ["700"] = "#4338ca", ["800"] = "#3730a3",
-                ["900"] = "#312e81",
+                ["50"]  = "#fff0f3", ["100"] = "#ffe0e8", ["200"] = "#ffc6d5",
+                ["300"] = "#ff9fb5", ["400"] = "#ff6088", ["500"] = "#ff004e",
+                ["600"] = "#e6003f", ["700"] = "#c20035", ["800"] = "#a00030",
+                ["900"] = "#84002c",
             },
-            -- Tailwind `neutral`, which is what the learner site's chrome uses.
+            -- Slate — matches the platform default + the learner site chrome.
             secondary = {
-                ["50"]  = "#fafafa", ["100"] = "#f5f5f5", ["200"] = "#e5e5e5",
-                ["300"] = "#d4d4d4", ["400"] = "#a3a3a3", ["500"] = "#737373",
-                ["600"] = "#525252", ["700"] = "#404040", ["800"] = "#262626",
-                ["900"] = "#171717",
+                ["50"]  = "#f8fafc", ["100"] = "#f1f5f9", ["200"] = "#e2e8f0",
+                ["300"] = "#cbd5e1", ["400"] = "#94a3b8", ["500"] = "#64748b",
+                ["600"] = "#475569", ["700"] = "#334155", ["800"] = "#1e293b",
+                ["900"] = "#0f172a",
             },
-            accent           = "#6366f1",
+            accent           = "#ff004e",
             background       = "#ffffff",
-            foreground       = "#171717",
+            foreground       = "#0f172a",
             surface          = "#ffffff",
-            surface_elevated = "#fafafa",
+            surface_elevated = "#ffffff",
             success          = "#10b981",
             warning          = "#f59e0b",
             danger           = "#ef4444",
-            info             = "#6366f1",
+            info             = "#0ea5e9",
         }, {
             branding = { brand_name = "Workstation Academy", logo_text = "Academy" },
         }),

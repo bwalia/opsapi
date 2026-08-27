@@ -9,10 +9,11 @@
     on the shared opsapi dashboard:
 
       1. the "academy" preset exists, is scoped to project_code "academy", and
-         renders the learner site's indigo scale as CSS variables;
+         renders the opsapi #ff004e red scale as CSS variables (its own brand
+         name, but the platform's colour — matching the red learner site);
       2. ThemeQueries.getDefaultPreset prefers a preset whose slug equals the
          project_code — without that ORDER BY, a namespace with no explicitly
-         activated theme falls back to "OpsAPI Bright" (pink) instead.
+         activated theme falls back to "OpsAPI Bright" instead.
 ]]
 
 package.path = "lapis/?.lua;lapis/?/init.lua;" .. package.path
@@ -48,7 +49,7 @@ if academy then
         if academy.tokens.colors.secondary[key] == nil then missing[#missing + 1] = "s" .. key end
     end
     check("primary + secondary scales are complete (50-900)", #missing == 0, table.concat(missing, ","))
-    check("primary 500 is the learner site's indigo", academy.tokens.colors.primary["500"] == "#6366f1")
+    check("primary 500 is the opsapi red", academy.tokens.colors.primary["500"] == "#ff004e")
 end
 
 -- ---------------------------------------------------------------------------
@@ -61,8 +62,8 @@ end
 local ThemeRenderer = require("lib.theme-renderer")
 local css = ThemeRenderer.render({ tokens = academy and academy.tokens or {} })
 
-check("renders --color-primary-500", css:find("--color-primary-500: #6366f1", 1, true) ~= nil)
-check("renders --color-secondary-900", css:find("--color-secondary-900: #171717", 1, true) ~= nil)
+check("renders --color-primary-500", css:find("--color-primary-500: #ff004e", 1, true) ~= nil)
+check("renders --color-secondary-900", css:find("--color-secondary-900: #0f172a", 1, true) ~= nil)
 check("renders --brand-name", css:find("--brand-name: Workstation Academy", 1, true) ~= nil)
 
 -- ---------------------------------------------------------------------------
