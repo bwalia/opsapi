@@ -491,7 +491,15 @@ return function(app)
             local perr = price_error(eff_free, eff_price)
             if perr then return api_response(400, nil, perr) end
 
-            local updated = CourseQueries.update(self.namespace.id, self.params.uuid, fields)
+            -- Mirror create: a slug collision is a Postgres unique violation that
+            -- would otherwise propagate as a 500. Map it to a clean 409 so an
+            -- instructor renaming a course onto a taken slug gets a clear message,
+            -- not a scary server error.
+            local ok, updated = pcall(CourseQueries.update, self.namespace.id, self.params.uuid, fields)
+            if not ok then
+                ngx.log(ngx.ERR, "[academy] update course failed: ", tostring(updated))
+                return api_response(409, nil, "Could not update course (slug may already exist)")
+            end
             if not updated then return api_response(404, nil, "Course not found") end
             return api_response(200, with_tags(updated))
         end)))
