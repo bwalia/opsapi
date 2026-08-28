@@ -131,6 +131,9 @@ return function(app)
                         user_uuid = md.user_uuid, namespace_id = ns_id,
                         stripe_subscription_id = obj.subscription, stripe_customer_id = obj.customer,
                         status = subobj and subobj.status or "active",
+                        -- Which tier the learner bought (rides in the checkout metadata);
+                        -- EntitlementQueries compares this to each course's tier.
+                        plan_tier = tonumber(md.tier) or 1,
                         current_period_end_unix = subobj and subobj.current_period_end or nil,
                     })
                     -- First payment: record the ledger entry here (renewals come via invoice.paid).
