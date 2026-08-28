@@ -273,6 +273,9 @@ return function(app)
             is_free = row.is_free,
             price = row.price,
             currency = row.currency,
+            -- Membership tier a subscriber needs to unlock this course (1 = entry
+            -- level). nil when the tier column predates the migration -> defaults 1.
+            tier = row.tier and tonumber(row.tier) or 1,
             rating = row.rating and tonumber(row.rating) or 0,
             rating_count = row.rating_count,
             duration_minutes = row.duration_minutes,
