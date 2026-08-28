@@ -52,6 +52,7 @@ const EMPTY_FORM: CourseInput = {
   is_free: true,
   price: 0,
   currency: 'USD',
+  tier: 1,
   status: 'draft',
 };
 
@@ -100,6 +101,7 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDir
         // Stored in minor units (pence/cents); edit in major units.
         price: (course.price ?? 0) / 100,
         currency: course.currency,
+        tier: course.tier ?? 1,
         status: course.status,
       });
     } else {
@@ -319,6 +321,11 @@ const CourseModal: React.FC<CourseModalProps> = ({ isOpen, course, canPublishDir
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-secondary-700 mb-1">Membership tier</label>
+                <input className={inputClass} type="number" min={1} step={1} value={form.tier ?? 1} onChange={(e) => set('tier', Math.max(1, Math.floor(Number(e.target.value) || 1)))} />
+                <p className="mt-1 text-xs text-secondary-500">A subscriber can watch this course if their membership tier is this number or higher. Tier 1 = your entry-level plan. Buyers always get access regardless of tier.</p>
               </div>
             </>
           )}

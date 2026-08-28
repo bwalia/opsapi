@@ -24,6 +24,8 @@ export interface AcademyCourse {
   is_free: boolean;
   price: number;
   currency: string;
+  /** Membership tier a subscriber needs to unlock this course (1 = entry level). */
+  tier?: number;
   rating?: number;
   rating_count?: number;
   duration_minutes?: number;
@@ -132,6 +134,8 @@ export interface CourseInput {
   is_free?: boolean;
   price?: number;
   currency?: string;
+  /** Membership tier a subscriber needs to unlock this course (1 = entry level). */
+  tier?: number;
   status?: CourseStatus;
 }
 
@@ -148,6 +152,8 @@ export interface LessonInput {
 }
 
 export interface CommunityPlan {
+  /** Membership tier (1 = entry level). A plan unlocks its tier and below. */
+  tier?: number;
   amount: number; // minor units (e.g. 999 = $9.99)
   currency: string;
   interval: string; // month|year
@@ -177,7 +183,8 @@ export interface CreatorAccount {
   bank: CreatorBank;
   bank_details_complete: boolean;
   fee_pct: number; // effective cut % applied to this creator
-  plan?: CommunityPlan | null;
+  plan?: CommunityPlan | null; // entry-level plan (back-compat)
+  plans?: CommunityPlan[]; // every active membership tier
   earnings: CreatorEarnings;
 }
 
@@ -195,6 +202,8 @@ export interface SubscriptionPlanInput {
   amount: number; // minor units
   interval: 'month' | 'year';
   currency?: string;
+  /** Which tier this plan unlocks (1 = entry level). Omitted -> tier 1. */
+  tier?: number;
 }
 
 // ============================================================
