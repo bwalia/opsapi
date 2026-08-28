@@ -38,6 +38,7 @@ function CreatorMonetization(): React.ReactElement {
   const [bank, setBank] = useState<CreatorBank>(EMPTY_BANK);
   const [savingBank, setSavingBank] = useState(false);
 
+  const [tier, setTier] = useState('1');
   const [price, setPrice] = useState('');
   const [interval, setInterval] = useState<'month' | 'year'>('month');
   const [savingPlan, setSavingPlan] = useState(false);
@@ -97,18 +98,27 @@ function CreatorMonetization(): React.ReactElement {
       toast.error('Enter a valid price');
       return;
     }
+    const tierNum = Math.max(1, Math.floor(Number(tier) || 1));
     setSavingPlan(true);
     try {
-      await academyService.setSubscriptionPlan({ amount: Math.round(dollars * 100), interval });
-      toast.success('Community membership price saved');
+      await academyService.setSubscriptionPlan({ tier: tierNum, amount: Math.round(dollars * 100), interval });
+      toast.success(`Tier ${tierNum} membership saved`);
       load();
     } catch (err) {
       console.error('Save plan failed:', err);
-      toast.error('Failed to save price');
+      toast.error('Failed to save tier');
     } finally {
       setSavingPlan(false);
     }
   };
+
+  // Existing tiers, entry level first. Falls back to the single `plan` for a
+  // backend that predates the multi-tier response.
+  const plans = (account?.plans && account.plans.length > 0)
+    ? [...account.plans].sort((a, b) => (a.tier ?? 1) - (b.tier ?? 1))
+    : account?.plan
+      ? [account.plan]
+      : [];
 
   const e = account?.earnings;
 
@@ -223,19 +233,44 @@ function CreatorMonetization(): React.ReactElement {
         </CardContent>
       </Card>
 
-      {/* Community membership price */}
+      {/* Membership tiers */}
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-secondary-800">Community membership price</h2>
+          <h2 className="text-sm font-semibold text-secondary-800">Membership tiers</h2>
         </CardHeader>
         <CardContent>
+          {plans.length > 0 ? (
+            <div className="mb-5 overflow-hidden rounded-lg border border-secondary-200">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary-50 text-left text-xs uppercase tracking-wide text-secondary-500">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Tier</th>
+                    <th className="px-3 py-2 font-medium">Price</th>
+                    <th className="px-3 py-2 font-medium">Billing</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-secondary-100">
+                  {plans.map((p) => (
+                    <tr key={p.tier ?? 1}>
+                      <td className="px-3 py-2 font-medium text-secondary-900">Tier {p.tier ?? 1}</td>
+                      <td className="px-3 py-2 text-secondary-700">{money(p.amount, p.currency)}</td>
+                      <td className="px-3 py-2 text-secondary-500">/ {p.interval}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="mb-5 text-sm text-secondary-500">No membership tiers yet. Add one below.</p>
+          )}
+
           <form onSubmit={handleSavePlan} className="space-y-4">
-            {account?.plan ? (
-              <p className="text-sm text-secondary-600">
-                Current: <span className="font-medium text-secondary-900">{money(account.plan.amount, account.plan.currency)}</span> / {account.plan.interval}
-              </p>
-            ) : null}
-            <div className="grid grid-cols-2 gap-4">
+            <p className="text-sm font-medium text-secondary-700">Add or update a tier</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-secondary-700 mb-1">Tier</label>
+                <input className={inputClass} type="number" min={1} step={1} value={tier} onChange={(ev) => setTier(ev.target.value)} placeholder="1" />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-secondary-700 mb-1">Price</label>
                 <input className={inputClass} type="number" min={1} step="0.01" value={price} onChange={(ev) => setPrice(ev.target.value)} placeholder="9.99" />
@@ -248,8 +283,8 @@ function CreatorMonetization(): React.ReactElement {
                 </select>
               </div>
             </div>
-            <p className="text-xs text-secondary-400">Members who subscribe get access to all of your courses.</p>
-            <Button type="submit" isLoading={savingPlan}>Save price</Button>
+            <p className="text-xs text-secondary-400">A subscriber unlocks every course at their tier and below. Tier 1 is your entry-level plan. Saving a tier that already exists updates its price.</p>
+            <Button type="submit" isLoading={savingPlan}>Save tier</Button>
           </form>
         </CardContent>
       </Card>

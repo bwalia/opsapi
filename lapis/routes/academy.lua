@@ -273,6 +273,9 @@ return function(app)
             is_free = row.is_free,
             price = row.price,
             currency = row.currency,
+            -- Membership tier a subscriber needs to unlock this course (1 = entry
+            -- level). nil when the tier column predates the migration -> defaults 1.
+            tier = row.tier and tonumber(row.tier) or 1,
             rating = row.rating and tonumber(row.rating) or 0,
             rating_count = row.rating_count,
             duration_minutes = row.duration_minutes,
@@ -427,6 +430,9 @@ return function(app)
                 is_free = is_free,
                 price = price,
                 currency = body.currency or "USD",
+                -- Membership tier a subscriber needs to unlock this course (paid
+                -- only; harmless on free). Clamp to >= 1; default entry level.
+                tier = math.max(1, math.floor(tonumber(body.tier) or 1)),
                 status = status,
                 owner_user_uuid = self.current_user.uuid,
             })
@@ -469,6 +475,7 @@ return function(app)
             end
             if body.is_free ~= nil then fields.is_free = to_bool(body.is_free, true) end
             if body.price ~= nil then fields.price = tonumber(body.price) or 0 end
+            if body.tier ~= nil then fields.tier = math.max(1, math.floor(tonumber(body.tier) or 1)) end
             -- Present-but-empty ([]) clears the tags; absent leaves them untouched.
             if body.tags ~= nil then fields.tags = coerce_tags(body.tags) end
 

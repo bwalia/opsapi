@@ -94,18 +94,36 @@ function CreatorQueries.effectiveFeePct(user_uuid)
     return CreatorQueries.getDefaultFeePct()
 end
 
--- ---- Community subscription plan (academy-wide, namespace-level) ----------
+-- ---- Community subscription plans (one active plan PER TIER) --------------
 
-function CreatorQueries.getActivePlan(namespace_id)
+-- All active plans for a namespace, entry-level (lowest tier) first.
+function CreatorQueries.getActivePlans(namespace_id)
+    return db.query(
+        "SELECT * FROM creator_subscription_plans WHERE namespace_id = ? AND active = TRUE ORDER BY tier ASC, amount ASC",
+        namespace_id) or {}
+end
+
+-- The active plan for a specific tier, or nil.
+function CreatorQueries.getActivePlanForTier(namespace_id, tier)
     local rows = db.query(
-        "SELECT * FROM creator_subscription_plans WHERE namespace_id = ? AND active = TRUE ORDER BY created_at DESC LIMIT 1",
-        namespace_id)
+        "SELECT * FROM creator_subscription_plans WHERE namespace_id = ? AND tier = ? AND active = TRUE LIMIT 1",
+        namespace_id, math.max(1, math.floor(tonumber(tier) or 1)))
     return rows and rows[1] or nil
 end
 
+-- Backward-compat: the lowest-tier active plan (the entry-level membership).
+function CreatorQueries.getActivePlan(namespace_id)
+    return CreatorQueries.getActivePlans(namespace_id)[1]
+end
+
+-- Create/replace the active plan FOR ITS TIER. Deactivates only the same-tier
+-- active plan, so the other tiers (Basic/Pro/Premium…) stay live — that's what
+-- makes multiple plans coexist. `fields.tier` defaults to 1 (entry level).
 function CreatorQueries.upsertPlan(namespace_id, fields)
-    db.query("UPDATE creator_subscription_plans SET active = FALSE, updated_at = NOW() WHERE namespace_id = ? AND active = TRUE",
-        namespace_id)
+    local tier = math.max(1, math.floor(tonumber(fields.tier) or 1))
+    db.query("UPDATE creator_subscription_plans SET active = FALSE, updated_at = NOW() WHERE namespace_id = ? AND tier = ? AND active = TRUE",
+        namespace_id, tier)
+    fields.tier = tier
     fields.uuid = Global.generateUUID()
     fields.namespace_id = namespace_id
     fields.active = true

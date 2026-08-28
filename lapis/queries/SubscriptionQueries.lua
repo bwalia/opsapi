@@ -45,6 +45,9 @@ function SubscriptionQueries.upsert(params)
         stripe_subscription_id = params.stripe_subscription_id,
         stripe_customer_id = params.stripe_customer_id,
         status = params.status or "active",
+        -- The tier this subscription grants (EntitlementQueries compares it to the
+        -- course tier). Defaults to 1 so a legacy single-plan checkout still works.
+        plan_tier = math.max(1, math.floor(tonumber(params.plan_tier) or 1)),
         current_period_end = cpe and db.raw("to_timestamp(" .. cpe .. ")") or nil,
         created_at = db.raw("NOW()"),
         updated_at = db.raw("NOW()"),

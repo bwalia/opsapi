@@ -115,7 +115,10 @@ return function(app)
             -- Account, fee and earnings are per-instructor (user_uuid); the
             -- community subscription plan stays academy-wide (namespace-level).
             local acc = CreatorQueries.getAccount(uid)
-            local plan = CreatorQueries.getActivePlan(ns.id)
+            local plans_out = {}
+            for _, p in ipairs(CreatorQueries.getActivePlans(ns.id)) do
+                plans_out[#plans_out + 1] = { tier = p.tier, amount = p.amount, currency = p.currency, interval = p.interval }
+            end
             local earnings = PayoutQueries.earningsForInstructor(uid)
             local bank = {}
             if acc then
@@ -125,7 +128,8 @@ return function(app)
                 bank = bank,
                 bank_details_complete = acc and acc.bank_details_complete or false,
                 fee_pct = CreatorQueries.effectiveFeePct(uid),
-                plan = plan and { amount = plan.amount, currency = plan.currency, interval = plan.interval } or nil,
+                plan = plans_out[1],
+                plans = plans_out,
                 earnings = {
                     total_net = tonumber(earnings.total_net) or 0,
                     owed = tonumber(earnings.owed) or 0,
@@ -189,14 +193,17 @@ return function(app)
             if not amount or amount <= 0 then
                 return api_response(400, nil, "amount (in minor units, e.g. 999 = $9.99) is required")
             end
+            -- Which tier this plan unlocks (1 = entry level). A course is
+            -- accessible to a subscription whose plan tier >= the course tier.
+            local tier = math.max(1, math.floor(tonumber(body.tier) or 1))
             local interval = (body.interval == "year") and "year" or "month"
             local currency, cur_err = normalize_currency(body.currency)
             if not currency then return api_response(400, nil, cur_err) end
 
             local stripe = Stripe.new()
             local product, perr = stripe:create_product({
-                name = (ns.name or ns.slug) .. " membership",
-                metadata = { namespace_id = tostring(ns.id) },
+                name = (ns.name or ns.slug) .. " membership · tier " .. tier,
+                metadata = { namespace_id = tostring(ns.id), tier = tostring(tier) },
             })
             if not product then return api_response(502, nil, "Stripe product failed: " .. tostring(perr)) end
 
@@ -213,8 +220,9 @@ return function(app)
                 interval = interval,
                 amount = math.floor(amount),
                 currency = currency,
+                tier = tier,
             })
-            return { status = 200, json = { amount = plan.amount, currency = plan.currency, interval = plan.interval } }
+            return { status = 200, json = { tier = plan.tier, amount = plan.amount, currency = plan.currency, interval = plan.interval } }
         end)))
 
     ---------------------------------------------------------------------------
@@ -274,8 +282,16 @@ return function(app)
             return { status = 200, json = { already_subscribed = true } }
         end
 
-        local plan = CreatorQueries.getActivePlan(ns.id)
-        if not plan or not plan.stripe_price_id then return api_response(400, nil, "This community has no subscription plan") end
+        -- Which tier to subscribe to. Default: the entry-level (lowest) plan, so a
+        -- single-plan community keeps working with no `tier` in the request.
+        local body = parse_body()
+        local plan = body.tier
+            and CreatorQueries.getActivePlanForTier(ns.id, body.tier)
+            or CreatorQueries.getActivePlan(ns.id)
+        if not plan or not plan.stripe_price_id then
+            return api_response(400, nil, "No subscription plan available for that tier")
+        end
+        local tier = tostring(plan.tier or 1)
 
         local base = learner_base()
         local stripe = Stripe.new()
@@ -285,8 +301,10 @@ return function(app)
             cancel_url = base .. "/courses?subscribe=cancel",
             client_reference_id = uuid,
             line_items = { { price = plan.stripe_price_id, quantity = 1 } },
-            subscription_data = { metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid } },
-            metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid },
+            -- `tier` rides in the metadata so the webhook records plan_tier on the
+            -- academy_subscriptions row (EntitlementQueries reads it for access).
+            subscription_data = { metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid, tier = tier } },
+            metadata = { kind = "subscription", namespace_id = tostring(ns.id), user_uuid = uuid, tier = tier },
         })
         if not session then return api_response(502, nil, "Checkout failed: " .. tostring(err)) end
         return { status = 200, json = { url = session.url } }
@@ -320,11 +338,13 @@ return function(app)
     app:get("/api/v2/public/academy/:namespace/plan", function(self)
         local ns = NamespaceQueries.findBySlug(self.params.namespace)
         if not ns then return api_response(404, nil, "Namespace not found") end
-        local plan = CreatorQueries.getActivePlan(ns.id)
-        if not plan then return { status = 200, json = { has_plan = false } } end
-        return { status = 200, json = {
-            has_plan = true,
-            plan = { amount = plan.amount, currency = plan.currency, interval = plan.interval },
-        } }
+        local out = {}
+        for _, p in ipairs(CreatorQueries.getActivePlans(ns.id)) do
+            out[#out + 1] = { tier = p.tier, amount = p.amount, currency = p.currency, interval = p.interval }
+        end
+        if #out == 0 then return { status = 200, json = { has_plan = false } } end
+        -- `plan` = the entry-level plan (backward-compat); `plans` = every tier,
+        -- entry level first, for the pricing UI.
+        return { status = 200, json = { has_plan = true, plan = out[1], plans = out } }
     end)
 end
