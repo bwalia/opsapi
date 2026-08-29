@@ -26,6 +26,7 @@
 local cJson = require("cjson")
 local CourseQueries = require "queries.CourseQueries"
 local LessonQueries = require "queries.LessonQueries"
+local MinioClient = require "helper.minio"
 local InstructorQueries = require "queries.InstructorQueries"
 local EnrollmentQueries = require "queries.EnrollmentQueries"
 local EntitlementQueries = require "queries.EntitlementQueries"
@@ -967,6 +968,45 @@ return function(app)
                 completed_count = count,
                 total = #lessons,
             } }
+        end))
+
+    -- A short-lived signed URL to stream a PAID lesson's video. Free lessons
+    -- never reach here — the learner site signs those itself from its SQLite
+    -- cache (golden rule). This re-checks entitlement before handing out a key:
+    -- a preview lesson is watchable by anyone, otherwise the caller must have
+    -- access to the parent course (free / owner / enrolled / tier subscriber).
+    app:get("/api/v2/public/academy/:namespace/lessons/:uuid/stream-url",
+        AuthMiddleware.requireAuth(function(self)
+            local ns = resolve_namespace(self)
+            if not ns then return api_response(404, nil, "Namespace not found") end
+            local user_uuid = self.current_user and self.current_user.uuid
+            if not user_uuid then return api_response(401, nil, "Authentication required") end
+
+            local lesson = LessonQueries.getByUuid(ns.id, self.params.uuid)
+            if not lesson then return api_response(404, nil, "Lesson not found") end
+
+            local key = lesson.s3_key
+            if not key or key == "" then
+                return api_response(404, nil, "This lesson has no video")
+            end
+
+            if not pg_true(lesson.is_preview) then
+                local course = CourseQueries.findById(ns.id, lesson.course_id)
+                if not course then return api_response(404, nil, "Course not found") end
+                if not EntitlementQueries.hasCourseAccess(user_uuid, course) then
+                    return api_response(403, nil, "You need access to this course to watch it")
+                end
+            end
+
+            local expires_in = 3600
+            local url, err = MinioClient.getDefault():getPresignedUrl(key, expires_in)
+            if not url then
+                ngx.log(ngx.ERR, "[academy] presign failed for lesson ",
+                    tostring(self.params.uuid), ": ", tostring(err))
+                return api_response(500, nil, "Could not generate a playback URL")
+            end
+
+            return api_response(200, { url = url, expires_in = expires_in })
         end))
 
     -- Which lessons of a course the current learner has completed.
