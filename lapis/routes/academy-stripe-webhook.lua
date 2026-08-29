@@ -6,7 +6,8 @@
     Source of truth for granting access + recording the earnings ledger. All
     charges are on the PLATFORM account (no Connect); the creator's cut/net is
     computed by PayoutQueries.recordSale using their effective fee %.
-      - checkout.session.completed (course)       -> enroll + ledger entry
+      - checkout.session.completed (course)       -> enroll + ledger entry (only if paid)
+      - checkout.session.async_payment_succeeded  -> enroll + ledger for a delayed course payment
       - checkout.session.completed (subscription) -> create sub + first ledger entry
       - invoice.paid (subscription_cycle)         -> extend sub + renewal ledger entry
       - customer.subscription.updated/deleted     -> update status/period
@@ -105,6 +106,23 @@ return function(app)
             if ok_fetch then subobj = res end
         end
 
+        -- Enroll the buyer + record the instructor's earnings, atomically (a
+        -- failed ledger write rolls the enrollment back too, so access is never
+        -- granted without a sale row). Shared by the instant-payment path
+        -- (checkout.session.completed, payment_status "paid") and the delayed one
+        -- (checkout.session.async_payment_succeeded), so both grant identically.
+        local function grant_course_purchase(md, ns_id, session)
+            EnrollmentQueries.enroll(ns_id, tonumber(md.course_id), md.user_uuid)
+            -- Attribute the sale to the course owner (the instructor). Legacy /
+            -- admin-owned courses may have no owner -> platform revenue.
+            local course = CourseQueries.findById(ns_id, tonumber(md.course_id))
+            PayoutQueries.recordSale({
+                user_uuid = md.user_uuid, namespace_id = ns_id, course_id = tonumber(md.course_id),
+                seller_user_uuid = course and course.owner_user_uuid or nil,
+                kind = "course", stripe_ref = session.payment_intent, amount = session.amount_total, currency = session.currency,
+            })
+        end
+
         -- All persistent side effects run inside ONE transaction, and the
         -- idempotency marker is written as its LAST statement. Any failure rolls
         -- back the marker together with the partial side effects, so nothing is
@@ -114,18 +132,14 @@ return function(app)
                 local md = obj.metadata or {}
                 local ns_id = tonumber(md.namespace_id)
                 if md.kind == "course" and ns_id and tonumber(md.course_id) and md.user_uuid then
-                    -- Enroll + ledger are now atomic: if the ledger write fails the
-                    -- enrollment rolls back too, so the buyer is never granted access
-                    -- without the instructor's earnings row being recorded.
-                    EnrollmentQueries.enroll(ns_id, tonumber(md.course_id), md.user_uuid)
-                    -- Attribute the sale to the course owner (the instructor). Legacy /
-                    -- admin-owned courses may have no owner -> platform revenue.
-                    local course = CourseQueries.findById(ns_id, tonumber(md.course_id))
-                    PayoutQueries.recordSale({
-                        user_uuid = md.user_uuid, namespace_id = ns_id, course_id = tonumber(md.course_id),
-                        seller_user_uuid = course and course.owner_user_uuid or nil,
-                        kind = "course", stripe_ref = obj.payment_intent, amount = obj.amount_total, currency = obj.currency,
-                    })
+                    -- Only grant once the money is actually captured. Card and other
+                    -- instant methods arrive here already "paid"; asynchronous methods
+                    -- (some bank debits, vouchers) arrive "unpaid" and are granted
+                    -- later by async_payment_succeeded — NOT here, or the buyer would
+                    -- get the course before Stripe confirms the funds.
+                    if obj.payment_status == "paid" or obj.payment_status == "no_payment_required" then
+                        grant_course_purchase(md, ns_id, obj)
+                    end
                 elseif md.kind == "subscription" and ns_id and md.user_uuid and obj.subscription then
                     SubscriptionQueries.upsert({
                         user_uuid = md.user_uuid, namespace_id = ns_id,
@@ -141,6 +155,18 @@ return function(app)
                         user_uuid = md.user_uuid, namespace_id = ns_id, kind = "subscription",
                         stripe_ref = obj.subscription, amount = obj.amount_total, currency = obj.currency,
                     })
+                end
+
+            elseif t == "checkout.session.async_payment_succeeded" then
+                -- A delayed payment method finally cleared. The checkout.session.completed
+                -- for this session arrived "unpaid" and granted nothing; now that the funds
+                -- are confirmed we grant the course (a different event id, so it is not a
+                -- duplicate of the earlier no-op). Courses only — subscription first
+                -- payments settle through invoice.paid.
+                local md = obj.metadata or {}
+                local ns_id = tonumber(md.namespace_id)
+                if md.kind == "course" and ns_id and tonumber(md.course_id) and md.user_uuid then
+                    grant_course_purchase(md, ns_id, obj)
                 end
 
             elseif t == "invoice.paid" then
