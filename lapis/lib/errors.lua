@@ -163,6 +163,31 @@ function Errors.install_handler(app)
             })
         end
 
+        -- Lapis routing errors are CLIENT errors, not server faults. A request
+        -- for a path we don't serve raises "Failed to find route: <uri>" (a 404)
+        -- and a request with the wrong verb raises "don't know how to respond to
+        -- <METHOD>" (a 405). Falling through to SYSTEM_500 makes every client
+        -- typo, probe, and scanner hit look like a server crash — it pages
+        -- on-call on 5xx alerts and floods error_occurrences with non-errors.
+        -- Return a clean envelope with the correct status and skip the audit
+        -- write (logged at NOTICE so it never trips ERR/5xx-based alerting).
+        if type(err) == "string" then
+            if err:find("Failed to find route", 1, true) then
+                ngx.log(ngx.NOTICE, "404 (no route): ", err)
+                return { status = 404, json = { error = {
+                    code = "NOT_FOUND_404", category = "error",
+                    message = "The requested resource was not found.",
+                } } }
+            end
+            if err:find("don't know how to respond to", 1, true) then
+                ngx.log(ngx.NOTICE, "405 (method not allowed): ", err)
+                return { status = 405, json = { error = {
+                    code = "METHOD_NOT_ALLOWED_405", category = "error",
+                    message = "This method is not allowed for the requested resource.",
+                } } }
+            end
+        end
+
         -- Genuine surprise: log fully, return SYSTEM_500 envelope with
         -- a correlation id the user can quote to support.
         ngx.log(ngx.ERR, "Unhandled error: ", tostring(err))
