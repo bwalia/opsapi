@@ -8,7 +8,7 @@
   "error_log": "logs/opsapi.workstation.co.uk.error.log",
   "config_status": false,
   "profile_id": "prod",
-  "rules": "opsapi-prod-default",
+  "rules": "opsapi-prod-cloud003",
   "listens": [
     {
       "listen": "80"

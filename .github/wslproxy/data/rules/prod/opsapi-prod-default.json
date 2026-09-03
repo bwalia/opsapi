@@ -30,7 +30,6 @@
     }
   },
   "servers": [
-    "host:opsapi.workstation.co.uk",
     "host:int-opsapi.workstation.co.uk",
     "host:test-opsapi.workstation.co.uk",
     "host:acc-opsapi.workstation.co.uk",

@@ -99,10 +99,17 @@ spec:
       labels:
         app: workstation-db
     spec:
-      # Pin to the same LAN node as the app + ingress so the DB is never on the
-      # far side of the cloud<->LAN partition.
+      # Pin to cloud003 — the SAME node as the prod app (values-workstation-prod
+      # .yaml nodeSelector) — so app + DB are co-located on the london edge node
+      # and nothing prod needs crosses the down cloud<->LAN WireGuard mesh.
+      # cloud003 carries node-role.kubernetes.io/edge=true:NoSchedule, so the
+      # toleration is REQUIRED. local-path binds the PVC to cloud003.
       nodeSelector:
-        kubernetes.io/hostname: debworker00
+        kubernetes.io/hostname: cloud003
+      tolerations:
+        - key: node-role.kubernetes.io/edge
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: postgres
           image: pgvector/pgvector:pg15

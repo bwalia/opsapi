@@ -13,6 +13,19 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # Backups pg_dump the release's own DB (POSTGRES_HOST below), so they
+          # must run where that DB is reachable. Follow the release's placement:
+          # the prod release pins app + workstation-db to cloud003 (an edge node),
+          # so the backup pod must land there too and tolerate the edge taint.
+          # Values-driven → no effect for releases that set neither.
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           containers:
             - name: "opsapi-db-backup-{{ .Release.Namespace }}-hourly"
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -157,6 +170,19 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # Backups pg_dump the release's own DB (POSTGRES_HOST below), so they
+          # must run where that DB is reachable. Follow the release's placement:
+          # the prod release pins app + workstation-db to cloud003 (an edge node),
+          # so the backup pod must land there too and tolerate the edge taint.
+          # Values-driven → no effect for releases that set neither.
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           containers:
             - name: opsapi-db-backup-{{ .Release.Namespace }}-daily
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
