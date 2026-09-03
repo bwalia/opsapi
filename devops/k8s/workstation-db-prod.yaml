@@ -1,0 +1,160 @@
+# workstation-db (PROD) — dedicated Postgres owned by the WORKSTATION opsapi
+# product in the `prod` namespace. Prod copy of devops/k8s/workstation-db.yaml
+# (which is the `int` one) — see that file's header for the full rationale.
+#
+# Why a dedicated DB (not the shared diy-tax-db)
+# ----------------------------------------------
+# `opsapi.workstation.co.uk` (Helm release `workstation-opsapi`, namespace
+# `prod`) runs the FULL opsapi product (projectCode: all). It gets its OWN
+# Postgres ON THE LAN (debworker00), co-located with the app and the wslproxy
+# ingress, so nothing it needs crosses the (currently down) cloud<->LAN
+# WireGuard mesh. Fully data-isolated from diytaxreturn AND partition-
+# independent. The app is repointed at it by `database.host` in
+# values-workstation-prod.yaml.
+#
+# Image: pgvector/pgvector:pg15 — the tax-classifier migration
+# (classification_reference_data) uses the `vector(384)` type. The initdb
+# ConfigMap self-heals `CREATE EXTENSION vector` on a FRESH volume, so a wipe
+# recovers on its own (the app's postStart bootstrap then migrates + seeds it,
+# auto-creating the super admin from the Vault-provided ADMIN_* env).
+#
+# Credentials: pguser REUSES the app's Vault password so the app connects with
+# no change. The `workstation-db-auth` Secret is provisioned by the
+# ExternalSecret below from the prod Vault path the app reads
+# (secret/diytaxreturnuk/opsapi/prod/config, property POSTGRES_PASSWORD) — no
+# plaintext in git.
+#
+# Apply (one-time, BEFORE the first prod deploy so the DB is up when the app's
+# migrate hook runs; the StatefulSet's PVC persists across app redeploys):
+#   kubectl create namespace prod --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f devops/k8s/workstation-db-prod.yaml
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: workstation-db-auth
+  namespace: prod
+  labels:
+    app: workstation-db
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: workstation-db-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: POSTGRES_PASSWORD
+      remoteRef:
+        key: secret/diytaxreturnuk/opsapi/prod/config
+        property: POSTGRES_PASSWORD
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workstation-db-initdb
+  namespace: prod
+  labels:
+    app: workstation-db
+data:
+  # Runs ONLY on a fresh (empty) data volume, against POSTGRES_DB
+  # (workstation_opsapi). Makes the pgvector type available before the app's
+  # first `lapis migrate`, so a wiped/rebuilt volume self-heals.
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workstation-db
+  namespace: prod
+  labels:
+    app: workstation-db
+spec:
+  type: ClusterIP
+  selector:
+    app: workstation-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: workstation-db
+  namespace: prod
+  labels:
+    app: workstation-db
+spec:
+  serviceName: workstation-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workstation-db
+  template:
+    metadata:
+      labels:
+        app: workstation-db
+    spec:
+      # Pin to the same LAN node as the app + ingress so the DB is never on the
+      # far side of the cloud<->LAN partition.
+      nodeSelector:
+        kubernetes.io/hostname: debworker00
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg15
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: pguser
+            - name: POSTGRES_DB
+              value: workstation_opsapi
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: workstation-db-auth
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -d workstation_opsapi -h 127.0.0.1"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U pguser -h 127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: initdb
+          configMap:
+            name: workstation-db-initdb
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
