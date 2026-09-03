@@ -49,8 +49,17 @@ spec:
       {{- with .Values.nodeSelector }}
       # Optional hard node pin (per-release, via values). Combines with the
       # NotIn-lubuntu001 affinity above. Used by workstation-opsapi to keep the
-      # pod on a debian node with disk headroom (debworker00).
+      # pod on a specific node (a LAN debian node, or a cloud edge node like
+      # cloud003 for the prod release).
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      # Optional tolerations (per-release, via values). Required to schedule on
+      # tainted nodes — e.g. the workstation-opsapi PROD release pins to cloud003
+      # (node-role.kubernetes.io/edge=true:NoSchedule), so it must tolerate that
+      # taint. Empty/unset for LAN releases, which need no toleration.
+      tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:

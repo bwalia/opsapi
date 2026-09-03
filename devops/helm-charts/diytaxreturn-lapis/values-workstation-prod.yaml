@@ -96,6 +96,16 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
 
-# Pin to debworker00 (debian node, disk headroom) — see values-workstation-int.yaml.
+# PROD runs ENTIRELY on cloud003 (the london edge node) — same segment as the
+# dedicated workstation-db (devops/k8s/workstation-db-prod.yaml, also pinned to
+# cloud003) and where diytaxreturn's own prod stack already lives. Co-locating
+# app + DB on one node keeps prod off the down cloud<->LAN WireGuard mesh
+# entirely (nothing it needs crosses segments). cloud003 carries the edge taint
+# node-role.kubernetes.io/edge=true:NoSchedule, so the toleration below is
+# REQUIRED or the pod sits Pending (untolerated taint).
 nodeSelector:
-  kubernetes.io/hostname: debworker00
+  kubernetes.io/hostname: cloud003
+tolerations:
+  - key: node-role.kubernetes.io/edge
+    operator: Exists
+    effect: NoSchedule
