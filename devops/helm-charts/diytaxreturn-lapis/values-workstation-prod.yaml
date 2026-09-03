@@ -12,7 +12,12 @@ app: workstation-opsapi
 # ingress.hosts[0].host below.
 host: opsapi.workstation.co.uk
 
-projectCode: tax_copilot
+# Full opsapi product on prod's OWN isolated DB (see `database` below), so
+# `all` is safe: every migration runs against the dedicated workstation_opsapi
+# DB and cannot touch diytaxreturn's data. `all` enables every feature module
+# (incl. SERVICES/Domains) so the live product is the complete one — matching
+# the int build that was verified end-to-end before go-live.
+projectCode: all
 
 frontendUrl: "https://app.diytaxreturn.co.uk"
 
@@ -45,17 +50,39 @@ ingress:
           pathType: Prefix
   tls: []
 
-# Empty map (NOT unset) so the ExternalSecret's `.Values.database.host` lookup
-# resolves to nil and falls back to Vault's POSTGRES_HOST. See -int for detail.
-database: {}
+# DATABASE — dedicated Postgres on the LAN for prod (mirrors -int). Points this
+# release at its OWN `workstation-db` in the `prod` namespace
+# (devops/k8s/workstation-db-prod.yaml — pgvector/pgvector:pg15 on debworker00),
+# NOT the shared Vault POSTGRES_HOST. A fresh isolated DB: the app's postStart
+# bootstrap migrates it and auto-creates the super admin (credentials from Vault
+# — see `setup` below). The chart bakes `host` into config.lua (externalsecret
+# .yaml) and `name` into a POSTGRES_DB env override (deployment.yaml). Apply the
+# manifest BEFORE the first prod deploy so the DB is up when the migrate hook runs.
+database:
+  name: workstation_opsapi
+  host: workstation-db.prod.svc.cluster.local
+
+# workstation-db is plain Postgres with NO TLS — force pgmoon SSL off (the chart
+# default "true" was for the TLS-enforcing Zalando DB). See -int for detail.
+postgresSsl: "false"
 
 externalSecret:
   enabled: true
 
+# Bootstrap super-admin for the fresh prod workstation_opsapi DB, seeded on
+# first boot by scripts/setup-namespace. The CREDENTIALS come from Vault, not
+# git: adminEmail + adminPassword are left BLANK here so the chart does NOT emit
+# explicit ADMIN_* container env — instead the pod's `envFrom` pulls ADMIN_EMAIL
+# / ADMIN_PASSWORD out of the ESO-synced `workstation-opsapi-secrets` (Vault path
+# secret/diytaxreturnuk/opsapi/prod/config). Add those two keys to that Vault
+# path BEFORE deploying; without them setup-namespace falls back to its built-in
+# defaults (admin@opsapi.com / Admin@123). setup-namespace is idempotent — once
+# the admin exists it never rewrites the password, so redeploys are safe.
+# namespaceSlug is not a secret, so it stays git-owned here.
 setup:
   adminEmail: ""
   adminPassword: ""
-  namespaceSlug: ""
+  namespaceSlug: "workstation"
 
 # Browser CORS allow-list (consumed by middleware/cors.lua) — git-owned here.
 # workstation.academy lets the Academy tenant's instructor dashboard
