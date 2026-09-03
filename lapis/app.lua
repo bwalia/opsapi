@@ -398,7 +398,6 @@ load_if("ecommerce", "routes.categories")
 load_if("ecommerce", "routes.orders")
 load_if("ecommerce", "routes.cart")
 load_if("ecommerce", "routes.payments")
-load_if("ecommerce", "routes.addresses")
 load_if("ecommerce", "routes.stores")
 load_if("ecommerce", "routes.storeproducts")
 load_if("ecommerce", "routes.customers")
@@ -410,7 +409,6 @@ load_if("ecommerce", "routes.order_management")
 load_if("ecommerce", "routes.order-status")
 load_if("ecommerce", "routes.buyer-orders")
 load_if("ecommerce", "routes.public-store")
-load_if("ecommerce", "routes.tenants")
 
 -- ============================================
 -- DELIVERY PARTNER SYSTEM
