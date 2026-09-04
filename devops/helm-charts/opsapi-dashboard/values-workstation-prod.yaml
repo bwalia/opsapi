@@ -1,0 +1,40 @@
+# ── OpsAPI Dashboard on workstation.co.uk — PRODUCTION ──────────────────────
+# Helm RELEASE: workstation-opsapi-dashboard   Namespace: prod   Cluster: k3s1
+# Public host: https://opsapi-ui.workstation.co.uk   (bare host = prod)
+#   → calls the API at https://opsapi.workstation.co.uk (workstation-opsapi)
+#
+# Layered on top of values.yaml by deploy-workstation-dashboard.yml — run it
+# with workflow_dispatch TARGET_ENV=prod (pushes to main only auto-deploy int).
+# Only the fields that differ from the base defaults (or that other jobs read)
+# live here.
+env: prod
+
+# The API this UI calls. Baked into the browser bundle at BUILD time
+# (--build-arg NEXT_PUBLIC_API_URL) by the deploy workflow.
+apiUrl: https://opsapi.workstation.co.uk
+
+# Single source of truth for the DNS + wslproxy jobs (read via awk). MUST equal
+# ingress.hostname below.
+host: opsapi-ui.workstation.co.uk
+
+ingress:
+  enabled: true
+  className: wslproxy
+  hostname: opsapi-ui.workstation.co.uk
+  annotations: {}
+  tls: []
+
+# PROD runs ENTIRELY on cloud003 (the london edge node) — same placement as the
+# workstation-opsapi prod API and its dedicated workstation-db (see the API
+# chart's values-workstation-prod.yaml for the full rationale: keeps prod off
+# the cloud<->LAN WireGuard mesh). The matching edge vhost
+# host:opsapi-ui.workstation.co.uk routes via the opsapi-prod-cloud003 rule to
+# cloud003's own ingress entry, so requests never leave the node. cloud003
+# carries the taint node-role.kubernetes.io/edge=true:NoSchedule, so the
+# toleration below is REQUIRED or the pod sits Pending.
+nodeSelector:
+  kubernetes.io/hostname: cloud003
+tolerations:
+  - key: node-role.kubernetes.io/edge
+    operator: Exists
+    effect: NoSchedule
