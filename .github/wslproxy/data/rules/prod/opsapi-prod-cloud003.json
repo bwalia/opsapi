@@ -31,6 +31,7 @@
     }
   },
   "servers": [
-    "host:opsapi.workstation.co.uk"
+    "host:opsapi.workstation.co.uk",
+    "host:opsapi-ui.workstation.co.uk"
   ]
 }

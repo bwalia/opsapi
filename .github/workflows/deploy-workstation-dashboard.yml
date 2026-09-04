@@ -4,6 +4,11 @@ name: Deploy Workstation Dashboard
 # https://int-opsapi-ui.workstation.co.uk, fully from GitHub. The UI calls the
 # workstation-opsapi API at https://int-opsapi.workstation.co.uk.
 #
+# PROD: dispatch with TARGET_ENV=prod → https://opsapi-ui.workstation.co.uk
+# (namespace prod, pinned to cloud003 next to the prod API + DB, edge vhost
+# host:opsapi-ui.workstation.co.uk via the opsapi-prod-cloud003 rule). Pushes
+# to main only ever auto-deploy int.
+#
 # Mirrors deploy-k3s.yml (which deploys the API): same k3s1 cluster
 # (KUBE_CONFIG_DATA_K3S), same WSL Proxy edge (DNS CNAME -> lon1.pop0.uk +
 # a stub vhost/rule registered on the control plane), same Docker Hub registry.
@@ -23,7 +28,8 @@ on:
       - "opsapi-dashboard/**"
       - "devops/helm-charts/opsapi-dashboard/**"
       - ".github/workflows/deploy-workstation-dashboard.yml"
-      - ".github/wslproxy/data/servers/prod/host:*-opsapi-ui.workstation.co.uk.json"
+      # matches both int-opsapi-ui... and the bare prod host opsapi-ui...
+      - ".github/wslproxy/data/servers/prod/host:*opsapi-ui.workstation.co.uk.json"
   workflow_dispatch:
     inputs:
       TARGET_ENV:
