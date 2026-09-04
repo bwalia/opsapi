@@ -19,7 +19,12 @@ host: opsapi-ui.workstation.co.uk
 
 ingress:
   enabled: true
-  className: wslproxy
+  # NOT wslproxy: cloud003's only ingress entry is the traefik-edge DaemonSet
+  # (hostNetwork :80/:443), and it serves ONLY ingressclass traefik-edge —
+  # exactly how the working diytaxreturn prod ingresses on cloud003 route.
+  # The wslproxy-class traefik only answers on the LAN entry (193.237.176.232),
+  # which prod deliberately avoids.
+  className: traefik-edge
   hostname: opsapi-ui.workstation.co.uk
   annotations: {}
   tls: []

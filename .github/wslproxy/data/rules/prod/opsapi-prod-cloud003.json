@@ -16,13 +16,13 @@
     },
     "response": {
       "code": 305,
-      "redirect_uri": "origin-uk-003.pop0.uk:8888",
+      "redirect_uri": "origin-uk-003.pop0.uk",
       "strip_path": false,
       "backends": [
         {
-          "address": "origin-uk-003.pop0.uk:8888",
+          "address": "origin-uk-003.pop0.uk",
           "weight": 100,
-          "label": "origin-uk-003.pop0.uk:8888 = cloud003 k3s ingress entry. PROD-ONLY: workstation-opsapi prod runs entirely on cloud003, so its host routes to cloud003 by stable hostname. int/test/acc stay on opsapi-prod-default (193.237.176.232:8888)."
+          "label": "origin-uk-003.pop0.uk (port 80) = traefik-edge on cloud003 (hostNetwork DaemonSet; nothing listens on :8888 there) — same backend the working diytaxreturn prod rules use. Ingresses MUST use className traefik-edge, not wslproxy. PROD-ONLY: workstation-opsapi prod runs entirely on cloud003. int/test/acc stay on opsapi-prod-default (193.237.176.232:8888)."
         }
       ],
       "routing": {
