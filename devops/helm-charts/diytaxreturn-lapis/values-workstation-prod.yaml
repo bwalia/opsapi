@@ -37,11 +37,15 @@ service:
   type: ClusterIP
   port: 80
 
-# Dedicated Ingress — className `wslproxy`, plain HTTP :80 (TLS at the edge,
-# no cert-manager on k3s1). See values-workstation-int.yaml.
+# Dedicated Ingress — plain HTTP :80 (TLS at the edge, no cert-manager on
+# k3s1). className `traefik-edge`, NOT `wslproxy`: prod is pinned to cloud003,
+# whose only ingress entry is the traefik-edge DaemonSet (hostNetwork :80) —
+# it serves ONLY ingressclass traefik-edge, and the opsapi-prod-cloud003 edge
+# rule targets it at origin-uk-003.pop0.uk (port 80). Same pattern as the
+# working diytaxreturn prod ingresses. int/test/acc stay on wslproxy (LAN).
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik-edge
   annotations: {}
   hosts:
     - host: opsapi.workstation.co.uk
