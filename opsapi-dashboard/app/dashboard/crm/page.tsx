@@ -39,6 +39,17 @@ import {
 import { formatDate, formatCurrency } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
+import {
+  LEAD_STATUS_OPTIONS,
+  LEAD_SOURCE_OPTIONS,
+  LEAD_PRIORITY_OPTIONS,
+  leadStatusColors,
+  leadSourceLabels,
+  leadPriorityColors,
+  CreateLeadModal,
+  ConvertLeadModal,
+  LeadDetailModal,
+} from '@/components/crm/leads-shared';
 
 // ============================================================
 // Tab type
@@ -109,31 +120,8 @@ const ACTIVITY_TYPE_OPTIONS = [
   { value: 'task', label: 'Task' },
 ];
 
-const LEAD_STATUS_OPTIONS = [
-  { value: 'all', label: 'All Status' },
-  { value: 'new', label: 'New' },
-  { value: 'contacted', label: 'Contacted' },
-  { value: 'qualified', label: 'Qualified' },
-  { value: 'converted', label: 'Converted' },
-  { value: 'lost', label: 'Lost' },
-];
-
-const LEAD_SOURCE_OPTIONS = [
-  { value: 'all', label: 'All Sources' },
-  { value: 'website_form', label: 'Website Form' },
-  { value: 'email', label: 'Email' },
-  { value: 'social_media', label: 'Social Media' },
-  { value: 'manual', label: 'Manual Entry' },
-  { value: 'api', label: 'API / Webhook' },
-  { value: 'referral', label: 'Referral' },
-];
-
-const LEAD_PRIORITY_OPTIONS = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'urgent', label: 'Urgent' },
-];
+// LEAD_STATUS_OPTIONS / LEAD_SOURCE_OPTIONS / LEAD_PRIORITY_OPTIONS are imported
+// from components/crm/leads-shared (shared with the /dashboard/leads inbox).
 
 // ============================================================
 // Create Account Modal
@@ -525,232 +513,6 @@ const CreateActivityModal: React.FC<CreateActivityModalProps> = ({ isOpen, onClo
   );
 };
 
-// ============================================================
-// Create Lead Modal
-// ============================================================
-
-interface CreateLeadModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-const CreateLeadModal: React.FC<CreateLeadModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    company_name: '',
-    job_title: '',
-    source: 'manual',
-    channel: '',
-    campaign: '',
-    priority: 'medium',
-    notes: '',
-  });
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.first_name.trim() && !formData.email.trim()) {
-      toast.error('First name or email is required');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await crmService.createLead(formData);
-      toast.success('Lead created successfully');
-      setFormData({ first_name: '', last_name: '', email: '', phone: '', company_name: '', job_title: '', source: 'manual', channel: '', campaign: '', priority: 'medium', notes: '' });
-      onSuccess();
-      onClose();
-    } catch (error) {
-      console.error('Failed to create lead:', error);
-      toast.error('Failed to create lead');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create Lead">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">First Name *</label>
-            <input name="first_name" value={formData.first_name} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="First name" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Last Name</label>
-            <input name="last_name" value={formData.last_name} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Last name" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Email *</label>
-            <input name="email" type="email" value={formData.email} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="email@example.com" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Phone</label>
-            <input name="phone" value={formData.phone} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="+44 7700 000000" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Company</label>
-            <input name="company_name" value={formData.company_name} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Company name" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Job Title</label>
-            <input name="job_title" value={formData.job_title} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="e.g. Marketing Director" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Source</label>
-            <div className="relative">
-              <select name="source" value={formData.source} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
-                {LEAD_SOURCE_OPTIONS.filter((o) => o.value !== 'all').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Priority</label>
-            <div className="relative">
-              <select name="priority" value={formData.priority} onChange={handleChange} className="w-full appearance-none px-3 py-2 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer">
-                {LEAD_PRIORITY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Channel</label>
-            <input name="channel" value={formData.channel} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="e.g. organic, paid, social" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Campaign</label>
-            <input name="campaign" value={formData.campaign} onChange={handleChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Campaign name" />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-sm font-medium text-secondary-700 mb-1">Notes</label>
-            <textarea name="notes" value={formData.notes} onChange={handleChange} rows={3} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" placeholder="Additional notes about this lead..." />
-          </div>
-        </div>
-        <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
-          <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Creating...' : 'Create Lead'}</button>
-        </div>
-      </form>
-    </Modal>
-  );
-};
-
-// ============================================================
-// Convert Lead Modal
-// ============================================================
-
-interface ConvertLeadModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-  lead: CrmLead | null;
-}
-
-const ConvertLeadModal: React.FC<ConvertLeadModalProps> = ({ isOpen, onClose, onSuccess, lead }) => {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createDeal, setCreateDeal] = useState(false);
-  const [dealData, setDealData] = useState({ name: '', value: '', currency: 'GBP', stage: 'new' });
-
-  const handleDealChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setDealData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!lead) return;
-
-    setIsSubmitting(true);
-    try {
-      const deal = createDeal && dealData.name.trim() ? {
-        name: dealData.name,
-        value: dealData.value ? parseFloat(dealData.value) : 0,
-        currency: dealData.currency,
-        stage: dealData.stage,
-      } : undefined;
-
-      await crmService.convertLead(lead.uuid, deal);
-      toast.success('Lead converted to contact successfully');
-      setCreateDeal(false);
-      setDealData({ name: '', value: '', currency: 'GBP', stage: 'new' });
-      onSuccess();
-      onClose();
-    } catch (error) {
-      console.error('Failed to convert lead:', error);
-      toast.error('Failed to convert lead');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  if (!lead) return null;
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Convert Lead">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Lead summary */}
-        <div className="bg-secondary-50 rounded-lg p-4 space-y-1">
-          <p className="text-sm font-medium text-secondary-900">{lead.first_name} {lead.last_name}</p>
-          {lead.email && <p className="text-sm text-secondary-600">{lead.email}</p>}
-          {lead.company_name && <p className="text-sm text-secondary-600">{lead.company_name}</p>}
-          {lead.phone && <p className="text-sm text-secondary-600">{lead.phone}</p>}
-        </div>
-
-        <p className="text-sm text-secondary-600">
-          This will create a new <strong>CRM Contact</strong> from this lead&apos;s information.
-        </p>
-
-        {/* Optional deal creation */}
-        <div className="border border-secondary-200 rounded-lg p-4 space-y-3">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={createDeal}
-              onChange={(e) => setCreateDeal(e.target.checked)}
-              className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
-            />
-            <span className="text-sm font-medium text-secondary-700">Also create a deal</span>
-          </label>
-
-          {createDeal && (
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-secondary-700 mb-1">Deal Name *</label>
-                <input name="name" value={dealData.name} onChange={handleDealChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="Deal name" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-secondary-700 mb-1">Value</label>
-                <input name="value" type="number" step="0.01" value={dealData.value} onChange={handleDealChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="0.00" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-secondary-700 mb-1">Currency</label>
-                <input name="currency" value={dealData.currency} onChange={handleDealChange} className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500" placeholder="GBP" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-secondary-700 bg-surface border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors">Cancel</button>
-          <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50">{isSubmitting ? 'Converting...' : 'Convert Lead'}</button>
-        </div>
-      </form>
-    </Modal>
-  );
-};
 
 // ============================================================
 // Main CRM Page Content
@@ -793,6 +555,8 @@ function CrmPageContent() {
   const [isCreateLeadOpen, setIsCreateLeadOpen] = useState(false);
   const [isConvertLeadOpen, setIsConvertLeadOpen] = useState(false);
   const [convertTarget, setConvertTarget] = useState<CrmLead | null>(null);
+  const [detailLead, setDetailLead] = useState<CrmLead | null>(null);
+  const [isLeadDetailOpen, setIsLeadDetailOpen] = useState(false);
 
   // Delete
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -977,29 +741,8 @@ function CrmPageContent() {
 
   // ---- Table columns ----
 
-  const leadStatusColors: Record<string, string> = {
-    new: 'bg-blue-100 text-blue-800',
-    contacted: 'bg-amber-100 text-amber-800',
-    qualified: 'bg-green-100 text-green-800',
-    converted: 'bg-purple-100 text-purple-800',
-    lost: 'bg-red-100 text-red-800',
-  };
-
-  const leadSourceLabels: Record<string, string> = {
-    website_form: 'Website',
-    email: 'Email',
-    social_media: 'Social',
-    manual: 'Manual',
-    api: 'API',
-    referral: 'Referral',
-  };
-
-  const leadPriorityColors: Record<string, string> = {
-    low: 'bg-secondary-100 text-secondary-700',
-    medium: 'bg-blue-100 text-blue-700',
-    high: 'bg-amber-100 text-amber-700',
-    urgent: 'bg-red-100 text-red-700',
-  };
+  // leadStatusColors / leadSourceLabels / leadPriorityColors imported from
+  // components/crm/leads-shared (shared with the /dashboard/leads inbox).
 
   const leadColumns: TableColumn<CrmLead>[] = useMemo(() => [
     {
@@ -1612,6 +1355,7 @@ function CrmPageContent() {
             columns={leadColumns}
             data={leads}
             keyExtractor={(l) => l.uuid}
+            onRowClick={(lead) => { setDetailLead(lead); setIsLeadDetailOpen(true); }}
             sortColumn={sortColumn}
             sortDirection={sortDirection}
             onSort={handleSort}
@@ -1689,6 +1433,16 @@ function CrmPageContent() {
       <CreateDealModal isOpen={isCreateDealOpen} onClose={() => setIsCreateDealOpen(false)} onSuccess={fetchData} />
       <CreateActivityModal isOpen={isCreateActivityOpen} onClose={() => setIsCreateActivityOpen(false)} onSuccess={fetchData} />
       <ConvertLeadModal isOpen={isConvertLeadOpen} onClose={() => { setIsConvertLeadOpen(false); setConvertTarget(null); }} onSuccess={fetchData} lead={convertTarget} />
+
+      {/* Lead detail — opens on clicking a leads row */}
+      <LeadDetailModal
+        isOpen={isLeadDetailOpen}
+        lead={detailLead}
+        onClose={() => setIsLeadDetailOpen(false)}
+        onSaved={fetchData}
+        onConvert={(lead) => { setIsLeadDetailOpen(false); handleConvertLead(lead); }}
+        onDelete={(lead) => { setIsLeadDetailOpen(false); handleDeleteClick(lead.uuid, `${lead.first_name} ${lead.last_name || ''}`, 'leads'); }}
+      />
 
       {/* Delete Confirmation */}
       <ConfirmDialog

@@ -1,0 +1,21 @@
+<h2>You've got a new lead<% if namespace_name and namespace_name ~= "" then %> — <%= namespace_name %><% end %></h2>
+
+<p>A new enquiry has just come in. The details are below — log in to your dashboard and open <strong>Leads</strong> to follow up.</p>
+
+<div class="info-box">
+  <p><strong>Name:</strong> <%= first_name %><% if last_name and last_name ~= "" then %> <%= last_name %><% end %></p>
+  <% if company_name and company_name ~= "" then %><p><strong>Company:</strong> <%= company_name %></p><% end %>
+  <% if job_title and job_title ~= "" then %><p><strong>Job title:</strong> <%= job_title %></p><% end %>
+  <% if email and email ~= "" then %><p><strong>Email:</strong> <%= email %></p><% end %>
+  <% if phone and phone ~= "" then %><p><strong>Phone:</strong> <%= phone %></p><% end %>
+  <% if source and source ~= "" then %><p><strong>Source:</strong> <%= source %></p><% end %>
+</div>
+
+<% if notes and notes ~= "" then %>
+  <p><strong>Message:</strong></p>
+  <div class="info-box">
+    <%= notes %>
+  </div>
+<% end %>
+
+<p>This is an automated notification from <%= app_name %>. You can turn these off or add a Telegram alert under Leads → Notifications.</p>

@@ -8,54 +8,22 @@
     Endpoints:
     - POST /api/v2/public/leads/:namespace_slug - Submit a lead (no auth required)
 
-    Confirmation email:
-    On successful capture with a valid email, a "we got your enquiry"
-    confirmation is sent to the submitter via helper.mail. The send is
-    fire-and-forget (Mail.send default is async via ngx.timer.at) so the
-    HTTP response never waits on SMTP. If SMTP isn't configured, Mail.send
-    logs a warning and returns false — the lead is still stored, only the
-    email side-effect is skipped. Duplicates (same email in same namespace
-    within 5 minutes) do not re-send the email — the earlier submission
-    already produced one.
+    Notifications:
+    On a fresh capture, CrmLeadNotificationQueries.notify() fires the configured
+    channels for the namespace (see crm_lead_notification_settings): a
+    confirmation email to the submitter, a "you got a lead" email to the
+    namespace owner/admin, and an optional Telegram alert. It reads settings in
+    request context and defers the actual sends to an ngx.timer, so the HTTP
+    response never waits on SMTP / Telegram. Duplicates (same email in the same
+    namespace within 5 minutes) do NOT re-notify — the earlier submission
+    already did.
 ]]
 
 local cjson = require("cjson")
 local db = require("lapis.db")
 local RateLimit = require("middleware.rate-limit")
 local CrmLeadQueries = require("queries.CrmLeadQueries")
-local Mail = require("helper.mail")
-
---- Fire the "thanks for reaching out" confirmation to the submitter.
--- Non-blocking (Mail.send is async by default) and non-throwing: any
--- SMTP problem is logged and swallowed so a mail-side-effect never
--- fails a lead capture that already succeeded database-side.
--- @param lead_data table  Parsed request body (first_name, company_name, notes, ...)
--- @param recipient string Verified email from the request
-local function send_lead_confirmation(lead_data, recipient)
-    if not recipient or recipient == "" then return end
-    if not Mail.isConfigured() then
-        ngx.log(ngx.NOTICE, "[crm-leads-public] SMTP not configured — skipping confirmation email to ", recipient)
-        return
-    end
-
-    local ok, err = pcall(Mail.send, {
-        to = recipient,
-        subject = "We got your enquiry — thanks for getting in touch",
-        template = "lead_confirmation",
-        data = {
-            first_name = lead_data.first_name,
-            company_name = lead_data.company_name,
-            notes = lead_data.comments or lead_data.notes,
-            -- app_name / current_year are auto-populated by render_template.
-        },
-    })
-    if not ok then
-        ngx.log(ngx.WARN, "[crm-leads-public] confirmation email send raised: ", tostring(err))
-    elseif err then
-        -- Mail.send returns (false, "reason") on non-fatal failures.
-        ngx.log(ngx.WARN, "[crm-leads-public] confirmation email not sent: ", tostring(err))
-    end
-end
+local CrmLeadNotificationQueries = require("queries.CrmLeadNotificationQueries")
 
 return function(app)
     -- POST /api/v2/public/leads/:namespace_slug - Public lead submission
@@ -63,7 +31,7 @@ return function(app)
         RateLimit.wrap({ rate = 10, window = 60, prefix = "public_lead" }, function(self)
             -- Resolve namespace from slug
             local namespaces = db.query([[
-                SELECT id, slug FROM namespaces
+                SELECT id, slug, name FROM namespaces
                 WHERE slug = ?
                 LIMIT 1
             ]], self.params.namespace_slug)
@@ -105,10 +73,18 @@ return function(app)
                 campaign = data.campaign,
                 referrer_url = referrer,
                 landing_page_url = data.landing_page_url,
-                notes = data.comments or data.notes,
+                -- The enquiry text a visitor types. Public forms name this
+                -- field inconsistently (`message` is the most common, then
+                -- `comments`/`notes`) — accept all three so the message is
+                -- never silently dropped. It lands in `notes` (shown + editable
+                -- in the lead detail view).
+                notes = data.message or data.comments or data.notes,
                 metadata = cjson.encode({
                     user_agent = user_agent,
-                    ip = RateLimit.getClientIP()
+                    ip = RateLimit.getClientIP(),
+                    -- Keep the ORIGINAL submitted message verbatim so a later
+                    -- edit to `notes` can never lose the visitor's own words.
+                    message = data.message or data.comments or data.notes,
                 })
             })
 
@@ -123,8 +99,10 @@ return function(app)
                 return { status = 500, json = { success = false, error = "Submission failed" } }
             end
 
-            -- Fresh capture succeeded — fire the confirmation. Non-blocking, non-throwing.
-            send_lead_confirmation(data, data.email)
+            -- Fresh capture succeeded — fire configured notifications (confirmation
+            -- to submitter, admin email, Telegram). Deferred to a timer internally,
+            -- so this never blocks the response; failures are logged, not fatal.
+            CrmLeadNotificationQueries.notify(namespace, lead)
 
             return { status = 201, json = { success = true, message = "Thank you for your submission" } }
         end)

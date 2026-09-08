@@ -320,6 +320,8 @@ local config_cmi_namespace_cleanup_migrations = load_if_enabled(ProjectConfig.FE
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
 local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
+local crm_leads_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-leads-menu-items") or {}
+local crm_lead_notif_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-lead-notifications") or {}
 
 -- Leads are a CORE capability: the crm_leads table is created for EVERY
 -- PROJECT_CODE (lead capture is generic), so this module loads unconditionally.
@@ -1764,6 +1766,9 @@ local _migrations = {
     ['721_seed_crm_modules'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 2),
     ['722_grant_crm_permissions'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 3),
     ['723_enable_crm_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_menu_items_migrations, 4),
+    ['724_seed_crm_leads_menu_item'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_menu_migrations, 1),
+    ['725_enable_crm_leads_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_leads_menu_migrations, 2),
+    ['726_create_crm_lead_notification_settings'] = conditional_array(ProjectConfig.FEATURES.CRM, crm_lead_notif_migrations, 1),
 
     -- =========================================================================
     -- TIMESHEET SYSTEM (520-529)

@@ -18,6 +18,7 @@ local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local CrmLeadQueries = require("queries.CrmLeadQueries")
+local CrmLeadNotificationQueries = require("queries.CrmLeadNotificationQueries")
 
 return function(app)
     -- Helper to parse JSON body
@@ -108,6 +109,54 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local stats = CrmLeadQueries.getLeadStats(self.namespace.id)
             return api_response(200, stats)
+        end)
+    ))
+
+    -- ── Lead notification settings (per namespace) ─────────────────────────
+    -- Registered BEFORE /:uuid so the literal path isn't captured as a :uuid.
+
+    -- GET settings (any namespace member; bot token is masked, never returned)
+    app:get("/api/v2/crm/leads/notification-settings", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            return api_response(200, CrmLeadNotificationQueries.getForApi(self.namespace.id))
+        end)
+    ))
+
+    -- PUT settings (namespace owner / platform admin only)
+    app:put("/api/v2/crm/leads/notification-settings", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            if not (self.is_namespace_owner or self.is_platform_admin) then
+                return api_response(403, nil, "Only the namespace owner can change notification settings")
+            end
+            local body = parse_json_body()
+            local saved = CrmLeadNotificationQueries.upsert(self.namespace.id, {
+                notify_admin = body.notify_admin == true,
+                admin_email = body.admin_email,
+                send_confirmation = body.send_confirmation == true,
+                telegram_enabled = body.telegram_enabled == true,
+                telegram_bot_token = body.telegram_bot_token,
+                telegram_chat_id = body.telegram_chat_id,
+            })
+            return api_response(200, saved)
+        end)
+    ))
+
+    -- POST test Telegram (owner / admin) — verifies the bot token + chat id.
+    -- Accepts optional token/chat in the body so the owner can test BEFORE saving.
+    app:post("/api/v2/crm/leads/notification-settings/test-telegram", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requireNamespace(function(self)
+            if not (self.is_namespace_owner or self.is_platform_admin) then
+                return api_response(403, nil, "Only the namespace owner can send a test alert")
+            end
+            local body = parse_json_body()
+            local ok, err = CrmLeadNotificationQueries.sendTestTelegram(self.namespace.id, {
+                telegram_bot_token = body.telegram_bot_token,
+                telegram_chat_id = body.telegram_chat_id,
+            })
+            if not ok then
+                return api_response(400, nil, err or "Telegram test failed")
+            end
+            return api_response(200, { sent = true })
         end)
     ))
 
