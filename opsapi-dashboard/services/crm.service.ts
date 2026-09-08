@@ -133,6 +133,25 @@ export interface CrmLeadStats {
   leads_by_source: { source: string; count: number }[];
 }
 
+export interface LeadNotificationSettings {
+  notify_admin: boolean;
+  admin_email: string;
+  send_confirmation: boolean;
+  telegram_enabled: boolean;
+  telegram_chat_id: string;
+  has_telegram_token: boolean;
+  telegram_token_hint: string;
+}
+
+export interface LeadNotificationSettingsInput {
+  notify_admin: boolean;
+  admin_email?: string;
+  send_confirmation: boolean;
+  telegram_enabled: boolean;
+  telegram_chat_id?: string;
+  telegram_bot_token?: string; // only sent when changed (never echoed back)
+}
+
 export interface CrmLeadConvertResult {
   lead: CrmLead;
   contact: CrmContact;
@@ -400,6 +419,31 @@ export const crmService = {
     const response = await apiClient.get('/api/v2/crm/leads/stats');
     const d = response.data as Record<string, unknown>;
     return (d?.data || d) as CrmLeadStats;
+  },
+
+  // ----------------------------------------------------------
+  // Lead notification settings (per namespace)
+  // ----------------------------------------------------------
+
+  async getLeadNotificationSettings(): Promise<LeadNotificationSettings> {
+    const response = await apiClient.get('/api/v2/crm/leads/notification-settings');
+    return (response.data?.data ?? response.data) as LeadNotificationSettings;
+  },
+
+  // Sent as JSON (these routes parse a JSON body, unlike the form-encoded CRUD).
+  async updateLeadNotificationSettings(data: LeadNotificationSettingsInput): Promise<LeadNotificationSettings> {
+    const response = await apiClient.put('/api/v2/crm/leads/notification-settings', data, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return (response.data?.data ?? response.data) as LeadNotificationSettings;
+  },
+
+  // Send a test Telegram alert. Optional token/chat_id let the owner test
+  // before saving. Throws (rejected promise) with the API error on failure.
+  async testTelegram(input: { telegram_bot_token?: string; telegram_chat_id?: string } = {}): Promise<void> {
+    await apiClient.post('/api/v2/crm/leads/notification-settings/test-telegram', input, {
+      headers: { 'Content-Type': 'application/json' },
+    });
   },
 };
 
