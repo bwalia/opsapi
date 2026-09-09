@@ -16,6 +16,9 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local ClassificationCSV = require("lib.classification-csv")
+local MerchantCleaner = require("lib.merchant-cleaner")
+
+local cleanMerchant = MerchantCleaner.clean_merchant_name
 
 local function isAdmin(user)
     if not user then return false end
@@ -207,40 +210,38 @@ local function mapCategory(prefix, label, custom_mappings)
     return nil
 end
 
--- Merchant name cleaning (matches Python clean_merchant_name)
-local function cleanMerchant(desc)
-    if not desc or desc == "" then return "" end
-    local text = desc:match("^%s*(.-)%s*$") or desc
-    text = text:gsub("^TRANSFER%s+VIA%s+FASTER%s+PAYMENT%s+TO%s+", "")
-    -- Strip payment prefixes (longest first to avoid partial matches)
-    for _, pfx in ipairs({"FPI", "FPO", "BGC", "TFR", "STO", "DEB", "VIS", "DD", "SO", "CR", "DR", "BP"}) do
-        local pattern = "^" .. pfx .. "%s+"
-        if text:match(pattern) then
-            text = text:gsub(pattern, "", 1)
-            break
-        end
-    end
-    text = text:gsub("%*[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]+", "")
-    text = text:gsub("%*", " ")
-    text = text:gsub("%s+CD%s+%d%d%d%d", "")
-    text = text:gsub("%d%d/%d%d/?%d*", "")
-    text = text:gsub("%d%d[A-Z][A-Z][A-Z]%d%d%d?%d?", "")
-    text = text:gsub("%s+L%s+REF.*$", "")
-    text = text:gsub("%s*REF%s*[:;]?%s*.*$", "")
-    text = text:gsub("%s*MANDATE%s+NO%s*[:;]?%s*%w+.*$", "")
-    text = text:gsub("%s+%d%d%d%d%d%d%d+%s*$", "")
-    text = text:gsub("%s+LTD%s*%.?%s*$", "")
-    text = text:gsub("%s+PLC%s*%.?%s*$", "")
-    text = text:gsub("%s+LIMITED%s*%.?%s*$", "")
-    text = text:gsub("%s*,%s*$", "")
-    text = text:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-    return text:upper()
+-- Category mapping helpers continue below. Merchant cleaning lives in
+-- lib/merchant-cleaner.lua (shared with tax-classifier; must match Python).
+
+local function setSize(set)
+    local n = 0
+    for _ in pairs(set) do n = n + 1 end
+    return n
 end
 
-local function amountBand(amount)
-    if amount < 50 then return "small"
-    elseif amount < 200 then return "medium"
-    else return "large" end
+local function sortedKeys(set)
+    local keys = {}
+    for k in pairs(set) do table.insert(keys, k) end
+    table.sort(keys)
+    return keys
+end
+
+-- Re-derive HMRC + deductibility from the catalogue (same as PUT path).
+local function deriveHmrcFields(category, fallback_hmrc, fallback_deductible)
+    if not category or category == "" then
+        return fallback_hmrc or "otherExpenses", fallback_deductible ~= false
+    end
+    local cat = db.query([[
+        SELECT c.is_tax_deductible, h.key AS hmrc_category
+        FROM tax_categories c
+        LEFT JOIN tax_hmrc_categories h ON h.id = c.hmrc_category_id
+        WHERE c.key = ? AND c.is_active = true
+        LIMIT 1
+    ]], category)
+    if cat and #cat > 0 then
+        return cat[1].hmrc_category or "", cat[1].is_tax_deductible
+    end
+    return fallback_hmrc or "otherExpenses", fallback_deductible ~= false
 end
 
 return function(app)
@@ -785,8 +786,10 @@ return function(app)
     )
 
     -- ========================================
-    -- SAVE TRANSACTIONS — dedup + insert
+    -- SAVE TRANSACTIONS — conflict check + merchant upsert
     -- ========================================
+    -- One cleaned merchant → one category per profile. Conflicting labels
+    -- (in-batch or vs existing DB) return 409 until the admin resolves.
     app:post("/api/v2/tax/admin/profiles/:uuid/save-transactions",
         AuthMiddleware.requireAuth(function(self)
             if not isAdmin(self.current_user) then
@@ -806,7 +809,109 @@ return function(app)
                 return { status = 400, json = { error = "transactions array is required" } }
             end
 
-            -- Save any new custom mappings
+            -- Optional resolutions from a prior 409 conflict review.
+            -- { merchant = "TESCO", category = "office_supplies" } or { merchant = "BP", skip = true }
+            local resolutions = {}
+            if body.resolutions and type(body.resolutions) == "table" then
+                for _, r in ipairs(body.resolutions) do
+                    local m = cleanMerchant(r.merchant or "")
+                    if m ~= "" then
+                        resolutions[m] = r
+                    end
+                end
+            end
+
+            -- Group upload rows by cleaned merchant; track category sets for conflicts.
+            local upload_cats = {}      -- merchant -> { [category] = true }
+            local upload_samples = {}   -- merchant -> first tx (for response samples)
+            local upload_txs = {}       -- merchant -> list of txs
+            local blank_skipped = 0
+
+            for _, tx in ipairs(transactions) do
+                local merchant = cleanMerchant(tx.description or tx.description_raw or "")
+                local category = tx.category or ""
+                if merchant == "" or category == "" then
+                    blank_skipped = blank_skipped + 1
+                else
+                    if not upload_cats[merchant] then
+                        upload_cats[merchant] = {}
+                        upload_samples[merchant] = tx
+                        upload_txs[merchant] = {}
+                    end
+                    upload_cats[merchant][category] = true
+                    table.insert(upload_txs[merchant], tx)
+                end
+            end
+
+            -- Load existing DB categories for these merchants.
+            local db_cats = {}   -- merchant -> { [category] = true }
+            local db_sources = {} -- merchant -> { [source_file] = true }
+            for merchant, _ in pairs(upload_cats) do
+                local rows = db.query([[
+                    SELECT category, source_file
+                    FROM classification_reference_data
+                    WHERE client_business_type = ?
+                      AND upper(description) = ?
+                      AND category IS NOT NULL AND category != ''
+                ]], profile.profile_key, merchant)
+                local cats = {}
+                local sources = {}
+                for _, row in ipairs(rows or {}) do
+                    cats[row.category] = true
+                    if row.source_file and row.source_file ~= "" then
+                        sources[row.source_file] = true
+                    end
+                end
+                db_cats[merchant] = cats
+                db_sources[merchant] = sources
+            end
+
+            -- Build conflict list (unresolved merchants with ≥2 categories across upload ∪ DB).
+            local conflicts = {}
+            for merchant, cats in pairs(upload_cats) do
+                local res = resolutions[merchant]
+                if res and (res.skip == true or (res.category and res.category ~= "")) then
+                    -- Resolved — skip or forced category.
+                else
+                    local union = {}
+                    for c, _ in pairs(cats) do union[c] = true end
+                    for c, _ in pairs(db_cats[merchant] or {}) do union[c] = true end
+                    if setSize(union) > 1 then
+                        local sources = { "upload" }
+                        for s, _ in pairs(db_sources[merchant] or {}) do
+                            table.insert(sources, s)
+                        end
+                        table.insert(conflicts, {
+                            merchant = merchant,
+                            categories = sortedKeys(union),
+                            sources = sources,
+                            sample = {
+                                description = (upload_samples[merchant] or {}).description,
+                                description_raw = (upload_samples[merchant] or {}).description_raw,
+                                original_label = (upload_samples[merchant] or {}).original_label,
+                            },
+                        })
+                    end
+                end
+            end
+
+            if #conflicts > 0 then
+                table.sort(conflicts, function(a, b) return a.merchant < b.merchant end)
+                return {
+                    status = 409,
+                    json = {
+                        error = "Conflicting reference labels — resolve before saving",
+                        conflicts = conflicts,
+                        conflict_count = #conflicts,
+                        inserted = 0,
+                        updated = 0,
+                        skipped_unchanged = 0,
+                        duplicates_removed = 0,
+                    }
+                }
+            end
+
+            -- Persist new mappings only after conflicts are cleared (never on 409).
             if body.new_mappings and type(body.new_mappings) == "table" then
                 local existing_mappings = {}
                 if profile.category_mappings then
@@ -824,60 +929,157 @@ return function(app)
                     cjson.encode(existing_mappings), self.params.uuid)
             end
 
-            -- Amount-banded dedup
-            local seen = {}
-            local deduped = {}
-            for _, tx in ipairs(transactions) do
-                local desc = (tx.description or ""):lower():match("^%s*(.-)%s*$") or ""
-                local key = desc .. "|" .. (tx.category or "") .. "|" ..
-                    (tx.transaction_type or "") .. "|" .. amountBand(tx.amount or 0) .. "|" ..
-                    profile.profile_key
-                if not seen[key] then
-                    seen[key] = true
-                    table.insert(deduped, tx)
+            -- Collapse to one row per merchant (last upload row wins; resolution overrides category).
+            local to_save = {}
+            local duplicates_removed = blank_skipped
+            for merchant, txs in pairs(upload_txs) do
+                local res = resolutions[merchant]
+                if res and res.skip == true then
+                    duplicates_removed = duplicates_removed + #txs
+                else
+                    duplicates_removed = duplicates_removed + math.max(#txs - 1, 0)
+                    local tx = txs[#txs]
+                    local category = (res and res.category and res.category ~= "") and res.category or tx.category
+                    -- Prefer HMRC fields from a matching upload row with that category.
+                    local chosen = tx
+                    for i = #txs, 1, -1 do
+                        if txs[i].category == category then
+                            chosen = txs[i]
+                            break
+                        end
+                    end
+                    local hmrc, deductible = deriveHmrcFields(
+                        category,
+                        chosen.hmrc_category,
+                        chosen.is_tax_deductible
+                    )
+                    table.insert(to_save, {
+                        merchant = merchant,
+                        description = merchant,
+                        description_raw = chosen.description_raw or chosen.description or merchant,
+                        amount = chosen.amount or 0,
+                        transaction_type = chosen.transaction_type or "DEBIT",
+                        transaction_date = chosen.transaction_date or "",
+                        category = category,
+                        hmrc_category = hmrc,
+                        is_tax_deductible = deductible,
+                        original_label = chosen.original_label or "",
+                    })
                 end
             end
 
-            -- Insert into classification_reference_data
+            local source_file = "admin-upload-" .. profile.profile_key
+            local max_row_q = db.query([[
+                SELECT COALESCE(MAX(row_index), 0) AS m
+                FROM classification_reference_data
+                WHERE source_file = ?
+            ]], source_file)
+            local next_row_index = tonumber(max_row_q and max_row_q[1] and max_row_q[1].m) or 0
+
             local inserted = 0
+            local updated = 0
+            local skipped_unchanged = 0
             local Global = require("helper.global")
-            for _, tx in ipairs(deduped) do
+
+            for _, tx in ipairs(to_save) do
+                local existing = db.query([[
+                    SELECT id, uuid, category, hmrc_category, is_tax_deductible,
+                           description, description_raw, amount, transaction_type, original_label
+                    FROM classification_reference_data
+                    WHERE client_business_type = ?
+                      AND upper(description) = ?
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                ]], profile.profile_key, tx.merchant)
+
                 local ok, err = pcall(function()
-                    db.query([[
-                        INSERT INTO classification_reference_data
-                            (uuid, description, description_raw, amount, transaction_type,
-                             transaction_date, category, hmrc_category, confidence,
-                             is_tax_deductible, reasoning, original_label,
-                             client_business_type, user_profile_type, industry,
-                             source_file, row_index, namespace_id, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?,
-                                ?, ?, ?, 1.0000,
-                                ?, ?, ?,
-                                ?, ?, ?,
-                                ?, ?, 0, NOW(), NOW())
-                        ON CONFLICT (source_file, row_index) DO NOTHING
-                    ]],
-                        Global.generateStaticUUID(),
-                        tx.description or "",
-                        tx.description_raw or "",
-                        tx.amount or 0,
-                        tx.transaction_type or "DEBIT",
-                        tx.transaction_date or "",
-                        tx.category or "uncategorised_expense",
-                        tx.hmrc_category or "otherExpenses",
-                        tx.is_tax_deductible ~= false,
-                        "Accountant classified as '" .. (tx.original_label or "") .. "' for " .. (profile.industry or "business"),
-                        tx.original_label or "",
-                        profile.profile_key,
-                        profile.user_profile_type or "limited_company",
-                        profile.industry or "",
-                        "admin-upload-" .. profile.profile_key,
-                        tx.row_index or 0
-                    )
-                    inserted = inserted + 1
+                    if existing and #existing > 0 then
+                        local keep = existing[1]
+                        local keep_desc = tostring(keep.description or ""):upper()
+                        local same = keep.category == tx.category
+                            and tostring(keep.hmrc_category or "") == tostring(tx.hmrc_category or "")
+                            and (keep.is_tax_deductible == true) == (tx.is_tax_deductible == true)
+                            and keep_desc == tx.merchant
+
+                        if same then
+                            skipped_unchanged = skipped_unchanged + 1
+                        else
+                            db.query([[
+                                UPDATE classification_reference_data SET
+                                    description = ?,
+                                    description_raw = ?,
+                                    amount = ?,
+                                    transaction_type = ?,
+                                    transaction_date = ?,
+                                    category = ?,
+                                    hmrc_category = ?,
+                                    is_tax_deductible = ?,
+                                    confidence = 1.0000,
+                                    reasoning = ?,
+                                    original_label = ?,
+                                    updated_at = NOW()
+                                WHERE id = ?
+                            ]],
+                                tx.description,
+                                tx.description_raw,
+                                tx.amount,
+                                tx.transaction_type,
+                                tx.transaction_date,
+                                tx.category,
+                                tx.hmrc_category,
+                                tx.is_tax_deductible,
+                                "Accountant classified as '" .. (tx.original_label or "") .. "' for " .. (profile.industry or "business"),
+                                tx.original_label,
+                                keep.id
+                            )
+                            updated = updated + 1
+                        end
+
+                        -- Collapse any extra rows for this merchant (legacy conflicts / dupes).
+                        if #existing > 1 then
+                            db.query([[
+                                DELETE FROM classification_reference_data
+                                WHERE client_business_type = ?
+                                  AND upper(description) = ?
+                                  AND id != ?
+                            ]], profile.profile_key, tx.merchant, keep.id)
+                        end
+                    else
+                        next_row_index = next_row_index + 1
+                        db.query([[
+                            INSERT INTO classification_reference_data
+                                (uuid, description, description_raw, amount, transaction_type,
+                                 transaction_date, category, hmrc_category, confidence,
+                                 is_tax_deductible, reasoning, original_label,
+                                 client_business_type, user_profile_type, industry,
+                                 source_file, row_index, namespace_id, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?,
+                                    ?, ?, ?, 1.0000,
+                                    ?, ?, ?,
+                                    ?, ?, ?,
+                                    ?, ?, 0, NOW(), NOW())
+                        ]],
+                            Global.generateStaticUUID(),
+                            tx.description,
+                            tx.description_raw,
+                            tx.amount,
+                            tx.transaction_type,
+                            tx.transaction_date,
+                            tx.category,
+                            tx.hmrc_category,
+                            tx.is_tax_deductible,
+                            "Accountant classified as '" .. (tx.original_label or "") .. "' for " .. (profile.industry or "business"),
+                            tx.original_label,
+                            profile.profile_key,
+                            profile.user_profile_type or "limited_company",
+                            profile.industry or "",
+                            source_file,
+                            next_row_index
+                        )
+                        inserted = inserted + 1
+                    end
                 end)
                 if not ok then
-                    ngx.log(ngx.WARN, "Failed to insert reference row: " .. tostring(err))
+                    ngx.log(ngx.WARN, "Failed to upsert reference row for " .. tostring(tx.merchant) .. ": " .. tostring(err))
                 end
             end
 
@@ -885,9 +1087,11 @@ return function(app)
                 status = 200,
                 json = {
                     inserted = inserted,
+                    updated = updated,
+                    skipped_unchanged = skipped_unchanged,
+                    duplicates_removed = duplicates_removed,
                     deduped_from = #transactions,
-                    deduped_to = #deduped,
-                    duplicates_removed = #transactions - #deduped,
+                    deduped_to = #to_save,
                 }
             }
         end)
