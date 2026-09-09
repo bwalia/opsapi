@@ -1061,7 +1061,7 @@ return function(app)
             end
 
             -- Collapse to one row per merchant (last upload row wins; resolution overrides category).
-            -- Skip resolutions still heal existing DB rows (keep preferred system label).
+            -- Unambiguous skip (≤1 system category) heals existing DB rows without importing.
             local to_save = {}
             local skip_heal = {}  -- merchants to heal-in-place without importing upload
             local duplicates_removed = blank_skipped
