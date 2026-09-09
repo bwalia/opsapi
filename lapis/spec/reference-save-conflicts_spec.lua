@@ -25,8 +25,18 @@ local function unionCategories(upload_set, db_set)
     return union
 end
 
+-- Skip only clears when system has ≤1 distinct category (unambiguous keep).
+local function resolutionClearsConflict(res, db_cat_set)
+    if not res then return false end
+    if res.category and res.category ~= "" then return true end
+    if res.skip == true then
+        return setSize(db_cat_set or {}) <= 1
+    end
+    return false
+end
+
 local function isConflict(upload_set, db_set, resolution)
-    if resolution and (resolution.skip == true or (resolution.category and resolution.category ~= "")) then
+    if resolutionClearsConflict(resolution, db_set) then
         return false
     end
     return setSize(unionCategories(upload_set, db_set)) > 1
@@ -70,24 +80,18 @@ local function buildConflictSides(upload_set, db_set, db_rows)
     }
 end
 
--- Index rows by a provided cleanMerchant function (tests pass identity or stub).
+-- One key per row: cleaned description, else cleaned description_raw.
 local function indexByCleanedMerchant(rows, cleanMerchant)
     local by_merchant = {}
     for _, row in ipairs(rows or {}) do
-        local keys = {}
         local d = cleanMerchant(row.description or "")
-        local r = cleanMerchant(row.description_raw or "")
-        if d ~= "" then keys[d] = true end
-        if r ~= "" then keys[r] = true end
-        for merchant, _ in pairs(keys) do
+        local merchant = d
+        if merchant == "" then
+            merchant = cleanMerchant(row.description_raw or "")
+        end
+        if merchant ~= "" then
             if not by_merchant[merchant] then by_merchant[merchant] = {} end
-            local seen = false
-            for _, existing in ipairs(by_merchant[merchant]) do
-                if existing.id == row.id then seen = true; break end
-            end
-            if not seen then
-                table.insert(by_merchant[merchant], row)
-            end
+            table.insert(by_merchant[merchant], row)
         end
     end
     return by_merchant
@@ -128,11 +132,31 @@ check("resolution with third category clears conflict",
         { category = "travel_expense" }
     ))
 
-check("resolution with skip clears conflict",
+check("skip clears when system has one label",
     not isConflict(
         { office_supplies = true },
         { personal_expense = true },
         { skip = true }
+    ))
+
+check("skip clears when system has no rows",
+    not isConflict(
+        { office_supplies = true, personal_expense = true },
+        {},
+        { skip = true }
+    ))
+
+check("skip does NOT clear when system has multiple labels",
+    isConflict(
+        { office_supplies = true },
+        { personal_expense = true, travel_expense = true },
+        { skip = true }
+    ))
+
+check("resolutionClearsConflict rejects skip with multi system labels",
+    not resolutionClearsConflict(
+        { skip = true },
+        { personal_expense = true, travel_expense = true }
     ))
 
 local keys = sortedKeys({ b = true, a = true })
@@ -175,6 +199,21 @@ local indexed = indexByCleanedMerchant({
 check("legacy unclean description joins cleaned merchant key",
     indexed["TESCO"] and #indexed["TESCO"] == 2,
     indexed["TESCO"] and tostring(#indexed["TESCO"]) or "nil")
+
+-- Divergent desc vs raw must NOT dual-index the same row (cross-merchant delete risk).
+local divergent = indexByCleanedMerchant({
+    { id = 99, description = "TESCO", description_raw = "VIS SAINSBURY S ARGOS", category = "x" },
+}, fakeClean)
+check("divergent desc/raw indexes under description only",
+    divergent["TESCO"] and #divergent["TESCO"] == 1
+        and divergent["SAINSBURY S ARGOS"] == nil,
+    divergent["SAINSBURY S ARGOS"] and "raw key present" or "ok")
+
+local raw_only = indexByCleanedMerchant({
+    { id = 100, description = "", description_raw = "TESCO CD 99", category = "y" },
+}, fakeClean)
+check("empty description falls back to cleaned raw",
+    raw_only["TESCO"] and #raw_only["TESCO"] == 1)
 
 if failures > 0 then
     print(failures .. " failure(s)")

@@ -246,6 +246,17 @@ local function pickPreferredRefRow(rows)
     return best
 end
 
+-- One merchant key per row: cleaned description, else cleaned description_raw.
+-- Never index the same row under two keys — that lets collapse for merchant A
+-- DELETE a row that is the only gold label for merchant B.
+local function merchantKeyForRow(row)
+    local cleaned_desc = cleanMerchant(row.description or "")
+    if cleaned_desc ~= "" then
+        return cleaned_desc
+    end
+    return cleanMerchant(row.description_raw or "")
+end
+
 -- Index profile reference rows by cleaned merchant so legacy unclean
 -- `description` values still join the conflict / upsert set.
 local function indexReferenceByMerchant(profile_key)
@@ -259,26 +270,24 @@ local function indexReferenceByMerchant(profile_key)
     ]], profile_key)
     local by_merchant = {}
     for _, row in ipairs(rows or {}) do
-        local keys = {}
-        local cleaned_desc = cleanMerchant(row.description or "")
-        local cleaned_raw = cleanMerchant(row.description_raw or "")
-        if cleaned_desc ~= "" then keys[cleaned_desc] = true end
-        if cleaned_raw ~= "" then keys[cleaned_raw] = true end
-        for merchant, _ in pairs(keys) do
+        local merchant = merchantKeyForRow(row)
+        if merchant ~= "" then
             if not by_merchant[merchant] then by_merchant[merchant] = {} end
-            local seen = false
-            for _, existing in ipairs(by_merchant[merchant]) do
-                if existing.id == row.id then
-                    seen = true
-                    break
-                end
-            end
-            if not seen then
-                table.insert(by_merchant[merchant], row)
-            end
+            table.insert(by_merchant[merchant], row)
         end
     end
     return by_merchant
+end
+
+-- Skip is only unambiguous when the system has 0 or 1 distinct categories.
+-- Multiple stored labels require an explicit category pick (not silent prefer).
+local function resolutionClearsConflict(res, db_cat_set)
+    if not res then return false end
+    if res.category and res.category ~= "" then return true end
+    if res.skip == true then
+        return setSize(db_cat_set or {}) <= 1
+    end
+    return false
 end
 
 -- Collapse every matched row for a merchant onto one gold label + clean key.
@@ -979,8 +988,8 @@ return function(app)
             local conflicts = {}
             for merchant, cats in pairs(upload_cats) do
                 local res = resolutions[merchant]
-                if res and (res.skip == true or (res.category and res.category ~= "")) then
-                    -- Resolved — skip or forced category.
+                if resolutionClearsConflict(res, db_cats[merchant]) then
+                    -- Resolved — explicit category, or unambiguous skip (0–1 system labels).
                 else
                     local union = {}
                     for c, _ in pairs(cats) do union[c] = true end
@@ -1058,7 +1067,7 @@ return function(app)
             local duplicates_removed = blank_skipped
             for merchant, txs in pairs(upload_txs) do
                 local res = resolutions[merchant]
-                if res and res.skip == true then
+                if res and res.skip == true and resolutionClearsConflict(res, db_cats[merchant]) then
                     duplicates_removed = duplicates_removed + #txs
                     table.insert(skip_heal, merchant)
                 else
@@ -1106,10 +1115,11 @@ return function(app)
             local skipped_unchanged = 0
             local Global = require("helper.global")
 
-            -- Skip = don't import upload, but still collapse/normalize existing DB gold label.
+            -- Skip = don't import upload, but still collapse/normalize existing DB gold label
+            -- when the system label is unambiguous (0–1 distinct categories).
             for _, merchant in ipairs(skip_heal) do
                 local existing = db_by_merchant[merchant] or {}
-                if #existing > 0 then
+                if #existing > 0 and setSize(db_cats[merchant] or {}) <= 1 then
                     local keep = pickPreferredRefRow(existing)
                     local ok, err = pcall(function()
                         local result = collapseMerchantRows(
