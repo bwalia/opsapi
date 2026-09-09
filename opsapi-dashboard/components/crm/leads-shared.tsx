@@ -632,6 +632,11 @@ export const LeadNotificationsModal: React.FC<LeadNotificationsModalProps> = ({ 
             <div className="flex items-center gap-2 mb-1">
               <Send className="w-4 h-4 text-secondary-500" />
               <h3 className="text-sm font-semibold text-secondary-900">Telegram</h3>
+              {telegramEnabled && hasToken && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Connected
+                </span>
+              )}
             </div>
             <div className="border border-secondary-200 rounded-xl px-4">
               <Field label="Telegram alerts" hint="Push a message to a chat whenever a lead arrives.">

@@ -1,5 +1,8 @@
 import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
 
+// Send a JSON request body (the CRM routes parse JSON via parse_json_body).
+const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
+
 // ============================================================
 // Types
 // ============================================================
@@ -394,13 +397,15 @@ export const crmService = {
     return response.data?.data ?? response.data;
   },
 
+  // Lead write routes parse a JSON body (parse_json_body), so send JSON — not
+  // the form-encoded string toFormData produces (which cjson.decode rejects).
   async createLead(data: Record<string, unknown>): Promise<CrmLead> {
-    const response = await apiClient.post('/api/v2/crm/leads', toFormData(data));
+    const response = await apiClient.post('/api/v2/crm/leads', data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateLead(uuid: string, data: Record<string, unknown>): Promise<CrmLead> {
-    const response = await apiClient.put(`/api/v2/crm/leads/${uuid}`, toFormData(data));
+    const response = await apiClient.put(`/api/v2/crm/leads/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -411,7 +416,7 @@ export const crmService = {
   async convertLead(uuid: string, dealData?: Record<string, unknown>): Promise<CrmLeadConvertResult> {
     const payload: Record<string, unknown> = {};
     if (dealData) payload.deal = dealData;
-    const response = await apiClient.post(`/api/v2/crm/leads/${uuid}/convert`, toFormData(payload));
+    const response = await apiClient.post(`/api/v2/crm/leads/${uuid}/convert`, payload, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
