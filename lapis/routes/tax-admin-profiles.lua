@@ -909,14 +909,16 @@ return function(app)
             end
             profile = profile[1]
 
-            -- Find frequently occurring (description, category) pairs
+            -- Suggest keyword rules only for merchants that map to ONE category.
+            -- Conflicting labels (same description, multiple categories) must not
+            -- become opposing keyword rules.
             local rows = db.query([[
-                SELECT description, category, COUNT(*) as cnt
+                SELECT description, MIN(category) as category, COUNT(*) as cnt
                 FROM classification_reference_data
                 WHERE client_business_type = ?
                   AND description != ''
-                GROUP BY description, category
-                HAVING COUNT(*) >= 2
+                GROUP BY description
+                HAVING COUNT(DISTINCT category) = 1 AND COUNT(*) >= 2
                 ORDER BY cnt DESC
                 LIMIT 50
             ]], profile.profile_key)
