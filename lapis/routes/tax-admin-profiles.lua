@@ -809,24 +809,6 @@ return function(app)
                 return { status = 400, json = { error = "transactions array is required" } }
             end
 
-            -- Save any new custom mappings
-            if body.new_mappings and type(body.new_mappings) == "table" then
-                local existing_mappings = {}
-                if profile.category_mappings then
-                    if type(profile.category_mappings) == "table" then
-                        existing_mappings = profile.category_mappings
-                    elseif type(profile.category_mappings) == "string" then
-                        local ok, decoded = pcall(cjson.decode, profile.category_mappings)
-                        if ok and type(decoded) == "table" then existing_mappings = decoded end
-                    end
-                end
-                for k, v in pairs(body.new_mappings) do
-                    existing_mappings[k:lower()] = v
-                end
-                db.query("UPDATE classification_profiles SET category_mappings = ?::jsonb, updated_at = NOW() WHERE uuid = ?",
-                    cjson.encode(existing_mappings), self.params.uuid)
-            end
-
             -- Optional resolutions from a prior 409 conflict review.
             -- { merchant = "TESCO", category = "office_supplies" } or { merchant = "BP", skip = true }
             local resolutions = {}
@@ -929,6 +911,24 @@ return function(app)
                 }
             end
 
+            -- Persist new mappings only after conflicts are cleared (never on 409).
+            if body.new_mappings and type(body.new_mappings) == "table" then
+                local existing_mappings = {}
+                if profile.category_mappings then
+                    if type(profile.category_mappings) == "table" then
+                        existing_mappings = profile.category_mappings
+                    elseif type(profile.category_mappings) == "string" then
+                        local ok, decoded = pcall(cjson.decode, profile.category_mappings)
+                        if ok and type(decoded) == "table" then existing_mappings = decoded end
+                    end
+                end
+                for k, v in pairs(body.new_mappings) do
+                    existing_mappings[k:lower()] = v
+                end
+                db.query("UPDATE classification_profiles SET category_mappings = ?::jsonb, updated_at = NOW() WHERE uuid = ?",
+                    cjson.encode(existing_mappings), self.params.uuid)
+            end
+
             -- Collapse to one row per merchant (last upload row wins; resolution overrides category).
             local to_save = {}
             local duplicates_removed = blank_skipped
@@ -984,7 +984,7 @@ return function(app)
             for _, tx in ipairs(to_save) do
                 local existing = db.query([[
                     SELECT id, uuid, category, hmrc_category, is_tax_deductible,
-                           description_raw, amount, transaction_type, original_label
+                           description, description_raw, amount, transaction_type, original_label
                     FROM classification_reference_data
                     WHERE client_business_type = ?
                       AND upper(description) = ?
@@ -994,9 +994,11 @@ return function(app)
                 local ok, err = pcall(function()
                     if existing and #existing > 0 then
                         local keep = existing[1]
+                        local keep_desc = tostring(keep.description or ""):upper()
                         local same = keep.category == tx.category
                             and tostring(keep.hmrc_category or "") == tostring(tx.hmrc_category or "")
                             and (keep.is_tax_deductible == true) == (tx.is_tax_deductible == true)
+                            and keep_desc == tx.merchant
 
                         if same then
                             skipped_unchanged = skipped_unchanged + 1
