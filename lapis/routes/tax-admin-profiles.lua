@@ -226,6 +226,129 @@ local function sortedKeys(set)
     return keys
 end
 
+-- Prefer admin-test-* corrections, then newest updated_at, then highest id.
+local function pickPreferredRefRow(rows)
+    if not rows or #rows == 0 then return nil end
+    local best = rows[1]
+    local function rank(row)
+        local source = tostring(row.source_file or "")
+        local test_boost = (source:sub(1, 11) == "admin-test-") and 1 or 0
+        return test_boost, tostring(row.updated_at or ""), tonumber(row.id) or 0
+    end
+    local b1, b2, b3 = rank(best)
+    for i = 2, #rows do
+        local a1, a2, a3 = rank(rows[i])
+        if a1 > b1 or (a1 == b1 and a2 > b2) or (a1 == b1 and a2 == b2 and a3 > b3) then
+            best = rows[i]
+            b1, b2, b3 = a1, a2, a3
+        end
+    end
+    return best
+end
+
+-- One merchant key per row: cleaned description, else cleaned description_raw.
+-- Never index the same row under two keys — that lets collapse for merchant A
+-- DELETE a row that is the only gold label for merchant B.
+local function merchantKeyForRow(row)
+    local cleaned_desc = cleanMerchant(row.description or "")
+    if cleaned_desc ~= "" then
+        return cleaned_desc
+    end
+    return cleanMerchant(row.description_raw or "")
+end
+
+-- Index profile reference rows by cleaned merchant so legacy unclean
+-- `description` values still join the conflict / upsert set.
+local function indexReferenceByMerchant(profile_key)
+    local rows = db.query([[
+        SELECT id, uuid, category, hmrc_category, is_tax_deductible,
+               description, description_raw, amount, transaction_type,
+               original_label, source_file, updated_at
+        FROM classification_reference_data
+        WHERE client_business_type = ?
+          AND category IS NOT NULL AND category != ''
+    ]], profile_key)
+    local by_merchant = {}
+    for _, row in ipairs(rows or {}) do
+        local merchant = merchantKeyForRow(row)
+        if merchant ~= "" then
+            if not by_merchant[merchant] then by_merchant[merchant] = {} end
+            table.insert(by_merchant[merchant], row)
+        end
+    end
+    return by_merchant
+end
+
+-- Skip is only unambiguous when the system has 0 or 1 distinct categories.
+-- Multiple stored labels require an explicit category pick (not silent prefer).
+local function resolutionClearsConflict(res, db_cat_set)
+    if not res then return false end
+    if res.category and res.category ~= "" then return true end
+    if res.skip == true then
+        return setSize(db_cat_set or {}) <= 1
+    end
+    return false
+end
+
+-- Collapse every matched row for a merchant onto one gold label + clean key.
+-- Returns "updated" | "skipped_unchanged" | nil (no rows).
+local function collapseMerchantRows(profile, merchant, keep, category, hmrc, deductible,
+                                    description_raw, amount, transaction_type,
+                                    transaction_date, original_label, existing_rows)
+    if not keep then return nil end
+    local keep_desc = tostring(keep.description or ""):upper()
+    local same = keep.category == category
+        and tostring(keep.hmrc_category or "") == tostring(hmrc or "")
+        and (keep.is_tax_deductible == true) == (deductible == true)
+        and keep_desc == merchant
+
+    if not same then
+        db.query([[
+            UPDATE classification_reference_data SET
+                description = ?,
+                description_raw = ?,
+                amount = ?,
+                transaction_type = ?,
+                transaction_date = COALESCE(NULLIF(?, ''), transaction_date),
+                category = ?,
+                hmrc_category = ?,
+                is_tax_deductible = ?,
+                confidence = 1.0000,
+                reasoning = ?,
+                original_label = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ]],
+            merchant,
+            description_raw or keep.description_raw or merchant,
+            amount or keep.amount or 0,
+            transaction_type or keep.transaction_type or "DEBIT",
+            transaction_date or "",
+            category,
+            hmrc,
+            deductible,
+            "Accountant classified as '" .. (original_label or keep.original_label or "")
+                .. "' for " .. (profile.industry or "business"),
+            original_label or keep.original_label or "",
+            keep.id
+        )
+    end
+
+    -- Delete every other matched row (including legacy unclean keys).
+    local deleted_extra = false
+    for _, row in ipairs(existing_rows or {}) do
+        if row.id ~= keep.id then
+            db.query("DELETE FROM classification_reference_data WHERE id = ?", row.id)
+            deleted_extra = true
+        end
+    end
+    if deleted_extra then
+        -- Collapsing extras always counts as an update even if keep was same.
+        return "updated"
+    end
+    return same and "skipped_unchanged" or "updated"
+end
+
 -- Re-derive HMRC + deductibility from the catalogue (same as PUT path).
 local function deriveHmrcFields(category, fallback_hmrc, fallback_deductible)
     if not category or category == "" then
@@ -843,20 +966,15 @@ return function(app)
                 end
             end
 
-            -- Load existing DB categories for these merchants.
+            -- Load existing DB rows once, indexed by cleaned merchant (includes
+            -- legacy unclean description keys that clean to the same merchant).
+            local db_by_merchant = indexReferenceByMerchant(profile.profile_key)
             local db_cats = {}   -- merchant -> { [category] = true }
             local db_sources = {} -- merchant -> { [source_file] = true }
             for merchant, _ in pairs(upload_cats) do
-                local rows = db.query([[
-                    SELECT category, source_file
-                    FROM classification_reference_data
-                    WHERE client_business_type = ?
-                      AND upper(description) = ?
-                      AND category IS NOT NULL AND category != ''
-                ]], profile.profile_key, merchant)
                 local cats = {}
                 local sources = {}
-                for _, row in ipairs(rows or {}) do
+                for _, row in ipairs(db_by_merchant[merchant] or {}) do
                     cats[row.category] = true
                     if row.source_file and row.source_file ~= "" then
                         sources[row.source_file] = true
@@ -870,8 +988,8 @@ return function(app)
             local conflicts = {}
             for merchant, cats in pairs(upload_cats) do
                 local res = resolutions[merchant]
-                if res and (res.skip == true or (res.category and res.category ~= "")) then
-                    -- Resolved — skip or forced category.
+                if resolutionClearsConflict(res, db_cats[merchant]) then
+                    -- Resolved — explicit category, or unambiguous skip (0–1 system labels).
                 else
                     local union = {}
                     for c, _ in pairs(cats) do union[c] = true end
@@ -881,9 +999,22 @@ return function(app)
                         for s, _ in pairs(db_sources[merchant] or {}) do
                             table.insert(sources, s)
                         end
+                        local existing_payload = {}
+                        for _, row in ipairs(db_by_merchant[merchant] or {}) do
+                            table.insert(existing_payload, {
+                                category = row.category,
+                                source_file = row.source_file,
+                                description = row.description,
+                                description_raw = row.description_raw,
+                                updated_at = row.updated_at,
+                            })
+                        end
                         table.insert(conflicts, {
                             merchant = merchant,
                             categories = sortedKeys(union),
+                            upload_categories = sortedKeys(cats),
+                            existing_categories = sortedKeys(db_cats[merchant] or {}),
+                            existing = existing_payload,
                             sources = sources,
                             sample = {
                                 description = (upload_samples[merchant] or {}).description,
@@ -930,12 +1061,15 @@ return function(app)
             end
 
             -- Collapse to one row per merchant (last upload row wins; resolution overrides category).
+            -- Unambiguous skip (≤1 system category) heals existing DB rows without importing.
             local to_save = {}
+            local skip_heal = {}  -- merchants to heal-in-place without importing upload
             local duplicates_removed = blank_skipped
             for merchant, txs in pairs(upload_txs) do
                 local res = resolutions[merchant]
-                if res and res.skip == true then
+                if res and res.skip == true and resolutionClearsConflict(res, db_cats[merchant]) then
                     duplicates_removed = duplicates_removed + #txs
+                    table.insert(skip_heal, merchant)
                 else
                     duplicates_removed = duplicates_removed + math.max(#txs - 1, 0)
                     local tx = txs[#txs]
@@ -981,67 +1115,63 @@ return function(app)
             local skipped_unchanged = 0
             local Global = require("helper.global")
 
+            -- Skip = don't import upload, but still collapse/normalize existing DB gold label
+            -- when the system label is unambiguous (0–1 distinct categories).
+            for _, merchant in ipairs(skip_heal) do
+                local existing = db_by_merchant[merchant] or {}
+                if #existing > 0 and setSize(db_cats[merchant] or {}) <= 1 then
+                    local keep = pickPreferredRefRow(existing)
+                    local ok, err = pcall(function()
+                        local result = collapseMerchantRows(
+                            profile,
+                            merchant,
+                            keep,
+                            keep.category,
+                            keep.hmrc_category,
+                            keep.is_tax_deductible == true,
+                            keep.description_raw,
+                            keep.amount,
+                            keep.transaction_type,
+                            "",
+                            keep.original_label,
+                            existing
+                        )
+                        if result == "updated" then
+                            updated = updated + 1
+                        elseif result == "skipped_unchanged" then
+                            skipped_unchanged = skipped_unchanged + 1
+                        end
+                    end)
+                    if not ok then
+                        ngx.log(ngx.WARN, "Failed to heal skipped merchant " .. tostring(merchant) .. ": " .. tostring(err))
+                    end
+                end
+            end
+
             for _, tx in ipairs(to_save) do
-                local existing = db.query([[
-                    SELECT id, uuid, category, hmrc_category, is_tax_deductible,
-                           description, description_raw, amount, transaction_type, original_label
-                    FROM classification_reference_data
-                    WHERE client_business_type = ?
-                      AND upper(description) = ?
-                    ORDER BY updated_at DESC NULLS LAST, id DESC
-                ]], profile.profile_key, tx.merchant)
+                local existing = db_by_merchant[tx.merchant] or {}
 
                 local ok, err = pcall(function()
-                    if existing and #existing > 0 then
-                        local keep = existing[1]
-                        local keep_desc = tostring(keep.description or ""):upper()
-                        local same = keep.category == tx.category
-                            and tostring(keep.hmrc_category or "") == tostring(tx.hmrc_category or "")
-                            and (keep.is_tax_deductible == true) == (tx.is_tax_deductible == true)
-                            and keep_desc == tx.merchant
-
-                        if same then
-                            skipped_unchanged = skipped_unchanged + 1
-                        else
-                            db.query([[
-                                UPDATE classification_reference_data SET
-                                    description = ?,
-                                    description_raw = ?,
-                                    amount = ?,
-                                    transaction_type = ?,
-                                    transaction_date = ?,
-                                    category = ?,
-                                    hmrc_category = ?,
-                                    is_tax_deductible = ?,
-                                    confidence = 1.0000,
-                                    reasoning = ?,
-                                    original_label = ?,
-                                    updated_at = NOW()
-                                WHERE id = ?
-                            ]],
-                                tx.description,
-                                tx.description_raw,
-                                tx.amount,
-                                tx.transaction_type,
-                                tx.transaction_date,
-                                tx.category,
-                                tx.hmrc_category,
-                                tx.is_tax_deductible,
-                                "Accountant classified as '" .. (tx.original_label or "") .. "' for " .. (profile.industry or "business"),
-                                tx.original_label,
-                                keep.id
-                            )
+                    if #existing > 0 then
+                        local keep = pickPreferredRefRow(existing)
+                        local result = collapseMerchantRows(
+                            profile,
+                            tx.merchant,
+                            keep,
+                            tx.category,
+                            tx.hmrc_category,
+                            tx.is_tax_deductible == true,
+                            tx.description_raw,
+                            tx.amount,
+                            tx.transaction_type,
+                            tx.transaction_date,
+                            tx.original_label,
+                            existing
+                        )
+                        if result == "updated" then
                             updated = updated + 1
-                        end
-
-                        -- Collapse any extra rows for this merchant (legacy conflicts / dupes).
-                        if #existing > 1 then
-                            db.query([[
-                                DELETE FROM classification_reference_data
-                                WHERE client_business_type = ?
-                                  AND upper(description) = ?
-                                  AND id != ?
-                            ]], profile.profile_key, tx.merchant, keep.id)
+                        elseif result == "skipped_unchanged" then
+                            skipped_unchanged = skipped_unchanged + 1
                         end
                     else
                         next_row_index = next_row_index + 1
