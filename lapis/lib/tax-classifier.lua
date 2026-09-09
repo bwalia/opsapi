@@ -45,66 +45,16 @@ function Classifier.get_hmrc_box_map()
 end
 
 -- ---------------------------------------------------------------------------
--- Layer 1: Merchant Cleaner
+-- Layer 1: Merchant Cleaner (shared with admin CSV upload / Python classify)
 -- ---------------------------------------------------------------------------
 
-local STRIP_PATTERNS = {
-    -- Card/payment method prefixes
-    "^CARD PAYMENT TO%s+",
-    "^CONTACTLESS PAYMENT TO%s+",
-    "^DIRECT DEBIT TO%s+",
-    "^STANDING ORDER TO%s+",
-    "^FASTER PAYMENT TO%s+",
-    "^FASTER PAYMENT FROM%s+",
-    "^BACS PAYMENT TO%s+",
-    "^BACS CREDIT FROM%s+",
-    "^BANK TRANSFER TO%s+",
-    "^BANK TRANSFER FROM%s+",
-    "^INTERNET TRANSFER TO%s+",
-    "^POS%s+",
-    "^VIS%s+",
-    "^MC%s+",
-    -- Reference numbers
-    "%s+REF[:%s]+[A-Z0-9]+",
-    "%s+REFERENCE[:%s]+[A-Z0-9]+",
-    "%s+MANDATE NO[:%s]+[A-Z0-9]+",
-    -- Card numbers
-    "%s+%*+%d%d%d%d",
-    "%s+CARD%s+%d+",
-    -- Dates embedded in descriptions
-    "%s+%d%d[/%-]%d%d[/%-]%d%d%d?%d?",
-    "%s+%d%d%s+%a%a%a%s+%d%d%d?%d?",
-    -- Location/branch codes
-    "%s+%d%d%d%d%d%d+$",
-    "%s+[A-Z][A-Z]%d%d%s+%d[A-Z][A-Z]$",
-    -- Currency markers
-    "GBP%s*",
-    "£%s*",
-    -- Extra whitespace
-    "%s+",
-}
+local MerchantCleaner = require("lib.merchant-cleaner")
 
---- Clean a transaction description to extract the core merchant name
+--- Clean a transaction description to extract the core merchant name.
+-- Delegates to lib/merchant-cleaner.lua so OpsAPI upload and FastAPI classify
+-- agree on the same cleaned merchant string.
 function Classifier.clean_merchant(description)
-    if not description then return "" end
-    local cleaned = description:upper()
-
-    for _, pattern in ipairs(STRIP_PATTERNS) do
-        cleaned = cleaned:gsub(pattern, " ")
-    end
-
-    -- Remove duplicate words
-    local words = {}
-    local seen = {}
-    for word in cleaned:gmatch("%S+") do
-        if not seen[word] then
-            seen[word] = true
-            table.insert(words, word)
-        end
-    end
-
-    cleaned = table.concat(words, " ")
-    return cleaned:match("^%s*(.-)%s*$") or ""
+    return MerchantCleaner.clean_merchant_name(description)
 end
 
 -- ---------------------------------------------------------------------------

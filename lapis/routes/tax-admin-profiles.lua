@@ -16,6 +16,9 @@ local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local ClassificationCSV = require("lib.classification-csv")
+local MerchantCleaner = require("lib.merchant-cleaner")
+
+local cleanMerchant = MerchantCleaner.clean_merchant_name
 
 local function isAdmin(user)
     if not user then return false end
@@ -207,37 +210,9 @@ local function mapCategory(prefix, label, custom_mappings)
     return nil
 end
 
--- Merchant name cleaning (matches Python clean_merchant_name)
-local function cleanMerchant(desc)
-    if not desc or desc == "" then return "" end
-    local text = desc:match("^%s*(.-)%s*$") or desc
-    text = text:gsub("^TRANSFER%s+VIA%s+FASTER%s+PAYMENT%s+TO%s+", "")
-    -- Strip payment prefixes (longest first to avoid partial matches)
-    for _, pfx in ipairs({"FPI", "FPO", "BGC", "TFR", "STO", "DEB", "VIS", "DD", "SO", "CR", "DR", "BP"}) do
-        local pattern = "^" .. pfx .. "%s+"
-        if text:match(pattern) then
-            text = text:gsub(pattern, "", 1)
-            break
-        end
-    end
-    text = text:gsub("%*[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]+", "")
-    text = text:gsub("%*", " ")
-    text = text:gsub("%s+CD%s+%d%d%d%d", "")
-    text = text:gsub("%d%d/%d%d/?%d*", "")
-    text = text:gsub("%d%d[A-Z][A-Z][A-Z]%d%d%d?%d?", "")
-    text = text:gsub("%s+L%s+REF.*$", "")
-    text = text:gsub("%s*REF%s*[:;]?%s*.*$", "")
-    text = text:gsub("%s*MANDATE%s+NO%s*[:;]?%s*%w+.*$", "")
-    text = text:gsub("%s+%d%d%d%d%d%d%d+%s*$", "")
-    text = text:gsub("%s+LTD%s*%.?%s*$", "")
-    text = text:gsub("%s+PLC%s*%.?%s*$", "")
-    text = text:gsub("%s+LIMITED%s*%.?%s*$", "")
-    text = text:gsub("%s*,%s*$", "")
-    text = text:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-    return text:upper()
-end
+-- Category mapping helpers continue below. Merchant cleaning lives in
+-- lib/merchant-cleaner.lua (shared with tax-classifier; must match Python).
 
--- Count keys in a set-like table { [k] = true, ... }.
 local function setSize(set)
     local n = 0
     for _ in pairs(set) do n = n + 1 end
