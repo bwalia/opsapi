@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Star,
   Bell,
+  CheckCircle2,
 } from 'lucide-react';
 import { Input, Table, Pagination, Card, Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -114,6 +115,7 @@ function LeadsPageContent() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [telegramActive, setTelegramActive] = useState(false); // green dot on the Notifications button
   const [isConvertOpen, setIsConvertOpen] = useState(false);
   const [convertTarget, setConvertTarget] = useState<CrmLead | null>(null);
   const [detailLead, setDetailLead] = useState<CrmLead | null>(null);
@@ -139,7 +141,13 @@ function LeadsPageContent() {
     if (s) setStats(s);
   }, []);
 
-  useEffect(() => { loadStats(); }, [loadStats]);
+  // Whether Telegram alerts are live (drives the dot on the Notifications button).
+  const loadNotifStatus = useCallback(async () => {
+    const s = await crmService.getLeadNotificationSettings().catch(() => null);
+    setTelegramActive(!!(s && s.telegram_enabled && s.has_telegram_token));
+  }, []);
+
+  useEffect(() => { loadStats(); loadNotifStatus(); }, [loadStats, loadNotifStatus]);
 
   const fetchLeads = useCallback(async () => {
     const fetchId = ++fetchIdRef.current;
@@ -194,6 +202,17 @@ function LeadsPageContent() {
     setDetailLead(lead);
     setIsDetailOpen(true);
   }, []);
+
+  // Quick triage: flip new ⇄ contacted from the row. Updates the header stats.
+  const handleToggleContacted = useCallback(async (lead: CrmLead) => {
+    const next = lead.status === 'contacted' ? 'new' : 'contacted';
+    try {
+      await crmService.updateLead(lead.uuid, { status: next });
+      refreshAll();
+    } catch {
+      toast.error('Failed to update lead');
+    }
+  }, [refreshAll]);
 
   const handleConvert = useCallback((lead: CrmLead) => {
     setIsDetailOpen(false);
@@ -293,9 +312,18 @@ function LeadsPageContent() {
     {
       key: 'actions',
       header: '',
-      width: 'w-28',
+      width: 'w-32',
       render: (lead) => (
         <div className="flex items-center gap-1">
+          {(lead.status === 'new' || lead.status === 'contacted') && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleToggleContacted(lead); }}
+              className={`p-1.5 rounded-lg transition-colors ${lead.status === 'contacted' ? 'text-green-600 bg-green-50 hover:bg-green-100' : 'text-secondary-400 hover:text-green-600 hover:bg-green-50'}`}
+              title={lead.status === 'contacted' ? 'Contacted — click to mark New' : 'Mark contacted'}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+            </button>
+          )}
           {lead.status !== 'converted' && (
             <button
               onClick={(e) => { e.stopPropagation(); handleConvert(lead); }}
@@ -315,7 +343,7 @@ function LeadsPageContent() {
         </div>
       ),
     },
-  ], [handleConvert, handleDeleteClick]);
+  ], [handleConvert, handleDeleteClick, handleToggleContacted]);
 
   return (
     <div className="space-y-6">
@@ -327,8 +355,15 @@ function LeadsPageContent() {
             <Button variant="secondary" onClick={refreshAll} title="Refresh">
               <RefreshCw className="w-4 h-4" />
             </Button>
-            <Button variant="secondary" onClick={() => setIsNotifOpen(true)}>
-              <Bell className="w-4 h-4 mr-1.5" /> Notifications
+            <Button variant="secondary" onClick={() => setIsNotifOpen(true)} title={telegramActive ? 'Notifications — Telegram alerts on' : 'Notifications'}>
+              <span className="relative mr-1.5 inline-flex">
+                <Bell className="w-4 h-4" />
+                {telegramActive && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-green-500 ring-2 ring-surface" />
+                )}
+              </span>
+              Notifications
+              {telegramActive && <span className="ml-1.5 hidden sm:inline text-xs font-medium text-green-600">• Telegram on</span>}
             </Button>
             <Button onClick={() => setIsCreateOpen(true)}>
               <Plus className="w-4 h-4 mr-1.5" /> New Lead
@@ -411,7 +446,7 @@ function LeadsPageContent() {
         onDelete={handleDeleteClick}
       />
       <CreateLeadModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} onSuccess={refreshAll} />
-      <LeadNotificationsModal isOpen={isNotifOpen} onClose={() => setIsNotifOpen(false)} />
+      <LeadNotificationsModal isOpen={isNotifOpen} onClose={() => { setIsNotifOpen(false); loadNotifStatus(); }} />
       <ConvertLeadModal
         isOpen={isConvertOpen}
         onClose={() => { setIsConvertOpen(false); setConvertTarget(null); }}

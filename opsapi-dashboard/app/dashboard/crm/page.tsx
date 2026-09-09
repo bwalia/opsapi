@@ -18,8 +18,6 @@ import {
   ChevronDown,
   RefreshCw,
   X,
-  UserPlus,
-  ArrowRightCircle,
   Contact,
 } from 'lucide-react';
 import { Input, Table, Badge, Pagination, Card, Modal, Button, ConfirmDialog } from '@/components/ui';
@@ -31,31 +29,18 @@ import {
   type CrmContact,
   type CrmDeal,
   type CrmActivity,
-  type CrmLead,
-  type CrmLeadStats,
   type CrmDashboardStats,
   type CrmListParams,
 } from '@/services/crm.service';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
-import {
-  LEAD_STATUS_OPTIONS,
-  LEAD_SOURCE_OPTIONS,
-  LEAD_PRIORITY_OPTIONS,
-  leadStatusColors,
-  leadSourceLabels,
-  leadPriorityColors,
-  CreateLeadModal,
-  ConvertLeadModal,
-  LeadDetailModal,
-} from '@/components/crm/leads-shared';
 
 // ============================================================
 // Tab type
 // ============================================================
 
-type CrmTab = 'leads' | 'accounts' | 'contacts' | 'deals' | 'activities';
+type CrmTab = 'accounts' | 'contacts' | 'deals' | 'activities';
 
 // ============================================================
 // Stats Card
@@ -119,9 +104,6 @@ const ACTIVITY_TYPE_OPTIONS = [
   { value: 'note', label: 'Note' },
   { value: 'task', label: 'Task' },
 ];
-
-// LEAD_STATUS_OPTIONS / LEAD_SOURCE_OPTIONS / LEAD_PRIORITY_OPTIONS are imported
-// from components/crm/leads-shared (shared with the /dashboard/leads inbox).
 
 // ============================================================
 // Create Account Modal
@@ -520,11 +502,10 @@ const CreateActivityModal: React.FC<CreateActivityModalProps> = ({ isOpen, onClo
 
 function CrmPageContent() {
   // Active tab
-  const [activeTab, setActiveTab] = useState<CrmTab>('leads');
+  const [activeTab, setActiveTab] = useState<CrmTab>('accounts');
 
   // Stats
   const [stats, setStats] = useState<CrmDashboardStats | null>(null);
-  const [leadStats, setLeadStats] = useState<CrmLeadStats | null>(null);
 
   // Common list state
   const [isLoading, setIsLoading] = useState(true);
@@ -545,18 +526,12 @@ function CrmPageContent() {
   const [contacts, setContacts] = useState<CrmContact[]>([]);
   const [deals, setDeals] = useState<CrmDeal[]>([]);
   const [activities, setActivities] = useState<CrmActivity[]>([]);
-  const [leads, setLeads] = useState<CrmLead[]>([]);
 
   // Modals
   const [isCreateAccountOpen, setIsCreateAccountOpen] = useState(false);
   const [isCreateContactOpen, setIsCreateContactOpen] = useState(false);
   const [isCreateDealOpen, setIsCreateDealOpen] = useState(false);
   const [isCreateActivityOpen, setIsCreateActivityOpen] = useState(false);
-  const [isCreateLeadOpen, setIsCreateLeadOpen] = useState(false);
-  const [isConvertLeadOpen, setIsConvertLeadOpen] = useState(false);
-  const [convertTarget, setConvertTarget] = useState<CrmLead | null>(null);
-  const [detailLead, setDetailLead] = useState<CrmLead | null>(null);
-  const [isLeadDetailOpen, setIsLeadDetailOpen] = useState(false);
 
   // Delete
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -571,12 +546,8 @@ function CrmPageContent() {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const [dashboardData, leadData] = await Promise.all([
-          crmService.getDashboardStats().catch(() => null),
-          crmService.getLeadStats().catch(() => null),
-        ]);
+        const dashboardData = await crmService.getDashboardStats().catch(() => null);
         if (dashboardData) setStats(dashboardData);
-        if (leadData) setLeadStats(leadData);
       } catch (error) {
         console.error('Failed to load CRM stats:', error);
       }
@@ -620,14 +591,7 @@ function CrmPageContent() {
     try {
       const params = buildParams();
 
-      if (activeTab === 'leads') {
-        const response = await crmService.getLeads(params);
-        if (fetchId === fetchIdRef.current) {
-          setLeads(response.data);
-          setTotalPages(response.total_pages);
-          setTotalItems(response.total);
-        }
-      } else if (activeTab === 'accounts') {
+      if (activeTab === 'accounts') {
         const response = await crmService.getAccounts(params);
         if (fetchId === fetchIdRef.current) {
           setAccounts(response.data);
@@ -706,8 +670,7 @@ function CrmPageContent() {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      if (deleteTarget.type === 'leads') await crmService.deleteLead(deleteTarget.uuid);
-      else if (deleteTarget.type === 'accounts') await crmService.deleteAccount(deleteTarget.uuid);
+      if (deleteTarget.type === 'accounts') await crmService.deleteAccount(deleteTarget.uuid);
       else if (deleteTarget.type === 'contacts') await crmService.deleteContact(deleteTarget.uuid);
       else if (deleteTarget.type === 'deals') await crmService.deleteDeal(deleteTarget.uuid);
       else if (deleteTarget.type === 'activities') await crmService.deleteActivity(deleteTarget.uuid);
@@ -722,12 +685,6 @@ function CrmPageContent() {
     }
   };
 
-  // Convert lead handler
-  const handleConvertLead = useCallback((lead: CrmLead) => {
-    setConvertTarget(lead);
-    setIsConvertLeadOpen(true);
-  }, []);
-
   // Complete activity
   const handleCompleteActivity = useCallback(async (uuid: string) => {
     try {
@@ -740,106 +697,6 @@ function CrmPageContent() {
   }, [fetchData]);
 
   // ---- Table columns ----
-
-  // leadStatusColors / leadSourceLabels / leadPriorityColors imported from
-  // components/crm/leads-shared (shared with the /dashboard/leads inbox).
-
-  const leadColumns: TableColumn<CrmLead>[] = useMemo(() => [
-    {
-      key: 'name',
-      header: 'Name',
-      sortable: true,
-      render: (lead) => (
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-            <UserPlus className="w-5 h-5 text-violet-600" />
-          </div>
-          <div>
-            <p className="font-medium text-secondary-900">{lead.first_name} {lead.last_name || ''}</p>
-            {lead.company_name && <p className="text-xs text-secondary-500">{lead.company_name}</p>}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'email',
-      header: 'Email',
-      render: (lead) => lead.email ? (
-        <div className="flex items-center gap-2 text-sm text-secondary-600">
-          <Mail className="w-3.5 h-3.5 text-secondary-400" />
-          <span>{lead.email}</span>
-        </div>
-      ) : <span className="text-sm text-secondary-400">--</span>,
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      render: (lead) => (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary-100 text-secondary-700">
-          {leadSourceLabels[lead.source] || lead.source}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (lead) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${leadStatusColors[lead.status] || 'bg-secondary-100 text-secondary-600'}`}>
-          {lead.status}
-        </span>
-      ),
-    },
-    {
-      key: 'priority',
-      header: 'Priority',
-      render: (lead) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${leadPriorityColors[lead.priority] || 'bg-secondary-100 text-secondary-600'}`}>
-          {lead.priority}
-        </span>
-      ),
-    },
-    {
-      key: 'score',
-      header: 'Score',
-      sortable: true,
-      render: (lead) => (
-        <span className="text-sm font-medium text-secondary-700">{lead.score}</span>
-      ),
-    },
-    {
-      key: 'created_at',
-      header: 'Created',
-      sortable: true,
-      render: (lead) => (
-        <span className="text-sm text-secondary-600">{formatDate(lead.created_at)}</span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 'w-28',
-      render: (lead) => (
-        <div className="flex items-center gap-1">
-          {lead.status !== 'converted' && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleConvertLead(lead); }}
-              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
-              title="Convert to Contact"
-            >
-              <ArrowRightCircle className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleDeleteClick(lead.uuid, `${lead.first_name} ${lead.last_name || ''}`, 'leads'); }}
-            className="p-1.5 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg transition-colors"
-            title="Delete Lead"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      ),
-    },
-  ], [handleDeleteClick, handleConvertLead]);
 
   const accountColumns: TableColumn<CrmAccount>[] = useMemo(() => [
     {
@@ -1150,7 +1007,6 @@ function CrmPageContent() {
 
   // Tab config
   const tabs: { key: CrmTab; label: string; icon: React.ReactNode }[] = [
-    { key: 'leads', label: 'Leads', icon: <UserPlus className="w-4 h-4" /> },
     { key: 'accounts', label: 'Accounts', icon: <Building2 className="w-4 h-4" /> },
     { key: 'contacts', label: 'Contacts', icon: <Users className="w-4 h-4" /> },
     { key: 'deals', label: 'Deals', icon: <DollarSign className="w-4 h-4" /> },
@@ -1159,8 +1015,7 @@ function CrmPageContent() {
 
   // Create button handler
   const handleCreate = () => {
-    if (activeTab === 'leads') setIsCreateLeadOpen(true);
-    else if (activeTab === 'accounts') setIsCreateAccountOpen(true);
+    if (activeTab === 'accounts') setIsCreateAccountOpen(true);
     else if (activeTab === 'contacts') setIsCreateContactOpen(true);
     else if (activeTab === 'deals') setIsCreateDealOpen(true);
     else if (activeTab === 'activities') setIsCreateActivityOpen(true);
@@ -1168,7 +1023,6 @@ function CrmPageContent() {
 
   const createLabel = useMemo(() => {
     const labels: Record<CrmTab, string> = {
-      leads: 'Add Lead',
       accounts: 'Add Account',
       contacts: 'Add Contact',
       deals: 'Add Deal',
@@ -1182,7 +1036,7 @@ function CrmPageContent() {
       {/* Page Header */}
       <PageHeader
         title="CRM"
-        description="Manage leads, accounts, contacts, deals, and activities"
+        description="Manage accounts, contacts, deals, and activities"
         icon={<Contact className="h-5 w-5" />}
         actions={
           <>
@@ -1201,14 +1055,8 @@ function CrmPageContent() {
       />
 
       {/* Stats Cards */}
-      {(stats || leadStats) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <StatCard
-            title="New Leads"
-            value={leadStats?.new_leads ?? 0}
-            icon={<UserPlus className="w-6 h-6" />}
-            color="info"
-          />
+      {stats && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard
             title="Total Accounts"
             value={stats?.total_accounts ?? 0}
@@ -1226,12 +1074,6 @@ function CrmPageContent() {
             value={formatCurrency(stats?.total_deal_value ?? 0)}
             icon={<DollarSign className="w-6 h-6" />}
             color="success"
-          />
-          <StatCard
-            title="Conversion Rate"
-            value={leadStats ? `${leadStats.conversion_rate}%` : '0%'}
-            icon={<ArrowRightCircle className="w-6 h-6" />}
-            color="warning"
           />
         </div>
       )}
@@ -1267,36 +1109,6 @@ function CrmPageContent() {
               leftIcon={<Search className="w-4 h-4" />}
             />
           </div>
-
-          {/* Filters for leads */}
-          {activeTab === 'leads' && (
-            <>
-              <div className="relative">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
-                >
-                  {LEAD_STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
-              </div>
-              <div className="relative">
-                <select
-                  value={sourceFilter}
-                  onChange={(e) => { setSourceFilter(e.target.value); setCurrentPage(1); }}
-                  className="appearance-none px-4 py-2.5 pr-10 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface cursor-pointer"
-                >
-                  {LEAD_SOURCE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 pointer-events-none" />
-              </div>
-            </>
-          )}
 
           {/* Status filter for accounts and contacts */}
           {(activeTab === 'accounts' || activeTab === 'contacts') && (
@@ -1350,20 +1162,6 @@ function CrmPageContent() {
 
       {/* Table */}
       <div>
-        {activeTab === 'leads' && (
-          <Table
-            columns={leadColumns}
-            data={leads}
-            keyExtractor={(l) => l.uuid}
-            onRowClick={(lead) => { setDetailLead(lead); setIsLeadDetailOpen(true); }}
-            sortColumn={sortColumn}
-            sortDirection={sortDirection}
-            onSort={handleSort}
-            isLoading={isLoading}
-            emptyMessage="No leads found"
-          />
-        )}
-
         {activeTab === 'accounts' && (
           <Table
             columns={accountColumns}
@@ -1427,22 +1225,10 @@ function CrmPageContent() {
       </div>
 
       {/* Create Modals */}
-      <CreateLeadModal isOpen={isCreateLeadOpen} onClose={() => setIsCreateLeadOpen(false)} onSuccess={fetchData} />
       <CreateAccountModal isOpen={isCreateAccountOpen} onClose={() => setIsCreateAccountOpen(false)} onSuccess={fetchData} />
       <CreateContactModal isOpen={isCreateContactOpen} onClose={() => setIsCreateContactOpen(false)} onSuccess={fetchData} />
       <CreateDealModal isOpen={isCreateDealOpen} onClose={() => setIsCreateDealOpen(false)} onSuccess={fetchData} />
       <CreateActivityModal isOpen={isCreateActivityOpen} onClose={() => setIsCreateActivityOpen(false)} onSuccess={fetchData} />
-      <ConvertLeadModal isOpen={isConvertLeadOpen} onClose={() => { setIsConvertLeadOpen(false); setConvertTarget(null); }} onSuccess={fetchData} lead={convertTarget} />
-
-      {/* Lead detail — opens on clicking a leads row */}
-      <LeadDetailModal
-        isOpen={isLeadDetailOpen}
-        lead={detailLead}
-        onClose={() => setIsLeadDetailOpen(false)}
-        onSaved={fetchData}
-        onConvert={(lead) => { setIsLeadDetailOpen(false); handleConvertLead(lead); }}
-        onDelete={(lead) => { setIsLeadDetailOpen(false); handleDeleteClick(lead.uuid, `${lead.first_name} ${lead.last_name || ''}`, 'leads'); }}
-      />
 
       {/* Delete Confirmation */}
       <ConfirmDialog
