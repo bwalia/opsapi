@@ -136,6 +136,10 @@ end
 local function do_sends(p)
     local Mail = require("helper.mail")
     local lead, s = p.lead, p.settings
+    -- Brand the email per-namespace: app_name drives the header, footer and the
+    -- "Thanks, The <app_name> Team" line. When the namespace has no name, leave
+    -- it nil so render_template falls back to the global from_name.
+    local brand = (p.namespace.name and p.namespace.name ~= "") and p.namespace.name or nil
 
     -- 1) Confirmation to the submitter
     if s.send_confirmation ~= false and lead.email and lead.email ~= "" then
@@ -146,7 +150,7 @@ local function do_sends(p)
                 subject = "We got your enquiry — thanks for getting in touch",
                 template = "lead_confirmation",
                 sync = true,
-                data = { first_name = lead.first_name, company_name = lead.company_name, notes = lead.notes },
+                data = { first_name = lead.first_name, company_name = lead.company_name, notes = lead.notes, app_name = brand },
             })
         end)
     end
@@ -164,6 +168,7 @@ local function do_sends(p)
                     first_name = lead.first_name, last_name = lead.last_name, email = lead.email,
                     phone = lead.phone, company_name = lead.company_name, job_title = lead.job_title,
                     source = lead.source, notes = lead.notes, namespace_name = p.namespace.name,
+                    app_name = brand,
                 },
             })
         end)
