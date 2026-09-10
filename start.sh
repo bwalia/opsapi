@@ -732,10 +732,11 @@ check_and_update_env() {
 
     # ── Ensure OTP_SUPPRESS_FOR_EMAIL_REGEX covers required sinks ─────
     # Lapis attempts real SMTP delivery for any recipient that doesn't
-    # match this regex. Three known non-deliverable destinations on
-    # non-prod envs generate Mail Delivery Subsystem bounces back to
-    # SMTP_FROM_EMAIL and flood that inbox:
+    # match this regex. Known non-deliverable / shared-CI destinations
+    # on non-prod envs generate Mail Delivery Subsystem bounces back to
+    # SMTP_FROM_EMAIL or flood the shared admin Gmail:
     #   - legacy `diytaxreturnmail+e2e-…@gmail.com` E2E pattern
+    #   - bare `diytaxreturnmail@gmail.com` (seeded admin / RP login)
     #   - `*@e2e.invalid` E2E sink (RFC 6761 reserved TLD)
     #   - `*@admin.com` test-admin user (MX times out to 127.0.0.1)
     # helper/mail.lua gates the suppression on is_production_env, so
@@ -746,8 +747,8 @@ check_and_update_env() {
     # (e.g. an older deploy left `@e2e\.invalid$`-only), extend it
     # in place rather than overwrite — preserves any custom additions.
     if [[ "$target_env" != "prod" ]]; then
-        local default_regex='^diytaxreturnmail\+e2e-.*@gmail\.com$|@e2e\.invalid$|@admin\.com$'
-        local required_patterns=('@e2e\.invalid$' '@admin\.com$')
+        local default_regex='^diytaxreturnmail\+e2e-.*@gmail\.com$|^diytaxreturnmail@gmail\.com$|@e2e\.invalid$|@admin\.com$'
+        local required_patterns=('^diytaxreturnmail@gmail\.com$' '@e2e\.invalid$' '@admin\.com$')
         local current_line current_value new_value pat
         current_line=$(grep "^OTP_SUPPRESS_FOR_EMAIL_REGEX=" "$ENV_FILE" | head -1)
         if [[ -z "$current_line" ]]; then

@@ -147,14 +147,16 @@ spec:
             # whose SMTP delivery must be silently skipped. Used by
             # helper/mail.lua + helper/otp.lua; gated internally on
             # is_production_env, so this is a no-op in prod even when
-            # set — safe to default for every env. Covers three known
-            # non-deliverable sinks that otherwise generate Mail
-            # Delivery Subsystem bounces back to SMTP_FROM_EMAIL:
+            # set — safe to default for every env. Covers known
+            # non-deliverable / shared-CI sinks that otherwise flood
+            # SMTP_FROM_EMAIL or the shared admin Gmail:
             #   - legacy `diytaxreturnmail+e2e-…@gmail.com` E2E pattern
+            #   - bare `diytaxreturnmail@gmail.com` (seeded admin / RP login)
             #   - `*@e2e.invalid` E2E sink (RFC 6761 reserved TLD)
             #   - `*@admin.com` test-admin user (MX times out to 127.0.0.1)
+            # Acc also suppresses ADMIN_EMAIL in helper/otp.lua regardless.
             - name: OTP_SUPPRESS_FOR_EMAIL_REGEX
-              value: {{ .Values.otpSuppressForEmailRegex | default "^diytaxreturnmail\\+e2e-.*@gmail\\.com$|@e2e\\.invalid$|@admin\\.com$" | quote }}
+              value: {{ .Values.otpSuppressForEmailRegex | default "^diytaxreturnmail\\+e2e-.*@gmail\\.com$|^diytaxreturnmail@gmail\\.com$|@e2e\\.invalid$|@admin\\.com$" | quote }}
             - name: PROJECT_CODE
               value: {{ .Values.projectCode | default "all" | quote }}
             {{- if and .Values.setup .Values.setup.adminEmail }}
