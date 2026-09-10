@@ -263,15 +263,17 @@ function OTP.sendToEmail(user, brand)
     end
 
     -- When TEST_OTP_CODE is set, the bypass code is accepted by OTP.verify()
-    -- but we still create a real OTP and send the email so users receive the code.
-    -- This allows developers to bypass with the test code while real users get emails.
-    -- Mirrors the deploy-env guard in OTP.verify() above — OPSAPI_DEPLOY_ENV-first
-    -- so cluster envs (int/acc with LAPIS_ENVIRONMENT="production") still log
-    -- the bypass notice correctly. Fail-closed default "production".
+    -- but we still create a real OTP row. SMTP may still fire for non-suppressed
+    -- recipients (so real users on shared non-prod envs can use the emailed
+    -- code). Mirrors the deploy-env guard in OTP.verify() — OPSAPI_DEPLOY_ENV
+    -- first so cluster envs (int/acc with LAPIS_ENVIRONMENT="production") still
+    -- log the bypass notice. Fail-closed default "production".
     local deploy = os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or "production"
+    local is_prod = (deploy == "production" or deploy == "prod")
     local test_code = os.getenv("TEST_OTP_CODE")
-    if deploy ~= "production" and deploy ~= "prod" and test_code and #test_code >= 6 then
-        ngx.log(ngx.NOTICE, "[OTP] Test bypass enabled — real OTP will also be created and emailed for ", user.email)
+    if not is_prod and test_code and #test_code >= 6 then
+        ngx.log(ngx.NOTICE, "[OTP] Test bypass enabled for ", user.email,
+            " — OTP row will be created; SMTP may still be suppressed")
     end
 
     local code, err = OTP.create(user.id)
@@ -279,23 +281,36 @@ function OTP.sendToEmail(user, brand)
         return false, err
     end
 
-    -- E2E test traffic suppression. CI runs the Playwright suite many times
-    -- a day and each register/login dumps a real OTP into the shared test
-    -- mailbox (diytaxreturnmail@gmail.com via Gmail plus-addressing). We
-    -- still CREATE the OTP row above so OTP.verify works normally — only
-    -- the SMTP send is skipped. Double-gated:
-    --   1) LAPIS_ENVIRONMENT must not be "production"  (acc + prod = always send)
+    -- Acceptance admin: skip SMTP for the seeded platform ADMIN_EMAIL.
+    -- Acc has TEST_OTP_CODE / e2e peek; RP suites + manual admin logins were
+    -- flooding the shared Gmail with OTP mail. OTP row is still created above
+    -- so verify/bypass keep working. Prod is untouched (deploy ~= "acc").
+    if deploy == "acc" then
+        local admin_email = os.getenv("ADMIN_EMAIL")
+        if type(admin_email) == "string" and admin_email ~= ""
+            and string.lower(user.email) == string.lower(admin_email) then
+            ngx.log(ngx.NOTICE, "[OTP] Suppressed email for acceptance admin ",
+                user.email, " (code still in DB for OTP.verify / TEST_OTP_CODE)")
+            return true
+        end
+    end
+
+    -- E2E / sink traffic suppression. CI runs Playwright many times a day;
+    -- each register/login would otherwise dump a real OTP into shared
+    -- mailboxes. We still CREATE the OTP row above so OTP.verify works —
+    -- only the SMTP send is skipped. Double-gated:
+    --   1) deploy env must not be prod/production
     --   2) Recipient must match OTP_SUPPRESS_FOR_EMAIL_REGEX
     -- If the env var is unset, behaviour is identical to before this change.
     local suppress_regex = os.getenv("OTP_SUPPRESS_FOR_EMAIL_REGEX")
-    if env ~= "production" and suppress_regex and suppress_regex ~= "" then
+    if not is_prod and suppress_regex and suppress_regex ~= "" then
         local matched, regex_err = ngx.re.match(user.email, suppress_regex, "jo")
         if regex_err then
             ngx.log(ngx.WARN, "[OTP] Bad OTP_SUPPRESS_FOR_EMAIL_REGEX (", suppress_regex,
                 "): ", regex_err, " — falling back to sending the email")
         elseif matched then
-            ngx.log(ngx.NOTICE, "[OTP] Suppressed email for E2E test recipient ", user.email,
-                " (env=", env, ", code still in DB for OTP.verify)")
+            ngx.log(ngx.NOTICE, "[OTP] Suppressed email for E2E/sink recipient ", user.email,
+                " (deploy=", deploy, ", code still in DB for OTP.verify)")
             return true
         end
     end
