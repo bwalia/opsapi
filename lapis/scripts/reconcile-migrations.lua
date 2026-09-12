@@ -142,6 +142,16 @@ local MANIFEST = {
   ["543_inv_create_tax_rates"]                       = "invoice_tax_rates",
   ["544_inv_create_sequences"]                       = "invoice_sequences",
 
+  -- ── field service ─────────────────────────────────────────────────
+  ["850_fs_create_job_types"]                        = "fs_job_types",
+  ["851_fs_create_phase_templates"]                  = "fs_phase_templates",
+  ["852_fs_create_sites"]                            = "fs_sites",
+  ["853_fs_create_jobs"]                             = "fs_jobs",
+  ["854_fs_create_job_phases"]                       = "fs_job_phases",
+  ["855_fs_create_visits"]                           = "fs_visits",
+  ["856_fs_create_job_items"]                        = "fs_job_items",
+  ["857_fs_create_job_activity"]                     = "fs_job_activity",
+
   -- ── document templates ────────────────────────────────────────────
   ["570_doc_create_templates"]                       = "document_templates",
   ["571_doc_create_versions"]                        = "document_template_versions",

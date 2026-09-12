@@ -41,6 +41,7 @@ local TAG_GROUPS = {
     ["delivery"] = "Delivery",
     ["tax"]      = "Tax Copilot",
     ["order"]    = "Orders",
+    ["field%-service"] = "Field Service",
 }
 
 local EXACT_TAG_MAP = {
