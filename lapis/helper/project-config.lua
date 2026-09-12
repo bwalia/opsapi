@@ -41,6 +41,7 @@ ProjectConfig.FEATURES = {
     ACCOUNTING = "accounting",         -- Bookkeeping, VAT returns, trial balance, AI-powered
     ACADEMY = "academy",               -- LMS: courses, lessons, rich (WYSIWYG) content
     CMS = "cms",                       -- Content: website pages + blog (articles, categories, tags)
+    FIELD_SERVICE = "field_service",   -- Service jobs, job phases, engineer site visits
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -69,6 +70,23 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.ACCOUNTING,
         ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.CMS,
+        ProjectConfig.FEATURES.FIELD_SERVICE,
+        ProjectConfig.FEATURES.THEMES,
+    },
+
+    -- Field Service - service manager + engineer site visits. Jobs are broken
+    -- into phases (copied from job-type templates) and engineers log visits
+    -- against them. Visit time feeds Timesheets, jobs bill through Invoicing,
+    -- and customers/sites hang off CRM accounts — so those three are always
+    -- enabled alongside it (the fs_* tables FK into crm_* and invoices).
+    field_service = {
+        ProjectConfig.FEATURES.CORE,
+        ProjectConfig.FEATURES.FIELD_SERVICE,
+        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.TIMESHEETS,
+        ProjectConfig.FEATURES.INVOICING,
+        ProjectConfig.FEATURES.NOTIFICATIONS,
+        ProjectConfig.FEATURES.MENU,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -351,6 +369,10 @@ function ProjectConfig.isAccountingEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.ACCOUNTING)
 end
 
+function ProjectConfig.isFieldServiceEnabled()
+    return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.FIELD_SERVICE)
+end
+
 function ProjectConfig.isThemesEnabled()
     return ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.THEMES)
 end
@@ -483,6 +505,14 @@ ProjectConfig.PROJECT_MODULES = {
     -- CMS modules — RBAC module the routes/cms-*.lua gate on ("cms")
     cms = {
         { machine_name = "cms", name = "Content", description = "Website pages, blog articles, categories and tags (rich WYSIWYG)", category = "Content" },
+    },
+
+    -- Field service modules — RBAC modules the routes/field-service-*.lua gate on
+    field_service = {
+        { machine_name = "fs_jobs", name = "Service Jobs", description = "Field service jobs, phases, parts and invoicing", category = "Field Service" },
+        { machine_name = "fs_visits", name = "Site Visits", description = "Engineer site visits: scheduling, check-in/out, work reports", category = "Field Service" },
+        { machine_name = "fs_sites", name = "Service Sites", description = "Customer site addresses for field service", category = "Field Service" },
+        { machine_name = "fs_job_types", name = "Job Types", description = "Job types and their phase templates", category = "Field Service" },
     },
 
     -- Theme system (platform-level; always on)

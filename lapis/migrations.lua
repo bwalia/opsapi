@@ -353,6 +353,10 @@ local invoicing_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.I
 local document_template_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-templates") or {}
 local document_template_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.INVOICING, "migrations.document-template-menu") or {}
 
+-- Field Service (service jobs, job phases, engineer site visits)
+local field_service_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-system") or {}
+local field_service_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-menu-items") or {}
+
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
 local accounting_hmrc_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-hmrc-categories") or {}
@@ -2340,6 +2344,27 @@ local _migrations = {
 
     -- API keys (core): namespace-scoped machine credentials.
     ['845_create_api_keys'] = api_key_migrations[1],
+
+    -- =========================================================================
+    -- FIELD SERVICE (850-861). Feature-gated. Numbered after CRM (500s),
+    -- timesheets (520s) and invoicing (540s) because fs_* tables FK into
+    -- crm_accounts / crm_contacts / invoices. Tables are ordered so FK targets
+    -- exist first: job types -> phase templates -> sites -> jobs -> phases ->
+    -- visits -> items -> activity.
+    -- =========================================================================
+    ['850_fs_create_job_types'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 1),
+    ['851_fs_create_phase_templates'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 2),
+    ['852_fs_create_sites'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 3),
+    ['853_fs_create_jobs'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 4),
+    ['854_fs_create_job_phases'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 5),
+    ['855_fs_create_visits'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 6),
+    ['856_fs_create_job_items'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 7),
+    ['857_fs_create_job_activity'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_migrations, 8),
+    -- Sidebar menu items + RBAC modules (fs_*) + role grants + enable for namespaces
+    ['858_seed_fs_menu_items'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 1),
+    ['859_register_fs_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 2),
+    ['860_grant_fs_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 3),
+    ['861_enable_fs_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

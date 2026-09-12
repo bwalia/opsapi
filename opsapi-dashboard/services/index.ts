@@ -123,3 +123,31 @@ export {
   dementiaService,
 } from './familyAccess.service';
 export { apiKeysService } from './apiKeys.service';
+
+// Field Service (service jobs, job phases, engineer site visits)
+export {
+  fieldService,
+  parseFsDate,
+  toApiDateTime,
+  toLocalInputValue,
+  formatFsDate,
+  formatFsDateTime,
+  formatFsTime,
+  type FsJob,
+  type FsJobDetail,
+  type FsPhase,
+  type ChecklistItem,
+  type FsVisit,
+  type FsVisitDetail,
+  type FsJobItem,
+  type FsJobType,
+  type FsPhaseTemplate,
+  type FsSite,
+  type FsEngineer,
+  type FsStats,
+  type FsInvoicePreview,
+  type JobStatus,
+  type JobPriority,
+  type PhaseStatus,
+  type VisitStatus,
+} from './field-service.service';
