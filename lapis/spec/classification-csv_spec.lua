@@ -63,6 +63,47 @@ check("guessMapping detects debit/credit layout",
     dc_mode == "debit_credit" and dc_mapping and dc_mapping.debit and dc_mapping.credit,
     tostring(dc_mode))
 
+local _, in_out_mapping, in_out_mode = pcall(CSV.guessMapping, {
+    "Date", "Description", "Out", "In", "Category",
+})
+check("guessMapping detects In/Out columns",
+    in_out_mode == "debit_credit"
+        and in_out_mapping
+        and in_out_mapping.debit == 3
+        and in_out_mapping.credit == 4,
+    tostring(in_out_mode))
+
+local _, pay_mapping, pay_mode = pcall(CSV.guessMapping, {
+    "Date", "Details", "Payments Out", "Payments In", "Label",
+})
+check("guessMapping detects Payments Out/In",
+    pay_mode == "debit_credit"
+        and pay_mapping
+        and pay_mapping.debit == 3
+        and pay_mapping.credit == 4,
+    tostring(pay_mode))
+
+local _, dep_mapping, dep_mode = pcall(CSV.guessMapping, {
+    "Date", "Narrative", "Withdrawals", "Deposits", "Category",
+})
+check("guessMapping detects Withdrawals/Deposits",
+    dep_mode == "debit_credit"
+        and dep_mapping
+        and dep_mapping.debit == 3
+        and dep_mapping.credit == 4,
+    tostring(dep_mode))
+
+-- Short "in" must not steal a description-like header via substring.
+local _, safe_mapping, safe_mode = pcall(CSV.guessMapping, {
+    "Date", "Training Notes", "Amount", "Category",
+})
+check("guessMapping does not treat Training Notes as credit",
+    safe_mode == "signed_amount"
+        and safe_mapping
+        and safe_mapping.amount == 3
+        and not safe_mapping.credit,
+    tostring(safe_mode))
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
