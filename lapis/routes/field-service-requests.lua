@@ -23,9 +23,10 @@ return function(app)
         local result = RequestQueries.listRequests(self.namespace.id, {
             status = self.params.status,
             priority = self.params.priority,
-            account_uuid = self.params.account_uuid,
-            asset_uuid = self.params.asset_uuid,
+            customer_uuid = self.params.customer_uuid,
+            product_uuid = self.params.product_uuid,
             manager_uuid = self.params.manager_uuid,
+            sla = self.params.sla,
             search = self.params.search,
             page = self.params.page,
             per_page = self.params.per_page,

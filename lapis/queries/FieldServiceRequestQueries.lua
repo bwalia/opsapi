@@ -2,14 +2,14 @@
     Field Service — service request (complaint) queries
     ===================================================
 
-    The intake layer: a customer reports a fault, a manager triages and assigns
-    it, then converts it into one or more jobs. One request → many jobs. Every
-    read/write is namespace-scoped; account / contact / site / asset are resolved
-    from their uuids and re-checked against the tenant.
+    The intake layer: a customer reports a fault on one of our products, a manager
+    triages and assigns it, then converts it into one or more jobs. One request →
+    many jobs. Every read/write is namespace-scoped; the customer + product are
+    resolved from their uuids and re-checked against the tenant.
 
-    Converting to a job reuses JobQueries.createJob (job number, phase copy from
-    the job type) inside the same transaction, then stamps the new job with
-    service_request_id + asset_id.
+    Model: customer = `customers`, product (the serviced item) = `storeproducts`,
+    the specific unit is a free-text `product_ref`, and the visit address lives on
+    the request. Converting reuses JobQueries.createJob and links the job back.
 ]]
 
 local db = require("lapis.db")
@@ -31,7 +31,7 @@ local TRANSITIONS = {
     triaged = { assigned = true, in_progress = true, on_hold = true, rejected = true, duplicate = true },
     assigned = { in_progress = true, on_hold = true, triaged = true, resolved = true },
     in_progress = { on_hold = true, resolved = true },
-    on_hold = { assigned = true, in_progress = true, resolved = true, cancelled = false },
+    on_hold = { assigned = true, in_progress = true, resolved = true },
     resolved = { closed = true, in_progress = true },  -- reopen
     closed = { in_progress = true },                    -- reopen
     rejected = {},
@@ -42,22 +42,23 @@ local TRANSITIONS = {
 -- Read
 --------------------------------------------------------------------------------
 
-local CONTACT_NAME_SQL = [[COALESCE(
-    NULLIF(TRIM(COALESCE(ct.first_name, '') || ' ' || COALESCE(ct.last_name, '')), ''), ct.email)]]
+-- customers is a person: display name from first/last, fall back to email.
+local CUSTOMER_NAME_SQL = [[COALESCE(
+    NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), c.email)]]
 
 local REQUEST_SELECT = [[
     SELECT r.*,
-        acc.uuid AS account_uuid, acc.name AS account_name,
-        ct.uuid AS contact_uuid, ]] .. CONTACT_NAME_SQL .. [[ AS contact_name, ct.email AS contact_email,
-        ct.phone AS contact_phone,
-        s.uuid AS site_uuid, s.name AS site_name,
-        ast.uuid AS asset_uuid, ast.name AS asset_name, ast.serial_number AS asset_serial,
-        ]] .. Common.user_name_sql("mgr") .. [[ AS assigned_manager_name
+        c.uuid AS customer_uuid, ]] .. CUSTOMER_NAME_SQL .. [[ AS customer_name,
+        c.email AS customer_email, c.phone AS customer_phone,
+        p.uuid AS product_uuid, p.name AS product_name, p.sku AS product_sku,
+        ]] .. Common.user_name_sql("mgr") .. [[ AS assigned_manager_name,
+        (r.sla_response_due_at IS NOT NULL AND r.first_response_at IS NULL AND r.sla_response_due_at < NOW()
+            AND r.status NOT IN ('resolved', 'closed', 'rejected', 'duplicate')) AS response_overdue,
+        (r.sla_resolve_due_at IS NOT NULL AND r.resolved_at IS NULL AND r.sla_resolve_due_at < NOW()
+            AND r.status NOT IN ('resolved', 'closed', 'rejected', 'duplicate')) AS resolve_overdue
     FROM fs_service_requests r
-    LEFT JOIN crm_accounts acc ON acc.id = r.account_id
-    LEFT JOIN crm_contacts ct ON ct.id = r.contact_id
-    LEFT JOIN fs_sites s ON s.id = r.site_id
-    LEFT JOIN fs_assets ast ON ast.id = r.asset_id
+    LEFT JOIN customers c ON c.id = r.customer_id
+    LEFT JOIN storeproducts p ON p.id = r.product_id
     LEFT JOIN users mgr ON mgr.uuid = r.assigned_manager_uuid
 ]]
 
@@ -72,19 +73,21 @@ local function shape_request(r)
         reported_by = r.reported_by,
         priority = r.priority,
         status = r.status,
-        account_uuid = r.account_uuid,
-        account_name = r.account_name,
-        contact_uuid = r.contact_uuid,
-        contact_name = r.contact_name,
-        contact_email = r.contact_email,
-        contact_phone = r.contact_phone,
-        site_uuid = r.site_uuid,
-        site_name = r.site_name,
-        asset_uuid = r.asset_uuid,
-        asset_name = r.asset_name,
-        asset_serial = r.asset_serial,
+        customer_uuid = r.customer_uuid,
+        customer_name = r.customer_name,
+        customer_email = r.customer_email,
+        customer_phone = r.customer_phone,
+        product_uuid = r.product_uuid,
+        product_name = r.product_name,
+        product_sku = r.product_sku,
+        product_ref = r.product_ref,
+        service_address = r.service_address,
+        service_postcode = r.service_postcode,
         assigned_manager_uuid = r.assigned_manager_uuid,
         assigned_manager_name = r.assigned_manager_uuid and r.assigned_manager_name or nil,
+        response_overdue = Common.to_bool(r.response_overdue, false),
+        resolve_overdue = Common.to_bool(r.resolve_overdue, false),
+        sla_breached = Common.to_bool(r.response_overdue, false) or Common.to_bool(r.resolve_overdue, false),
         sla_response_due_at = r.sla_response_due_at,
         sla_resolve_due_at = r.sla_resolve_due_at,
         first_response_at = r.first_response_at,
@@ -116,30 +119,36 @@ function RequestQueries.listRequests(namespace_id, params)
         table.insert(where, "r.priority = ?")
         table.insert(values, tostring(params.priority))
     end
-    if nilify(params.account_uuid) then
-        table.insert(where, "acc.uuid = ?")
-        table.insert(values, tostring(params.account_uuid))
+    if nilify(params.customer_uuid) then
+        table.insert(where, "c.uuid = ?")
+        table.insert(values, tostring(params.customer_uuid))
     end
-    if nilify(params.asset_uuid) then
-        table.insert(where, "ast.uuid = ?")
-        table.insert(values, tostring(params.asset_uuid))
+    if nilify(params.product_uuid) then
+        table.insert(where, "p.uuid = ?")
+        table.insert(values, tostring(params.product_uuid))
     end
     if nilify(params.manager_uuid) then
         table.insert(where, "r.assigned_manager_uuid = ?")
         table.insert(values, tostring(params.manager_uuid))
     end
+    if params.sla == "breached" then
+        table.insert(where, [[(
+            (r.sla_response_due_at IS NOT NULL AND r.first_response_at IS NULL AND r.sla_response_due_at < NOW())
+            OR (r.sla_resolve_due_at IS NOT NULL AND r.resolved_at IS NULL AND r.sla_resolve_due_at < NOW())
+        ) AND r.status NOT IN ('resolved', 'closed', 'rejected', 'duplicate')]])
+    end
     if nilify(params.search) then
         local term = "%" .. tostring(params.search) .. "%"
-        table.insert(where,
-            "(r.request_number ILIKE ? OR r.title ILIKE ? OR r.description ILIKE ? OR acc.name ILIKE ?)")
-        for _ = 1, 4 do table.insert(values, term) end
+        table.insert(where, [[(r.request_number ILIKE ? OR r.title ILIKE ? OR r.description ILIKE ?
+            OR c.first_name ILIKE ? OR c.last_name ILIKE ? OR c.email ILIKE ?)]])
+        for _ = 1, 6 do table.insert(values, term) end
     end
     local where_sql = table.concat(where, " AND ")
 
     local count = db.query([[
         SELECT COUNT(*) AS total FROM fs_service_requests r
-        LEFT JOIN crm_accounts acc ON acc.id = r.account_id
-        LEFT JOIN fs_assets ast ON ast.id = r.asset_id
+        LEFT JOIN customers c ON c.id = r.customer_id
+        LEFT JOIN storeproducts p ON p.id = r.product_id
         WHERE ]] .. where_sql, unpack(values))
 
     -- Urgent first, then newest.
@@ -237,15 +246,13 @@ local function next_request_number(namespace_id)
     return string.format("%s-%04d", rows[1].prefix or "SR", tonumber(rows[1].current_number))
 end
 
--- Resolve the uuid references a request payload may carry. Only keys present in
--- `data` are returned; an explicit empty value resolves to db.NULL (clear).
+-- Resolve the customer + product uuids a request payload may carry. Only keys
+-- present in `data` are returned; an explicit empty value resolves to db.NULL.
 local function resolve_refs(namespace_id, data)
     local refs = {}
     local specs = {
-        { key = "account_uuid", tbl = "crm_accounts", col = "account_id", label = "Account" },
-        { key = "contact_uuid", tbl = "crm_contacts", col = "contact_id", label = "Contact" },
-        { key = "site_uuid", tbl = "fs_sites", col = "site_id", label = "Site" },
-        { key = "asset_uuid", tbl = "fs_assets", col = "asset_id", label = "Asset" },
+        { key = "customer_uuid", tbl = "customers", col = "customer_id", label = "Customer" },
+        { key = "product_uuid", tbl = "storeproducts", col = "product_id", label = "Product" },
     }
     for _, spec in ipairs(specs) do
         if data[spec.key] ~= nil then
@@ -275,20 +282,6 @@ function RequestQueries.createRequest(namespace_id, actor_uuid, data)
     if not refs then return nil, ref_err end
     for k, v in pairs(refs) do if v == db.NULL then refs[k] = nil end end
 
-    -- Picking the faulty unit auto-fills its customer + site when not given.
-    if refs.asset_id and (not refs.account_id or not refs.site_id) then
-        local a = db.query("SELECT account_id, site_id FROM fs_assets WHERE id = ?", refs.asset_id)[1]
-        if a then
-            refs.account_id = refs.account_id or a.account_id
-            refs.site_id = refs.site_id or a.site_id
-        end
-    end
-    -- A site belongs to a customer: inherit the account when none was given.
-    if refs.site_id and not refs.account_id then
-        local s = db.query("SELECT account_id FROM fs_sites WHERE id = ?", refs.site_id)[1]
-        refs.account_id = s and s.account_id or nil
-    end
-
     local metadata = data.metadata
     if type(metadata) == "table" then metadata = cjson.encode(metadata) end
 
@@ -297,10 +290,11 @@ function RequestQueries.createRequest(namespace_id, actor_uuid, data)
             uuid = Common.uuid(),
             namespace_id = namespace_id,
             request_number = next_request_number(namespace_id),
-            account_id = refs.account_id,
-            contact_id = refs.contact_id,
-            site_id = refs.site_id,
-            asset_id = refs.asset_id,
+            customer_id = refs.customer_id,
+            product_id = refs.product_id,
+            product_ref = nilify(data.product_ref),
+            service_address = nilify(data.service_address),
+            service_postcode = nilify(data.service_postcode),
             title = tostring(data.title),
             description = nilify(data.description),
             fault_category = nilify(data.fault_category),
@@ -318,7 +312,10 @@ function RequestQueries.createRequest(namespace_id, actor_uuid, data)
     end)
 end
 
-local TEXT_FIELDS = { "title", "description", "fault_category", "reported_by", "resolution_notes" }
+local TEXT_FIELDS = {
+    "title", "description", "fault_category", "reported_by", "resolution_notes",
+    "product_ref", "service_address", "service_postcode",
+}
 local DATE_FIELDS = { "sla_response_due_at", "sla_resolve_due_at" }
 
 function RequestQueries.updateRequest(namespace_id, uuid, data)
@@ -413,20 +410,22 @@ function RequestQueries.convertToJob(namespace_id, uuid, actor_uuid, data)
             description = nilify(data.description) or row.description,
             priority = nilify(data.priority) or row.priority,
             job_type_uuid = nilify(data.job_type_uuid),
-            account_uuid = nilify(data.account_uuid) or row.account_uuid,
-            contact_uuid = nilify(data.contact_uuid) or row.contact_uuid,
-            site_uuid = nilify(data.site_uuid) or row.site_uuid,
+            customer_uuid = nilify(data.customer_uuid) or row.customer_uuid,
+            product_uuid = nilify(data.product_uuid) or row.product_uuid,
+            product_ref = row.product_ref,
+            service_address = nilify(data.service_address) or row.service_address,
+            service_postcode = row.service_postcode,
             service_manager_uuid = nilify(data.service_manager_uuid) or row.assigned_manager_uuid,
             due_date = nilify(data.due_date),
         }
         local job, err = JobQueries.createJob(namespace_id, actor_uuid, job_data)
         if not job then return nil, err end
 
-        -- Link the job to its request + the faulty asset (createJob doesn't know these columns).
+        -- Link the job back to its request (createJob doesn't know this column).
         db.query([[
-            UPDATE fs_jobs SET service_request_id = ?, asset_id = ?, updated_at = NOW()
+            UPDATE fs_jobs SET service_request_id = ?, updated_at = NOW()
             WHERE uuid = ? AND namespace_id = ?
-        ]], row.id, row.asset_id or db.NULL, job.uuid, namespace_id)
+        ]], row.id, job.uuid, namespace_id)
 
         -- Work has started on the complaint.
         local set = {}

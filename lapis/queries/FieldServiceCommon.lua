@@ -24,15 +24,15 @@ local RESOLVABLE = {
     crm_contacts = true,
     fs_job_types = true,
     fs_phase_templates = true,
-    fs_sites = true,
     fs_jobs = true,
     fs_job_phases = true,
     fs_visits = true,
     fs_job_items = true,
-    fs_assets = true,
     employees = true,
     fs_service_requests = true,
     fs_parts = true,
+    customers = true,
+    storeproducts = true,
 }
 
 -- SQL expression for a user's display name (users alias `u`).
@@ -139,12 +139,17 @@ end
 
 --- Resolve a uuid to its internal id, scoped to the tenant. Returns nil when
 -- the row does not exist, is soft-deleted, or belongs to another namespace.
+-- Reused platform tables that have no `deleted_at` column (they use is_active /
+-- status instead), so resolve_id must not filter on it.
+local NO_SOFT_DELETE = { customers = true, storeproducts = true }
+
 function Common.resolve_id(tbl, namespace_id, uuid)
     assert(RESOLVABLE[tbl], "resolve_id: table not allowed: " .. tostring(tbl))
     uuid = Common.nilify(uuid)
     if not uuid then return nil end
+    local deleted = NO_SOFT_DELETE[tbl] and "" or " AND deleted_at IS NULL"
     local rows = db.query(
-        "SELECT id FROM " .. tbl .. " WHERE uuid = ? AND namespace_id = ? AND deleted_at IS NULL LIMIT 1",
+        "SELECT id FROM " .. tbl .. " WHERE uuid = ? AND namespace_id = ?" .. deleted .. " LIMIT 1",
         tostring(uuid), namespace_id
     )
     return rows and rows[1] and rows[1].id or nil

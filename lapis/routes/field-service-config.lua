@@ -107,38 +107,4 @@ return function(app)
         return Http.ok({ message = "Phase template removed" })
     end))
 
-    -- ============================================================
-    -- SITES
-    -- ============================================================
-
-    app:get("/api/v2/field-service/sites", Http.guard_any(SITE_READERS, function(self)
-        local result = ConfigQueries.listSites(self.namespace.id, {
-            account_uuid = self.params.account_uuid,
-            search = self.params.search,
-            page = self.params.page,
-            per_page = self.params.per_page,
-        })
-        return Http.ok(result.items, 200, result.meta)
-    end))
-
-    app:post("/api/v2/field-service/sites", Http.guard("fs_sites", "create", function(self)
-        local site, err = ConfigQueries.createSite(self.namespace.id, Http.body(self))
-        return Http.result(site, err, 201)
-    end))
-
-    app:get("/api/v2/field-service/sites/:uuid", Http.guard_any(SITE_READERS, function(self)
-        local site = ConfigQueries.getSite(self.namespace.id, self.params.uuid)
-        if not site then return Http.fail(404, "Site not found") end
-        return Http.ok(site)
-    end))
-
-    app:put("/api/v2/field-service/sites/:uuid", Http.guard("fs_sites", "update", function(self)
-        return Http.result(ConfigQueries.updateSite(self.namespace.id, self.params.uuid, Http.body(self)))
-    end))
-
-    app:delete("/api/v2/field-service/sites/:uuid", Http.guard("fs_sites", "delete", function(self)
-        local ok, err = ConfigQueries.deleteSite(self.namespace.id, self.params.uuid)
-        if not ok then return Http.from_error(err) end
-        return Http.ok({ message = "Site deleted" })
-    end))
 end

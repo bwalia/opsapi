@@ -50,7 +50,7 @@ return function(app)
     app:get("/api/v2/field-service/jobs", Http.guard("fs_jobs", "read", function(self)
         local p = self.params
         local result = JobQueries.listJobs(self.namespace.id, {
-            status = p.status, priority = p.priority, account_uuid = p.account_uuid, site_uuid = p.site_uuid,
+            status = p.status, priority = p.priority, customer_uuid = p.customer_uuid, product_uuid = p.product_uuid,
             job_type_uuid = p.job_type_uuid, manager_uuid = p.manager_uuid, engineer_uuid = p.engineer_uuid,
             overdue = p.overdue, uninvoiced = p.uninvoiced, search = p.search,
             page = p.page, per_page = p.per_page, order_by = p.order_by, order_dir = p.order_dir,
