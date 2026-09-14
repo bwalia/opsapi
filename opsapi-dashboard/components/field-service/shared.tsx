@@ -12,18 +12,18 @@ import { usePathname } from 'next/navigation';
 import { ChevronDown } from 'lucide-react';
 import { Modal, Button, Input, Textarea } from '@/components/ui';
 import { cn, extractApiError } from '@/lib/utils';
-import type { FsJob, FsVisit, FsSite, JobPriority, JobStatus, PhaseStatus, VisitStatus, RequestStatus } from '@/services/field-service.service';
+import type { FsJob, FsVisit, JobPriority, JobStatus, PhaseStatus, VisitStatus, RequestStatus } from '@/services/field-service.service';
 
 // ============================================================
 // Sub-navigation
 // ============================================================
 
 const NAV = [
+  { href: '/dashboard/customers', label: 'Customers', match: (p: string) => p.startsWith('/dashboard/customers') },
+  { href: '/dashboard/products', label: 'Products', match: (p: string) => p.startsWith('/dashboard/products') },
   { href: '/dashboard/field-service/requests', label: 'Service Requests', match: (p: string) => p.startsWith('/dashboard/field-service/requests') },
   { href: '/dashboard/field-service', label: 'Jobs', match: (p: string) => p === '/dashboard/field-service' || p.startsWith('/dashboard/field-service/jobs') },
   { href: '/dashboard/field-service/visits', label: 'Site Visits', match: (p: string) => p.startsWith('/dashboard/field-service/visits') },
-  { href: '/dashboard/field-service/sites', label: 'Sites', match: (p: string) => p.startsWith('/dashboard/field-service/sites') },
-  { href: '/dashboard/field-service/assets', label: 'Assets', match: (p: string) => p.startsWith('/dashboard/field-service/assets') },
   { href: '/dashboard/field-service/parts', label: 'Parts', match: (p: string) => p.startsWith('/dashboard/field-service/parts') },
   { href: '/dashboard/field-service/employees', label: 'Employees', match: (p: string) => p.startsWith('/dashboard/field-service/employees') },
   { href: '/dashboard/field-service/job-types', label: 'Job Types', match: (p: string) => p.startsWith('/dashboard/field-service/job-types') },
@@ -357,16 +357,13 @@ type AddressLike = {
   postal_code?: string | null;
 };
 
-export function siteAddressFromJob(job: Pick<FsJob, 'site_address_line1' | 'site_address_line2' | 'site_city' | 'site_postal_code'> | Pick<FsVisit, 'site_address_line1' | 'site_address_line2' | 'site_city' | 'site_postal_code'>): string {
-  return formatAddress({
-    address_line1: job.site_address_line1,
-    address_line2: job.site_address_line2,
-    city: job.site_city,
-    postal_code: job.site_postal_code,
-  });
+export function siteAddressFromJob(
+  job: Pick<FsJob, 'service_address' | 'service_postcode'> | Pick<FsVisit, 'service_address' | 'service_postcode'>
+): string {
+  return [job.service_address, job.service_postcode].filter(Boolean).join(', ');
 }
 
-export function formatAddress(a: AddressLike | FsSite): string {
+export function formatAddress(a: AddressLike): string {
   return [a.address_line1, a.address_line2, a.city, a.postal_code].filter(Boolean).join(', ');
 }
 

@@ -250,7 +250,7 @@ function VisitsPageContent() {
                                 {v.job_number} · {v.job_title}
                               </p>
                               <p className="text-sm text-secondary-600 truncate">
-                                {v.account_name || 'No customer'}
+                                {v.customer_name || 'No customer'}
                                 {v.phase_name ? ` · ${v.phase_name}` : ''}
                               </p>
                             </div>
@@ -260,9 +260,9 @@ function VisitsPageContent() {
                             </div>
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary-500">
-                            {(v.site_postal_code || v.site_city) && (
+                            {(v.service_address || v.service_postcode) && (
                               <span className="inline-flex items-center gap-1">
-                                <MapPin className="w-3 h-3" /> {[v.site_name, v.site_city, v.site_postal_code].filter(Boolean).join(', ')}
+                                <MapPin className="w-3 h-3" /> {[v.service_address, v.service_postcode].filter(Boolean).join(', ')}
                               </span>
                             )}
                             <span className={cn('inline-flex items-center gap-1', !v.engineer_name && 'text-amber-600')}>

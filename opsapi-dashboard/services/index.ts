@@ -142,7 +142,6 @@ export {
   type FsJobItem,
   type FsJobType,
   type FsPhaseTemplate,
-  type FsSite,
   type FsEngineer,
   type FsStats,
   type FsInvoicePreview,

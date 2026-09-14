@@ -104,27 +104,16 @@ export interface FsJob {
   job_type_name?: string | null;
   job_type_color?: string | null;
   job_type_hourly_rate?: number | null;
-  account_uuid?: string | null;
-  account_name?: string | null;
-  account_email?: string | null;
-  account_phone?: string | null;
-  contact_uuid?: string | null;
-  contact_name?: string | null;
-  contact_email?: string | null;
-  contact_phone?: string | null;
-  site_uuid?: string | null;
-  site_name?: string | null;
-  site_address_line1?: string | null;
-  site_address_line2?: string | null;
-  site_city?: string | null;
-  site_county?: string | null;
-  site_postal_code?: string | null;
-  site_country?: string | null;
-  site_access_notes?: string | null;
-  site_contact_name?: string | null;
-  site_contact_phone?: string | null;
-  site_latitude?: number | null;
-  site_longitude?: number | null;
+  customer_uuid?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  product_uuid?: string | null;
+  product_name?: string | null;
+  product_sku?: string | null;
+  product_ref?: string | null;
+  service_address?: string | null;
+  service_postcode?: string | null;
   invoice_uuid?: string | null;
   invoice_number?: string | null;
   invoice_status?: string | null;
@@ -205,19 +194,15 @@ export interface FsVisit {
   phase_uuid?: string | null;
   phase_name?: string | null;
   phase_status?: PhaseStatus | null;
-  account_uuid?: string | null;
-  account_name?: string | null;
-  site_uuid?: string | null;
-  site_name?: string | null;
-  site_address_line1?: string | null;
-  site_address_line2?: string | null;
-  site_city?: string | null;
-  site_postal_code?: string | null;
-  site_latitude?: number | null;
-  site_longitude?: number | null;
-  site_access_notes?: string | null;
-  site_contact_name?: string | null;
-  site_contact_phone?: string | null;
+  customer_uuid?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  product_uuid?: string | null;
+  product_name?: string | null;
+  product_sku?: string | null;
+  product_ref?: string | null;
+  service_address?: string | null;
+  service_postcode?: string | null;
 }
 
 export type ItemApprovalStatus = 'pending' | 'approved' | 'rejected';
@@ -304,53 +289,11 @@ export interface FsJobType {
   updated_at: string;
 }
 
-export interface FsSite {
-  uuid: string;
-  name: string;
-  account_uuid?: string | null;
-  account_name?: string | null;
-  address_line1?: string | null;
-  address_line2?: string | null;
-  city?: string | null;
-  county?: string | null;
-  postal_code?: string | null;
-  country?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  contact_name?: string | null;
-  contact_phone?: string | null;
-  contact_email?: string | null;
-  access_notes?: string | null;
-  job_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface FsEngineer {
   uuid: string;
   email: string;
   name: string;
   open_visits: number;
-}
-
-export interface FsAccountLookup {
-  uuid: string;
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  address_line1?: string | null;
-  city?: string | null;
-  postal_code?: string | null;
-}
-
-export interface FsContactLookup {
-  uuid: string;
-  first_name: string;
-  last_name?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  account_uuid?: string | null;
-  account_name?: string | null;
 }
 
 export interface FsStats {
@@ -434,8 +377,8 @@ export interface FsPaginated<T> {
 export interface FsJobListParams {
   status?: string;
   priority?: string;
-  account_uuid?: string;
-  site_uuid?: string;
+  customer_uuid?: string;
+  product_uuid?: string;
   job_type_uuid?: string;
   manager_uuid?: string;
   engineer_uuid?: string;
@@ -460,47 +403,6 @@ export interface FsVisitListParams {
   page?: number;
   per_page?: number;
   order_dir?: 'asc' | 'desc';
-}
-
-export interface FsSiteListParams {
-  account_uuid?: string;
-  search?: string;
-  page?: number;
-  per_page?: number;
-}
-
-export type AssetStatus = 'active' | 'inactive' | 'decommissioned';
-
-export interface FsAsset {
-  uuid: string;
-  name: string;
-  asset_tag?: string | null;
-  serial_number?: string | null;
-  category?: string | null;
-  manufacturer?: string | null;
-  model?: string | null;
-  location_detail?: string | null;
-  installed_at?: string | null;
-  warranty_expires_at?: string | null;
-  status: AssetStatus;
-  notes?: string | null;
-  account_uuid?: string | null;
-  account_name?: string | null;
-  site_uuid?: string | null;
-  site_name?: string | null;
-  metadata?: Record<string, unknown> | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface FsAssetListParams {
-  account_uuid?: string;
-  site_uuid?: string;
-  status?: string;
-  category?: string;
-  search?: string;
-  page?: number;
-  per_page?: number;
 }
 
 export interface FsEmployee {
@@ -544,17 +446,16 @@ export interface FsServiceRequest {
   reported_by?: string | null;
   priority: JobPriority;
   status: RequestStatus;
-  account_uuid?: string | null;
-  account_name?: string | null;
-  contact_uuid?: string | null;
-  contact_name?: string | null;
-  contact_email?: string | null;
-  contact_phone?: string | null;
-  site_uuid?: string | null;
-  site_name?: string | null;
-  asset_uuid?: string | null;
-  asset_name?: string | null;
-  asset_serial?: string | null;
+  customer_uuid?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  product_uuid?: string | null;
+  product_name?: string | null;
+  product_sku?: string | null;
+  product_ref?: string | null;
+  service_address?: string | null;
+  service_postcode?: string | null;
   assigned_manager_uuid?: string | null;
   assigned_manager_name?: string | null;
   sla_response_due_at?: string | null;
@@ -563,6 +464,9 @@ export interface FsServiceRequest {
   resolved_at?: string | null;
   closed_at?: string | null;
   resolution_notes?: string | null;
+  response_overdue?: boolean;
+  resolve_overdue?: boolean;
+  sla_breached?: boolean;
   metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -603,9 +507,10 @@ export interface FsConvertResult {
 export interface FsRequestListParams {
   status?: string;
   priority?: string;
-  account_uuid?: string;
-  asset_uuid?: string;
+  customer_uuid?: string;
+  product_uuid?: string;
   manager_uuid?: string;
+  sla?: string;
   search?: string;
   page?: number;
   per_page?: number;
@@ -679,18 +584,6 @@ export const fieldService = {
     return unwrap<FsEngineer[]>(await apiClient.get(`${BASE}/engineers${qs({ search })}`)) || [];
   },
 
-  async lookupAccounts(search?: string): Promise<FsAccountLookup[]> {
-    return unwrap<FsAccountLookup[]>(await apiClient.get(`${BASE}/lookups/accounts${qs({ search })}`)) || [];
-  },
-
-  async lookupContacts(accountUuid?: string, search?: string): Promise<FsContactLookup[]> {
-    return (
-      unwrap<FsContactLookup[]>(
-        await apiClient.get(`${BASE}/lookups/contacts${qs({ account_uuid: accountUuid, search })}`)
-      ) || []
-    );
-  },
-
   // ---------------- Job types & phase templates ----------------
   async getJobTypes(opts: { includeInactive?: boolean; withPhases?: boolean } = {}): Promise<FsJobType[]> {
     const q = qs({ include_inactive: opts.includeInactive, with_phases: opts.withPhases });
@@ -729,48 +622,6 @@ export const fieldService = {
 
   async deletePhaseTemplate(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/phase-templates/${uuid}`);
-  },
-
-  // ---------------- Sites ----------------
-  async getSites(params: FsSiteListParams = {}): Promise<FsPaginated<FsSite>> {
-    return paginated<FsSite>(await apiClient.get(`${BASE}/sites${qs(params)}`));
-  },
-
-  async getSite(uuid: string): Promise<FsSite> {
-    return unwrap<FsSite>(await apiClient.get(`${BASE}/sites/${uuid}`));
-  },
-
-  async createSite(data: FsPayload): Promise<FsSite> {
-    return unwrap<FsSite>(await apiClient.post(`${BASE}/sites`, data, JSON_BODY));
-  },
-
-  async updateSite(uuid: string, data: FsPayload): Promise<FsSite> {
-    return unwrap<FsSite>(await apiClient.put(`${BASE}/sites/${uuid}`, data, JSON_BODY));
-  },
-
-  async deleteSite(uuid: string): Promise<void> {
-    await apiClient.delete(`${BASE}/sites/${uuid}`);
-  },
-
-  // ---------------- Assets ----------------
-  async getAssets(params: FsAssetListParams = {}): Promise<FsPaginated<FsAsset>> {
-    return paginated<FsAsset>(await apiClient.get(`${BASE}/assets${qs(params)}`));
-  },
-
-  async getAsset(uuid: string): Promise<FsAsset> {
-    return unwrap<FsAsset>(await apiClient.get(`${BASE}/assets/${uuid}`));
-  },
-
-  async createAsset(data: FsPayload): Promise<FsAsset> {
-    return unwrap<FsAsset>(await apiClient.post(`${BASE}/assets`, data, JSON_BODY));
-  },
-
-  async updateAsset(uuid: string, data: FsPayload): Promise<FsAsset> {
-    return unwrap<FsAsset>(await apiClient.put(`${BASE}/assets/${uuid}`, data, JSON_BODY));
-  },
-
-  async deleteAsset(uuid: string): Promise<void> {
-    await apiClient.delete(`${BASE}/assets/${uuid}`);
   },
 
   // ---------------- Employees ----------------

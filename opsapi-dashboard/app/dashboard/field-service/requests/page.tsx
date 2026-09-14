@@ -10,12 +10,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { ClipboardList, Pencil, Plus, Search, Trash2, Building2, Package } from 'lucide-react';
-import { Input, Table, Pagination, Card, Button, ConfirmDialog, SearchableSelect } from '@/components/ui';
+import { ClipboardList, Pencil, Plus, Search, Trash2, Building2, Package, AlertTriangle } from 'lucide-react';
+import { Input, Table, Pagination, Card, Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { fieldService, formatFsDate, type FsAccountLookup, type FsServiceRequest } from '@/services/field-service.service';
+import { fieldService, formatFsDate, type FsServiceRequest } from '@/services/field-service.service';
 import {
   FieldServiceNav,
   FilterSelect,
@@ -30,18 +30,21 @@ import type { TableColumn } from '@/types';
 
 const PER_PAGE = 20;
 const PRIORITY_FILTER = [{ value: 'all', label: 'All priorities' }, ...PRIORITY_OPTIONS];
+const SLA_FILTER = [
+  { value: 'all', label: 'All SLAs' },
+  { value: 'breached', label: 'SLA breached' },
+];
 
 function RequestsPageContent() {
   const router = useRouter();
   const { canCreate, canUpdate, canDelete } = usePermissions();
   const [requests, setRequests] = useState<FsServiceRequest[]>([]);
-  const [accounts, setAccounts] = useState<FsAccountLookup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('open');
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [accountFilter, setAccountFilter] = useState('');
+  const [slaFilter, setSlaFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -59,10 +62,6 @@ function RequestsPageContent() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  useEffect(() => {
-    fieldService.lookupAccounts().then(setAccounts).catch(() => setAccounts([]));
-  }, []);
-
   const fetchRequests = useCallback(async () => {
     const id = ++fetchIdRef.current;
     setIsLoading(true);
@@ -73,7 +72,7 @@ function RequestsPageContent() {
         search: debouncedSearch || undefined,
         status: statusFilter === 'all' ? undefined : statusFilter,
         priority: priorityFilter === 'all' ? undefined : priorityFilter,
-        account_uuid: accountFilter || undefined,
+        sla: slaFilter === 'breached' ? 'breached' : undefined,
       });
       if (id === fetchIdRef.current) {
         setRequests(res.data);
@@ -85,7 +84,7 @@ function RequestsPageContent() {
     } finally {
       if (id === fetchIdRef.current) setIsLoading(false);
     }
-  }, [currentPage, debouncedSearch, statusFilter, priorityFilter, accountFilter]);
+  }, [currentPage, debouncedSearch, statusFilter, priorityFilter, slaFilter]);
 
   useEffect(() => {
     fetchRequests();
@@ -106,7 +105,6 @@ function RequestsPageContent() {
     }
   };
 
-  const accountOptions = useMemo(() => accounts.map((a) => ({ value: a.uuid, label: a.name })), [accounts]);
   const allowEdit = canUpdate('fs_service_requests');
   const allowDelete = canDelete('fs_service_requests');
 
@@ -129,21 +127,21 @@ function RequestsPageContent() {
       },
       {
         key: 'customer',
-        header: 'Customer / asset',
+        header: 'Customer / product',
         render: (r) => (
           <div className="text-sm">
             <p className="text-secondary-800 flex items-center gap-1">
-              {r.account_name ? (
+              {r.customer_name ? (
                 <>
-                  <Building2 className="w-3 h-3 text-secondary-400" /> {r.account_name}
+                  <Building2 className="w-3 h-3 text-secondary-400" /> {r.customer_name}
                 </>
               ) : (
                 <span className="text-secondary-400">—</span>
               )}
             </p>
-            {r.asset_name && (
+            {r.product_name && (
               <p className="text-xs text-secondary-500 flex items-center gap-1">
-                <Package className="w-3 h-3" /> {r.asset_name}
+                <Package className="w-3 h-3" /> {r.product_name}
               </p>
             )}
           </div>
@@ -157,7 +155,19 @@ function RequestsPageContent() {
       {
         key: 'status',
         header: 'Status',
-        render: (r) => <RequestStatusPill status={r.status} />,
+        render: (r) => (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <RequestStatusPill status={r.status} />
+            {r.sla_breached && (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700"
+                title="SLA breached"
+              >
+                <AlertTriangle className="w-3 h-3" /> Overdue
+              </span>
+            )}
+          </div>
+        ),
       },
       {
         key: 'manager',
@@ -264,18 +274,15 @@ function RequestsPageContent() {
             options={PRIORITY_FILTER}
             ariaLabel="Filter by priority"
           />
-          <div className="w-full sm:w-64">
-            <SearchableSelect
-              options={accountOptions}
-              value={accountFilter}
-              onChange={(v) => {
-                setAccountFilter(v);
-                setCurrentPage(1);
-              }}
-              placeholder="All customers"
-              clearable
-            />
-          </div>
+          <FilterSelect
+            value={slaFilter}
+            onChange={(v) => {
+              setSlaFilter(v);
+              setCurrentPage(1);
+            }}
+            options={SLA_FILTER}
+            ariaLabel="Filter by SLA"
+          />
         </div>
       </Card>
 

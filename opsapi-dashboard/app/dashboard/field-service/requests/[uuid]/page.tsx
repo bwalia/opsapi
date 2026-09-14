@@ -126,34 +126,44 @@ function NotesModal({
   onClose: () => void;
   onSubmit: (notes: string) => void;
 }) {
-  const [notes, setNotes] = useState('');
-  useEffect(() => {
-    if (status) setNotes('');
-  }, [status]);
   const label = status ? REQUEST_TRANSITION_LABELS[status] : '';
   return (
     <Modal isOpen={!!status} onClose={onClose} title={label} size="sm">
-      {!!status && (
-        <div className="space-y-4">
-          <label className="block">
-            <span className="text-sm font-medium text-secondary-700">Notes (optional)</span>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-secondary-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-              placeholder="What was done / why?"
-            />
-          </label>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={() => onSubmit(notes.trim())}>{label}</Button>
-          </div>
-        </div>
-      )}
+      {/* Mounted only while open so the field starts fresh each time. */}
+      {!!status && <NotesForm label={label} onClose={onClose} onSubmit={onSubmit} />}
     </Modal>
+  );
+}
+
+function NotesForm({
+  label,
+  onClose,
+  onSubmit,
+}: {
+  label: string;
+  onClose: () => void;
+  onSubmit: (notes: string) => void;
+}) {
+  const [notes, setNotes] = useState('');
+  return (
+    <div className="space-y-4">
+      <label className="block">
+        <span className="text-sm font-medium text-secondary-700">Notes (optional)</span>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          className="mt-1 w-full rounded-lg border border-secondary-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+          placeholder="What was done / why?"
+        />
+      </label>
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={() => onSubmit(notes.trim())}>{label}</Button>
+      </div>
+    </div>
   );
 }
 
@@ -335,29 +345,29 @@ function RequestDetailContent() {
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <InfoRow icon={<Building2 className="w-4 h-4" />} label="Customer">
-                {req.account_name || '—'}
-              </InfoRow>
-              <InfoRow icon={<User className="w-4 h-4" />} label="Reported by">
-                {req.contact_name || req.reported_by || '—'}
-                {req.contact_phone && (
-                  <a href={`tel:${req.contact_phone}`} className="ml-2 text-primary-600 hover:underline">
-                    <Phone className="w-3 h-3 inline" /> {req.contact_phone}
+                {req.customer_name || '—'}
+                {req.customer_phone && (
+                  <a href={`tel:${req.customer_phone}`} className="ml-2 text-primary-600 hover:underline">
+                    <Phone className="w-3 h-3 inline" /> {req.customer_phone}
                   </a>
                 )}
-                {req.contact_email && (
-                  <a href={`mailto:${req.contact_email}`} className="ml-2 text-primary-600 hover:underline">
+                {req.customer_email && (
+                  <a href={`mailto:${req.customer_email}`} className="ml-2 text-primary-600 hover:underline">
                     <Mail className="w-3 h-3 inline" />
                   </a>
                 )}
               </InfoRow>
-              <InfoRow icon={<MapPin className="w-4 h-4" />} label="Site">
-                {req.site_name || '—'}
+              <InfoRow icon={<User className="w-4 h-4" />} label="Reported by">
+                {req.reported_by || req.customer_name || '—'}
               </InfoRow>
-              <InfoRow icon={<Package className="w-4 h-4" />} label="Faulty asset">
-                {req.asset_name ? (
+              <InfoRow icon={<MapPin className="w-4 h-4" />} label="Service address">
+                {[req.service_address, req.service_postcode].filter(Boolean).join(', ') || '—'}
+              </InfoRow>
+              <InfoRow icon={<Package className="w-4 h-4" />} label="Product">
+                {req.product_name ? (
                   <>
-                    {req.asset_name}
-                    {req.asset_serial && <span className="text-secondary-500"> · {req.asset_serial}</span>}
+                    {req.product_name}
+                    {req.product_ref && <span className="text-secondary-500"> · {req.product_ref}</span>}
                   </>
                 ) : (
                   '—'
@@ -371,12 +381,18 @@ function RequestDetailContent() {
               </InfoRow>
               {req.sla_response_due_at && (
                 <InfoRow icon={<Phone className="w-4 h-4" />} label="Respond by">
-                  {formatFsDateTime(req.sla_response_due_at)}
+                  <span className={req.response_overdue ? 'text-red-600 font-medium' : ''}>
+                    {formatFsDateTime(req.sla_response_due_at)}
+                    {req.response_overdue ? ' · Overdue' : ''}
+                  </span>
                 </InfoRow>
               )}
               {req.sla_resolve_due_at && (
                 <InfoRow icon={<Wrench className="w-4 h-4" />} label="Resolve by">
-                  {formatFsDateTime(req.sla_resolve_due_at)}
+                  <span className={req.resolve_overdue ? 'text-red-600 font-medium' : ''}>
+                    {formatFsDateTime(req.sla_resolve_due_at)}
+                    {req.resolve_overdue ? ' · Overdue' : ''}
+                  </span>
                 </InfoRow>
               )}
             </div>

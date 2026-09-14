@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Building2, Loader2, MapPin, Pencil, Phone, Trash2, User, Wrench, Mail, CalendarDays, Hash } from 'lucide-react';
+import { ArrowLeft, Building2, Loader2, MapPin, Pencil, Phone, Trash2, Wrench, Mail, CalendarDays, Hash, Package } from 'lucide-react';
 import { Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -127,7 +127,7 @@ function JobDetailContent() {
   const canManage = canUpdate('fs_jobs');
   const editable = job.status !== 'completed' && job.status !== 'cancelled';
   const address = siteAddressFromJob(job);
-  const maps = mapsUrl(address, job.site_latitude, job.site_longitude);
+  const maps = mapsUrl(address);
   const transitions = TRANSITION_ORDER.filter((s) => job.allowed_transitions.includes(s));
 
   return (
@@ -192,42 +192,37 @@ function JobDetailContent() {
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-secondary-500 mb-1">Customer</p>
             <p className="flex items-center gap-1.5 text-secondary-900">
-              <Building2 className="w-4 h-4 text-secondary-400" /> {job.account_name || '—'}
+              <Building2 className="w-4 h-4 text-secondary-400" /> {job.customer_name || '—'}
             </p>
-            {job.contact_name && (
-              <p className="flex items-center gap-1.5 text-secondary-600 mt-1">
-                <User className="w-4 h-4 text-secondary-400" /> {job.contact_name}
-              </p>
-            )}
-            {(job.contact_phone || job.account_phone) && (
-              <a href={`tel:${job.contact_phone || job.account_phone}`} className="flex items-center gap-1.5 text-primary-600 mt-1 hover:underline">
-                <Phone className="w-4 h-4" /> {job.contact_phone || job.account_phone}
+            {job.customer_phone && (
+              <a href={`tel:${job.customer_phone}`} className="flex items-center gap-1.5 text-primary-600 mt-1 hover:underline">
+                <Phone className="w-4 h-4" /> {job.customer_phone}
               </a>
             )}
-            {(job.contact_email || job.account_email) && (
-              <a href={`mailto:${job.contact_email || job.account_email}`} className="flex items-center gap-1.5 text-primary-600 mt-1 hover:underline break-all">
-                <Mail className="w-4 h-4 shrink-0" /> {job.contact_email || job.account_email}
+            {job.customer_email && (
+              <a href={`mailto:${job.customer_email}`} className="flex items-center gap-1.5 text-primary-600 mt-1 hover:underline break-all">
+                <Mail className="w-4 h-4 shrink-0" /> {job.customer_email}
               </a>
             )}
           </div>
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-secondary-500 mb-1">Site</p>
-            {job.site_name || address ? (
-              <>
-                <p className="text-secondary-900">{job.site_name}</p>
-                {address &&
-                  (maps ? (
-                    <a href={maps} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1.5 text-primary-600 hover:underline mt-1">
-                      <MapPin className="w-4 h-4 mt-0.5 shrink-0" /> {address}
-                    </a>
-                  ) : (
-                    <p className="text-secondary-600">{address}</p>
-                  ))}
-                {job.site_access_notes && <p className="text-xs text-secondary-500 mt-1">Access: {job.site_access_notes}</p>}
-              </>
+            <p className="text-xs font-medium uppercase tracking-wide text-secondary-500 mb-1">Product / address</p>
+            {job.product_name ? (
+              <p className="flex items-center gap-1.5 text-secondary-900">
+                <Package className="w-4 h-4 text-secondary-400" /> {job.product_name}
+              </p>
             ) : (
-              <p className="text-secondary-400">No site</p>
+              <p className="text-secondary-400">—</p>
             )}
+            {job.product_ref && <p className="text-xs text-secondary-500 mt-1">Ref: {job.product_ref}</p>}
+            {address &&
+              (maps ? (
+                <a href={maps} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1.5 text-primary-600 hover:underline mt-1">
+                  <MapPin className="w-4 h-4 mt-0.5 shrink-0" /> {address}
+                </a>
+              ) : (
+                <p className="text-secondary-600 mt-1">{address}</p>
+              ))}
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-secondary-500 mb-1">Service manager</p>

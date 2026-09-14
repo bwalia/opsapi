@@ -18,7 +18,7 @@ import {
   CheckCircle2,
   ClipboardList,
   DoorClosed,
-  KeyRound,
+  Package,
   Loader2,
   LogIn,
   LogOut,
@@ -126,7 +126,7 @@ function VisitDetailContent() {
   const canWork = isAssigned || canUpdate('fs_visits');
   const jobOpen = visit.job_status !== 'completed' && visit.job_status !== 'cancelled';
   const address = siteAddressFromJob(visit);
-  const maps = mapsUrl(address, visit.site_latitude, visit.site_longitude);
+  const maps = mapsUrl(address);
   const s = visit.status;
 
   return (
@@ -231,10 +231,15 @@ function VisitDetailContent() {
       </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <SectionCard title="Site">
+        <SectionCard title="Customer & site">
           <div className="space-y-2 text-sm">
-            <p className="font-medium text-secondary-900">{visit.account_name || 'No customer'}</p>
-            {visit.site_name && <p className="text-secondary-700">{visit.site_name}</p>}
+            <p className="font-medium text-secondary-900">{visit.customer_name || 'No customer'}</p>
+            {visit.product_name && (
+              <p className="text-secondary-700 flex items-center gap-1.5">
+                <Package className="w-4 h-4 text-secondary-400" /> {visit.product_name}
+                {visit.product_ref && <span className="text-secondary-500"> · {visit.product_ref}</span>}
+              </p>
+            )}
             {address ? (
               maps ? (
                 <a href={maps} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1.5 text-primary-600 hover:underline">
@@ -246,19 +251,12 @@ function VisitDetailContent() {
             ) : (
               <p className="text-secondary-400">No site address</p>
             )}
-            {(visit.site_contact_name || visit.site_contact_phone) && (
+            {visit.customer_phone && (
               <p className="flex items-center gap-1.5 text-secondary-700">
-                <User className="w-4 h-4 text-secondary-400" /> {visit.site_contact_name}
-                {visit.site_contact_phone && (
-                  <a href={`tel:${visit.site_contact_phone}`} className="ml-1 inline-flex items-center gap-1 text-primary-600 hover:underline">
-                    <Phone className="w-3.5 h-3.5" /> {visit.site_contact_phone}
-                  </a>
-                )}
-              </p>
-            )}
-            {visit.site_access_notes && (
-              <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 text-amber-800 p-2.5">
-                <KeyRound className="w-4 h-4 mt-0.5 shrink-0" /> {visit.site_access_notes}
+                <User className="w-4 h-4 text-secondary-400" />
+                <a href={`tel:${visit.customer_phone}`} className="inline-flex items-center gap-1 text-primary-600 hover:underline">
+                  <Phone className="w-3.5 h-3.5" /> {visit.customer_phone}
+                </a>
               </p>
             )}
           </div>

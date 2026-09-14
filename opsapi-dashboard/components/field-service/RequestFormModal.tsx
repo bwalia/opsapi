@@ -7,14 +7,13 @@ import {
   fieldService,
   toApiDateTime,
   toLocalInputValue,
-  type FsAccountLookup,
-  type FsAsset,
-  type FsContactLookup,
   type FsServiceRequest,
-  type FsSite,
   type JobPriority,
   type RequestChannel,
 } from '@/services/field-service.service';
+import { customersService } from '@/services/customers.service';
+import { productsService } from '@/services/products.service';
+import type { Customer, StoreProduct } from '@/types';
 import { apiError, optional, PRIORITY_OPTIONS, CHANNEL_LABELS } from './shared';
 
 interface RequestFormModalProps {
@@ -29,6 +28,10 @@ const CHANNEL_OPTIONS = (Object.keys(CHANNEL_LABELS) as RequestChannel[]).map((c
   label: CHANNEL_LABELS[c],
 }));
 
+function customerLabel(c: Customer): string {
+  return `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.email;
+}
+
 const EMPTY = {
   title: '',
   description: '',
@@ -36,10 +39,11 @@ const EMPTY = {
   channel: 'phone' as RequestChannel,
   fault_category: '',
   reported_by: '',
-  account_uuid: '',
-  contact_uuid: '',
-  site_uuid: '',
-  asset_uuid: '',
+  customer_uuid: '',
+  product_uuid: '',
+  product_ref: '',
+  service_address: '',
+  service_postcode: '',
   sla_response_due_at: '',
   sla_resolve_due_at: '',
 };
@@ -55,10 +59,11 @@ function formFromRequest(r?: FsServiceRequest | null): RequestForm {
     channel: r.channel || 'phone',
     fault_category: r.fault_category || '',
     reported_by: r.reported_by || '',
-    account_uuid: r.account_uuid || '',
-    contact_uuid: r.contact_uuid || '',
-    site_uuid: r.site_uuid || '',
-    asset_uuid: r.asset_uuid || '',
+    customer_uuid: r.customer_uuid || '',
+    product_uuid: r.product_uuid || '',
+    product_ref: r.product_ref || '',
+    service_address: r.service_address || '',
+    service_postcode: r.service_postcode || '',
     sla_response_due_at: toLocalInputValue(r.sla_response_due_at),
     sla_resolve_due_at: toLocalInputValue(r.sla_resolve_due_at),
   };
@@ -75,42 +80,23 @@ export function RequestFormModal(props: RequestFormModalProps) {
 
 function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
   const [form, setForm] = useState<RequestForm>(() => formFromRequest(request));
-  const [accounts, setAccounts] = useState<FsAccountLookup[]>([]);
-  const [contacts, setContacts] = useState<FsContactLookup[]>([]);
-  const [sites, setSites] = useState<FsSite[]>([]);
-  const [assets, setAssets] = useState<FsAsset[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<StoreProduct[]>([]);
   const [saving, setSaving] = useState(false);
   const isEdit = !!request;
 
   useEffect(() => {
-    fieldService.lookupAccounts().then(setAccounts).catch(() => setAccounts([]));
-    fieldService.lookupContacts().then(setContacts).catch(() => setContacts([]));
-    fieldService.getSites({ per_page: 200 }).then((r) => setSites(r.data)).catch(() => setSites([]));
-    fieldService.getAssets({ per_page: 200 }).then((r) => setAssets(r.data)).catch(() => setAssets([]));
+    customersService.getCustomers({ perPage: 200 }).then((r) => setCustomers(r.data || [])).catch(() => setCustomers([]));
+    productsService.getStoreProducts({ perPage: 200 }).then((r) => setProducts(r.data || [])).catch(() => setProducts([]));
   }, []);
 
-  const accountOptions = useMemo(() => accounts.map((a) => ({ value: a.uuid, label: a.name })), [accounts]);
-  // Related pickers narrow to the chosen customer (or show all when none is set).
-  const contactOptions = useMemo(
-    () =>
-      contacts
-        .filter((c) => !form.account_uuid || c.account_uuid === form.account_uuid)
-        .map((c) => ({ value: c.uuid, label: `${c.first_name} ${c.last_name || ''}`.trim(), hint: c.email || undefined })),
-    [contacts, form.account_uuid]
+  const customerOptions = useMemo(
+    () => customers.map((c) => ({ value: c.uuid, label: customerLabel(c), hint: c.email || undefined })),
+    [customers]
   );
-  const siteOptions = useMemo(
-    () =>
-      sites
-        .filter((s) => !form.account_uuid || s.account_uuid === form.account_uuid)
-        .map((s) => ({ value: s.uuid, label: s.name, hint: s.city || s.postal_code || undefined })),
-    [sites, form.account_uuid]
-  );
-  const assetOptions = useMemo(
-    () =>
-      assets
-        .filter((a) => !form.account_uuid || a.account_uuid === form.account_uuid)
-        .map((a) => ({ value: a.uuid, label: a.name, hint: a.serial_number || a.category || undefined })),
-    [assets, form.account_uuid]
+  const productOptions = useMemo(
+    () => products.map((p) => ({ value: p.uuid, label: p.name, hint: p.sku || undefined })),
+    [products]
   );
 
   const set = (key: keyof RequestForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -130,10 +116,11 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
       description: isEdit ? form.description.trim() : optional(form.description),
       fault_category: isEdit ? form.fault_category.trim() : optional(form.fault_category),
       reported_by: isEdit ? form.reported_by.trim() : optional(form.reported_by),
-      account_uuid: form.account_uuid || (isEdit ? '' : undefined),
-      contact_uuid: form.contact_uuid || (isEdit ? '' : undefined),
-      site_uuid: form.site_uuid || (isEdit ? '' : undefined),
-      asset_uuid: form.asset_uuid || (isEdit ? '' : undefined),
+      product_ref: isEdit ? form.product_ref.trim() : optional(form.product_ref),
+      service_address: isEdit ? form.service_address.trim() : optional(form.service_address),
+      service_postcode: isEdit ? form.service_postcode.trim() : optional(form.service_postcode),
+      customer_uuid: form.customer_uuid || (isEdit ? '' : undefined),
+      product_uuid: form.product_uuid || (isEdit ? '' : undefined),
       sla_response_due_at: form.sla_response_due_at ? toApiDateTime(form.sla_response_due_at) : (isEdit ? '' : undefined),
       sla_resolve_due_at: form.sla_resolve_due_at ? toApiDateTime(form.sla_resolve_due_at) : (isEdit ? '' : undefined),
     };
@@ -157,7 +144,7 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
         label="What's the problem? *"
         value={form.title}
         onChange={set('title')}
-        placeholder="e.g. AC not cooling in Ward 5"
+        placeholder="e.g. AC not cooling"
       />
       <Textarea
         label="Details"
@@ -167,6 +154,23 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
         rows={3}
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <SearchableSelect
+          label="Customer"
+          options={customerOptions}
+          value={form.customer_uuid}
+          onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v }))}
+          placeholder="No customer"
+          clearable
+        />
+        <SearchableSelect
+          label="Product (the faulty item)"
+          options={productOptions}
+          value={form.product_uuid}
+          onChange={(v) => setForm((f) => ({ ...f, product_uuid: v }))}
+          placeholder="No product"
+          clearable
+        />
+        <Input label="Unit serial / reference" value={form.product_ref} onChange={set('product_ref')} />
         <SearchableSelect
           label="Priority"
           options={PRIORITY_OPTIONS}
@@ -182,57 +186,19 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
           placeholder="Channel"
         />
         <Input label="Fault category" value={form.fault_category} onChange={set('fault_category')} placeholder="e.g. no_cooling" />
-        <Input label="Reported by" value={form.reported_by} onChange={set('reported_by')} placeholder="Caller's name" />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <SearchableSelect
-          label="Customer"
-          options={accountOptions}
-          value={form.account_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, account_uuid: v, contact_uuid: '', site_uuid: '', asset_uuid: '' }))}
-          placeholder="No customer"
-          clearable
-        />
-        <SearchableSelect
-          label="Contact"
-          options={contactOptions}
-          value={form.contact_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, contact_uuid: v }))}
-          placeholder="Who called"
-          clearable
-        />
-        <SearchableSelect
-          label="Site"
-          options={siteOptions}
-          value={form.site_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, site_uuid: v }))}
-          placeholder="No site"
-          clearable
-        />
-        <SearchableSelect
-          label="Faulty asset"
-          options={assetOptions}
-          value={form.asset_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, asset_uuid: v }))}
-          placeholder="No asset"
-          clearable
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="sm:col-span-2">
+          <Input label="Service address" value={form.service_address} onChange={set('service_address')} placeholder="Where the engineer visits" />
+        </div>
+        <Input label="Postcode" value={form.service_postcode} onChange={set('service_postcode')} />
       </div>
+      <Input label="Reported by" value={form.reported_by} onChange={set('reported_by')} placeholder="Caller's name" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Input
-          label="Respond by (SLA)"
-          type="datetime-local"
-          value={form.sla_response_due_at}
-          onChange={set('sla_response_due_at')}
-        />
-        <Input
-          label="Resolve by (SLA)"
-          type="datetime-local"
-          value={form.sla_resolve_due_at}
-          onChange={set('sla_resolve_due_at')}
-        />
+        <Input label="Respond by (SLA)" type="datetime-local" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
+        <Input label="Resolve by (SLA)" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
       </div>
 
       <div className="flex justify-end gap-2">
