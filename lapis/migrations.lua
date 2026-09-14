@@ -616,12 +616,35 @@ local _migrations = {
             null = true
         }) }, "PRIMARY KEY (id)", "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
             "FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE" })
-        local roleExists = db.select("id from user__roles where role_id = ? and user_id = ?", 1, 1)
+        -- Link the platform super-admin to the `administrative` role.
+        --
+        -- Both ids are resolved by name rather than assumed to be 1/1: the
+        -- admin row is only seeded by 01_create_users when ADMIN_EMAIL +
+        -- ADMIN_PASSWORD are supplied (Vault in k8s, .env in docker-compose),
+        -- so on a fresh database without them there is no user to link. A
+        -- hardcoded user_id = 1 then violates user__roles_user_id_fkey and
+        -- aborts the whole migration run. Resolving by name also survives a
+        -- restored database where the admin didn't land on id 1.
+        --
+        -- On k8s the setup-namespace job creates the admin afterwards and
+        -- assigns its roles itself, so skipping here costs nothing.
+        local adminUser = db.select("id from users where username = ?", "administrative")
+        local adminRole = db.select("id from roles where role_name = ?", "administrative")
+        if not adminUser or #adminUser == 0 or not adminRole or #adminRole == 0 then
+            print("[Migration 02create_user__roles] no `administrative` user/role to link — skipping admin role assignment.")
+            return
+        end
+
+        local admin_user_id = adminUser[1].id
+        local admin_role_id = adminRole[1].id
+        local roleExists = db.select("id from user__roles where role_id = ? and user_id = ?", admin_role_id,
+            admin_user_id)
         if not roleExists or #roleExists == 0 then
             db.query([[
         INSERT INTO user__roles (uuid, role_id, user_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
-      ]], MigrationUtils.generateUUID(), 1, 1, MigrationUtils.getCurrentTimestamp(), MigrationUtils.getCurrentTimestamp())
+      ]], MigrationUtils.generateUUID(), admin_role_id, admin_user_id, MigrationUtils.getCurrentTimestamp(),
+                MigrationUtils.getCurrentTimestamp())
         end
     end,
 
