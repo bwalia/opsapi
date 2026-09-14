@@ -66,7 +66,10 @@ return function(app)
         if not self.current_user then return false end
         if not product.store_id then return false end
 
-        local store = StoreQueries.show(product.store_id)
+        -- product.store_id is the numeric FK; StoreQueries.show looks up by uuid,
+        -- so find the store by primary key instead (we only need its owner).
+        local StoreModel = require("models.StoreModel")
+        local store = StoreModel:find(product.store_id)
         if not store then return false end
 
         local UserQueries = require("queries.UserQueries")
@@ -155,7 +158,6 @@ return function(app)
             end
 
             params.namespace_id = self.namespace.id
-            params.created_by = self.current_user.uuid
 
             ngx.log(ngx.NOTICE, "Creating product in namespace: ", self.namespace.slug)
 
@@ -201,7 +203,6 @@ return function(app)
             end
 
             local params = RequestParser.parse_request(self)
-            params.updated_by = self.current_user.uuid
 
             local ok2, updated = pcall(StoreproductQueries.update, product_id, params)
 
