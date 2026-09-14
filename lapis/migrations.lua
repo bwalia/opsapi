@@ -27,9 +27,6 @@ MigrationTracker.init(ProjectConfig.getProjectCode(), ProjectConfig.getEnabledFe
 
 -- Dry-run mode is handled after building the migrations table (see end of file)
 
--- Default admin password - CHANGE THIS AFTER FIRST LOGIN
-local DEFAULT_ADMIN_PASSWORD = "DiyReturn@1990"
-
 -- =============================================================================
 -- CONDITIONAL MIGRATION LOADERS
 -- =============================================================================
@@ -507,14 +504,33 @@ local _migrations = {
         }) }, { "updated_at", types.time({
             null = true
         }) }, "PRIMARY KEY (id)" })
+        -- Seed the platform super-admin from ADMIN_EMAIL + ADMIN_PASSWORD.
+        -- Both come from the environment — Vault (via ExternalSecret) in
+        -- k8s, .env in docker-compose — with NO hardcoded defaults. If
+        -- either is missing we skip the seed cleanly rather than falling
+        -- back to a well-known credential. On k8s the setup-namespace-job
+        -- runs afterwards and creates the same row idempotently, so this
+        -- insert is really only load-bearing for docker-compose envs that
+        -- don't run that job.
+        --
+        -- The `administrative` username is a non-secret internal lookup
+        -- key used by other bootstrap migrations (namespace-system,
+        -- academy-system) and by setup-namespace to resolve the platform
+        -- admin. Kept stable across envs on purpose.
+        local admin_email = os.getenv("ADMIN_EMAIL")
+        local admin_password = os.getenv("ADMIN_PASSWORD")
+        if not admin_email or admin_email == "" or not admin_password or admin_password == "" then
+            print("[Migration 01_create_users] ADMIN_EMAIL / ADMIN_PASSWORD not set — skipping admin seed. Set both in .env (docker-compose) or in Vault at secret/diytaxreturnuk/opsapi/<env>/config (k8s).")
+            return
+        end
         local adminExists = db.select("id from users where username = ?", "administrative")
         if not adminExists or #adminExists == 0 then
-            local hashedPassword = MigrationUtils.hashPassword(DEFAULT_ADMIN_PASSWORD)
+            local hashedPassword = MigrationUtils.hashPassword(admin_password)
             db.query([[
         INSERT INTO users (uuid, first_name, last_name, username, password, email, active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ]], MigrationUtils.generateUUID(), "Super", "User", "administrative", hashedPassword,
-                "diytaxreturnmail@gmail.com", true, MigrationUtils.getCurrentTimestamp(),
+                admin_email, true, MigrationUtils.getCurrentTimestamp(),
                 MigrationUtils.getCurrentTimestamp())
         end
     end,

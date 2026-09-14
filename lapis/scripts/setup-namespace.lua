@@ -85,8 +85,12 @@ function SetupNamespace.run(config)
     local MigrationUtils = require("helper.migration-utils")
 
     local project_code = resolve(config, "project_code", "PROJECT_CODE", "all")
-    local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL", "admin@opsapi.com")
-    local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD", "Admin@123")
+    -- Admin creds MUST come from env (Vault in k8s, .env in docker-compose).
+    -- No hardcoded defaults — the sanity checks below fail hard if either
+    -- value is missing, so a deploy without properly-seeded Vault won't
+    -- silently install a well-known admin login.
+    local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL")
+    local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD")
 
     -- Validate project code when run directly with a single code.
     -- Multi-code inputs are handled by runMulti(); if one slips through here, fail fast.
@@ -456,8 +460,10 @@ function SetupNamespace.runMulti(config)
             .. table.concat(all_valid, ", "))
     end
 
-    local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL", "admin@opsapi.com")
-    local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD", "Admin@123")
+    -- Admin creds MUST come from env (Vault in k8s, .env in docker-compose).
+    -- No hardcoded defaults — same rationale as SetupNamespace.run() above.
+    local admin_email = resolve(config, "admin_email", "ADMIN_EMAIL")
+    local admin_password = resolve(config, "admin_password", "ADMIN_PASSWORD")
 
     -- Feature-only codes (e.g. `services`) enable features + run their migrations
     -- but must NOT seed a separate tenant — they are inherited into the primary
