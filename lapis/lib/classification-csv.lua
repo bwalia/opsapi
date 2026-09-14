@@ -82,11 +82,17 @@ local DESC_SYNONYMS = {
     "transaction description", "particulars", "payee", "counter party", "name",
 }
 local AMOUNT_SYNONYMS = { "amount", "value", "transaction amount" }
+-- Longer phrases first. Short tokens like "in"/"out" are exact-match only
+-- (see findBySynonyms) so they do not falsely match "training", "point", etc.
 local DEBIT_SYNONYMS = {
-    "spent", "debit", "debit amount", "money out", "withdrawn", "paid out",
+    "money out", "paid out", "payments out", "payment out",
+    "debit amount", "withdrawals", "withdrawal", "withdrawn",
+    "spent", "debit", "out",
 }
 local CREDIT_SYNONYMS = {
-    "received", "credit", "credit amount", "money in", "paid in",
+    "money in", "paid in", "payments in", "payment in",
+    "credit amount", "deposits", "deposited", "deposit",
+    "received", "credit", "in",
 }
 -- Accountant classification / label columns (training-specific)
 local LABEL_SYNONYMS = {
@@ -94,11 +100,21 @@ local LABEL_SYNONYMS = {
     "category", "classification", "accountant", "label", "mapped category",
 }
 
+--- Prefer exact header matches; substring only for synonyms longer than 3 chars.
 local function findBySynonyms(normalized_headers, synonyms, used)
     for _, syn in ipairs(synonyms) do
         for i, h in ipairs(normalized_headers) do
-            if not used[i] and (h == syn or h:find(syn, 1, true)) then
+            if not used[i] and h == syn then
                 return i
+            end
+        end
+    end
+    for _, syn in ipairs(synonyms) do
+        if #syn > 3 then
+            for i, h in ipairs(normalized_headers) do
+                if not used[i] and h:find(syn, 1, true) then
+                    return i
+                end
             end
         end
     end
