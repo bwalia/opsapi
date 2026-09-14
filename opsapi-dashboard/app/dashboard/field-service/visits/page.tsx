@@ -54,8 +54,10 @@ function dayKey(d: Date): string {
 
 function VisitsPageContent() {
   const router = useRouter();
-  const { canRead } = usePermissions();
-  const canSeeAll = canRead('fs_visits');
+  const { canUpdate } = usePermissions();
+  // Only a dispatcher (can update visits) sees everyone's schedule; an engineer
+  // is scoped to their own, matching the API's list scoping.
+  const canSeeAll = canUpdate('fs_visits');
 
   const [mine, setMine] = useState(!canSeeAll);
   const [range, setRange] = useState<Range>('week');

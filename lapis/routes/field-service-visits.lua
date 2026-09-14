@@ -55,8 +55,9 @@ return function(app)
     app:get("/api/v2/field-service/visits", Http.route(function(self)
         local p = self.params
         local engineer = p.engineer_uuid
-        -- Without fs_visits.read a member only ever sees their own visits.
-        if p.mine == "true" or not Http.has_perm(self, "fs_visits", "read") then
+        -- A caller who can't update visits (an engineer, vs a manager who
+        -- dispatches) only ever sees their own visits.
+        if p.mine == "true" or not Http.has_perm(self, "fs_visits", "update") then
             engineer = Http.actor(self)
         end
         local result = VisitQueries.listVisits(self.namespace.id, {
@@ -73,7 +74,10 @@ return function(app)
         return Http.result(result, err, 201)
     end))
 
-    app:get("/api/v2/field-service/visits/:uuid", with_visit("read", function(self)
+    -- Dispatchers (fs_visits.update) open any visit; an engineer only their own
+    -- (is_assigned). Plain fs_visits.read lists own visits but can't open another
+    -- engineer's by uuid.
+    app:get("/api/v2/field-service/visits/:uuid", with_visit("update", function(self)
         return Http.ok(VisitQueries.getVisit(self.namespace.id, self.params.uuid))
     end))
 
