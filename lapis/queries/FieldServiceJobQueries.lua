@@ -250,10 +250,12 @@ end
 
 local ITEM_SELECT = [[
     SELECT it.*, v.uuid AS visit_uuid, p.uuid AS phase_uuid, p.name AS phase_name,
+        pt.uuid AS part_uuid, pt.name AS part_name,
         ]] .. Common.user_name_sql("cu") .. [[ AS created_by_name
     FROM fs_job_items it
     LEFT JOIN fs_visits v ON v.id = it.visit_id
     LEFT JOIN fs_job_phases p ON p.id = it.phase_id
+    LEFT JOIN fs_parts pt ON pt.id = it.part_id
     LEFT JOIN users cu ON cu.uuid = it.created_by_uuid
 ]]
 
@@ -269,6 +271,11 @@ local function shape_item(it)
         line_total = round2(qty * price),
         is_billable = it.is_billable,
         invoiced = it.invoice_line_item_id ~= nil,
+        approval_status = it.approval_status,
+        approved_at = it.approved_at,
+        rejection_reason = it.rejection_reason,
+        part_uuid = it.part_uuid,
+        part_name = it.part_name,
         visit_uuid = it.visit_uuid,
         phase_uuid = it.phase_uuid,
         phase_name = it.phase_name,
@@ -937,6 +944,13 @@ function JobQueries.addItem(namespace_id, job_uuid, data, actor_uuid)
         fields.phase_id, err = resolve_child("fs_job_phases", namespace_id, data.phase_uuid, job.id, "Phase")
         if not fields.phase_id then return nil, err end
     end
+    if nilify(data.part_uuid) then
+        fields.part_id = Common.resolve_id("fs_parts", namespace_id, data.part_uuid)
+        if not fields.part_id then return nil, "Part not found" end
+    end
+    -- Parts / materials need back-office approval before they can be invoiced;
+    -- labour / expense / other are approved on entry.
+    fields.approval_status = (fields.item_type == "part" or fields.item_type == "material") and "pending" or "approved"
     fields.uuid = Common.uuid()
     fields.namespace_id = namespace_id
     fields.job_id = job.id
@@ -971,6 +985,14 @@ function JobQueries.updateItem(namespace_id, uuid, data, actor_uuid)
             fields.phase_id = db.NULL
         end
     end
+    if data.part_uuid ~= nil then
+        if nilify(data.part_uuid) then
+            fields.part_id = Common.resolve_id("fs_parts", namespace_id, data.part_uuid)
+            if not fields.part_id then return nil, "Part not found" end
+        else
+            fields.part_id = db.NULL
+        end
+    end
     if next(fields) == nil then return nil, "No valid fields to update" end
 
     FsJobItemModel:find(item.id):update(fields)
@@ -985,6 +1007,24 @@ function JobQueries.deleteItem(namespace_id, uuid, actor_uuid)
     db.query("UPDATE fs_job_items SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", item.id)
     Common.log_activity(namespace_id, item.job_id, actor_uuid, "item_removed", "Item removed: " .. item.description)
     return true
+end
+
+--- Manager approval of a job item. Only approved billable items reach an invoice.
+function JobQueries.setItemApproval(namespace_id, uuid, approve, opts, actor_uuid)
+    opts = opts or {}
+    local item = JobQueries.findItemRow(namespace_id, uuid)
+    if not item then return nil, "Item not found" end
+    if item.invoice_line_item_id then return nil, "Item has been invoiced and cannot be changed" end
+
+    FsJobItemModel:find(item.id):update({
+        approval_status = approve and "approved" or "rejected",
+        approved_by_uuid = actor_uuid or db.NULL,
+        approved_at = db.raw("NOW()"),
+        rejection_reason = (not approve) and (nilify(opts.reason) or db.NULL) or db.NULL,
+    })
+    Common.log_activity(namespace_id, item.job_id, actor_uuid, approve and "item_approved" or "item_rejected",
+        (approve and "Approved: " or "Rejected: ") .. item.description)
+    return JobQueries.getItem(namespace_id, uuid)
 end
 
 --------------------------------------------------------------------------------
@@ -1044,6 +1084,7 @@ local function collect_billable(job, opts)
     local items = db.query([[
         SELECT id, uuid, item_type, description, quantity, unit_price, tax_rate FROM fs_job_items
         WHERE job_id = ? AND deleted_at IS NULL AND is_billable = true AND invoice_line_item_id IS NULL
+          AND approval_status = 'approved'
         ORDER BY created_at ASC, id ASC
     ]], job.id)
     for _, it in ipairs(items or {}) do
@@ -1131,16 +1172,20 @@ function JobQueries.createInvoice(namespace_id, job_uuid, actor_uuid, opts)
         return nil, "Only scheduled, in-progress, on-hold or completed jobs can be invoiced"
     end
 
-    local lines, _, missing_rate = collect_billable(job, opts)
-    if #lines == 0 then return nil, "Nothing to invoice — no uninvoiced billable labour or items on this job" end
-    if missing_rate then
-        return nil, "Some labour has no hourly rate — set a rate on the visit, job or job type, or pass hourly_rate"
-    end
-
     local InvoiceQueries = require("queries.InvoiceQueries")
     local customer = customer_details(job)
 
     return Common.transaction(function()
+        -- Lock the job so two concurrent invoicings can't bill the same work twice,
+        -- and collect the billable lines inside the lock so the loser sees nothing.
+        db.query("SELECT id FROM fs_jobs WHERE id = ? FOR UPDATE", job.id)
+        local lines, _, missing_rate = collect_billable(job, opts)
+        if #lines == 0 then
+            return nil, "Nothing to invoice — no uninvoiced billable labour or approved items on this job"
+        end
+        if missing_rate then
+            return nil, "Some labour has no hourly rate — set a rate on the visit, job or job type, or pass hourly_rate"
+        end
         local created = InvoiceQueries.create({
             namespace_id = namespace_id,
             customer_name = customer.name,
@@ -1166,8 +1211,8 @@ function JobQueries.createInvoice(namespace_id, job_uuid, actor_uuid, opts)
                 timesheet_entry_id = l.timesheet_entry_id,
             })
             local tbl = l.source == "visit" and "fs_visits" or "fs_job_items"
-            db.query("UPDATE " .. tbl .. " SET invoice_line_item_id = ?, updated_at = NOW() WHERE id = ?",
-                li.internal_id, l.source_id)
+            db.query("UPDATE " .. tbl .. [[ SET invoice_line_item_id = ?, updated_at = NOW()
+                WHERE id = ? AND invoice_line_item_id IS NULL]], li.internal_id, l.source_id)
         end
 
         db.query("UPDATE fs_jobs SET invoice_id = ?, invoiced_at = NOW(), updated_at = NOW() WHERE id = ?",

@@ -176,6 +176,17 @@ return function(app)
         return Http.ok({ message = "Item removed" })
     end))
 
+    -- Back-office approval of parts before they can be invoiced (manager only).
+    app:post("/api/v2/field-service/job-items/:uuid/approve", Http.guard("fs_jobs", "update", function(self)
+        return Http.result(JobQueries.setItemApproval(self.namespace.id, self.params.uuid, true, Http.body(self),
+            Http.actor(self)))
+    end))
+
+    app:post("/api/v2/field-service/job-items/:uuid/reject", Http.guard("fs_jobs", "update", function(self)
+        return Http.result(JobQueries.setItemApproval(self.namespace.id, self.params.uuid, false, Http.body(self),
+            Http.actor(self)))
+    end))
+
     -- ============================================================
     -- INVOICING
     -- ============================================================

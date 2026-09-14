@@ -360,6 +360,8 @@ local field_service_assets_migrations = load_if_enabled(ProjectConfig.FEATURES.F
 local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets-menu") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
+local field_service_parts_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts") or {}
+local field_service_parts_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts-menu") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -2384,6 +2386,14 @@ local _migrations = {
     ['872_register_fs_requests_module'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 2),
     ['873_grant_fs_requests_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 3),
     ['874_enable_fs_requests_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 4),
+
+    ['875_fs_create_parts'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_migrations, 1),
+    ['876_fs_job_items_add_part_approval'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_migrations, 2),
+    ['877_fs_invoice_line_item_fks'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_migrations, 3),
+    ['878_seed_fs_parts_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 1),
+    ['879_register_fs_parts_module'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 2),
+    ['880_grant_fs_parts_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 3),
+    ['881_enable_fs_parts_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

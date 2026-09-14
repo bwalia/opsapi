@@ -220,6 +220,8 @@ export interface FsVisit {
   site_contact_phone?: string | null;
 }
 
+export type ItemApprovalStatus = 'pending' | 'approved' | 'rejected';
+
 export interface FsJobItem {
   uuid: string;
   item_type: JobItemType;
@@ -230,6 +232,11 @@ export interface FsJobItem {
   line_total: number;
   is_billable: boolean;
   invoiced: boolean;
+  approval_status: ItemApprovalStatus;
+  approved_at?: string | null;
+  rejection_reason?: string | null;
+  part_uuid?: string | null;
+  part_name?: string | null;
   visit_uuid?: string | null;
   phase_uuid?: string | null;
   phase_name?: string | null;
@@ -604,6 +611,32 @@ export interface FsRequestListParams {
   per_page?: number;
 }
 
+export interface FsPart {
+  uuid: string;
+  sku?: string | null;
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  unit_cost?: number | null;
+  unit_price?: number | null;
+  tax_rate: number;
+  stock_quantity?: number | null;
+  reorder_level?: number | null;
+  is_active: boolean;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FsPartListParams {
+  category?: string;
+  is_active?: boolean;
+  include_inactive?: boolean;
+  search?: string;
+  page?: number;
+  per_page?: number;
+}
+
 export type FsPayload = Record<string, unknown>;
 
 // ============================================================
@@ -809,6 +842,31 @@ export const fieldService = {
     await apiClient.delete(`${BASE}/service-requests/${uuid}`);
   },
 
+  // ---------------- Parts catalog ----------------
+  async getParts(params: FsPartListParams = {}): Promise<FsPaginated<FsPart>> {
+    // qs() drops boolean false, so stringify the flags.
+    const q: Record<string, unknown> = { ...params };
+    if (typeof params.is_active === 'boolean') q.is_active = String(params.is_active);
+    if (typeof params.include_inactive === 'boolean') q.include_inactive = String(params.include_inactive);
+    return paginated<FsPart>(await apiClient.get(`${BASE}/parts${qs(q)}`));
+  },
+
+  async getPart(uuid: string): Promise<FsPart> {
+    return unwrap<FsPart>(await apiClient.get(`${BASE}/parts/${uuid}`));
+  },
+
+  async createPart(data: FsPayload): Promise<FsPart> {
+    return unwrap<FsPart>(await apiClient.post(`${BASE}/parts`, data, JSON_BODY));
+  },
+
+  async updatePart(uuid: string, data: FsPayload): Promise<FsPart> {
+    return unwrap<FsPart>(await apiClient.put(`${BASE}/parts/${uuid}`, data, JSON_BODY));
+  },
+
+  async deletePart(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/parts/${uuid}`);
+  },
+
   // ---------------- Jobs ----------------
   async getJobs(params: FsJobListParams = {}): Promise<FsPaginated<FsJob>> {
     return paginated<FsJob>(await apiClient.get(`${BASE}/jobs${qs(params)}`));
@@ -882,6 +940,14 @@ export const fieldService = {
 
   async deleteItem(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/job-items/${uuid}`);
+  },
+
+  async approveItem(uuid: string): Promise<FsJobItem> {
+    return unwrap<FsJobItem>(await apiClient.post(`${BASE}/job-items/${uuid}/approve`, {}, JSON_BODY));
+  },
+
+  async rejectItem(uuid: string, reason?: string): Promise<FsJobItem> {
+    return unwrap<FsJobItem>(await apiClient.post(`${BASE}/job-items/${uuid}/reject`, { reason }, JSON_BODY));
   },
 
   // ---------------- Invoicing ----------------

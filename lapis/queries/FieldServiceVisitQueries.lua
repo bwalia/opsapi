@@ -376,6 +376,12 @@ function VisitQueries.logTimesheet(namespace_id, uuid, actor_uuid)
     local task = v.job_number .. " · " .. v.job_title
 
     return Common.transaction(function()
+        -- Lock the visit and re-check under the lock so two concurrent logs can't
+        -- each create a timesheet for the same visit (PR #604 review H2).
+        local locked = db.query("SELECT timesheet_uuid FROM fs_visits WHERE id = ? FOR UPDATE", v.id)[1]
+        if locked and locked.timesheet_uuid then
+            return nil, "Visit is already logged to timesheet " .. locked.timesheet_uuid
+        end
         -- Created without hours so it gets no seed entry; the single entry is
         -- added below (tagged source=field_service).
         local ts = TimesheetQueries.create({
