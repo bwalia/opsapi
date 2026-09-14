@@ -93,14 +93,11 @@ local JOB_SELECT = [[
     SELECT j.*,
         jt.uuid AS job_type_uuid, jt.name AS job_type_name, jt.color AS job_type_color,
         jt.default_hourly_rate AS job_type_hourly_rate,
-        a.uuid AS account_uuid, a.name AS account_name, a.email AS account_email, a.phone AS account_phone,
-        c.uuid AS contact_uuid, c.first_name AS contact_first_name, c.last_name AS contact_last_name,
-        c.email AS contact_email, c.phone AS contact_phone,
-        s.uuid AS site_uuid, s.name AS site_name, s.address_line1 AS site_address_line1,
-        s.address_line2 AS site_address_line2, s.city AS site_city, s.county AS site_county,
-        s.postal_code AS site_postal_code, s.country AS site_country, s.access_notes AS site_access_notes,
-        s.contact_name AS site_contact_name, s.contact_phone AS site_contact_phone,
-        s.latitude AS site_latitude, s.longitude AS site_longitude,
+        c.uuid AS customer_uuid,
+        COALESCE(NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), c.email)
+            AS customer_name,
+        c.email AS customer_email, c.phone AS customer_phone,
+        prod.uuid AS product_uuid, prod.name AS product_name, prod.sku AS product_sku,
         ]] .. Common.user_name_sql("mu") .. [[ AS service_manager_name,
         i.uuid AS invoice_uuid, i.invoice_number, i.status AS invoice_status, i.total_amount AS invoice_total,
         (SELECT COUNT(*) FROM fs_job_phases p WHERE p.job_id = j.id AND p.deleted_at IS NULL) AS phase_count,
@@ -113,16 +110,15 @@ local JOB_SELECT = [[
             AND v.status IN ('scheduled', 'en_route')) AS next_visit_at
     FROM fs_jobs j
     LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
-    LEFT JOIN crm_accounts a ON a.id = j.account_id
-    LEFT JOIN crm_contacts c ON c.id = j.contact_id
-    LEFT JOIN fs_sites s ON s.id = j.site_id
+    LEFT JOIN customers c ON c.id = j.customer_id
+    LEFT JOIN storeproducts prod ON prod.id = j.product_id
     LEFT JOIN users mu ON mu.uuid = j.service_manager_uuid
     LEFT JOIN invoices i ON i.id = j.invoice_id
 ]]
 
 local JOB_HIDDEN = {
-    id = true, namespace_id = true, job_type_id = true, account_id = true, contact_id = true,
-    site_id = true, invoice_id = true, deleted_at = true,
+    id = true, namespace_id = true, job_type_id = true, customer_id = true, product_id = true,
+    invoice_id = true, deleted_at = true,
 }
 
 local function shape_job(row)
@@ -135,9 +131,6 @@ local function shape_job(row)
     out.visit_count = tonumber(row.visit_count) or 0
     out.metadata = Common.decode(row.metadata, {})
     if next(out.metadata) == nil then out.metadata = nil end
-    local contact = ((row.contact_first_name or "") .. " " .. (row.contact_last_name or "")):match("^%s*(.-)%s*$")
-    out.contact_name = contact ~= "" and contact or nil
-    out.contact_first_name, out.contact_last_name = nil, nil
     return out
 end
 
@@ -199,18 +192,19 @@ JobQueries.VISIT_SELECT = [[
         jt.default_hourly_rate AS job_type_hourly_rate,
         p.uuid AS phase_uuid, p.name AS phase_name, p.status AS phase_status,
         ]] .. Common.user_name_sql("eu") .. [[ AS engineer_name, eu.email AS engineer_email,
-        a.uuid AS account_uuid, a.name AS account_name,
-        s.uuid AS site_uuid, s.name AS site_name, s.address_line1 AS site_address_line1,
-        s.address_line2 AS site_address_line2, s.city AS site_city, s.postal_code AS site_postal_code,
-        s.latitude AS site_latitude, s.longitude AS site_longitude, s.access_notes AS site_access_notes,
-        s.contact_name AS site_contact_name, s.contact_phone AS site_contact_phone
+        cust.uuid AS customer_uuid,
+        COALESCE(NULLIF(TRIM(COALESCE(cust.first_name, '') || ' ' || COALESCE(cust.last_name, '')), ''), cust.email)
+            AS customer_name,
+        cust.phone AS customer_phone,
+        prod.uuid AS product_uuid, prod.name AS product_name, prod.sku AS product_sku,
+        j.service_address, j.service_postcode, j.product_ref
     FROM fs_visits v
     JOIN fs_jobs j ON j.id = v.job_id
     LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
     LEFT JOIN fs_job_phases p ON p.id = v.phase_id AND p.deleted_at IS NULL
     LEFT JOIN users eu ON eu.uuid = v.engineer_user_uuid
-    LEFT JOIN crm_accounts a ON a.id = j.account_id
-    LEFT JOIN fs_sites s ON s.id = j.site_id
+    LEFT JOIN customers cust ON cust.id = j.customer_id
+    LEFT JOIN storeproducts prod ON prod.id = j.product_id
 ]]
 
 local VISIT_HIDDEN = {
@@ -236,6 +230,9 @@ function JobQueries.shapeVisit(v)
     end
     out.invoiced = v.invoice_line_item_id ~= nil
     out.effective_hourly_rate = JobQueries.visitRate(v)
+    -- pg returns NUMERIC as strings; surface the F-Gas kg fields as numbers.
+    out.refrigerant_added_kg = tonumber(v.refrigerant_added_kg)
+    out.refrigerant_recovered_kg = tonumber(v.refrigerant_recovered_kg)
     return out
 end
 
@@ -250,10 +247,12 @@ end
 
 local ITEM_SELECT = [[
     SELECT it.*, v.uuid AS visit_uuid, p.uuid AS phase_uuid, p.name AS phase_name,
+        pt.uuid AS part_uuid, pt.name AS part_name,
         ]] .. Common.user_name_sql("cu") .. [[ AS created_by_name
     FROM fs_job_items it
     LEFT JOIN fs_visits v ON v.id = it.visit_id
     LEFT JOIN fs_job_phases p ON p.id = it.phase_id
+    LEFT JOIN fs_parts pt ON pt.id = it.part_id
     LEFT JOIN users cu ON cu.uuid = it.created_by_uuid
 ]]
 
@@ -269,6 +268,11 @@ local function shape_item(it)
         line_total = round2(qty * price),
         is_billable = it.is_billable,
         invoiced = it.invoice_line_item_id ~= nil,
+        approval_status = it.approval_status,
+        approved_at = it.approved_at,
+        rejection_reason = it.rejection_reason,
+        part_uuid = it.part_uuid,
+        part_name = it.part_name,
         visit_uuid = it.visit_uuid,
         phase_uuid = it.phase_uuid,
         phase_name = it.phase_name,
@@ -333,8 +337,8 @@ function JobQueries.listJobs(namespace_id, params)
         add("j.status = ?", tostring(status))
     end
     if nilify(params.priority) and params.priority ~= "all" then add("j.priority = ?", tostring(params.priority)) end
-    if nilify(params.account_uuid) then add("a.uuid = ?", tostring(params.account_uuid)) end
-    if nilify(params.site_uuid) then add("s.uuid = ?", tostring(params.site_uuid)) end
+    if nilify(params.customer_uuid) then add("c.uuid = ?", tostring(params.customer_uuid)) end
+    if nilify(params.product_uuid) then add("prod.uuid = ?", tostring(params.product_uuid)) end
     if nilify(params.job_type_uuid) then add("jt.uuid = ?", tostring(params.job_type_uuid)) end
     if nilify(params.manager_uuid) then add("j.service_manager_uuid = ?", tostring(params.manager_uuid)) end
     if nilify(params.engineer_uuid) then
@@ -349,9 +353,9 @@ function JobQueries.listJobs(namespace_id, params)
     end
     if nilify(params.search) then
         local term = "%" .. tostring(params.search) .. "%"
-        add("(j.job_number ILIKE ? OR j.title ILIKE ? OR a.name ILIKE ? OR s.postal_code ILIKE ?" ..
-            " OR j.customer_reference ILIKE ?)")
-        for _ = 1, 5 do table.insert(values, term) end
+        add("(j.job_number ILIKE ? OR j.title ILIKE ? OR c.first_name ILIKE ? OR c.last_name ILIKE ?" ..
+            " OR c.email ILIKE ? OR j.service_postcode ILIKE ? OR j.customer_reference ILIKE ?)")
+        for _ = 1, 7 do table.insert(values, term) end
     end
     local where_sql = table.concat(where, " AND ")
 
@@ -361,8 +365,8 @@ function JobQueries.listJobs(namespace_id, params)
     local count = db.query([[
         SELECT COUNT(*) AS total FROM fs_jobs j
         LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
-        LEFT JOIN crm_accounts a ON a.id = j.account_id
-        LEFT JOIN fs_sites s ON s.id = j.site_id
+        LEFT JOIN customers c ON c.id = j.customer_id
+        LEFT JOIN storeproducts prod ON prod.id = j.product_id
         WHERE ]] .. where_sql, unpack(values))
 
     local page_values = { unpack(values) }
@@ -449,9 +453,8 @@ end
 local function resolve_job_refs(namespace_id, data)
     local refs = {}
     local specs = {
-        { key = "account_uuid", tbl = "crm_accounts", col = "account_id", label = "Account" },
-        { key = "contact_uuid", tbl = "crm_contacts", col = "contact_id", label = "Contact" },
-        { key = "site_uuid", tbl = "fs_sites", col = "site_id", label = "Site" },
+        { key = "customer_uuid", tbl = "customers", col = "customer_id", label = "Customer" },
+        { key = "product_uuid", tbl = "storeproducts", col = "product_id", label = "Product" },
         { key = "job_type_uuid", tbl = "fs_job_types", col = "job_type_id", label = "Job type" },
     }
     for _, spec in ipairs(specs) do
@@ -526,12 +529,6 @@ function JobQueries.createJob(namespace_id, actor_uuid, data)
     if not refs then return nil, ref_err end
     for k, v in pairs(refs) do if v == db.NULL then refs[k] = nil end end
 
-    -- A site belongs to a customer: inherit the account when none was given.
-    if refs.site_id and not refs.account_id then
-        local s = db.query("SELECT account_id FROM fs_sites WHERE id = ?", refs.site_id)
-        refs.account_id = s[1] and s[1].account_id or nil
-    end
-
     local hourly_rate = to_number(data.hourly_rate)
     if not hourly_rate and refs.job_type_id then
         local jt = db.query("SELECT default_hourly_rate FROM fs_job_types WHERE id = ?", refs.job_type_id)
@@ -549,9 +546,11 @@ function JobQueries.createJob(namespace_id, actor_uuid, data)
             title = tostring(data.title),
             description = nilify(data.description),
             job_type_id = refs.job_type_id,
-            account_id = refs.account_id,
-            contact_id = refs.contact_id,
-            site_id = refs.site_id,
+            customer_id = refs.customer_id,
+            product_id = refs.product_id,
+            product_ref = nilify(data.product_ref),
+            service_address = nilify(data.service_address),
+            service_postcode = nilify(data.service_postcode),
             status = "draft",
             priority = priority,
             service_manager_uuid = nilify(data.service_manager_uuid) or actor_uuid,
@@ -937,6 +936,13 @@ function JobQueries.addItem(namespace_id, job_uuid, data, actor_uuid)
         fields.phase_id, err = resolve_child("fs_job_phases", namespace_id, data.phase_uuid, job.id, "Phase")
         if not fields.phase_id then return nil, err end
     end
+    if nilify(data.part_uuid) then
+        fields.part_id = Common.resolve_id("fs_parts", namespace_id, data.part_uuid)
+        if not fields.part_id then return nil, "Part not found" end
+    end
+    -- Parts / materials need back-office approval before they can be invoiced;
+    -- labour / expense / other are approved on entry.
+    fields.approval_status = (fields.item_type == "part" or fields.item_type == "material") and "pending" or "approved"
     fields.uuid = Common.uuid()
     fields.namespace_id = namespace_id
     fields.job_id = job.id
@@ -971,6 +977,14 @@ function JobQueries.updateItem(namespace_id, uuid, data, actor_uuid)
             fields.phase_id = db.NULL
         end
     end
+    if data.part_uuid ~= nil then
+        if nilify(data.part_uuid) then
+            fields.part_id = Common.resolve_id("fs_parts", namespace_id, data.part_uuid)
+            if not fields.part_id then return nil, "Part not found" end
+        else
+            fields.part_id = db.NULL
+        end
+    end
     if next(fields) == nil then return nil, "No valid fields to update" end
 
     FsJobItemModel:find(item.id):update(fields)
@@ -985,6 +999,24 @@ function JobQueries.deleteItem(namespace_id, uuid, actor_uuid)
     db.query("UPDATE fs_job_items SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", item.id)
     Common.log_activity(namespace_id, item.job_id, actor_uuid, "item_removed", "Item removed: " .. item.description)
     return true
+end
+
+--- Manager approval of a job item. Only approved billable items reach an invoice.
+function JobQueries.setItemApproval(namespace_id, uuid, approve, opts, actor_uuid)
+    opts = opts or {}
+    local item = JobQueries.findItemRow(namespace_id, uuid)
+    if not item then return nil, "Item not found" end
+    if item.invoice_line_item_id then return nil, "Item has been invoiced and cannot be changed" end
+
+    FsJobItemModel:find(item.id):update({
+        approval_status = approve and "approved" or "rejected",
+        approved_by_uuid = actor_uuid or db.NULL,
+        approved_at = db.raw("NOW()"),
+        rejection_reason = (not approve) and (nilify(opts.reason) or db.NULL) or db.NULL,
+    })
+    Common.log_activity(namespace_id, item.job_id, actor_uuid, approve and "item_approved" or "item_rejected",
+        (approve and "Approved: " or "Rejected: ") .. item.description)
+    return JobQueries.getItem(namespace_id, uuid)
 end
 
 --------------------------------------------------------------------------------
@@ -1044,6 +1076,7 @@ local function collect_billable(job, opts)
     local items = db.query([[
         SELECT id, uuid, item_type, description, quantity, unit_price, tax_rate FROM fs_job_items
         WHERE job_id = ? AND deleted_at IS NULL AND is_billable = true AND invoice_line_item_id IS NULL
+          AND approval_status = 'approved'
         ORDER BY created_at ASC, id ASC
     ]], job.id)
     for _, it in ipairs(items or {}) do
@@ -1095,26 +1128,21 @@ end
 
 local function customer_details(job)
     local rows = db.query([[
-        SELECT a.name, a.email, a.address_line1, a.address_line2, a.city, a.state, a.postal_code, a.country,
-            s.name AS site_name, s.address_line1 AS s_line1, s.address_line2 AS s_line2, s.city AS s_city,
-            s.county AS s_county, s.postal_code AS s_postal_code, s.country AS s_country, s.contact_email
+        SELECT
+            COALESCE(NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), c.email) AS name,
+            c.email, c.phone, j.service_address, j.service_postcode
         FROM fs_jobs j
-        LEFT JOIN crm_accounts a ON a.id = j.account_id
-        LEFT JOIN fs_sites s ON s.id = j.site_id
+        LEFT JOIN customers c ON c.id = j.customer_id
         WHERE j.id = ?
     ]], job.id)
     local r = rows[1] or {}
     local address
-    if r.address_line1 then
-        address = { line1 = r.address_line1, line2 = r.address_line2, city = r.city, state = r.state,
-            postal_code = r.postal_code, country = r.country }
-    elseif r.s_line1 then
-        address = { line1 = r.s_line1, line2 = r.s_line2, city = r.s_city, state = r.s_county,
-            postal_code = r.s_postal_code, country = r.s_country }
+    if r.service_address or r.service_postcode then
+        address = { line1 = r.service_address, postal_code = r.service_postcode }
     end
     return {
-        name = r.name or r.site_name or "Customer",
-        email = r.email or r.contact_email,
+        name = r.name or "Customer",
+        email = r.email,
         address = address and require("cjson").encode(address) or "{}",
     }
 end
@@ -1131,22 +1159,25 @@ function JobQueries.createInvoice(namespace_id, job_uuid, actor_uuid, opts)
         return nil, "Only scheduled, in-progress, on-hold or completed jobs can be invoiced"
     end
 
-    local lines, _, missing_rate = collect_billable(job, opts)
-    if #lines == 0 then return nil, "Nothing to invoice — no uninvoiced billable labour or items on this job" end
-    if missing_rate then
-        return nil, "Some labour has no hourly rate — set a rate on the visit, job or job type, or pass hourly_rate"
-    end
-
     local InvoiceQueries = require("queries.InvoiceQueries")
     local customer = customer_details(job)
 
     return Common.transaction(function()
+        -- Lock the job so two concurrent invoicings can't bill the same work twice,
+        -- and collect the billable lines inside the lock so the loser sees nothing.
+        db.query("SELECT id FROM fs_jobs WHERE id = ? FOR UPDATE", job.id)
+        local lines, _, missing_rate = collect_billable(job, opts)
+        if #lines == 0 then
+            return nil, "Nothing to invoice — no uninvoiced billable labour or approved items on this job"
+        end
+        if missing_rate then
+            return nil, "Some labour has no hourly rate — set a rate on the visit, job or job type, or pass hourly_rate"
+        end
         local created = InvoiceQueries.create({
             namespace_id = namespace_id,
             customer_name = customer.name,
             customer_email = customer.email,
             customer_address = customer.address,
-            account_id = job.account_id,
             owner_user_uuid = actor_uuid,
             due_date = nilify(opts.due_date),
             currency = job.currency,
@@ -1166,8 +1197,8 @@ function JobQueries.createInvoice(namespace_id, job_uuid, actor_uuid, opts)
                 timesheet_entry_id = l.timesheet_entry_id,
             })
             local tbl = l.source == "visit" and "fs_visits" or "fs_job_items"
-            db.query("UPDATE " .. tbl .. " SET invoice_line_item_id = ?, updated_at = NOW() WHERE id = ?",
-                li.internal_id, l.source_id)
+            db.query("UPDATE " .. tbl .. [[ SET invoice_line_item_id = ?, updated_at = NOW()
+                WHERE id = ? AND invoice_line_item_id IS NULL]], li.internal_id, l.source_id)
         end
 
         db.query("UPDATE fs_jobs SET invoice_id = ?, invoiced_at = NOW(), updated_at = NOW() WHERE id = ?",

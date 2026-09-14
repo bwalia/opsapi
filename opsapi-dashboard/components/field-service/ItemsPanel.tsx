@@ -5,12 +5,12 @@
  * ItemFormModal is reused on the visit page to log parts used on site.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Lock, Package, Pencil, Plus, Trash2 } from 'lucide-react';
-import { Modal, Button, Input, Select, ConfirmDialog } from '@/components/ui';
-import { fieldService, type FsJobItem, type FsPhase, type JobItemType } from '@/services/field-service.service';
-import { CheckboxField, SectionCard, apiError, money } from './shared';
+import { Check, Lock, Package, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Modal, Button, Input, Select, SearchableSelect, ConfirmDialog } from '@/components/ui';
+import { fieldService, type FsJobItem, type FsPart, type FsPhase, type JobItemType } from '@/services/field-service.service';
+import { CheckboxField, Pill, SectionCard, apiError, money } from './shared';
 
 const ITEM_TYPE_LABELS: Record<JobItemType, string> = {
   part: 'Part',
@@ -47,7 +47,29 @@ function ItemForm({ jobUuid, item, phases = [], visitUuid, onClose, onSaved }: I
   const [taxRate, setTaxRate] = useState(item ? String(item.tax_rate) : '20');
   const [billable, setBillable] = useState(item?.is_billable ?? true);
   const [phaseUuid, setPhaseUuid] = useState(item?.phase_uuid || '');
+  const [partUuid, setPartUuid] = useState(item?.part_uuid || '');
+  const [parts, setParts] = useState<FsPart[]>([]);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fieldService.getParts({ per_page: 200 }).then((r) => setParts(r.data)).catch(() => setParts([]));
+  }, []);
+
+  const partOptions = useMemo(
+    () => parts.map((p) => ({ value: p.uuid, label: p.name, hint: p.sku || p.category || undefined })),
+    [parts]
+  );
+
+  // Picking a catalog part fills in the description / price / VAT (still editable).
+  const onPickPart = (uuid: string) => {
+    setPartUuid(uuid);
+    const p = parts.find((x) => x.uuid === uuid);
+    if (p) {
+      if (!description.trim()) setDescription(p.name);
+      if (p.unit_price != null) setUnitPrice(String(p.unit_price));
+      if (p.tax_rate != null) setTaxRate(String(p.tax_rate));
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +84,7 @@ function ItemForm({ jobUuid, item, phases = [], visitUuid, onClose, onSaved }: I
       unit_price: Number(unitPrice) || 0,
       tax_rate: Number(taxRate) || 0,
       is_billable: billable,
+      part_uuid: item ? partUuid : partUuid || undefined,
     };
     if (phases.length) payload.phase_uuid = item ? phaseUuid : phaseUuid || undefined;
     if (visitUuid && !item) payload.visit_uuid = visitUuid;
@@ -83,6 +106,16 @@ function ItemForm({ jobUuid, item, phases = [], visitUuid, onClose, onSaved }: I
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      {partOptions.length > 0 && (
+        <SearchableSelect
+          label="Catalog part (optional)"
+          options={partOptions}
+          value={partUuid}
+          onChange={onPickPart}
+          placeholder="Free-text item (no catalog part)"
+          clearable
+        />
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Select label="Type" value={itemType} onChange={(e) => setItemType(e.target.value as JobItemType)}>
           {(Object.keys(ITEM_TYPE_LABELS) as JobItemType[]).map((t) => (
@@ -128,12 +161,20 @@ function ItemForm({ jobUuid, item, phases = [], visitUuid, onClose, onSaved }: I
 // Items table (shared by the job and visit pages)
 // ============================================================
 
+const APPROVAL_PILL: Record<string, { label: string; className: string }> = {
+  pending: { label: 'Pending approval', className: 'bg-amber-50 text-amber-700' },
+  rejected: { label: 'Rejected', className: 'bg-red-50 text-red-700' },
+};
+
 export function ItemsTable({
   items,
   currency,
   canEdit,
   onEdit,
   onDelete,
+  canApprove = false,
+  onApprove,
+  onReject,
 }: {
   items: FsJobItem[];
   currency: string;
@@ -141,6 +182,10 @@ export function ItemsTable({
   canEdit: boolean | ((item: FsJobItem) => boolean);
   onEdit: (item: FsJobItem) => void;
   onDelete: (item: FsJobItem) => void;
+  /** Manager-only: show approve/reject on pending items. */
+  canApprove?: boolean;
+  onApprove?: (item: FsJobItem) => void;
+  onReject?: (item: FsJobItem) => void;
 }) {
   const editable = (item: FsJobItem) => (typeof canEdit === 'function' ? canEdit(item) : canEdit);
   if (items.length === 0) return <p className="text-sm text-secondary-500">No parts or materials logged.</p>;
@@ -160,7 +205,14 @@ export function ItemsTable({
           {items.map((it) => (
             <tr key={it.uuid}>
               <td className="py-2 pr-3">
-                <p className="text-secondary-900">{it.description}</p>
+                <p className="text-secondary-900 flex flex-wrap items-center gap-2">
+                  {it.description}
+                  {APPROVAL_PILL[it.approval_status] && (
+                    <Pill className={APPROVAL_PILL[it.approval_status].className}>
+                      {APPROVAL_PILL[it.approval_status].label}
+                    </Pill>
+                  )}
+                </p>
                 <p className="text-xs text-secondary-500">
                   {ITEM_TYPE_LABELS[it.item_type] ?? it.item_type}
                   {it.phase_name ? ` · ${it.phase_name}` : ''}
@@ -178,16 +230,28 @@ export function ItemsTable({
                     <Lock className="w-3 h-3" /> invoiced
                   </span>
                 ) : (
-                  editable(it) && (
-                    <>
-                      <button type="button" className="p-1.5 text-secondary-500 hover:text-primary-600" title="Edit" onClick={() => onEdit(it)}>
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button type="button" className="p-1.5 text-secondary-500 hover:text-error-500" title="Remove" onClick={() => onDelete(it)}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  )
+                  <span className="inline-flex items-center gap-0.5">
+                    {canApprove && it.approval_status === 'pending' && (
+                      <>
+                        <button type="button" className="p-1.5 text-secondary-500 hover:text-green-600" aria-label="Approve" title="Approve" onClick={() => onApprove?.(it)}>
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button type="button" className="p-1.5 text-secondary-500 hover:text-error-500" aria-label="Reject" title="Reject" onClick={() => onReject?.(it)}>
+                          <X className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                    {editable(it) && (
+                      <>
+                        <button type="button" className="p-1.5 text-secondary-500 hover:text-primary-600" aria-label="Edit" title="Edit" onClick={() => onEdit(it)}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button type="button" className="p-1.5 text-secondary-500 hover:text-error-500" aria-label="Remove" title="Remove" onClick={() => onDelete(it)}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </span>
                 )}
               </td>
             </tr>
@@ -255,13 +319,34 @@ export function ItemsPanel({
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<FsJobItem | null>(null);
   const { requestDelete, confirm } = useItemActions(onChanged);
-  const total = items.filter((i) => i.is_billable).reduce((sum, i) => sum + i.line_total, 0);
+  const total = items.filter((i) => i.is_billable && i.approval_status === 'approved').reduce((s, i) => s + i.line_total, 0);
+  const pending = items.filter((i) => i.approval_status === 'pending').length;
+
+  const approve = async (it: FsJobItem) => {
+    try {
+      await fieldService.approveItem(it.uuid);
+      toast.success('Approved');
+      onChanged();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not approve item'));
+    }
+  };
+  const reject = async (it: FsJobItem) => {
+    try {
+      await fieldService.rejectItem(it.uuid);
+      toast.success('Rejected');
+      onChanged();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not reject item'));
+    }
+  };
 
   return (
     <SectionCard
       title="Parts & materials"
       actions={
         <>
+          {pending > 0 && <Pill className="bg-amber-50 text-amber-700">{pending} pending approval</Pill>}
           {items.length > 0 && <span className="text-sm text-secondary-500">Billable: {money(total, currency)}</span>}
           {canEdit && (
             <Button
@@ -288,6 +373,9 @@ export function ItemsPanel({
           items={items}
           currency={currency}
           canEdit={canEdit}
+          canApprove={canEdit}
+          onApprove={approve}
+          onReject={reject}
           onEdit={(it) => {
             setEditing(it);
             setFormOpen(true);

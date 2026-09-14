@@ -87,8 +87,9 @@ function VisitQueries.listVisits(namespace_id, params)
     if to_bool(params.follow_up, false) then add("v.follow_up_required = true") end
     if nilify(params.search) then
         local term = "%" .. tostring(params.search) .. "%"
-        add("(j.job_number ILIKE ? OR j.title ILIKE ? OR a.name ILIKE ? OR s.postal_code ILIKE ?)")
-        for _ = 1, 4 do table.insert(values, term) end
+        add("(j.job_number ILIKE ? OR j.title ILIKE ? OR cust.first_name ILIKE ? OR cust.last_name ILIKE ?" ..
+            " OR cust.email ILIKE ? OR j.service_postcode ILIKE ?)")
+        for _ = 1, 6 do table.insert(values, term) end
     end
     local where_sql = table.concat(where, " AND ")
     local order_dir = tostring(params.order_dir or ""):lower() == "desc" and "DESC" or "ASC"
@@ -96,8 +97,8 @@ function VisitQueries.listVisits(namespace_id, params)
     local count = db.query([[
         SELECT COUNT(*) AS total FROM fs_visits v
         JOIN fs_jobs j ON j.id = v.job_id
-        LEFT JOIN crm_accounts a ON a.id = j.account_id
-        LEFT JOIN fs_sites s ON s.id = j.site_id
+        LEFT JOIN customers cust ON cust.id = j.customer_id
+        LEFT JOIN storeproducts prod ON prod.id = j.product_id
         WHERE ]] .. where_sql, unpack(values))
 
     local page_values = { unpack(values) }
@@ -245,10 +246,21 @@ function VisitQueries.updateVisit(namespace_id, uuid, data, actor_uuid)
             update.phase_id = db.NULL
         end
     end
-    for _, f in ipairs({ "instructions", "work_summary", "follow_up_notes", "customer_signoff_name" }) do
+    for _, f in ipairs({ "instructions", "work_summary", "follow_up_notes", "customer_signoff_name",
+        "refrigerant_type", "leak_check_result", "leak_check_notes", "fgas_cylinder_ref" }) do
         if data[f] ~= nil then update[f] = nullable(data[f]) end
     end
     if data.follow_up_required ~= nil then update.follow_up_required = to_bool(data.follow_up_required, false) end
+
+    -- F-Gas refrigerant quantities (kg). Compliance data — always editable,
+    -- not locked by invoicing like the billing fields below.
+    for _, f in ipairs({ "refrigerant_added_kg", "refrigerant_recovered_kg" }) do
+        if data[f] ~= nil then
+            local kg = to_number(data[f])
+            if kg and (kg < 0 or kg > 1000) then return nil, f .. " must be between 0 and 1000" end
+            update[f] = kg and round2(kg) or db.NULL
+        end
+    end
 
     local invoiced = visit.invoice_line_item_id ~= nil
     if data.is_billable ~= nil or data.hourly_rate ~= nil or data.labour_hours ~= nil then
@@ -352,14 +364,16 @@ end
 function VisitQueries.logTimesheet(namespace_id, uuid, actor_uuid)
     if not ProjectConfig.isTimesheetsEnabled() then return nil, "Timesheets are not enabled" end
     local rows = db.query([[
-        SELECT v.*, j.job_number, j.title AS job_title, j.account_id, a.name AS account_name,
+        SELECT v.*, j.job_number, j.title AS job_title,
+            COALESCE(NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), c.email)
+                AS customer_name,
             j.hourly_rate AS job_hourly_rate, jt.default_hourly_rate AS job_type_hourly_rate,
             p.name AS phase_name,
             TO_CHAR(COALESCE(v.checked_in_at, v.scheduled_start), 'YYYY-MM-DD') AS work_date
         FROM fs_visits v
         JOIN fs_jobs j ON j.id = v.job_id
         LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
-        LEFT JOIN crm_accounts a ON a.id = j.account_id
+        LEFT JOIN customers c ON c.id = j.customer_id
         LEFT JOIN fs_job_phases p ON p.id = v.phase_id AND p.deleted_at IS NULL
         WHERE v.uuid = ? AND v.namespace_id = ? AND v.deleted_at IS NULL LIMIT 1
     ]], tostring(uuid), namespace_id)
@@ -376,14 +390,19 @@ function VisitQueries.logTimesheet(namespace_id, uuid, actor_uuid)
     local task = v.job_number .. " · " .. v.job_title
 
     return Common.transaction(function()
+        -- Lock the visit and re-check under the lock so two concurrent logs can't
+        -- each create a timesheet for the same visit (PR #604 review H2).
+        local locked = db.query("SELECT timesheet_uuid FROM fs_visits WHERE id = ? FOR UPDATE", v.id)[1]
+        if locked and locked.timesheet_uuid then
+            return nil, "Visit is already logged to timesheet " .. locked.timesheet_uuid
+        end
         -- Created without hours so it gets no seed entry; the single entry is
         -- added below (tagged source=field_service).
         local ts = TimesheetQueries.create({
             namespace_id = namespace_id,
             user_uuid = v.engineer_user_uuid,
             work_date = v.work_date,
-            client_account_id = v.account_id,
-            client_name = v.account_name,
+            client_name = v.customer_name,
             task = task,
             hourly_rate = rate,
             is_billable = v.is_billable,

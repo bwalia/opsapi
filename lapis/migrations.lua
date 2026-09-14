@@ -353,6 +353,15 @@ local document_template_menu_migrations = load_if_enabled(ProjectConfig.FEATURES
 -- Field Service (service jobs, job phases, engineer site visits)
 local field_service_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-system") or {}
 local field_service_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-menu-items") or {}
+local field_service_assets_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets") or {}
+local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets-menu") or {}
+local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
+local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
+local field_service_parts_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts") or {}
+local field_service_parts_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts-menu") or {}
+local field_service_v2_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-v2") or {}
+local field_service_roles_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-roles") or {}
+local field_service_fgas_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-fgas") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -2381,6 +2390,35 @@ local _migrations = {
     ['859_register_fs_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 2),
     ['860_grant_fs_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 3),
     ['861_enable_fs_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 4),
+
+    ['862_fs_create_assets'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_migrations, 1),
+    ['863_create_employees'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_migrations, 2),
+    ['864_seed_fs_assets_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 1),
+    ['865_register_fs_assets_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 2),
+    ['866_grant_fs_assets_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 3),
+    ['867_enable_fs_assets_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 4),
+
+    ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
+    ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),
+    ['870_fs_jobs_add_request_asset'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 3),
+    ['871_seed_fs_requests_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 1),
+    ['872_register_fs_requests_module'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 2),
+    ['873_grant_fs_requests_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 3),
+    ['874_enable_fs_requests_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 4),
+
+    ['875_fs_create_parts'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_migrations, 1),
+    ['876_fs_job_items_add_part_approval'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_migrations, 2),
+    ['877_fs_invoice_line_item_fks'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_migrations, 3),
+    ['878_seed_fs_parts_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 1),
+    ['879_register_fs_parts_module'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 2),
+    ['880_grant_fs_parts_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 3),
+    ['881_enable_fs_parts_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_parts_menu_migrations, 4),
+
+    ['882_fs_v2_requests_customer_product'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_v2_migrations, 1),
+    ['883_fs_v2_jobs_customer_product'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_v2_migrations, 2),
+    ['884_fs_v2_drop_assets_sites'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_v2_migrations, 3),
+    ['885_fs_seed_operational_roles'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 1),
+    ['886_fs_fgas_refrigerant_log'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_fgas_migrations, 1),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

@@ -18,7 +18,7 @@ import {
   CheckCircle2,
   ClipboardList,
   DoorClosed,
-  KeyRound,
+  Package,
   Loader2,
   LogIn,
   LogOut,
@@ -30,7 +30,7 @@ import {
   FileClock,
   XCircle,
 } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, Input, Textarea, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useAuthStore } from '@/store/auth.store';
@@ -52,6 +52,109 @@ import { PhaseChecklist, usePhaseStatus } from '@/components/field-service/Phase
 import { ItemFormModal, ItemsTable, useItemActions } from '@/components/field-service/ItemsPanel';
 import CheckOutModal, { getPosition } from '@/components/field-service/CheckOutModal';
 import type { FsJobItem } from '@/services/field-service.service';
+
+const LEAK_LABEL: Record<string, string> = { pass: 'Leak check passed', fail: 'Leak check FAILED', na: 'No leak check' };
+const LEAK_TONE: Record<string, string> = {
+  pass: 'bg-green-50 text-green-700',
+  fail: 'bg-red-50 text-red-700',
+  na: 'bg-secondary-100 text-secondary-600',
+};
+
+/** F-Gas / refrigerant record for a visit — the on-site engineer logs it. */
+function FGasCard({ visit, canWork, onSaved }: { visit: FsVisitDetail; canWork: boolean; onSaved: () => void }) {
+  const blank = () => ({
+    refrigerant_type: visit.refrigerant_type || '',
+    refrigerant_added_kg: visit.refrigerant_added_kg != null ? String(visit.refrigerant_added_kg) : '',
+    refrigerant_recovered_kg: visit.refrigerant_recovered_kg != null ? String(visit.refrigerant_recovered_kg) : '',
+    leak_check_result: visit.leak_check_result || '',
+    fgas_cylinder_ref: visit.fgas_cylinder_ref || '',
+    leak_check_notes: visit.leak_check_notes || '',
+  });
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [f, setF] = useState(blank);
+
+  const has = !!(visit.refrigerant_type || visit.refrigerant_added_kg || visit.refrigerant_recovered_kg ||
+    visit.leak_check_result || visit.fgas_cylinder_ref || visit.leak_check_notes);
+
+  const start = () => { setF(blank()); setEditing(true); };
+  const set = (k: keyof ReturnType<typeof blank>) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      setF((prev) => ({ ...prev, [k]: e.target.value }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await fieldService.updateVisit(visit.uuid, {
+        refrigerant_type: f.refrigerant_type.trim(),
+        refrigerant_added_kg: f.refrigerant_added_kg.trim(),
+        refrigerant_recovered_kg: f.refrigerant_recovered_kg.trim(),
+        leak_check_result: f.leak_check_result,
+        fgas_cylinder_ref: f.fgas_cylinder_ref.trim(),
+        leak_check_notes: f.leak_check_notes.trim(),
+      });
+      toast.success('F-Gas record saved');
+      setEditing(false);
+      onSaved();
+    } catch (err) {
+      toast.error(apiError(err, 'Failed to save F-Gas record'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SectionCard
+      title="F-Gas / refrigerant"
+      actions={
+        canWork && !editing ? (
+          <Button size="sm" variant="ghost" onClick={start}>
+            {has ? 'Edit' : 'Log F-Gas'}
+          </Button>
+        ) : undefined
+      }
+    >
+      {editing ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Refrigerant type" value={f.refrigerant_type} onChange={set('refrigerant_type')} placeholder="e.g. R32" />
+            <Input label="Cylinder ref" value={f.fgas_cylinder_ref} onChange={set('fgas_cylinder_ref')} />
+            <Input label="Charged (kg)" inputMode="decimal" value={f.refrigerant_added_kg} onChange={set('refrigerant_added_kg')} />
+            <Input label="Recovered (kg)" inputMode="decimal" value={f.refrigerant_recovered_kg} onChange={set('refrigerant_recovered_kg')} />
+          </div>
+          <Select label="Leak check" value={f.leak_check_result} onChange={set('leak_check_result')}>
+            <option value="">Not recorded</option>
+            <option value="pass">Passed</option>
+            <option value="fail">Failed</option>
+            <option value="na">Not applicable</option>
+          </Select>
+          <Textarea label="Leak check notes" rows={2} value={f.leak_check_notes} onChange={set('leak_check_notes')} />
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</Button>
+            <Button size="sm" onClick={save} isLoading={saving}>Save</Button>
+          </div>
+        </div>
+      ) : has ? (
+        <div className="space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <p><span className="text-secondary-500">Type: </span>{visit.refrigerant_type || '—'}</p>
+            <p><span className="text-secondary-500">Cylinder: </span>{visit.fgas_cylinder_ref || '—'}</p>
+            <p><span className="text-secondary-500">Charged: </span>{visit.refrigerant_added_kg != null ? `${visit.refrigerant_added_kg} kg` : '—'}</p>
+            <p><span className="text-secondary-500">Recovered: </span>{visit.refrigerant_recovered_kg != null ? `${visit.refrigerant_recovered_kg} kg` : '—'}</p>
+          </div>
+          {visit.leak_check_result && (
+            <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${LEAK_TONE[visit.leak_check_result] || LEAK_TONE.na}`}>
+              {LEAK_LABEL[visit.leak_check_result] || visit.leak_check_result}
+            </span>
+          )}
+          {visit.leak_check_notes && <p className="text-secondary-700 whitespace-pre-line">{visit.leak_check_notes}</p>}
+        </div>
+      ) : (
+        <p className="text-sm text-secondary-500">No refrigerant handled on this visit.</p>
+      )}
+    </SectionCard>
+  );
+}
 
 function VisitDetailContent() {
   const params = useParams<{ uuid: string }>();
@@ -126,7 +229,7 @@ function VisitDetailContent() {
   const canWork = isAssigned || canUpdate('fs_visits');
   const jobOpen = visit.job_status !== 'completed' && visit.job_status !== 'cancelled';
   const address = siteAddressFromJob(visit);
-  const maps = mapsUrl(address, visit.site_latitude, visit.site_longitude);
+  const maps = mapsUrl(address);
   const s = visit.status;
 
   return (
@@ -231,10 +334,15 @@ function VisitDetailContent() {
       </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <SectionCard title="Site">
+        <SectionCard title="Customer & site">
           <div className="space-y-2 text-sm">
-            <p className="font-medium text-secondary-900">{visit.account_name || 'No customer'}</p>
-            {visit.site_name && <p className="text-secondary-700">{visit.site_name}</p>}
+            <p className="font-medium text-secondary-900">{visit.customer_name || 'No customer'}</p>
+            {visit.product_name && (
+              <p className="text-secondary-700 flex items-center gap-1.5">
+                <Package className="w-4 h-4 text-secondary-400" /> {visit.product_name}
+                {visit.product_ref && <span className="text-secondary-500"> · {visit.product_ref}</span>}
+              </p>
+            )}
             {address ? (
               maps ? (
                 <a href={maps} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1.5 text-primary-600 hover:underline">
@@ -246,19 +354,12 @@ function VisitDetailContent() {
             ) : (
               <p className="text-secondary-400">No site address</p>
             )}
-            {(visit.site_contact_name || visit.site_contact_phone) && (
+            {visit.customer_phone && (
               <p className="flex items-center gap-1.5 text-secondary-700">
-                <User className="w-4 h-4 text-secondary-400" /> {visit.site_contact_name}
-                {visit.site_contact_phone && (
-                  <a href={`tel:${visit.site_contact_phone}`} className="ml-1 inline-flex items-center gap-1 text-primary-600 hover:underline">
-                    <Phone className="w-3.5 h-3.5" /> {visit.site_contact_phone}
-                  </a>
-                )}
-              </p>
-            )}
-            {visit.site_access_notes && (
-              <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 text-amber-800 p-2.5">
-                <KeyRound className="w-4 h-4 mt-0.5 shrink-0" /> {visit.site_access_notes}
+                <User className="w-4 h-4 text-secondary-400" />
+                <a href={`tel:${visit.customer_phone}`} className="inline-flex items-center gap-1 text-primary-600 hover:underline">
+                  <Phone className="w-3.5 h-3.5" /> {visit.customer_phone}
+                </a>
               </p>
             )}
           </div>
@@ -300,6 +401,8 @@ function VisitDetailContent() {
             {visit.timesheet_uuid && <p className="text-xs text-secondary-500">Logged to timesheet.</p>}
           </div>
         </SectionCard>
+
+        <FGasCard visit={visit} canWork={canWork} onSaved={load} />
       </div>
 
       {visit.phase && (

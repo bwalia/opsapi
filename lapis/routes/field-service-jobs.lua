@@ -47,11 +47,18 @@ return function(app)
     -- JOBS
     -- ============================================================
 
-    app:get("/api/v2/field-service/jobs", Http.guard("fs_jobs", "read", function(self)
+    app:get("/api/v2/field-service/jobs", Http.route(function(self)
         local p = self.params
+        local engineer = p.engineer_uuid
+        -- A caller who can't update jobs (an engineer, vs a manager who can
+        -- dispatch) only ever sees jobs assigned to them — i.e. jobs that have a
+        -- visit booked to them. Managers may still ask for their own via ?mine.
+        if p.mine == "true" or not Http.has_perm(self, "fs_jobs", "update") then
+            engineer = Http.actor(self)
+        end
         local result = JobQueries.listJobs(self.namespace.id, {
-            status = p.status, priority = p.priority, account_uuid = p.account_uuid, site_uuid = p.site_uuid,
-            job_type_uuid = p.job_type_uuid, manager_uuid = p.manager_uuid, engineer_uuid = p.engineer_uuid,
+            status = p.status, priority = p.priority, customer_uuid = p.customer_uuid, product_uuid = p.product_uuid,
+            job_type_uuid = p.job_type_uuid, manager_uuid = p.manager_uuid, engineer_uuid = engineer,
             overdue = p.overdue, uninvoiced = p.uninvoiced, search = p.search,
             page = p.page, per_page = p.per_page, order_by = p.order_by, order_dir = p.order_dir,
         })
@@ -66,7 +73,10 @@ return function(app)
     app:get("/api/v2/field-service/jobs/:uuid", Http.route(function(self)
         local row = JobQueries.findJobRow(self.namespace.id, self.params.uuid)
         if not row then return Http.fail(404, "Job not found") end
-        if not can_work_job(self, row.id, "read") then return Http.forbidden("fs_jobs", "read") end
+        -- A dispatcher (fs_jobs.update) may open any job; an engineer only the
+        -- jobs they're assigned to. Plain fs_jobs.read is enough for the list
+        -- (auto-scoped to own) but not to open another engineer's job by uuid.
+        if not can_work_job(self, row.id, "update") then return Http.forbidden("fs_jobs", "read") end
         return Http.ok(JobQueries.getJob(self.namespace.id, self.params.uuid))
     end))
 
@@ -174,6 +184,17 @@ return function(app)
         local ok, err = JobQueries.deleteItem(self.namespace.id, self.params.uuid, Http.actor(self))
         if not ok then return Http.from_error(err) end
         return Http.ok({ message = "Item removed" })
+    end))
+
+    -- Back-office approval of parts before they can be invoiced (manager only).
+    app:post("/api/v2/field-service/job-items/:uuid/approve", Http.guard("fs_jobs", "update", function(self)
+        return Http.result(JobQueries.setItemApproval(self.namespace.id, self.params.uuid, true, Http.body(self),
+            Http.actor(self)))
+    end))
+
+    app:post("/api/v2/field-service/job-items/:uuid/reject", Http.guard("fs_jobs", "update", function(self)
+        return Http.result(JobQueries.setItemApproval(self.namespace.id, self.params.uuid, false, Http.body(self),
+            Http.actor(self)))
     end))
 
     -- ============================================================

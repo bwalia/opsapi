@@ -77,12 +77,13 @@ ProjectConfig.PROJECT_FEATURES = {
     -- Field Service - service manager + engineer site visits. Jobs are broken
     -- into phases (copied from job-type templates) and engineers log visits
     -- against them. Visit time feeds Timesheets, jobs bill through Invoicing,
-    -- and customers/sites hang off CRM accounts — so those three are always
-    -- enabled alongside it (the fs_* tables FK into crm_* and invoices).
+    -- and each request/job points at a Customer + a Product (the faulty unit) —
+    -- both owned by Ecommerce (routes.customers / routes.storeproducts), so it
+    -- is enabled alongside (the fs_* tables FK into customers/storeproducts).
     field_service = {
         ProjectConfig.FEATURES.CORE,
         ProjectConfig.FEATURES.FIELD_SERVICE,
-        ProjectConfig.FEATURES.CRM,
+        ProjectConfig.FEATURES.ECOMMERCE,
         ProjectConfig.FEATURES.TIMESHEETS,
         ProjectConfig.FEATURES.INVOICING,
         ProjectConfig.FEATURES.NOTIFICATIONS,
@@ -511,8 +512,10 @@ ProjectConfig.PROJECT_MODULES = {
     field_service = {
         { machine_name = "fs_jobs", name = "Service Jobs", description = "Field service jobs, phases, parts and invoicing", category = "Field Service" },
         { machine_name = "fs_visits", name = "Site Visits", description = "Engineer site visits: scheduling, check-in/out, work reports", category = "Field Service" },
-        { machine_name = "fs_sites", name = "Service Sites", description = "Customer site addresses for field service", category = "Field Service" },
         { machine_name = "fs_job_types", name = "Job Types", description = "Job types and their phase templates", category = "Field Service" },
+        { machine_name = "employees", name = "Employees", description = "Staff directory and engineer profiles", category = "Field Service" },
+        { machine_name = "fs_service_requests", name = "Service Requests", description = "Customer complaints and service requests (the intake queue)", category = "Field Service" },
+        { machine_name = "fs_parts", name = "Parts", description = "Parts / products catalog for field service", category = "Field Service" },
     },
 
     -- Theme system (platform-level; always on)

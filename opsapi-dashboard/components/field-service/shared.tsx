@@ -12,16 +12,20 @@ import { usePathname } from 'next/navigation';
 import { ChevronDown } from 'lucide-react';
 import { Modal, Button, Input, Textarea } from '@/components/ui';
 import { cn, extractApiError } from '@/lib/utils';
-import type { FsJob, FsVisit, FsSite, JobPriority, JobStatus, PhaseStatus, VisitStatus } from '@/services/field-service.service';
+import type { FsJob, FsVisit, JobPriority, JobStatus, PhaseStatus, VisitStatus, RequestStatus } from '@/services/field-service.service';
 
 // ============================================================
 // Sub-navigation
 // ============================================================
 
 const NAV = [
+  { href: '/dashboard/customers', label: 'Customers', match: (p: string) => p.startsWith('/dashboard/customers') },
+  { href: '/dashboard/products', label: 'Products', match: (p: string) => p.startsWith('/dashboard/products') },
+  { href: '/dashboard/field-service/requests', label: 'Service Requests', match: (p: string) => p.startsWith('/dashboard/field-service/requests') },
   { href: '/dashboard/field-service', label: 'Jobs', match: (p: string) => p === '/dashboard/field-service' || p.startsWith('/dashboard/field-service/jobs') },
   { href: '/dashboard/field-service/visits', label: 'Site Visits', match: (p: string) => p.startsWith('/dashboard/field-service/visits') },
-  { href: '/dashboard/field-service/sites', label: 'Sites', match: (p: string) => p.startsWith('/dashboard/field-service/sites') },
+  { href: '/dashboard/field-service/parts', label: 'Parts', match: (p: string) => p.startsWith('/dashboard/field-service/parts') },
+  { href: '/dashboard/field-service/employees', label: 'Employees', match: (p: string) => p.startsWith('/dashboard/field-service/employees') },
   { href: '/dashboard/field-service/job-types', label: 'Job Types', match: (p: string) => p.startsWith('/dashboard/field-service/job-types') },
 ];
 
@@ -121,6 +125,58 @@ export const VISIT_STATUS_COLORS: Record<VisitStatus, string> = {
   no_access: 'bg-red-50 text-red-700',
 };
 
+export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
+  new: 'New',
+  triaged: 'Triaged',
+  assigned: 'Assigned',
+  in_progress: 'In progress',
+  on_hold: 'On hold',
+  resolved: 'Resolved',
+  closed: 'Closed',
+  rejected: 'Rejected',
+  duplicate: 'Duplicate',
+};
+
+export const REQUEST_STATUS_COLORS: Record<RequestStatus, string> = {
+  new: 'bg-blue-50 text-blue-700',
+  triaged: 'bg-indigo-50 text-indigo-700',
+  assigned: 'bg-violet-50 text-violet-700',
+  in_progress: 'bg-amber-50 text-amber-700',
+  on_hold: 'bg-orange-50 text-orange-700',
+  resolved: 'bg-green-50 text-green-700',
+  closed: 'bg-secondary-100 text-secondary-600',
+  rejected: 'bg-red-50 text-red-700',
+  duplicate: 'bg-secondary-100 text-secondary-500',
+};
+
+/** Label shown on the button that moves a request to a given status. */
+export const REQUEST_TRANSITION_LABELS: Record<RequestStatus, string> = {
+  new: 'Reopen',
+  triaged: 'Mark triaged',
+  assigned: 'Mark assigned',
+  in_progress: 'Start work',
+  on_hold: 'Put on hold',
+  resolved: 'Resolve',
+  closed: 'Close',
+  rejected: 'Reject',
+  duplicate: 'Mark duplicate',
+};
+
+export const CHANNEL_LABELS: Record<string, string> = {
+  phone: 'Phone',
+  app: 'App',
+  email: 'Email',
+  portal: 'Portal',
+  web: 'Web',
+  other: 'Other',
+};
+
+export const REQUEST_STATUS_OPTIONS = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'open', label: 'Open requests' },
+  ...(Object.keys(REQUEST_STATUS_LABELS) as RequestStatus[]).map((s) => ({ value: s, label: REQUEST_STATUS_LABELS[s] })),
+];
+
 export const JOB_STATUS_OPTIONS = [
   { value: 'open', label: 'Open jobs' },
   { value: 'all', label: 'All statuses' },
@@ -174,6 +230,10 @@ export function PhaseStatusPill({ status }: { status: PhaseStatus }) {
 
 export function VisitStatusPill({ status }: { status: VisitStatus }) {
   return <Pill className={VISIT_STATUS_COLORS[status]}>{VISIT_STATUS_LABELS[status] ?? status}</Pill>;
+}
+
+export function RequestStatusPill({ status }: { status: RequestStatus }) {
+  return <Pill className={REQUEST_STATUS_COLORS[status]}>{REQUEST_STATUS_LABELS[status] ?? status}</Pill>;
 }
 
 interface StatCardProps {
@@ -297,16 +357,13 @@ type AddressLike = {
   postal_code?: string | null;
 };
 
-export function siteAddressFromJob(job: Pick<FsJob, 'site_address_line1' | 'site_address_line2' | 'site_city' | 'site_postal_code'> | Pick<FsVisit, 'site_address_line1' | 'site_address_line2' | 'site_city' | 'site_postal_code'>): string {
-  return formatAddress({
-    address_line1: job.site_address_line1,
-    address_line2: job.site_address_line2,
-    city: job.site_city,
-    postal_code: job.site_postal_code,
-  });
+export function siteAddressFromJob(
+  job: Pick<FsJob, 'service_address' | 'service_postcode'> | Pick<FsVisit, 'service_address' | 'service_postcode'>
+): string {
+  return [job.service_address, job.service_postcode].filter(Boolean).join(', ');
 }
 
-export function formatAddress(a: AddressLike | FsSite): string {
+export function formatAddress(a: AddressLike): string {
   return [a.address_line1, a.address_line2, a.city, a.postal_code].filter(Boolean).join(', ');
 }
 

@@ -168,15 +168,15 @@ function JobsPageContent() {
         ),
       },
       {
-        key: 'account_name',
-        header: 'Customer / site',
+        key: 'customer_name',
+        header: 'Customer / product',
         render: (job) => (
           <div className="text-sm">
-            <p className="text-secondary-800">{job.account_name || <span className="text-secondary-400">—</span>}</p>
-            {(job.site_name || job.site_postal_code) && (
+            <p className="text-secondary-800">{job.customer_name || <span className="text-secondary-400">—</span>}</p>
+            {job.product_name && (
               <p className="text-xs text-secondary-500 flex items-center gap-1">
                 <MapPin className="w-3 h-3" />
-                {[job.site_name, job.site_postal_code].filter(Boolean).join(' · ')}
+                {job.product_name}
               </p>
             )}
           </div>

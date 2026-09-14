@@ -7,6 +7,41 @@ export interface ProductFilters extends PaginationParams {
   categoryUuid?: string;
 }
 
+/**
+ * The full storeproducts row as returned by GET /api/v2/products/:uuid.
+ * Its column names differ from the leaner list-oriented `StoreProduct` type
+ * (is_active vs status, inventory_quantity vs quantity, cost_price, …), so the
+ * detail page types against this shape.
+ */
+export interface StoreProductDetail {
+  uuid: string;
+  name: string;
+  slug?: string;
+  sku?: string;
+  barcode?: string;
+  description?: string;
+  short_description?: string;
+  price: number;
+  compare_price?: number;
+  cost_price?: number;
+  inventory_quantity?: number;
+  total_inventory?: number;
+  low_stock_threshold?: number;
+  track_inventory?: boolean;
+  is_active?: boolean;
+  is_featured?: boolean;
+  is_digital?: boolean;
+  requires_shipping?: boolean;
+  weight?: number;
+  tags?: string;
+  images?: string;
+  thumbnail_url?: string;
+  store_id?: number | string;
+  category_id?: number | string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export const productsService = {
   async getStoreProducts(params: ProductFilters = {}): Promise<PaginatedResponse<StoreProduct>> {
     const queryParams: Record<string, number | string> = {};
@@ -32,9 +67,10 @@ export const productsService = {
     };
   },
 
-  async getStoreProduct(uuid: string): Promise<StoreProduct> {
+  async getStoreProduct(uuid: string): Promise<StoreProductDetail> {
     const response = await apiClient.get(`/api/v2/products/${uuid}`);
-    return response.data;
+    // The endpoint wraps the row as { permissions, data: {...} }.
+    return (response.data?.data ?? response.data) as StoreProductDetail;
   },
 
   async createStoreProduct(data: Partial<StoreProduct>): Promise<StoreProduct> {

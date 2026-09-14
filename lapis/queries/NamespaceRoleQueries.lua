@@ -747,7 +747,81 @@ function NamespaceRoleQueries.createDefaultRoles(namespace_id, project_code)
     })
     table.insert(created_roles, member_role)
 
+    -- Field-service operational roles, when this deployment has that module.
+    local ProjectConfig = require("helper.project-config")
+    if ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.FIELD_SERVICE) then
+        for _, r in ipairs(NamespaceRoleQueries.createFieldServiceRoles(namespace_id)) do
+            table.insert(created_roles, r)
+        end
+    end
+
     return created_roles
+end
+
+--- The three field-service operational roles (Telecaller / Service Manager /
+--- Engineer). Idempotent per namespace and resilient: unknown modules are
+--- dropped and each create is isolated, so a missing companion module (e.g.
+--- invoices) can never abort namespace creation. The Engineer role is
+--- deliberately near-empty — an engineer's reach comes from being assigned to a
+--- visit (jobs/visits lists auto-scope to their own), not from module grants.
+-- @param namespace_id number Namespace ID
+-- @return table List of created roles (empty if all already existed)
+function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
+    local FS_ROLES = {
+        {
+            role_name = "telecaller", display_name = "Telecaller", priority = 30,
+            description = "Logs customer complaints as service requests",
+            permissions = {
+                customers = { "read", "create" },
+                fs_service_requests = { "create", "read", "update" },
+            },
+        },
+        {
+            role_name = "service_manager", display_name = "Service Manager", priority = 50,
+            description = "Assigns jobs to engineers, approves parts, and invoices",
+            permissions = {
+                fs_service_requests = { "manage" }, fs_jobs = { "manage" }, fs_visits = { "manage" },
+                fs_job_types = { "manage" }, fs_parts = { "manage" }, employees = { "manage" },
+                customers = { "manage" }, invoices = { "create", "read" }, timesheets = { "read" },
+            },
+        },
+        {
+            role_name = "engineer", display_name = "Engineer", priority = 20,
+            description = "Works only the jobs and visits assigned to them",
+            -- read (not manage): the Jobs/Visits list routes scope a caller to
+            -- their own work whenever they lack module.update, so an engineer
+            -- reads the pages but only ever sees the jobs/visits they're the
+            -- assigned engineer on. They act on a specific job via being that
+            -- assignee (is_engineer_on_job), not via a module grant.
+            permissions = { fs_jobs = { "read" }, fs_visits = { "read" }, fs_parts = { "read" } },
+        },
+    }
+
+    -- Drop any module the deployment doesn't have, so create() never rejects.
+    local valid = {}
+    for _, m in ipairs(db.query("SELECT machine_name FROM modules WHERE is_active = true") or {}) do
+        valid[m.machine_name] = true
+    end
+
+    local created = {}
+    for _, def in ipairs(FS_ROLES) do
+        local existing = db.select("id FROM namespace_roles WHERE namespace_id = ? AND role_name = ?",
+            namespace_id, def.role_name)
+        if #existing == 0 then
+            local perms = {}
+            for mod, actions in pairs(def.permissions) do
+                if valid[mod] then perms[mod] = actions end
+            end
+            local ok, role = pcall(NamespaceRoleQueries.create, {
+                namespace_id = namespace_id,
+                role_name = def.role_name, display_name = def.display_name,
+                description = def.description, permissions = perms,
+                is_system = true, is_default = false, priority = def.priority,
+            })
+            if ok then table.insert(created, role) end
+        end
+    end
+    return created
 end
 
 return NamespaceRoleQueries
