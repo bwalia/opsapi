@@ -87,8 +87,9 @@ function VisitQueries.listVisits(namespace_id, params)
     if to_bool(params.follow_up, false) then add("v.follow_up_required = true") end
     if nilify(params.search) then
         local term = "%" .. tostring(params.search) .. "%"
-        add("(j.job_number ILIKE ? OR j.title ILIKE ? OR a.name ILIKE ? OR s.postal_code ILIKE ?)")
-        for _ = 1, 4 do table.insert(values, term) end
+        add("(j.job_number ILIKE ? OR j.title ILIKE ? OR cust.first_name ILIKE ? OR cust.last_name ILIKE ?" ..
+            " OR cust.email ILIKE ? OR j.service_postcode ILIKE ?)")
+        for _ = 1, 6 do table.insert(values, term) end
     end
     local where_sql = table.concat(where, " AND ")
     local order_dir = tostring(params.order_dir or ""):lower() == "desc" and "DESC" or "ASC"
@@ -96,8 +97,8 @@ function VisitQueries.listVisits(namespace_id, params)
     local count = db.query([[
         SELECT COUNT(*) AS total FROM fs_visits v
         JOIN fs_jobs j ON j.id = v.job_id
-        LEFT JOIN crm_accounts a ON a.id = j.account_id
-        LEFT JOIN fs_sites s ON s.id = j.site_id
+        LEFT JOIN customers cust ON cust.id = j.customer_id
+        LEFT JOIN storeproducts prod ON prod.id = j.product_id
         WHERE ]] .. where_sql, unpack(values))
 
     local page_values = { unpack(values) }
@@ -352,14 +353,16 @@ end
 function VisitQueries.logTimesheet(namespace_id, uuid, actor_uuid)
     if not ProjectConfig.isTimesheetsEnabled() then return nil, "Timesheets are not enabled" end
     local rows = db.query([[
-        SELECT v.*, j.job_number, j.title AS job_title, j.account_id, a.name AS account_name,
+        SELECT v.*, j.job_number, j.title AS job_title,
+            COALESCE(NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), c.email)
+                AS customer_name,
             j.hourly_rate AS job_hourly_rate, jt.default_hourly_rate AS job_type_hourly_rate,
             p.name AS phase_name,
             TO_CHAR(COALESCE(v.checked_in_at, v.scheduled_start), 'YYYY-MM-DD') AS work_date
         FROM fs_visits v
         JOIN fs_jobs j ON j.id = v.job_id
         LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
-        LEFT JOIN crm_accounts a ON a.id = j.account_id
+        LEFT JOIN customers c ON c.id = j.customer_id
         LEFT JOIN fs_job_phases p ON p.id = v.phase_id AND p.deleted_at IS NULL
         WHERE v.uuid = ? AND v.namespace_id = ? AND v.deleted_at IS NULL LIMIT 1
     ]], tostring(uuid), namespace_id)
@@ -388,8 +391,7 @@ function VisitQueries.logTimesheet(namespace_id, uuid, actor_uuid)
             namespace_id = namespace_id,
             user_uuid = v.engineer_user_uuid,
             work_date = v.work_date,
-            client_account_id = v.account_id,
-            client_name = v.account_name,
+            client_name = v.customer_name,
             task = task,
             hourly_rate = rate,
             is_billable = v.is_billable,

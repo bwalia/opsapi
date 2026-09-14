@@ -1,7 +1,7 @@
 --[[
     Field Service — shared HTTP helpers for routes/field-service-*.lua
 
-    RBAC modules: fs_jobs, fs_visits, fs_sites, fs_job_types (see
+    RBAC modules: fs_jobs, fs_visits, fs_job_types, fs_parts (see
     helper/project-config.lua). Namespace owners and platform admins pass
     every check, mirroring NamespaceMiddleware.requirePermission.
 

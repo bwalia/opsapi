@@ -4,8 +4,6 @@
     Endpoints:
     - GET    /api/v2/field-service/stats                          - Dashboard counters
     - GET    /api/v2/field-service/engineers                      - Workspace members (engineer / manager pickers)
-    - GET    /api/v2/field-service/lookups/accounts               - CRM accounts (?search=)
-    - GET    /api/v2/field-service/lookups/contacts               - CRM contacts (?account_uuid=&search=)
 
     - GET    /api/v2/field-service/job-types                      - List (?include_inactive=&with_phases=)
     - POST   /api/v2/field-service/job-types                      - Create (optional ordered `phases` array)
@@ -16,12 +14,6 @@
     - PUT    /api/v2/field-service/job-types/:uuid/phases/reorder - Reorder ({ order = [uuid, ...] })
     - PUT    /api/v2/field-service/phase-templates/:uuid          - Update a phase template
     - DELETE /api/v2/field-service/phase-templates/:uuid          - Remove a phase template
-
-    - GET    /api/v2/field-service/sites                          - List (?account_uuid=&search=&page=&per_page=)
-    - POST   /api/v2/field-service/sites                          - Create
-    - GET    /api/v2/field-service/sites/:uuid                    - Get
-    - PUT    /api/v2/field-service/sites/:uuid                    - Update
-    - DELETE /api/v2/field-service/sites/:uuid                    - Soft delete (blocked while open jobs use it)
 ]]
 
 local Http = require("helper.field-service-http")
@@ -30,9 +22,8 @@ local JobQueries = require("queries.FieldServiceJobQueries")
 
 return function(app)
     -- Anyone who works jobs or visits needs the pickers.
-    local READERS = { { "fs_jobs", "read" }, { "fs_visits", "read" }, { "fs_sites", "read" } }
+    local READERS = { { "fs_jobs", "read" }, { "fs_visits", "read" } }
     local TYPE_READERS = { { "fs_job_types", "read" }, { "fs_jobs", "read" } }
-    local SITE_READERS = { { "fs_sites", "read" }, { "fs_jobs", "read" } }
 
     -- ============================================================
     -- STATS & LOOKUPS
@@ -44,14 +35,6 @@ return function(app)
 
     app:get("/api/v2/field-service/engineers", Http.guard_any(READERS, function(self)
         return Http.ok(ConfigQueries.listEngineers(self.namespace.id, { search = self.params.search }))
-    end))
-
-    app:get("/api/v2/field-service/lookups/accounts", Http.guard_any(READERS, function(self)
-        return Http.ok(ConfigQueries.lookupAccounts(self.namespace.id, self.params.search))
-    end))
-
-    app:get("/api/v2/field-service/lookups/contacts", Http.guard_any(READERS, function(self)
-        return Http.ok(ConfigQueries.lookupContacts(self.namespace.id, self.params.account_uuid, self.params.search))
     end))
 
     -- ============================================================

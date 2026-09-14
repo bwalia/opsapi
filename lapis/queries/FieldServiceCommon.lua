@@ -20,8 +20,6 @@ local Common = {}
 -- Tables resolve_id may look up. The name is interpolated into SQL, so it must
 -- come from this allow-list, never from request input.
 local RESOLVABLE = {
-    crm_accounts = true,
-    crm_contacts = true,
     fs_job_types = true,
     fs_phase_templates = true,
     fs_jobs = true,
