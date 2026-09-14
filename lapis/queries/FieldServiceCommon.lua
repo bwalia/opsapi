@@ -29,6 +29,8 @@ local RESOLVABLE = {
     fs_job_phases = true,
     fs_visits = true,
     fs_job_items = true,
+    fs_assets = true,
+    employees = true,
 }
 
 -- SQL expression for a user's display name (users alias `u`).

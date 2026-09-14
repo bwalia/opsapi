@@ -513,6 +513,8 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "fs_visits", name = "Site Visits", description = "Engineer site visits: scheduling, check-in/out, work reports", category = "Field Service" },
         { machine_name = "fs_sites", name = "Service Sites", description = "Customer site addresses for field service", category = "Field Service" },
         { machine_name = "fs_job_types", name = "Job Types", description = "Job types and their phase templates", category = "Field Service" },
+        { machine_name = "fs_assets", name = "Assets", description = "Equipment / asset register for field service", category = "Field Service" },
+        { machine_name = "employees", name = "Employees", description = "Staff directory and engineer profiles", category = "Field Service" },
     },
 
     -- Theme system (platform-level; always on)

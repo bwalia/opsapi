@@ -591,6 +591,8 @@ load_if("invoicing", "routes.document-templates")
 load_if("field_service", "routes.field-service-config")
 load_if("field_service", "routes.field-service-jobs")
 load_if("field_service", "routes.field-service-visits")
+load_if("field_service", "routes.field-service-assets")
+load_if("field_service", "routes.field-service-employees")
 
 -- ============================================
 -- ACCOUNTING / BOOKKEEPING (AI-powered)

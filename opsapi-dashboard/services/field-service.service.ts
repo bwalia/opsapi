@@ -462,6 +462,67 @@ export interface FsSiteListParams {
   per_page?: number;
 }
 
+export type AssetStatus = 'active' | 'inactive' | 'decommissioned';
+
+export interface FsAsset {
+  uuid: string;
+  name: string;
+  asset_tag?: string | null;
+  serial_number?: string | null;
+  category?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  location_detail?: string | null;
+  installed_at?: string | null;
+  warranty_expires_at?: string | null;
+  status: AssetStatus;
+  notes?: string | null;
+  account_uuid?: string | null;
+  account_name?: string | null;
+  site_uuid?: string | null;
+  site_name?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FsAssetListParams {
+  account_uuid?: string;
+  site_uuid?: string;
+  status?: string;
+  category?: string;
+  search?: string;
+  page?: number;
+  per_page?: number;
+}
+
+export interface FsEmployee {
+  uuid: string;
+  user_uuid: string;
+  user_name?: string | null;
+  user_email?: string | null;
+  employee_code?: string | null;
+  job_title?: string | null;
+  is_engineer: boolean;
+  is_active: boolean;
+  phone?: string | null;
+  email?: string | null;
+  region?: string | null;
+  skills: string[];
+  hourly_cost_rate?: number | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FsEmployeeListParams {
+  is_engineer?: boolean;
+  is_active?: boolean;
+  search?: string;
+  page?: number;
+  per_page?: number;
+}
+
 export type FsPayload = Record<string, unknown>;
 
 // ============================================================
@@ -575,6 +636,53 @@ export const fieldService = {
 
   async deleteSite(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/sites/${uuid}`);
+  },
+
+  // ---------------- Assets ----------------
+  async getAssets(params: FsAssetListParams = {}): Promise<FsPaginated<FsAsset>> {
+    return paginated<FsAsset>(await apiClient.get(`${BASE}/assets${qs(params)}`));
+  },
+
+  async getAsset(uuid: string): Promise<FsAsset> {
+    return unwrap<FsAsset>(await apiClient.get(`${BASE}/assets/${uuid}`));
+  },
+
+  async createAsset(data: FsPayload): Promise<FsAsset> {
+    return unwrap<FsAsset>(await apiClient.post(`${BASE}/assets`, data, JSON_BODY));
+  },
+
+  async updateAsset(uuid: string, data: FsPayload): Promise<FsAsset> {
+    return unwrap<FsAsset>(await apiClient.put(`${BASE}/assets/${uuid}`, data, JSON_BODY));
+  },
+
+  async deleteAsset(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/assets/${uuid}`);
+  },
+
+  // ---------------- Employees ----------------
+  async getEmployees(params: FsEmployeeListParams = {}): Promise<FsPaginated<FsEmployee>> {
+    // qs() drops boolean false, so stringify the flag filters — otherwise
+    // "inactive only" (is_active=false) would send nothing and return all.
+    const q: Record<string, unknown> = { ...params };
+    if (typeof params.is_engineer === 'boolean') q.is_engineer = String(params.is_engineer);
+    if (typeof params.is_active === 'boolean') q.is_active = String(params.is_active);
+    return paginated<FsEmployee>(await apiClient.get(`${BASE}/employees${qs(q)}`));
+  },
+
+  async getEmployee(uuid: string): Promise<FsEmployee> {
+    return unwrap<FsEmployee>(await apiClient.get(`${BASE}/employees/${uuid}`));
+  },
+
+  async createEmployee(data: FsPayload): Promise<FsEmployee> {
+    return unwrap<FsEmployee>(await apiClient.post(`${BASE}/employees`, data, JSON_BODY));
+  },
+
+  async updateEmployee(uuid: string, data: FsPayload): Promise<FsEmployee> {
+    return unwrap<FsEmployee>(await apiClient.put(`${BASE}/employees/${uuid}`, data, JSON_BODY));
+  },
+
+  async deleteEmployee(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/employees/${uuid}`);
   },
 
   // ---------------- Jobs ----------------

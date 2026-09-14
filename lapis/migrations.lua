@@ -356,6 +356,8 @@ local document_template_menu_migrations = load_if_enabled(ProjectConfig.FEATURES
 -- Field Service (service jobs, job phases, engineer site visits)
 local field_service_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-system") or {}
 local field_service_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-menu-items") or {}
+local field_service_assets_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets") or {}
+local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets-menu") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -2365,6 +2367,13 @@ local _migrations = {
     ['859_register_fs_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 2),
     ['860_grant_fs_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 3),
     ['861_enable_fs_menu_for_namespaces'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_menu_migrations, 4),
+
+    ['862_fs_create_assets'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_migrations, 1),
+    ['863_create_employees'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_migrations, 2),
+    ['864_seed_fs_assets_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 1),
+    ['865_register_fs_assets_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 2),
+    ['866_grant_fs_assets_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 3),
+    ['867_enable_fs_assets_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

@@ -22,6 +22,8 @@ const NAV = [
   { href: '/dashboard/field-service', label: 'Jobs', match: (p: string) => p === '/dashboard/field-service' || p.startsWith('/dashboard/field-service/jobs') },
   { href: '/dashboard/field-service/visits', label: 'Site Visits', match: (p: string) => p.startsWith('/dashboard/field-service/visits') },
   { href: '/dashboard/field-service/sites', label: 'Sites', match: (p: string) => p.startsWith('/dashboard/field-service/sites') },
+  { href: '/dashboard/field-service/assets', label: 'Assets', match: (p: string) => p.startsWith('/dashboard/field-service/assets') },
+  { href: '/dashboard/field-service/employees', label: 'Employees', match: (p: string) => p.startsWith('/dashboard/field-service/employees') },
   { href: '/dashboard/field-service/job-types', label: 'Job Types', match: (p: string) => p.startsWith('/dashboard/field-service/job-types') },
 ];
 
