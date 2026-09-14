@@ -153,6 +153,8 @@ local MANIFEST = {
   ["857_fs_create_job_activity"]                     = "fs_job_activity",
   ["862_fs_create_assets"]                           = "fs_assets",
   ["863_create_employees"]                           = "employees",
+  ["868_fs_create_request_sequences"]                = "fs_request_sequences",
+  ["869_fs_create_service_requests"]                 = "fs_service_requests",
 
   -- ── document templates ────────────────────────────────────────────
   ["570_doc_create_templates"]                       = "document_templates",

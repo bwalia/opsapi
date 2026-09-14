@@ -358,6 +358,8 @@ local field_service_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SE
 local field_service_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-menu-items") or {}
 local field_service_assets_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets") or {}
 local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets-menu") or {}
+local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
+local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -2374,6 +2376,14 @@ local _migrations = {
     ['865_register_fs_assets_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 2),
     ['866_grant_fs_assets_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 3),
     ['867_enable_fs_assets_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 4),
+
+    ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
+    ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),
+    ['870_fs_jobs_add_request_asset'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 3),
+    ['871_seed_fs_requests_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 1),
+    ['872_register_fs_requests_module'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 2),
+    ['873_grant_fs_requests_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 3),
+    ['874_enable_fs_requests_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_menu_migrations, 4),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.

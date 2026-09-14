@@ -523,6 +523,87 @@ export interface FsEmployeeListParams {
   per_page?: number;
 }
 
+export type RequestStatus =
+  | 'new' | 'triaged' | 'assigned' | 'in_progress' | 'on_hold' | 'resolved' | 'closed' | 'rejected' | 'duplicate';
+export type RequestChannel = 'phone' | 'app' | 'email' | 'portal' | 'web' | 'other';
+
+export interface FsServiceRequest {
+  uuid: string;
+  request_number: string;
+  title: string;
+  description?: string | null;
+  fault_category?: string | null;
+  channel: RequestChannel;
+  reported_by?: string | null;
+  priority: JobPriority;
+  status: RequestStatus;
+  account_uuid?: string | null;
+  account_name?: string | null;
+  contact_uuid?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  site_uuid?: string | null;
+  site_name?: string | null;
+  asset_uuid?: string | null;
+  asset_name?: string | null;
+  asset_serial?: string | null;
+  assigned_manager_uuid?: string | null;
+  assigned_manager_name?: string | null;
+  sla_response_due_at?: string | null;
+  sla_resolve_due_at?: string | null;
+  first_response_at?: string | null;
+  resolved_at?: string | null;
+  closed_at?: string | null;
+  resolution_notes?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FsRequestJob {
+  uuid: string;
+  job_number: string;
+  title: string;
+  status: JobStatus;
+  priority: JobPriority;
+  created_at: string;
+  visit_count: number;
+  invoice_number?: string | null;
+  invoice_status?: string | null;
+}
+
+export interface FsRequestTotals {
+  job_count: number;
+  open_jobs: number;
+  visit_count: number;
+  labour_hours: number;
+  invoiced_total: number;
+}
+
+export interface FsServiceRequestDetail extends FsServiceRequest {
+  jobs: FsRequestJob[];
+  totals: FsRequestTotals;
+  allowed_transitions: RequestStatus[];
+}
+
+export interface FsConvertResult {
+  job_uuid: string;
+  job_number: string;
+  request: FsServiceRequestDetail;
+}
+
+export interface FsRequestListParams {
+  status?: string;
+  priority?: string;
+  account_uuid?: string;
+  asset_uuid?: string;
+  manager_uuid?: string;
+  search?: string;
+  page?: number;
+  per_page?: number;
+}
+
 export type FsPayload = Record<string, unknown>;
 
 // ============================================================
@@ -683,6 +764,49 @@ export const fieldService = {
 
   async deleteEmployee(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/employees/${uuid}`);
+  },
+
+  // ---------------- Service requests (complaints) ----------------
+  async getRequests(params: FsRequestListParams = {}): Promise<FsPaginated<FsServiceRequest>> {
+    return paginated<FsServiceRequest>(await apiClient.get(`${BASE}/service-requests${qs(params)}`));
+  },
+
+  async getRequest(uuid: string): Promise<FsServiceRequestDetail> {
+    return unwrap<FsServiceRequestDetail>(await apiClient.get(`${BASE}/service-requests/${uuid}`));
+  },
+
+  async createRequest(data: FsPayload): Promise<FsServiceRequestDetail> {
+    return unwrap<FsServiceRequestDetail>(await apiClient.post(`${BASE}/service-requests`, data, JSON_BODY));
+  },
+
+  async updateRequest(uuid: string, data: FsPayload): Promise<FsServiceRequestDetail> {
+    return unwrap<FsServiceRequestDetail>(await apiClient.put(`${BASE}/service-requests/${uuid}`, data, JSON_BODY));
+  },
+
+  async setRequestStatus(
+    uuid: string,
+    status: RequestStatus,
+    opts: { resolution_notes?: string } = {}
+  ): Promise<FsServiceRequestDetail> {
+    return unwrap<FsServiceRequestDetail>(
+      await apiClient.post(`${BASE}/service-requests/${uuid}/status`, { status, ...opts }, JSON_BODY)
+    );
+  },
+
+  async assignRequest(uuid: string, managerUuid: string): Promise<FsServiceRequestDetail> {
+    return unwrap<FsServiceRequestDetail>(
+      await apiClient.post(`${BASE}/service-requests/${uuid}/assign`, { manager_uuid: managerUuid }, JSON_BODY)
+    );
+  },
+
+  async convertRequestToJob(uuid: string, data: FsPayload = {}): Promise<FsConvertResult> {
+    return unwrap<FsConvertResult>(
+      await apiClient.post(`${BASE}/service-requests/${uuid}/convert-to-job`, data, JSON_BODY)
+    );
+  },
+
+  async deleteRequest(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/service-requests/${uuid}`);
   },
 
   // ---------------- Jobs ----------------

@@ -72,9 +72,10 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Phone: icons.Phone,
     User: icons.User,
     PoundSterling: icons.PoundSterling,
-    // Field service (Service Jobs / Site Visits)
+    // Field service (Service Jobs / Site Visits / Service Requests)
     Wrench: icons.Wrench,
     MapPin: icons.MapPin,
+    ClipboardList: icons.ClipboardList,
     // Explicit alias — "pound-sign" normalizes to "poundsign", which doesn't
     // match "PoundSterling", so it needs its own key.
     'pound-sign': icons.PoundSterling,

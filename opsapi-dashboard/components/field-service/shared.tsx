@@ -12,13 +12,14 @@ import { usePathname } from 'next/navigation';
 import { ChevronDown } from 'lucide-react';
 import { Modal, Button, Input, Textarea } from '@/components/ui';
 import { cn, extractApiError } from '@/lib/utils';
-import type { FsJob, FsVisit, FsSite, JobPriority, JobStatus, PhaseStatus, VisitStatus } from '@/services/field-service.service';
+import type { FsJob, FsVisit, FsSite, JobPriority, JobStatus, PhaseStatus, VisitStatus, RequestStatus } from '@/services/field-service.service';
 
 // ============================================================
 // Sub-navigation
 // ============================================================
 
 const NAV = [
+  { href: '/dashboard/field-service/requests', label: 'Service Requests', match: (p: string) => p.startsWith('/dashboard/field-service/requests') },
   { href: '/dashboard/field-service', label: 'Jobs', match: (p: string) => p === '/dashboard/field-service' || p.startsWith('/dashboard/field-service/jobs') },
   { href: '/dashboard/field-service/visits', label: 'Site Visits', match: (p: string) => p.startsWith('/dashboard/field-service/visits') },
   { href: '/dashboard/field-service/sites', label: 'Sites', match: (p: string) => p.startsWith('/dashboard/field-service/sites') },
@@ -123,6 +124,58 @@ export const VISIT_STATUS_COLORS: Record<VisitStatus, string> = {
   no_access: 'bg-red-50 text-red-700',
 };
 
+export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
+  new: 'New',
+  triaged: 'Triaged',
+  assigned: 'Assigned',
+  in_progress: 'In progress',
+  on_hold: 'On hold',
+  resolved: 'Resolved',
+  closed: 'Closed',
+  rejected: 'Rejected',
+  duplicate: 'Duplicate',
+};
+
+export const REQUEST_STATUS_COLORS: Record<RequestStatus, string> = {
+  new: 'bg-blue-50 text-blue-700',
+  triaged: 'bg-indigo-50 text-indigo-700',
+  assigned: 'bg-violet-50 text-violet-700',
+  in_progress: 'bg-amber-50 text-amber-700',
+  on_hold: 'bg-orange-50 text-orange-700',
+  resolved: 'bg-green-50 text-green-700',
+  closed: 'bg-secondary-100 text-secondary-600',
+  rejected: 'bg-red-50 text-red-700',
+  duplicate: 'bg-secondary-100 text-secondary-500',
+};
+
+/** Label shown on the button that moves a request to a given status. */
+export const REQUEST_TRANSITION_LABELS: Record<RequestStatus, string> = {
+  new: 'Reopen',
+  triaged: 'Mark triaged',
+  assigned: 'Mark assigned',
+  in_progress: 'Start work',
+  on_hold: 'Put on hold',
+  resolved: 'Resolve',
+  closed: 'Close',
+  rejected: 'Reject',
+  duplicate: 'Mark duplicate',
+};
+
+export const CHANNEL_LABELS: Record<string, string> = {
+  phone: 'Phone',
+  app: 'App',
+  email: 'Email',
+  portal: 'Portal',
+  web: 'Web',
+  other: 'Other',
+};
+
+export const REQUEST_STATUS_OPTIONS = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'open', label: 'Open requests' },
+  ...(Object.keys(REQUEST_STATUS_LABELS) as RequestStatus[]).map((s) => ({ value: s, label: REQUEST_STATUS_LABELS[s] })),
+];
+
 export const JOB_STATUS_OPTIONS = [
   { value: 'open', label: 'Open jobs' },
   { value: 'all', label: 'All statuses' },
@@ -176,6 +229,10 @@ export function PhaseStatusPill({ status }: { status: PhaseStatus }) {
 
 export function VisitStatusPill({ status }: { status: VisitStatus }) {
   return <Pill className={VISIT_STATUS_COLORS[status]}>{VISIT_STATUS_LABELS[status] ?? status}</Pill>;
+}
+
+export function RequestStatusPill({ status }: { status: RequestStatus }) {
+  return <Pill className={REQUEST_STATUS_COLORS[status]}>{REQUEST_STATUS_LABELS[status] ?? status}</Pill>;
 }
 
 interface StatCardProps {

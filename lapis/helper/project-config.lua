@@ -515,6 +515,7 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "fs_job_types", name = "Job Types", description = "Job types and their phase templates", category = "Field Service" },
         { machine_name = "fs_assets", name = "Assets", description = "Equipment / asset register for field service", category = "Field Service" },
         { machine_name = "employees", name = "Employees", description = "Staff directory and engineer profiles", category = "Field Service" },
+        { machine_name = "fs_service_requests", name = "Service Requests", description = "Customer complaints and service requests (the intake queue)", category = "Field Service" },
     },
 
     -- Theme system (platform-level; always on)
