@@ -203,6 +203,13 @@ export interface FsVisit {
   product_ref?: string | null;
   service_address?: string | null;
   service_postcode?: string | null;
+  // F-Gas / refrigerant handling logged on this visit.
+  refrigerant_type?: string | null;
+  refrigerant_added_kg?: number | null;
+  refrigerant_recovered_kg?: number | null;
+  leak_check_result?: string | null;
+  leak_check_notes?: string | null;
+  fgas_cylinder_ref?: string | null;
 }
 
 export type ItemApprovalStatus = 'pending' | 'approved' | 'rejected';
@@ -418,6 +425,7 @@ export interface FsEmployee {
   email?: string | null;
   region?: string | null;
   skills: string[];
+  fgas_certificate_no?: string | null;
   hourly_cost_rate?: number | null;
   metadata?: Record<string, unknown> | null;
   created_at: string;

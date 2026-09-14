@@ -246,10 +246,21 @@ function VisitQueries.updateVisit(namespace_id, uuid, data, actor_uuid)
             update.phase_id = db.NULL
         end
     end
-    for _, f in ipairs({ "instructions", "work_summary", "follow_up_notes", "customer_signoff_name" }) do
+    for _, f in ipairs({ "instructions", "work_summary", "follow_up_notes", "customer_signoff_name",
+        "refrigerant_type", "leak_check_result", "leak_check_notes", "fgas_cylinder_ref" }) do
         if data[f] ~= nil then update[f] = nullable(data[f]) end
     end
     if data.follow_up_required ~= nil then update.follow_up_required = to_bool(data.follow_up_required, false) end
+
+    -- F-Gas refrigerant quantities (kg). Compliance data — always editable,
+    -- not locked by invoicing like the billing fields below.
+    for _, f in ipairs({ "refrigerant_added_kg", "refrigerant_recovered_kg" }) do
+        if data[f] ~= nil then
+            local kg = to_number(data[f])
+            if kg and (kg < 0 or kg > 1000) then return nil, f .. " must be between 0 and 1000" end
+            update[f] = kg and round2(kg) or db.NULL
+        end
+    end
 
     local invoiced = visit.invoice_line_item_id ~= nil
     if data.is_billable ~= nil or data.hourly_rate ~= nil or data.labour_hours ~= nil then

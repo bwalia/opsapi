@@ -50,6 +50,9 @@ return function(app)
     local ENGINEER_FIELDS = {
         work_summary = true, labour_hours = true, follow_up_required = true,
         follow_up_notes = true, customer_signoff_name = true,
+        -- F-Gas refrigerant log — the on-site engineer records this.
+        refrigerant_type = true, refrigerant_added_kg = true, refrigerant_recovered_kg = true,
+        leak_check_result = true, leak_check_notes = true, fgas_cylinder_ref = true,
     }
 
     app:get("/api/v2/field-service/visits", Http.route(function(self)

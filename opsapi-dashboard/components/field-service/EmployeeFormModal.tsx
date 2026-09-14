@@ -21,6 +21,7 @@ const EMPTY = {
   email: '',
   region: '',
   skills: '',
+  fgas_certificate_no: '',
   hourly_cost_rate: '',
   is_engineer: true,
   is_active: true,
@@ -38,6 +39,7 @@ function formFromEmployee(employee?: FsEmployee | null): EmployeeForm {
     email: employee.email || '',
     region: employee.region || '',
     skills: (employee.skills || []).join(', '),
+    fgas_certificate_no: employee.fgas_certificate_no || '',
     hourly_cost_rate: employee.hourly_cost_rate != null ? String(employee.hourly_cost_rate) : '',
     is_engineer: !!employee.is_engineer,
     is_active: !!employee.is_active,
@@ -88,7 +90,7 @@ function EmployeeForm({ employee, onClose, onSaved }: EmployeeFormModalProps) {
       hourly_cost_rate: form.hourly_cost_rate.trim(),
     };
     if (!isEdit) payload.user_uuid = form.user_uuid;
-    for (const key of ['employee_code', 'job_title', 'phone', 'email', 'region'] as const) {
+    for (const key of ['employee_code', 'job_title', 'phone', 'email', 'region', 'fgas_certificate_no'] as const) {
       // On edit send empty strings so cleared fields are cleared server-side.
       payload[key] = isEdit ? form[key].trim() : optional(form[key]);
     }
@@ -135,6 +137,12 @@ function EmployeeForm({ employee, onClose, onSaved }: EmployeeFormModalProps) {
         <Input label="Phone" value={form.phone} onChange={set('phone')} />
         <Input label="Email" type="email" value={form.email} onChange={set('email')} />
         <Input label="Region / team" value={form.region} onChange={set('region')} />
+        <Input
+          label="F-Gas certificate no."
+          value={form.fgas_certificate_no}
+          onChange={set('fgas_certificate_no')}
+          placeholder="Refrigerant handling cert"
+        />
         <Input
           label="Hourly cost rate"
           value={form.hourly_cost_rate}

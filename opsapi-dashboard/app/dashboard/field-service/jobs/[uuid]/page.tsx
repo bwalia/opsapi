@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Building2, Loader2, MapPin, Pencil, Phone, Trash2, Wrench, Mail, CalendarDays, Hash, Package } from 'lucide-react';
+import { ArrowLeft, Building2, Loader2, MapPin, Pencil, Phone, Trash2, Wrench, Mail, CalendarDays, Hash, Package, Printer } from 'lucide-react';
 import { Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -163,29 +163,37 @@ function JobDetailContent() {
               </div>
             </div>
           </div>
-          {canManage && (
-            <div className="flex flex-wrap items-center gap-2">
-              {transitions.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={s === 'completed' || (s === 'in_progress' && job.status !== 'completed') ? 'primary' : s === 'cancelled' ? 'danger' : 'ghost'}
-                  onClick={() => handleTransition(s)}
-                  disabled={busy}
-                >
-                  {JOB_TRANSITION_LABELS[s]}
-                </Button>
-              ))}
-              <Button size="sm" variant="ghost" onClick={() => setEditOpen(true)} title="Edit details">
-                <Pencil className="w-4 h-4" />
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Anyone who can see the job (engineer included) can print its sheet. */}
+            <Link href={`/dashboard/field-service/jobs/${job.uuid}/job-sheet`} target="_blank" rel="noopener noreferrer">
+              <Button size="sm" variant="secondary" leftIcon={<Printer className="w-4 h-4" />} title="Open a printable job sheet">
+                Job sheet
               </Button>
-              {canDelete('fs_jobs') && !job.invoice_uuid && (
-                <Button size="sm" variant="ghost" onClick={() => setDeleteOpen(true)} title="Delete job">
-                  <Trash2 className="w-4 h-4 text-error-500" />
+            </Link>
+            {canManage && (
+              <>
+                {transitions.map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    variant={s === 'completed' || (s === 'in_progress' && job.status !== 'completed') ? 'primary' : s === 'cancelled' ? 'danger' : 'ghost'}
+                    onClick={() => handleTransition(s)}
+                    disabled={busy}
+                  >
+                    {JOB_TRANSITION_LABELS[s]}
+                  </Button>
+                ))}
+                <Button size="sm" variant="ghost" onClick={() => setEditOpen(true)} title="Edit details">
+                  <Pencil className="w-4 h-4" />
                 </Button>
-              )}
-            </div>
-          )}
+                {canDelete('fs_jobs') && !job.invoice_uuid && (
+                  <Button size="sm" variant="ghost" onClick={() => setDeleteOpen(true)} title="Delete job">
+                    <Trash2 className="w-4 h-4 text-error-500" />
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">

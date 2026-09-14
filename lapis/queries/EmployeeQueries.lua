@@ -58,6 +58,7 @@ local function shape_employee(e)
         region = e.region,
         skills = arr(Common.decode(e.skills, {})),
         hourly_cost_rate = e.hourly_cost_rate,
+        fgas_certificate_no = e.fgas_certificate_no,
         metadata = Common.decode(e.metadata, {}),
         created_at = e.created_at,
         updated_at = e.updated_at,
@@ -109,7 +110,7 @@ function EmployeeQueries.getEmployee(namespace_id, uuid)
     return rows and rows[1] and shape_employee(rows[1]) or nil
 end
 
-local TEXT_FIELDS = { "employee_code", "job_title", "phone", "email", "region" }
+local TEXT_FIELDS = { "employee_code", "job_title", "phone", "email", "region", "fgas_certificate_no" }
 
 function EmployeeQueries.createEmployee(namespace_id, actor_uuid, data)
     local user_uuid = nilify(data.user_uuid)

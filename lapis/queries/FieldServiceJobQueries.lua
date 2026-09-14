@@ -230,6 +230,9 @@ function JobQueries.shapeVisit(v)
     end
     out.invoiced = v.invoice_line_item_id ~= nil
     out.effective_hourly_rate = JobQueries.visitRate(v)
+    -- pg returns NUMERIC as strings; surface the F-Gas kg fields as numbers.
+    out.refrigerant_added_kg = tonumber(v.refrigerant_added_kg)
+    out.refrigerant_recovered_kg = tonumber(v.refrigerant_recovered_kg)
     return out
 end
 
