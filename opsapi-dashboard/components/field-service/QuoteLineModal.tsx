@@ -148,7 +148,7 @@ function LineForm({ kind, jobUuid, visitUuid, onClose, onSaved }: Props) {
         </>
       )}
 
-      <div className="flex justify-end gap-2 pt-1">
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-4 border-t border-secondary-200">
         <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button onClick={save} isLoading={saving}>Add</Button>
       </div>

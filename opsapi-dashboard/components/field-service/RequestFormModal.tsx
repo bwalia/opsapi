@@ -212,7 +212,7 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
         <Input label="Resolve by (SLA)" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
       </div>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>

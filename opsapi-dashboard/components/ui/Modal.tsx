@@ -10,18 +10,23 @@ export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  description?: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showClose?: boolean;
+  /** Action row rendered in a bordered footer (kept out of the scroll area). */
+  footer?: React.ReactNode;
 }
 
 const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   title,
+  description,
   children,
   size = 'md',
   showClose = true,
+  footer,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = title ? `modal-title-${title.replace(/\s+/g, '-').toLowerCase()}` : undefined;
@@ -53,47 +58,58 @@ const Modal: React.FC<ModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Full-width bottom sheet on phones; a centred, max-width panel on sm+.
   const sizes = {
-    sm: 'max-w-sm',
-    md: 'max-w-md',
-    lg: 'max-w-lg',
-    xl: 'max-w-2xl',
-    '2xl': 'max-w-3xl',
+    sm: 'sm:max-w-sm',
+    md: 'sm:max-w-md',
+    lg: 'sm:max-w-lg',
+    xl: 'sm:max-w-2xl',
+    '2xl': 'sm:max-w-3xl',
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
     >
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-secondary-900/50 backdrop-blur-sm"
+        className="fixed inset-0 bg-secondary-900/50 backdrop-blur-sm fs-overlay-in"
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Modal Content */}
+      {/* Modal Content — bottom sheet (mobile) / centred card (desktop) */}
       <div
         ref={modalRef}
         tabIndex={-1}
         className={cn(
-          'relative w-full bg-surface-elevated rounded-2xl shadow-2xl my-8 max-h-[90vh] flex flex-col',
+          'relative w-full bg-surface-elevated shadow-2xl flex flex-col',
+          'rounded-t-2xl sm:rounded-2xl max-h-[92dvh] sm:max-h-[88vh]',
+          'fs-sheet-in sm:fs-modal-in',
           sizes[size]
         )}
       >
+        {/* Mobile drag handle */}
+        <div className="sm:hidden pt-2.5 pb-1 flex justify-center flex-shrink-0" aria-hidden="true">
+          <span className="h-1.5 w-10 rounded-full bg-secondary-200" />
+        </div>
+
         {/* Header */}
         {(title || showClose) && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-secondary-200 flex-shrink-0">
-            {title && (
-              <h2 id={titleId} className="text-lg font-semibold text-secondary-900">{title}</h2>
-            )}
+          <div className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-3 sm:pt-5 pb-3 flex-shrink-0">
+            <div className="min-w-0">
+              {title && (
+                <h2 id={titleId} className="text-lg font-semibold text-secondary-900 leading-tight">{title}</h2>
+              )}
+              {description && <p className="text-sm text-secondary-500 mt-0.5">{description}</p>}
+            </div>
             {showClose && (
               <button
                 onClick={onClose}
-                className="p-2 text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100 rounded-lg transition-colors min-w-[40px] min-h-[40px] flex items-center justify-center"
+                className="-mr-1.5 shrink-0 p-2 text-secondary-400 hover:text-secondary-600 hover:bg-secondary-100 rounded-lg transition-colors flex items-center justify-center"
                 aria-label="Close dialog"
               >
                 <X className="w-5 h-5" />
@@ -103,7 +119,17 @@ const Modal: React.FC<ModalProps> = ({
         )}
 
         {/* Body - Scrollable */}
-        <div className="p-6 overflow-y-auto flex-1">{children}</div>
+        <div className="px-5 sm:px-6 pb-5 pt-1 overflow-y-auto flex-1">{children}</div>
+
+        {/* Footer - actions (optional) */}
+        {footer && (
+          <div
+            className="flex items-center justify-end gap-2 px-5 sm:px-6 py-3.5 border-t border-secondary-200 bg-secondary-50/60 flex-shrink-0 rounded-b-2xl"
+            style={{ paddingBottom: 'max(0.875rem, env(safe-area-inset-bottom))' }}
+          >
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

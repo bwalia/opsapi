@@ -212,7 +212,7 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
       <Textarea label="Description" value={form.description} onChange={setField('description')} rows={3} placeholder="What needs doing?" />
       {job && <Textarea label="Internal notes" value={form.notes} onChange={setField('notes')} rows={2} />}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>

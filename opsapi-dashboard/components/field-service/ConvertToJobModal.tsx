@@ -22,7 +22,13 @@ interface ConvertToJobModalProps {
 
 export function ConvertToJobModal(props: ConvertToJobModalProps) {
   return (
-    <Modal isOpen={props.isOpen} onClose={props.onClose} title="Convert to job" size="md">
+    <Modal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      title="Convert to job"
+      description={`Turn ${props.request.request_number} into a scheduled job`}
+      size="lg"
+    >
       {props.isOpen && <ConvertForm {...props} />}
     </Modal>
   );
@@ -80,9 +86,8 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-sm text-secondary-600">
-        Create a job from <span className="font-medium text-secondary-800">{request.request_number}</span>.
-        The customer, site and faulty asset carry over.
+      <p className="text-sm text-secondary-500">
+        The customer, site and faulty item carry over from the request.
       </p>
       <Input label="Job title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={request.title} />
       <SearchableSelect
@@ -130,12 +135,12 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
         />
         <Input label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
       </div>
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
         <Button type="submit" isLoading={saving}>
-          Create job
+          {engineerUuid ? 'Create & assign' : 'Create job'}
         </Button>
       </div>
     </form>

@@ -139,7 +139,7 @@ function SiteAddModal({
           <Input label="Postcode" value={f.postal_code} onChange={set('postal_code')} />
         </div>
         <Textarea label="Access notes" rows={2} value={f.access_notes} onChange={set('access_notes')} placeholder="Parking, keys, who to ask for…" />
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-4 border-t border-secondary-200">
           <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={save} isLoading={saving}>Add site</Button>
         </div>
