@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { ChevronDown, Search, Check, X, Plus } from 'lucide-react';
+
+type MenuPos = { left: number; width: number; top?: number; bottom?: number; maxH: number };
 
 export interface SearchableSelectOption {
   value: string;
@@ -58,8 +61,30 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
   const [open, setOpen] = useState(autoFocus);
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Position the menu in a portal (fixed) so it's never clipped by a modal's
+  // overflow; flip above the trigger when there's little room below.
+  const place = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const openUp = spaceBelow < 260 && spaceAbove > spaceBelow;
+    const maxH = Math.max(180, Math.min(340, (openUp ? spaceAbove : spaceBelow) - 16));
+    setPos({
+      left: r.left,
+      width: r.width,
+      maxH,
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+    });
+  }, []);
 
   const selected = useMemo(
     () => options.find((o) => o.value === value),
@@ -99,11 +124,12 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
     onClose?.();
   };
 
-  // Close on outside click.
+  // Close on outside click — the menu lives in a portal, so check it too.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      if (!rootRef.current?.contains(t) && !menuRef.current?.contains(t)) {
         close();
       }
     };
@@ -111,6 +137,19 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
     return () => document.removeEventListener('mousedown', handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Keep the portal menu aligned to the trigger while open.
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onMove = () => place();
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open, place]);
 
   // Focus the search input whenever the menu opens.
   useEffect(() => {
@@ -156,6 +195,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
       )}
 
       <button
+        ref={btnRef}
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen((o) => !o)}
@@ -184,8 +224,12 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
         </span>
       </button>
 
-      {open && (
-        <div className="absolute z-50 mt-1 w-full min-w-[200px] rounded-lg border border-secondary-200 bg-surface shadow-lg">
+      {open && pos && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={menuRef}
+          className="rounded-lg border border-secondary-200 bg-surface shadow-xl overflow-hidden"
+          style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, zIndex: 9999 }}
+        >
           <div className="flex items-center gap-2 border-b border-secondary-100 px-3 py-2">
             <Search className="h-4 w-4 shrink-0 text-secondary-400" />
             <input
@@ -200,7 +244,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
               className="w-full bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none"
             />
           </div>
-          <ul className="max-h-60 overflow-y-auto py-1" role="listbox">
+          <ul className="overflow-y-auto py-1" role="listbox" style={{ maxHeight: pos.maxH }}>
             {filtered.length === 0 && !showCreate ? (
               <li className="px-3 py-2 text-sm text-secondary-400">{emptyMessage}</li>
             ) : (
@@ -242,7 +286,8 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
               </li>
             )}
           </ul>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
