@@ -433,6 +433,21 @@ function RequestQueries.convertToJob(namespace_id, uuid, actor_uuid, data)
             WHERE uuid = ? AND namespace_id = ?
         ]], row.id, job.uuid, namespace_id)
 
+        -- Assign the engineer by booking their first visit. This is what puts
+        -- the job in that engineer's "My Work" and moves it draft -> scheduled;
+        -- without it the job stays draft and no one is assigned to do it.
+        local visit
+        if nilify(data.engineer_uuid) then
+            local VisitQueries = require("queries.FieldServiceVisitQueries")
+            local start_at = nilify(data.scheduled_start) or os.date("!%Y-%m-%d %H:%M:%S")
+            local v, verr = VisitQueries.createVisit(namespace_id, job.uuid, {
+                engineer_user_uuid = data.engineer_uuid,
+                scheduled_start = start_at,
+            }, actor_uuid)
+            if not v then return nil, verr end
+            visit = v
+        end
+
         -- Work has started on the complaint.
         local set = {}
         if not row.first_response_at then set.first_response_at = db.raw("NOW()") end
@@ -445,6 +460,8 @@ function RequestQueries.convertToJob(namespace_id, uuid, actor_uuid, data)
         return {
             job_uuid = job.uuid,
             job_number = job.job_number,
+            visit_uuid = visit and visit.uuid or nil,
+            engineer_assigned = visit ~= nil,
             request = RequestQueries.getRequest(namespace_id, uuid),
         }
     end)
