@@ -6,15 +6,35 @@
 local db = require("lapis.db")
 local FsJobPhotoModel = require("models.FsJobPhotoModel")
 local Common = require("queries.FieldServiceCommon")
+local MinioClient = require("helper.minio")
 
 local nilify, arr = Common.nilify, Common.arr
 
 local JobPhotoQueries = {}
 
+-- The object key inside the bucket: stored, or derived from the URL
+-- (scheme://host/bucket/<key>).
+local function object_key_of(p)
+    if p.object_key and p.object_key ~= "" then return p.object_key end
+    local rest = (p.url or ""):gsub("^https?://[^/]+/", "") -- bucket/key
+    return (rest:gsub("^[^/]+/", ""))                       -- key
+end
+
+-- A browser-reachable, time-limited URL. Presign against the public host so the
+-- photo loads in an <img>; fall back to the stored URL if presigning is off.
+local function browser_url(p)
+    local key = object_key_of(p)
+    if not key or key == "" then return p.url end
+    local ok, minio = pcall(MinioClient.getDefault)
+    if not ok or not minio then return p.url end
+    local signed = minio:getPresignedUrl(key, 3600, nil, true)
+    return signed or p.url
+end
+
 local function shape(p)
     return {
         uuid = p.uuid,
-        url = p.url,
+        url = browser_url(p),
         filename = p.filename,
         content_type = p.content_type,
         caption = p.caption,
@@ -61,7 +81,7 @@ function JobPhotoQueries.addPhoto(namespace_id, job_uuid, data, actor_uuid)
         job_id = job_id,
         visit_id = visit_id,
         url = tostring(data.url),
-        object_key = nilify(data.object_key),
+        object_key = nilify(data.object_key) or object_key_of({ url = tostring(data.url) }),
         filename = nilify(data.filename),
         content_type = nilify(data.content_type),
         caption = nilify(data.caption),
