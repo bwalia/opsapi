@@ -12,6 +12,7 @@ import {
 import { customersService } from '@/services/customers.service';
 import { productsService } from '@/services/products.service';
 import type { Customer, StoreProduct } from '@/types';
+import { SitePicker, siteToAddress } from './SitePicker';
 import { PRIORITY_OPTIONS, apiError, optional, optionalNumber } from './shared';
 
 interface JobFormModalProps {
@@ -28,7 +29,13 @@ function customerLabel(c: Customer): string {
 
 export function JobFormModal(props: JobFormModalProps) {
   return (
-    <Modal isOpen={props.isOpen} onClose={props.onClose} title={props.job ? `Edit ${props.job.job_number}` : 'New service job'} size="xl">
+    <Modal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      title={props.job ? `Edit ${props.job.job_number}` : 'New service job'}
+      description={props.job ? undefined : 'Create a job and assign the engineer who does the repair'}
+      size="3xl"
+    >
       {props.isOpen && <JobForm {...props} />}
     </Modal>
   );
@@ -39,6 +46,7 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
     title: job?.title || '',
     job_type_uuid: job?.job_type_uuid || '',
     customer_uuid: job?.customer_uuid || '',
+    site_uuid: job?.site_uuid || '',
     product_uuid: job?.product_uuid || '',
     product_ref: job?.product_ref || '',
     service_address: job?.service_address || '',
@@ -96,6 +104,7 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
       title: form.title.trim(),
       job_type_uuid: pick(form.job_type_uuid),
       customer_uuid: pick(form.customer_uuid),
+      site_uuid: pick(form.site_uuid),
       product_uuid: pick(form.product_uuid),
       product_ref: pick(form.product_ref),
       service_address: pick(form.service_address),
@@ -158,9 +167,14 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
           label="Customer"
           options={customerOptions}
           value={form.customer_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v }))}
+          onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v, site_uuid: '' }))}
           placeholder="Select customer"
           clearable
+        />
+        <SitePicker
+          customerUuid={form.customer_uuid}
+          value={form.site_uuid}
+          onChange={(v, site) => setForm((f) => ({ ...f, site_uuid: v, ...(site ? siteToAddress(site) : {}) }))}
         />
         <SearchableSelect
           label="Product (the item)"
@@ -204,7 +218,7 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
       <Textarea label="Description" value={form.description} onChange={setField('description')} rows={3} placeholder="What needs doing?" />
       {job && <Textarea label="Internal notes" value={form.notes} onChange={setField('notes')} rows={2} />}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>

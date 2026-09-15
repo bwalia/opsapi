@@ -594,6 +594,7 @@ load_if("field_service", "routes.field-service-visits")
 load_if("field_service", "routes.field-service-employees")
 load_if("field_service", "routes.field-service-requests")
 load_if("field_service", "routes.field-service-parts")
+load_if("field_service", "routes.field-service-sites")
 
 -- ============================================
 -- ACCOUNTING / BOOKKEEPING (AI-powered)

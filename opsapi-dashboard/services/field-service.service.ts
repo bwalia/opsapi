@@ -76,7 +76,7 @@ export type JobStatus = 'draft' | 'scheduled' | 'in_progress' | 'on_hold' | 'com
 export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type PhaseStatus = 'pending' | 'in_progress' | 'blocked' | 'completed' | 'skipped';
 export type VisitStatus = 'scheduled' | 'en_route' | 'on_site' | 'completed' | 'cancelled' | 'no_access';
-export type JobItemType = 'part' | 'material' | 'labour' | 'expense' | 'other';
+export type JobItemType = 'part' | 'material' | 'labour' | 'hire' | 'expense' | 'other';
 
 export interface FsJob {
   uuid: string;
@@ -112,6 +112,11 @@ export interface FsJob {
   product_name?: string | null;
   product_sku?: string | null;
   product_ref?: string | null;
+  site_uuid?: string | null;
+  site_name?: string | null;
+  site_city?: string | null;
+  site_postal_code?: string | null;
+  site_access_notes?: string | null;
   service_address?: string | null;
   service_postcode?: string | null;
   invoice_uuid?: string | null;
@@ -201,6 +206,9 @@ export interface FsVisit {
   product_name?: string | null;
   product_sku?: string | null;
   product_ref?: string | null;
+  site_uuid?: string | null;
+  site_name?: string | null;
+  site_access_notes?: string | null;
   service_address?: string | null;
   service_postcode?: string | null;
   // F-Gas / refrigerant handling logged on this visit.
@@ -223,6 +231,10 @@ export interface FsJobItem {
   tax_rate: number;
   line_total: number;
   is_billable: boolean;
+  labour_category?: string | null;
+  days?: number | null;
+  supplier?: string | null;
+  part_number?: string | null;
   invoiced: boolean;
   approval_status: ItemApprovalStatus;
   approved_at?: string | null;
@@ -444,6 +456,31 @@ export type RequestStatus =
   | 'new' | 'triaged' | 'assigned' | 'in_progress' | 'on_hold' | 'resolved' | 'closed' | 'rejected' | 'duplicate';
 export type RequestChannel = 'phone' | 'app' | 'email' | 'portal' | 'web' | 'other';
 
+export interface FsSite {
+  uuid: string;
+  customer_uuid?: string | null;
+  customer_name?: string | null;
+  name: string;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  county?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  access_notes?: string | null;
+  address?: string | null; // one-line summary for pickers
+  job_count?: number;
+}
+
+export interface FsSiteListParams {
+  customer_uuid?: string;
+  search?: string;
+  page?: number;
+  per_page?: number;
+}
+
 export interface FsServiceRequest {
   uuid: string;
   request_number: string;
@@ -462,6 +499,8 @@ export interface FsServiceRequest {
   product_name?: string | null;
   product_sku?: string | null;
   product_ref?: string | null;
+  site_uuid?: string | null;
+  site_name?: string | null;
   service_address?: string | null;
   service_postcode?: string | null;
   assigned_manager_uuid?: string | null;
@@ -548,6 +587,16 @@ export interface FsPartListParams {
   search?: string;
   page?: number;
   per_page?: number;
+}
+
+export interface FsJobPhoto {
+  uuid: string;
+  url: string;
+  filename?: string | null;
+  content_type?: string | null;
+  caption?: string | null;
+  visit_uuid?: string | null;
+  created_at?: string;
 }
 
 export type FsPayload = Record<string, unknown>;
@@ -656,6 +705,40 @@ export const fieldService = {
 
   async deleteEmployee(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/employees/${uuid}`);
+  },
+
+  // ---------------- Customer sites ----------------
+  async getSites(params: FsSiteListParams = {}): Promise<FsPaginated<FsSite>> {
+    return paginated<FsSite>(await apiClient.get(`${BASE}/sites${qs(params)}`));
+  },
+
+  async createSite(data: FsPayload): Promise<FsSite> {
+    return unwrap<FsSite>(await apiClient.post(`${BASE}/sites`, data, JSON_BODY));
+  },
+
+  async updateSite(uuid: string, data: FsPayload): Promise<FsSite> {
+    return unwrap<FsSite>(await apiClient.put(`${BASE}/sites/${uuid}`, data, JSON_BODY));
+  },
+
+  async deleteSite(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/sites/${uuid}`);
+  },
+
+  // ---------------- Job photos ----------------
+  async getJobPhotos(jobUuid: string): Promise<FsJobPhoto[]> {
+    return unwrap<FsJobPhoto[]>(await apiClient.get(`${BASE}/jobs/${jobUuid}/photos`)) || [];
+  },
+
+  async uploadJobPhoto(jobUuid: string, file: File, opts?: { visit_uuid?: string; caption?: string }): Promise<FsJobPhoto> {
+    const fd = new FormData();
+    fd.append('photo', file);
+    if (opts?.visit_uuid) fd.append('visit_uuid', opts.visit_uuid);
+    if (opts?.caption) fd.append('caption', opts.caption);
+    return unwrap<FsJobPhoto>(await apiClient.post(`${BASE}/jobs/${jobUuid}/photos`, fd));
+  },
+
+  async deleteJobPhoto(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/job-photos/${uuid}`);
   },
 
   // ---------------- Service requests (complaints) ----------------

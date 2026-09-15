@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useMemo, useCallback } from 'react';
-import { Users, ShoppingCart, Package, Store, DollarSign } from 'lucide-react';
+import React, { useMemo, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Loader2, Users, ShoppingCart, Package, Store, DollarSign } from 'lucide-react';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { StatsCard, RecentOrdersTable, OrdersChart, HealthStatus } from '@/components/dashboard';
 import { PendingInvitationsBanner } from '@/components/namespace/invitations';
 import { Stagger, RevealItem } from '@/components/motion/Reveal';
@@ -29,6 +31,15 @@ const fetchDashboardData = async () => {
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { canRead, canUpdate, isLoading: permsLoading } = usePermissions();
+  // Engineers can see visits but can't dispatch them — send them straight to
+  // the simplified "My Work" home instead of this manager dashboard.
+  const isEngineer = canRead('fs_visits') && !canUpdate('fs_visits');
+  useEffect(() => {
+    if (!permsLoading && isEngineer) router.replace('/dashboard/field-service/my-work');
+  }, [permsLoading, isEngineer, router]);
+
   // Single data fetch for all dashboard data using custom hook
   const { data, isLoading, refetch } = useDataFetch<{
     stats: DashboardStats;
@@ -93,9 +104,20 @@ export default function DashboardPage() {
   const recentOrders = useMemo(() => stats?.recentOrders || [], [stats?.recentOrders]);
 
   // Memoize refresh handler to prevent inline function recreation
+  // Redirecting engineers away — don't flash the manager dashboard.
+  const redirecting = permsLoading || isEngineer;
+
   const handleRefresh = useCallback(() => {
     refetch();
   }, [refetch]);
+
+  if (redirecting) {
+    return (
+      <div className="flex items-center justify-center py-24 text-secondary-500">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <Stagger className="space-y-5 sm:space-y-6">

@@ -36,6 +36,8 @@
 local Http = require("helper.field-service-http")
 local Common = require("queries.FieldServiceCommon")
 local JobQueries = require("queries.FieldServiceJobQueries")
+local JobPhotoQueries = require("queries.JobPhotoQueries")
+local MinioClient = require("helper.minio")
 
 return function(app)
     -- fs_jobs.<action>, or the caller is an engineer booked on the job.
@@ -195,6 +197,57 @@ return function(app)
     app:post("/api/v2/field-service/job-items/:uuid/reject", Http.guard("fs_jobs", "update", function(self)
         return Http.result(JobQueries.setItemApproval(self.namespace.id, self.params.uuid, false, Http.body(self),
             Http.actor(self)))
+    end))
+
+    -- ============================================================
+    -- PHOTOS (site / fault photos for the quote sheet)
+    -- ============================================================
+
+    app:get("/api/v2/field-service/jobs/:uuid/photos", Http.route(function(self)
+        local row = JobQueries.findJobRow(self.namespace.id, self.params.uuid)
+        if not row then return Http.fail(404, "Job not found") end
+        if not can_work_job(self, row.id, "update") then return Http.forbidden("fs_jobs", "read") end
+        return Http.ok(JobPhotoQueries.listByJobId(row.id))
+    end))
+
+    -- Upload one photo (multipart: `photo`|`file`|`image`). The assigned
+    -- engineer may add photos on site; the file goes to MinIO.
+    app:post("/api/v2/field-service/jobs/:uuid/photos", Http.route(function(self)
+        local row = JobQueries.findJobRow(self.namespace.id, self.params.uuid)
+        if not row then return Http.fail(404, "Job not found") end
+        if not can_work_job(self, row.id, "update") then return Http.forbidden("fs_jobs", "update") end
+
+        local file = self.params.photo or self.params.file or self.params.image
+        if type(file) ~= "table" or not file.content or file.content == "" then
+            return Http.fail(400, "No photo uploaded (use the 'photo' field)")
+        end
+        if #file.content > 15 * 1024 * 1024 then
+            return Http.fail(413, "Photo is too large (max 15MB)")
+        end
+
+        local url, err, meta = MinioClient.quickUpload(file, {
+            prefix = "field-service/jobs/" .. row.uuid .. "/photos",
+        })
+        if not url then return Http.fail(502, "Upload failed: " .. tostring(err)) end
+
+        local photo, perr = JobPhotoQueries.addPhoto(self.namespace.id, self.params.uuid, {
+            url = url,
+            object_key = meta and meta.object_key,
+            filename = file.filename,
+            content_type = file.content_type,
+            caption = self.params.caption,
+            visit_uuid = self.params.visit_uuid,
+        }, Http.actor(self))
+        return Http.result(photo, perr, 201)
+    end))
+
+    app:delete("/api/v2/field-service/job-photos/:uuid", Http.route(function(self)
+        local job_id = JobPhotoQueries.jobIdForPhoto(self.namespace.id, self.params.uuid)
+        if not job_id then return Http.fail(404, "Photo not found") end
+        if not can_work_job(self, job_id, "update") then return Http.forbidden("fs_jobs", "update") end
+        local ok, err = JobPhotoQueries.deletePhoto(self.namespace.id, self.params.uuid)
+        if not ok then return Http.from_error(err) end
+        return Http.ok({ message = "Photo removed" })
     end))
 
     -- ============================================================

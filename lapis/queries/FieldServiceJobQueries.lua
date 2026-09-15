@@ -40,7 +40,9 @@ local JOB_TRANSITIONS = {
 }
 
 local PHASE_STATUSES = { pending = true, in_progress = true, blocked = true, completed = true, skipped = true }
-local ITEM_TYPES = { part = true, material = true, labour = true, expense = true, other = true }
+local ITEM_TYPES = { part = true, material = true, labour = true, hire = true, expense = true, other = true }
+-- Labour categories from the engineer's quote sheet (Engineer/Mate × normal/overtime).
+local LABOUR_CATEGORIES = { engineer_nt = true, engineer_ot = true, mate_nt = true, mate_ot = true }
 local OPEN_VISIT_STATUSES = "('scheduled', 'en_route', 'on_site')"
 
 --------------------------------------------------------------------------------
@@ -98,6 +100,9 @@ local JOB_SELECT = [[
             AS customer_name,
         c.email AS customer_email, c.phone AS customer_phone,
         prod.uuid AS product_uuid, prod.name AS product_name, prod.sku AS product_sku,
+        st.uuid AS site_uuid, st.name AS site_name,
+        st.address_line1 AS site_address_line1, st.city AS site_city,
+        st.postal_code AS site_postal_code, st.access_notes AS site_access_notes,
         ]] .. Common.user_name_sql("mu") .. [[ AS service_manager_name,
         i.uuid AS invoice_uuid, i.invoice_number, i.status AS invoice_status, i.total_amount AS invoice_total,
         (SELECT COUNT(*) FROM fs_job_phases p WHERE p.job_id = j.id AND p.deleted_at IS NULL) AS phase_count,
@@ -112,13 +117,14 @@ local JOB_SELECT = [[
     LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
     LEFT JOIN customers c ON c.id = j.customer_id
     LEFT JOIN storeproducts prod ON prod.id = j.product_id
+    LEFT JOIN fs_sites st ON st.id = j.site_id
     LEFT JOIN users mu ON mu.uuid = j.service_manager_uuid
     LEFT JOIN invoices i ON i.id = j.invoice_id
 ]]
 
 local JOB_HIDDEN = {
     id = true, namespace_id = true, job_type_id = true, customer_id = true, product_id = true,
-    invoice_id = true, deleted_at = true,
+    site_id = true, invoice_id = true, deleted_at = true,
 }
 
 local function shape_job(row)
@@ -197,6 +203,7 @@ JobQueries.VISIT_SELECT = [[
             AS customer_name,
         cust.phone AS customer_phone,
         prod.uuid AS product_uuid, prod.name AS product_name, prod.sku AS product_sku,
+        st.uuid AS site_uuid, st.name AS site_name, st.access_notes AS site_access_notes,
         j.service_address, j.service_postcode, j.product_ref
     FROM fs_visits v
     JOIN fs_jobs j ON j.id = v.job_id
@@ -205,6 +212,7 @@ JobQueries.VISIT_SELECT = [[
     LEFT JOIN users eu ON eu.uuid = v.engineer_user_uuid
     LEFT JOIN customers cust ON cust.id = j.customer_id
     LEFT JOIN storeproducts prod ON prod.id = j.product_id
+    LEFT JOIN fs_sites st ON st.id = j.site_id
 ]]
 
 local VISIT_HIDDEN = {
@@ -267,6 +275,10 @@ local function shape_item(it)
         tax_rate = tonumber(it.tax_rate) or 0,
         line_total = round2(qty * price),
         is_billable = it.is_billable,
+        labour_category = it.labour_category,
+        days = it.days ~= nil and tonumber(it.days) or nil,
+        supplier = it.supplier,
+        part_number = it.part_number,
         invoiced = it.invoice_line_item_id ~= nil,
         approval_status = it.approval_status,
         approved_at = it.approved_at,
@@ -456,6 +468,7 @@ local function resolve_job_refs(namespace_id, data)
         { key = "customer_uuid", tbl = "customers", col = "customer_id", label = "Customer" },
         { key = "product_uuid", tbl = "storeproducts", col = "product_id", label = "Product" },
         { key = "job_type_uuid", tbl = "fs_job_types", col = "job_type_id", label = "Job type" },
+        { key = "site_uuid", tbl = "fs_sites", col = "site_id", label = "Site" },
     }
     for _, spec in ipairs(specs) do
         if data[spec.key] ~= nil then
@@ -583,7 +596,8 @@ function JobQueries.createJob(namespace_id, actor_uuid, data)
     end)
 end
 
-local JOB_TEXT_FIELDS = { "title", "description", "customer_reference", "notes", "currency" }
+local JOB_TEXT_FIELDS = { "title", "description", "customer_reference", "notes", "currency",
+    "product_ref", "service_address", "service_postcode" }
 
 function JobQueries.updateJob(namespace_id, uuid, data, actor_uuid)
     local job = JobQueries.findJobRow(namespace_id, uuid)
@@ -909,6 +923,20 @@ local function validate_item(data, partial)
         out.tax_rate = r
     end
     if data.is_billable ~= nil or not partial then out.is_billable = to_bool(data.is_billable, true) end
+    -- Quote-sheet extras: labour category (Engineer/Mate NT/OT), days (labour +
+    -- tool hire), and the material's supplier + free-text part number.
+    if data.labour_category ~= nil then
+        local lc = nilify(data.labour_category)
+        if lc and not LABOUR_CATEGORIES[lc] then return nil, "Invalid labour_category" end
+        out.labour_category = nullable(data.labour_category)
+    end
+    if data.days ~= nil then
+        local d = to_number(data.days)
+        if d and d < 0 then return nil, "days cannot be negative" end
+        out.days = d and round2(d) or db.NULL
+    end
+    if data.supplier ~= nil then out.supplier = nullable(data.supplier) end
+    if data.part_number ~= nil then out.part_number = nullable(data.part_number) end
     return out
 end
 

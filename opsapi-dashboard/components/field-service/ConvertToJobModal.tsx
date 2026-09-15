@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { Modal, Button, Input, SearchableSelect } from '@/components/ui';
 import {
   fieldService,
+  toApiDateTime,
   type FsConvertResult,
   type FsEngineer,
   type FsJobType,
@@ -21,7 +22,13 @@ interface ConvertToJobModalProps {
 
 export function ConvertToJobModal(props: ConvertToJobModalProps) {
   return (
-    <Modal isOpen={props.isOpen} onClose={props.onClose} title="Convert to job" size="md">
+    <Modal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      title="Convert to job"
+      description={`Turn ${props.request.request_number} into a scheduled job`}
+      size="2xl"
+    >
       {props.isOpen && <ConvertForm {...props} />}
     </Modal>
   );
@@ -30,6 +37,8 @@ export function ConvertToJobModal(props: ConvertToJobModalProps) {
 function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) {
   const [jobTypeUuid, setJobTypeUuid] = useState('');
   const [managerUuid, setManagerUuid] = useState(request.assigned_manager_uuid || '');
+  const [engineerUuid, setEngineerUuid] = useState('');
+  const [visitAt, setVisitAt] = useState('');
   const [title, setTitle] = useState(request.title || '');
   const [dueDate, setDueDate] = useState('');
   const [jobTypes, setJobTypes] = useState<FsJobType[]>([]);
@@ -58,10 +67,14 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
       service_manager_uuid: optional(managerUuid),
       title: optional(title),
       due_date: optional(dueDate),
+      // Assigning the engineer books their first visit, which is what makes the
+      // job appear in their My Work and moves it out of draft.
+      engineer_uuid: optional(engineerUuid),
+      scheduled_start: engineerUuid && visitAt ? toApiDateTime(visitAt) : undefined,
     };
     try {
       const result = await fieldService.convertRequestToJob(request.uuid, payload);
-      toast.success(`${result.job_number} created`);
+      toast.success(engineerUuid ? `${result.job_number} created and assigned` : `${result.job_number} created`);
       onConverted(result);
       onClose();
     } catch (err) {
@@ -73,9 +86,8 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-sm text-secondary-600">
-        Create a job for an engineer from <span className="font-medium text-secondary-800">{request.request_number}</span>.
-        The customer, site and faulty asset carry over.
+      <p className="text-sm text-secondary-500">
+        The customer, site and faulty item carry over from the request.
       </p>
       <Input label="Job title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={request.title} />
       <SearchableSelect
@@ -86,6 +98,32 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
         placeholder="No job type (add phases later)"
         clearable
       />
+
+      {/* Assign the engineer who'll do the work + when they'll visit. */}
+      <div className="rounded-xl border border-primary-100 bg-primary-50/40 p-3 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Assign the engineer</p>
+        <SearchableSelect
+          label="Engineer"
+          options={managerOptions}
+          value={engineerUuid}
+          onChange={setEngineerUuid}
+          placeholder="Choose who does the repair"
+          clearable
+        />
+        <Input
+          label="First visit"
+          type="datetime-local"
+          value={visitAt}
+          onChange={(e) => setVisitAt(e.target.value)}
+          disabled={!engineerUuid}
+        />
+        <p className="text-xs text-secondary-500">
+          {engineerUuid
+            ? "Books their first visit — it shows in the engineer's My Work straight away."
+            : 'Pick an engineer to book their visit now, or leave blank and schedule it later.'}
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <SearchableSelect
           label="Service manager"
@@ -97,12 +135,12 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
         />
         <Input label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
       </div>
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
         <Button type="submit" isLoading={saving}>
-          Create job
+          {engineerUuid ? 'Create & assign' : 'Create job'}
         </Button>
       </div>
     </form>

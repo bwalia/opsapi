@@ -459,7 +459,8 @@ function MinioClient.new(config)
     -- Public URL for browser access (different from internal endpoint)
     -- MINIO_ENDPOINT_WEB_EXTERNAL should be set to the externally accessible URL
     -- e.g., http://127.0.0.1:9000 or https://s3.yourdomain.com
-    self.public_url = config.public_url or getEnv("MINIO_ENDPOINT_WEB_EXTERNAL") or self.endpoint
+    self.public_url = config.public_url or getEnv("MINIO_ENDPOINT_WEB_EXTERNAL")
+        or getEnv("MINIO_PUBLIC_URL") or self.endpoint
 
     -- Parse endpoint to get host, hostname, and port
     if self.endpoint then
@@ -920,13 +921,25 @@ end
 -- @param expires_in number Seconds until expiration (default 3600)
 -- @param bucket string Optional bucket
 -- @return string|nil Presigned URL
-function MinioClient:getPresignedUrl(object_key, expires_in, bucket)
+-- @param browser boolean When true, sign for and return the browser-reachable
+--   public host (MINIO_ENDPOINT_WEB_EXTERNAL) so the URL works in an <img>/tab,
+--   not just from inside the network.
+function MinioClient:getPresignedUrl(object_key, expires_in, bucket, browser)
     bucket = bucket or self.bucket
     expires_in = expires_in or 3600
 
     local valid, config_err = self:validate()
     if not valid then
         return nil, config_err
+    end
+
+    -- SigV4 signs over the Host header, so the host we sign must match the host
+    -- the browser will hit. Use the public host when serving a browser URL.
+    local base = self.endpoint
+    local host = self.host
+    if browser and self.public_url then
+        base = (self.public_url:gsub("/$", ""))
+        host = self.public_url:gsub("^https?://", ""):gsub("/.*$", "")
     end
 
     local time = getUtcTime()
@@ -958,7 +971,7 @@ function MinioClient:getPresignedUrl(object_key, expires_in, bucket)
     local query_string = table.concat(query_parts, "&")
 
     -- Create canonical request
-    local headers = { ["host"] = self.host }
+    local headers = { ["host"] = host }
     local canonical_request = createCanonicalRequest(
         "GET", uri, query_string, headers, "host", "UNSIGNED-PAYLOAD"
     )
@@ -972,7 +985,7 @@ function MinioClient:getPresignedUrl(object_key, expires_in, bucket)
     local signing_key = getSigningKey(self.secret_key, time.date, self.region, "s3")
     local signature = hmac_sha256_hex(signing_key, string_to_sign)
 
-    return self.endpoint .. uri .. "?" .. query_string .. "&X-Amz-Signature=" .. signature
+    return base .. uri .. "?" .. query_string .. "&X-Amz-Signature=" .. signature
 end
 
 --- Get content type from filename (public method)

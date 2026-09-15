@@ -93,7 +93,13 @@ function AssignModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Assign manager" size="sm">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Assign manager"
+      description="The manager owns and triages this complaint. The engineer who does the repair is assigned when it's converted to a job."
+      size="md"
+    >
       {isOpen && (
         <div className="space-y-4">
           <SearchableSelect
@@ -103,7 +109,7 @@ function AssignModal({
             onChange={setUuid}
             placeholder="Select a manager"
           />
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-1 border-t border-secondary-200">
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>

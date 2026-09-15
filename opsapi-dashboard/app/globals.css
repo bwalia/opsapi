@@ -347,3 +347,14 @@ img {
     min-width: auto;
   }
 }
+
+/* Modal / dialog entrance — backdrop fade, desktop scale-in, mobile bottom-sheet */
+@keyframes fs-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fs-modal-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes fs-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.fs-overlay-in { animation: fs-overlay-in 150ms ease-out; }
+.fs-modal-in { animation: fs-modal-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+.fs-sheet-in { animation: fs-sheet-in 260ms cubic-bezier(0.16, 1, 0.3, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .fs-overlay-in, .fs-modal-in, .fs-sheet-in { animation: none; }
+}
