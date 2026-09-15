@@ -16,6 +16,7 @@ const ITEM_TYPE_LABELS: Record<JobItemType, string> = {
   part: 'Part',
   material: 'Material',
   labour: 'Labour',
+  hire: 'Hire',
   expense: 'Expense',
   other: 'Other',
 };

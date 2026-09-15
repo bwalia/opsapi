@@ -18,7 +18,7 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft, Phone, Navigation, Car, LogIn, CheckCircle2, Package, Snowflake,
-  Loader2, ClipboardList, Wrench, KeyRound,
+  Loader2, ClipboardList, KeyRound, HardHat, Truck,
 } from 'lucide-react';
 import { Button, Input, Textarea } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -26,7 +26,7 @@ import { fieldService, type FsVisitDetail } from '@/services/field-service.servi
 import { siteAddressFromJob, mapsUrl, apiError } from '@/components/field-service/shared';
 import { FGasCard } from '@/components/field-service/FGasCard';
 import { PhaseChecklist } from '@/components/field-service/PhasesPanel';
-import { ItemFormModal } from '@/components/field-service/ItemsPanel';
+import { QuoteLineModal, LABOUR_LABEL, type LineKind } from '@/components/field-service/QuoteLineModal';
 import { getPosition } from '@/components/field-service/CheckOutModal';
 
 /** Hours between check-in and now, rounded to 2dp (for the finish default). */
@@ -113,7 +113,7 @@ function GuidedVisitContent() {
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showFinish, setShowFinish] = useState(false);
-  const [showPart, setShowPart] = useState(false);
+  const [line, setLine] = useState<LineKind | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -177,7 +177,10 @@ function GuidedVisitContent() {
   const s = visit.status;
   const onSite = s === 'on_site';
   const done = s === 'completed';
-  const parts = visit.items.filter((i) => i.item_type === 'part' || i.item_type === 'material');
+  const labourLines = visit.items.filter((i) => i.item_type === 'labour');
+  const materialLines = visit.items.filter((i) => i.item_type === 'part' || i.item_type === 'material');
+  const hireLines = visit.items.filter((i) => i.item_type === 'hire');
+  const loggedCount = labourLines.length + materialLines.length + hireLines.length;
 
   // One source of truth for the primary action; rendered in the mobile sticky
   // bar and the desktop side rail.
@@ -266,17 +269,33 @@ function GuidedVisitContent() {
 
           {onSite && (
             <>
-              <div className="flex gap-3">
-                <ActionTile icon={<Package className="w-5 h-5 text-primary-600" />} label="Add part" hint={parts.length ? `${parts.length} logged` : 'Parts you fitted'} onClick={() => setShowPart(true)} />
+              <div className="grid grid-cols-2 gap-3">
+                <ActionTile icon={<HardHat className="w-5 h-5 text-primary-600" />} label="Labour" hint="Engineer / mate time" onClick={() => setLine('labour')} />
+                <ActionTile icon={<Package className="w-5 h-5 text-primary-600" />} label="Materials" hint="Parts fitted" onClick={() => setLine('material')} />
+                <ActionTile icon={<Truck className="w-5 h-5 text-primary-600" />} label="Hire" hint="Tools / access" onClick={() => setLine('hire')} />
                 <ActionTile icon={<Snowflake className="w-5 h-5 text-primary-600" />} label="Refrigerant" hint="F-Gas log" onClick={() => document.getElementById('fgas')?.scrollIntoView({ behavior: 'smooth' })} />
               </div>
 
-              {parts.length > 0 && (
+              {loggedCount > 0 && (
                 <Card>
-                  <ul className="space-y-1.5">
-                    {parts.map((p) => (
-                      <li key={p.uuid} className="flex items-center gap-2 text-sm text-secondary-700">
-                        <Wrench className="w-4 h-4 text-secondary-400 shrink-0" /> {p.quantity}× {p.description}
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-secondary-400 mb-2">On this sheet</h2>
+                  <ul className="space-y-1.5 text-sm text-secondary-700">
+                    {labourLines.map((i) => (
+                      <li key={i.uuid} className="flex items-center gap-2">
+                        <HardHat className="w-4 h-4 text-secondary-400 shrink-0" />
+                        {LABOUR_LABEL[i.labour_category || ''] || 'Labour'} · {i.quantity}h{i.days ? ` · ${i.days}d` : ''}
+                      </li>
+                    ))}
+                    {materialLines.map((i) => (
+                      <li key={i.uuid} className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-secondary-400 shrink-0" />
+                        {i.quantity}× {i.description}{i.supplier ? ` · ${i.supplier}` : ''}
+                      </li>
+                    ))}
+                    {hireLines.map((i) => (
+                      <li key={i.uuid} className="flex items-center gap-2">
+                        <Truck className="w-4 h-4 text-secondary-400 shrink-0" />
+                        {i.description}{i.days ? ` · ${i.days}d` : ''}{i.supplier ? ` · ${i.supplier}` : ''}
                       </li>
                     ))}
                   </ul>
@@ -306,7 +325,14 @@ function GuidedVisitContent() {
       </div>
 
       {showFinish && <FinishSheet visit={visit} onClose={() => setShowFinish(false)} onDone={() => { setShowFinish(false); load(); }} />}
-      <ItemFormModal isOpen={showPart} jobUuid={visit.job_uuid} visitUuid={visit.uuid} onClose={() => setShowPart(false)} onSaved={() => { setShowPart(false); load(); }} />
+      <QuoteLineModal
+        isOpen={line !== null}
+        kind={line || 'material'}
+        jobUuid={visit.job_uuid}
+        visitUuid={visit.uuid}
+        onClose={() => setLine(null)}
+        onSaved={() => { setLine(null); load(); }}
+      />
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   money,
   hours,
 } from '@/components/field-service/shared';
+import { LABOUR_LABEL } from '@/components/field-service/QuoteLineModal';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -75,7 +76,9 @@ function JobSheetContent() {
   }
 
   const address = siteAddressFromJob(job);
-  const parts = job.items.filter((i) => i.item_type === 'part' || i.item_type === 'material');
+  const labourLines = job.items.filter((i) => i.item_type === 'labour');
+  const materialLines = job.items.filter((i) => i.item_type === 'part' || i.item_type === 'material');
+  const hireLines = job.items.filter((i) => i.item_type === 'hire');
   const fgasVisits = job.visits.filter(
     (v) => v.refrigerant_type || v.refrigerant_added_kg || v.refrigerant_recovered_kg || v.leak_check_result || v.fgas_cylinder_ref
   );
@@ -242,40 +245,106 @@ function JobSheetContent() {
           </>
         )}
 
-        <h2>Parts &amp; materials used</h2>
-        {parts.length === 0 ? (
+        <h2>Labour</h2>
+        {labourLines.length === 0 ? (
           <div style={{ color: '#6b7280' }}>None recorded.</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Item</th>
-                <th className="num">Qty</th>
-                <th className="num">Unit</th>
-                <th className="num">Total</th>
-                <th>Approval</th>
+                <th>Labour type</th>
+                <th className="num">Hours</th>
+                <th className="num">Days</th>
               </tr>
             </thead>
             <tbody>
-              {parts.map((it) => (
+              {labourLines.map((it) => (
                 <tr key={it.uuid}>
-                  <td>{it.description}</td>
+                  <td>{LABOUR_LABEL[it.labour_category || ''] || it.description}</td>
                   <td className="num">{it.quantity}</td>
-                  <td className="num">{money(it.unit_price, job.currency)}</td>
-                  <td className="num">{money(it.line_total, job.currency)}</td>
-                  <td>{it.approval_status}</td>
+                  <td className="num">{it.days ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
 
-        <h2>Labour &amp; totals</h2>
+        <h2>Materials</h2>
+        {materialLines.length === 0 ? (
+          <div style={{ color: '#6b7280' }}>None recorded.</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Part type</th>
+                <th>Part number</th>
+                <th>Supplier</th>
+                <th className="num">Qty</th>
+                <th className="num">Price per</th>
+              </tr>
+            </thead>
+            <tbody>
+              {materialLines.map((it) => (
+                <tr key={it.uuid}>
+                  <td>{it.description}</td>
+                  <td>{it.part_number || '—'}</td>
+                  <td>{it.supplier || '—'}</td>
+                  <td className="num">{it.quantity}</td>
+                  <td className="num">{it.unit_price ? money(it.unit_price, job.currency) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {hireLines.length > 0 && (
+          <>
+            <h2>Specialist tool / access equipment hire</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Supplier</th>
+                  <th>Description</th>
+                  <th>Part number</th>
+                  <th className="num">Days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hireLines.map((it) => (
+                  <tr key={it.uuid}>
+                    <td>{it.supplier || '—'}</td>
+                    <td>{it.description}</td>
+                    <td>{it.part_number || '—'}</td>
+                    <td className="num">{it.days ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {job.visits.some((v) => v.work_summary || v.follow_up_notes) && (
+          <>
+            <h2>Engineer notes</h2>
+            <div style={{ display: 'grid', gap: 4 }}>
+              {job.visits
+                .filter((v) => v.work_summary || v.follow_up_notes)
+                .map((v) => (
+                  <div key={v.uuid}>
+                    <strong>{formatFsDate(v.scheduled_start)}:</strong> {v.work_summary || ''}
+                    {v.follow_up_notes ? ` — Follow-up: ${v.follow_up_notes}` : ''}
+                  </div>
+                ))}
+            </div>
+          </>
+        )}
+
+        <h2>Totals</h2>
         <div className="js-grid">
           <Row label="Labour hours" value={hours(job.totals.labour_hours)} />
           <Row label="Billable hours" value={hours(job.totals.billable_hours)} />
           <Row label="Labour value" value={money(job.totals.labour_value, job.currency)} />
-          <Row label="Parts value" value={money(job.totals.items_value, job.currency)} />
+          <Row label="Materials value" value={money(job.totals.items_value, job.currency)} />
         </div>
 
         <div className="js-sign">

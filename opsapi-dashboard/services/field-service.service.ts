@@ -76,7 +76,7 @@ export type JobStatus = 'draft' | 'scheduled' | 'in_progress' | 'on_hold' | 'com
 export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type PhaseStatus = 'pending' | 'in_progress' | 'blocked' | 'completed' | 'skipped';
 export type VisitStatus = 'scheduled' | 'en_route' | 'on_site' | 'completed' | 'cancelled' | 'no_access';
-export type JobItemType = 'part' | 'material' | 'labour' | 'expense' | 'other';
+export type JobItemType = 'part' | 'material' | 'labour' | 'hire' | 'expense' | 'other';
 
 export interface FsJob {
   uuid: string;
@@ -231,6 +231,10 @@ export interface FsJobItem {
   tax_rate: number;
   line_total: number;
   is_billable: boolean;
+  labour_category?: string | null;
+  days?: number | null;
+  supplier?: string | null;
+  part_number?: string | null;
   invoiced: boolean;
   approval_status: ItemApprovalStatus;
   approved_at?: string | null;
