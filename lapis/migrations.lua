@@ -364,6 +364,7 @@ local field_service_roles_migrations = load_if_enabled(ProjectConfig.FEATURES.FI
 local field_service_fgas_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-fgas") or {}
 local field_service_sites_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-sites") or {}
 local field_service_quote_lines_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-quote-lines") or {}
+local field_service_photos_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-photos") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -2447,6 +2448,7 @@ local _migrations = {
     ['887_fs_create_customer_sites'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 1),
     ['888_fs_jobs_requests_site_id'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 2),
     ['889_fs_job_items_quote_lines'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_quote_lines_migrations, 1),
+    ['890_fs_create_job_photos'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_photos_migrations, 1),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
