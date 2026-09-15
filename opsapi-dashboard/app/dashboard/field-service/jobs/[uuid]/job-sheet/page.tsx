@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { ArrowLeft, Printer, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
-import { fieldService, formatFsDate, formatFsDateTime, type FsJobDetail } from '@/services/field-service.service';
+import { fieldService, formatFsDate, formatFsDateTime, type FsJobDetail, type FsJobPhoto } from '@/services/field-service.service';
 import {
   JOB_STATUS_LABELS,
   JOB_PRIORITY_LABELS,
@@ -39,13 +39,19 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function JobSheetContent() {
   const { uuid } = useParams<{ uuid: string }>();
   const [job, setJob] = useState<FsJobDetail | null>(null);
+  const [photos, setPhotos] = useState<FsJobPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setJob(await fieldService.getJob(uuid));
+      const [j, ph] = await Promise.all([
+        fieldService.getJob(uuid),
+        fieldService.getJobPhotos(uuid).catch(() => [] as FsJobPhoto[]),
+      ]);
+      setJob(j);
+      setPhotos(ph);
     } catch {
       setFailed(true);
     } finally {
@@ -346,6 +352,18 @@ function JobSheetContent() {
           <Row label="Labour value" value={money(job.totals.labour_value, job.currency)} />
           <Row label="Materials value" value={money(job.totals.items_value, job.currency)} />
         </div>
+
+        {photos.length > 0 && (
+          <>
+            <h2>Photos ({photos.length})</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {photos.map((p) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={p.uuid} src={p.url} alt={p.caption || 'Job photo'} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="js-sign">
           <div className="js-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 40 }}>

@@ -25,6 +25,7 @@ import { ProtectedPage } from '@/components/permissions';
 import { fieldService, type FsVisitDetail } from '@/services/field-service.service';
 import { siteAddressFromJob, mapsUrl, apiError } from '@/components/field-service/shared';
 import { FGasCard } from '@/components/field-service/FGasCard';
+import { PhotosCard } from '@/components/field-service/PhotosCard';
 import { PhaseChecklist } from '@/components/field-service/PhasesPanel';
 import { QuoteLineModal, LABOUR_LABEL, type LineKind } from '@/components/field-service/QuoteLineModal';
 import { getPosition } from '@/components/field-service/CheckOutModal';
@@ -307,6 +308,8 @@ function GuidedVisitContent() {
               </div>
             </>
           )}
+
+          <PhotosCard jobUuid={visit.job_uuid} visitUuid={visit.uuid} canEdit={onSite} />
 
           {done && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-center">

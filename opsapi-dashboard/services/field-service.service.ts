@@ -589,6 +589,16 @@ export interface FsPartListParams {
   per_page?: number;
 }
 
+export interface FsJobPhoto {
+  uuid: string;
+  url: string;
+  filename?: string | null;
+  content_type?: string | null;
+  caption?: string | null;
+  visit_uuid?: string | null;
+  created_at?: string;
+}
+
 export type FsPayload = Record<string, unknown>;
 
 // ============================================================
@@ -712,6 +722,23 @@ export const fieldService = {
 
   async deleteSite(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/sites/${uuid}`);
+  },
+
+  // ---------------- Job photos ----------------
+  async getJobPhotos(jobUuid: string): Promise<FsJobPhoto[]> {
+    return unwrap<FsJobPhoto[]>(await apiClient.get(`${BASE}/jobs/${jobUuid}/photos`)) || [];
+  },
+
+  async uploadJobPhoto(jobUuid: string, file: File, opts?: { visit_uuid?: string; caption?: string }): Promise<FsJobPhoto> {
+    const fd = new FormData();
+    fd.append('photo', file);
+    if (opts?.visit_uuid) fd.append('visit_uuid', opts.visit_uuid);
+    if (opts?.caption) fd.append('caption', opts.caption);
+    return unwrap<FsJobPhoto>(await apiClient.post(`${BASE}/jobs/${jobUuid}/photos`, fd));
+  },
+
+  async deleteJobPhoto(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/job-photos/${uuid}`);
   },
 
   // ---------------- Service requests (complaints) ----------------
