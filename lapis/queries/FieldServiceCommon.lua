@@ -29,6 +29,7 @@ local RESOLVABLE = {
     employees = true,
     fs_service_requests = true,
     fs_parts = true,
+    fs_sites = true,
     customers = true,
     storeproducts = true,
 }

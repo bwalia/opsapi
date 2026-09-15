@@ -51,6 +51,7 @@ local REQUEST_SELECT = [[
         c.uuid AS customer_uuid, ]] .. CUSTOMER_NAME_SQL .. [[ AS customer_name,
         c.email AS customer_email, c.phone AS customer_phone,
         p.uuid AS product_uuid, p.name AS product_name, p.sku AS product_sku,
+        st.uuid AS site_uuid, st.name AS site_name,
         ]] .. Common.user_name_sql("mgr") .. [[ AS assigned_manager_name,
         (r.sla_response_due_at IS NOT NULL AND r.first_response_at IS NULL AND r.sla_response_due_at < NOW()
             AND r.status NOT IN ('resolved', 'closed', 'rejected', 'duplicate')) AS response_overdue,
@@ -59,6 +60,7 @@ local REQUEST_SELECT = [[
     FROM fs_service_requests r
     LEFT JOIN customers c ON c.id = r.customer_id
     LEFT JOIN storeproducts p ON p.id = r.product_id
+    LEFT JOIN fs_sites st ON st.id = r.site_id
     LEFT JOIN users mgr ON mgr.uuid = r.assigned_manager_uuid
 ]]
 
@@ -81,6 +83,8 @@ local function shape_request(r)
         product_name = r.product_name,
         product_sku = r.product_sku,
         product_ref = r.product_ref,
+        site_uuid = r.site_uuid,
+        site_name = r.site_name,
         service_address = r.service_address,
         service_postcode = r.service_postcode,
         assigned_manager_uuid = r.assigned_manager_uuid,
@@ -253,6 +257,7 @@ local function resolve_refs(namespace_id, data)
     local specs = {
         { key = "customer_uuid", tbl = "customers", col = "customer_id", label = "Customer" },
         { key = "product_uuid", tbl = "storeproducts", col = "product_id", label = "Product" },
+        { key = "site_uuid", tbl = "fs_sites", col = "site_id", label = "Site" },
     }
     for _, spec in ipairs(specs) do
         if data[spec.key] ~= nil then
@@ -412,6 +417,7 @@ function RequestQueries.convertToJob(namespace_id, uuid, actor_uuid, data)
             job_type_uuid = nilify(data.job_type_uuid),
             customer_uuid = nilify(data.customer_uuid) or row.customer_uuid,
             product_uuid = nilify(data.product_uuid) or row.product_uuid,
+            site_uuid = nilify(data.site_uuid) or row.site_uuid,
             product_ref = row.product_ref,
             service_address = nilify(data.service_address) or row.service_address,
             service_postcode = row.service_postcode,

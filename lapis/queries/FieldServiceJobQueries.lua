@@ -98,6 +98,9 @@ local JOB_SELECT = [[
             AS customer_name,
         c.email AS customer_email, c.phone AS customer_phone,
         prod.uuid AS product_uuid, prod.name AS product_name, prod.sku AS product_sku,
+        st.uuid AS site_uuid, st.name AS site_name,
+        st.address_line1 AS site_address_line1, st.city AS site_city,
+        st.postal_code AS site_postal_code, st.access_notes AS site_access_notes,
         ]] .. Common.user_name_sql("mu") .. [[ AS service_manager_name,
         i.uuid AS invoice_uuid, i.invoice_number, i.status AS invoice_status, i.total_amount AS invoice_total,
         (SELECT COUNT(*) FROM fs_job_phases p WHERE p.job_id = j.id AND p.deleted_at IS NULL) AS phase_count,
@@ -112,13 +115,14 @@ local JOB_SELECT = [[
     LEFT JOIN fs_job_types jt ON jt.id = j.job_type_id
     LEFT JOIN customers c ON c.id = j.customer_id
     LEFT JOIN storeproducts prod ON prod.id = j.product_id
+    LEFT JOIN fs_sites st ON st.id = j.site_id
     LEFT JOIN users mu ON mu.uuid = j.service_manager_uuid
     LEFT JOIN invoices i ON i.id = j.invoice_id
 ]]
 
 local JOB_HIDDEN = {
     id = true, namespace_id = true, job_type_id = true, customer_id = true, product_id = true,
-    invoice_id = true, deleted_at = true,
+    site_id = true, invoice_id = true, deleted_at = true,
 }
 
 local function shape_job(row)
@@ -197,6 +201,7 @@ JobQueries.VISIT_SELECT = [[
             AS customer_name,
         cust.phone AS customer_phone,
         prod.uuid AS product_uuid, prod.name AS product_name, prod.sku AS product_sku,
+        st.uuid AS site_uuid, st.name AS site_name, st.access_notes AS site_access_notes,
         j.service_address, j.service_postcode, j.product_ref
     FROM fs_visits v
     JOIN fs_jobs j ON j.id = v.job_id
@@ -205,6 +210,7 @@ JobQueries.VISIT_SELECT = [[
     LEFT JOIN users eu ON eu.uuid = v.engineer_user_uuid
     LEFT JOIN customers cust ON cust.id = j.customer_id
     LEFT JOIN storeproducts prod ON prod.id = j.product_id
+    LEFT JOIN fs_sites st ON st.id = j.site_id
 ]]
 
 local VISIT_HIDDEN = {
@@ -456,6 +462,7 @@ local function resolve_job_refs(namespace_id, data)
         { key = "customer_uuid", tbl = "customers", col = "customer_id", label = "Customer" },
         { key = "product_uuid", tbl = "storeproducts", col = "product_id", label = "Product" },
         { key = "job_type_uuid", tbl = "fs_job_types", col = "job_type_id", label = "Job type" },
+        { key = "site_uuid", tbl = "fs_sites", col = "site_id", label = "Site" },
     }
     for _, spec in ipairs(specs) do
         if data[spec.key] ~= nil then

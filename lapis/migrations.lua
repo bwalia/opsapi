@@ -362,6 +362,7 @@ local field_service_parts_menu_migrations = load_if_enabled(ProjectConfig.FEATUR
 local field_service_v2_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-v2") or {}
 local field_service_roles_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-roles") or {}
 local field_service_fgas_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-fgas") or {}
+local field_service_sites_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-sites") or {}
 
 -- Accounting/Bookkeeping
 local accounting_system_migrations = load_if_enabled(ProjectConfig.FEATURES.ACCOUNTING, "migrations.accounting-system") or {}
@@ -2442,6 +2443,8 @@ local _migrations = {
     ['884_fs_v2_drop_assets_sites'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_v2_migrations, 3),
     ['885_fs_seed_operational_roles'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 1),
     ['886_fs_fgas_refrigerant_log'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_fgas_migrations, 1),
+    ['887_fs_create_customer_sites'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 1),
+    ['888_fs_jobs_requests_site_id'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 2),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
     -- Replaced by new tables in Phase 1 migration 621_create_theme_system.
