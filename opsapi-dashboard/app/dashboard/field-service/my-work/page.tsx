@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { MapPin, ChevronRight, RefreshCw, Loader2, CheckCircle2, Wrench } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
-import { fieldService, parseFsDate, formatFsTime, type FsVisit } from '@/services/field-service.service';
+import { fieldService, parseFsDate, formatFsDateTime, type FsVisit } from '@/services/field-service.service';
 import { siteAddressFromJob, apiError } from '@/components/field-service/shared';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +38,8 @@ function statusLine(v: FsVisit): { text: string; tone: string } {
   if (v.status === 'on_site') return { text: 'On site now', tone: 'text-emerald-700 bg-emerald-50' };
   if (v.status === 'en_route') return { text: 'On the way', tone: 'text-blue-700 bg-blue-50' };
   if (v.status === 'no_access') return { text: 'No access — revisit', tone: 'text-amber-700 bg-amber-50' };
-  return { text: formatFsTime(v.scheduled_start), tone: 'text-secondary-700 bg-secondary-100' };
+  // Date + time so multiple visits to the same job stay distinguishable.
+  return { text: formatFsDateTime(v.scheduled_start), tone: 'text-secondary-700 bg-secondary-100' };
 }
 
 function VisitCard({ visit, onOpen }: { visit: FsVisit; onOpen: () => void }) {
@@ -126,7 +127,7 @@ function MyWorkContent() {
   const todayLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
-    <div className="mx-auto max-w-xl min-h-dvh px-4 pb-16" style={{ paddingBlock: 16 }}>
+    <div className="min-h-dvh px-4 sm:px-6 lg:px-8 pb-16" style={{ paddingBlock: 16 }}>
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold text-secondary-900">My Work</h1>
         <button
@@ -168,7 +169,7 @@ function MyWorkContent() {
                   <Wrench className="w-4 h-4" /> Nothing scheduled today.
                 </p>
               ) : (
-                <ul className="space-y-3">
+                <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                   {b.visits.map((v) => (
                     <li key={v.uuid}>
                       <VisitCard visit={v} onOpen={() => open(v.uuid)} />
