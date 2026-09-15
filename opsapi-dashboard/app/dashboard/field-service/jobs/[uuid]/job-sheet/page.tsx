@@ -146,6 +146,7 @@ function JobSheetContent() {
         <h2>Customer &amp; Site</h2>
         <div className="js-grid">
           <Row label="Customer" value={job.customer_name} />
+          <Row label="Site" value={job.site_name} />
           <Row label="Reference / PO" value={job.customer_reference} />
           <Row label="Phone" value={job.customer_phone} />
           <Row label="Email" value={job.customer_email} />

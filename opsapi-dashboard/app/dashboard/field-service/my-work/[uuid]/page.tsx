@@ -14,7 +14,7 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft, Phone, Navigation, Car, LogIn, CheckCircle2, Package, Snowflake,
-  Loader2, ClipboardList, Wrench,
+  Loader2, ClipboardList, Wrench, KeyRound,
 } from 'lucide-react';
 import { Button, Input, Textarea } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
@@ -187,10 +187,14 @@ function GuidedVisitContent() {
       <p className="text-secondary-600 mt-0.5">{visit.customer_name || 'No customer'}</p>
 
       <div className="mt-4 flex gap-3">
-        {maps && (
-          <a href={maps} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-2xl border border-secondary-200 bg-surface p-3 flex items-center gap-2 text-secondary-800 font-medium active:scale-[0.98] transition" style={{ minHeight: 60 }}>
-            <Navigation className="w-5 h-5 text-primary-600" />
-            <span className="min-w-0"><span className="block text-xs text-secondary-500">Directions</span><span className="block truncate">{address}</span></span>
+        {(maps || visit.site_name) && (
+          <a href={maps || '#'} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-2xl border border-secondary-200 bg-surface p-3 flex items-center gap-2 text-secondary-800 font-medium active:scale-[0.98] transition" style={{ minHeight: 60 }}>
+            <Navigation className="w-5 h-5 text-primary-600 shrink-0" />
+            <span className="min-w-0">
+              <span className="block text-xs text-secondary-500">{visit.site_name ? 'Site · tap for directions' : 'Directions'}</span>
+              <span className="block truncate">{visit.site_name || address}</span>
+              {visit.site_name && address && <span className="block text-xs text-secondary-500 truncate">{address}</span>}
+            </span>
           </a>
         )}
         {visit.customer_phone && (
@@ -199,6 +203,12 @@ function GuidedVisitContent() {
           </a>
         )}
       </div>
+
+      {visit.site_access_notes && (
+        <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800 flex items-start gap-2">
+          <KeyRound className="w-4 h-4 mt-0.5 shrink-0" /> <span>{visit.site_access_notes}</span>
+        </div>
+      )}
 
       {/* What to fix */}
       <div className="mt-5 rounded-2xl border border-secondary-200 bg-surface p-4">

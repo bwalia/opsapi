@@ -14,6 +14,7 @@ import {
 import { customersService } from '@/services/customers.service';
 import { productsService } from '@/services/products.service';
 import type { Customer, StoreProduct } from '@/types';
+import { SitePicker, siteToAddress } from './SitePicker';
 import { apiError, optional, PRIORITY_OPTIONS, CHANNEL_LABELS } from './shared';
 
 interface RequestFormModalProps {
@@ -40,6 +41,7 @@ const EMPTY = {
   fault_category: '',
   reported_by: '',
   customer_uuid: '',
+  site_uuid: '',
   product_uuid: '',
   product_ref: '',
   service_address: '',
@@ -60,6 +62,7 @@ function formFromRequest(r?: FsServiceRequest | null): RequestForm {
     fault_category: r.fault_category || '',
     reported_by: r.reported_by || '',
     customer_uuid: r.customer_uuid || '',
+    site_uuid: r.site_uuid || '',
     product_uuid: r.product_uuid || '',
     product_ref: r.product_ref || '',
     service_address: r.service_address || '',
@@ -120,6 +123,7 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
       service_address: isEdit ? form.service_address.trim() : optional(form.service_address),
       service_postcode: isEdit ? form.service_postcode.trim() : optional(form.service_postcode),
       customer_uuid: form.customer_uuid || (isEdit ? '' : undefined),
+      site_uuid: form.site_uuid || (isEdit ? '' : undefined),
       product_uuid: form.product_uuid || (isEdit ? '' : undefined),
       sla_response_due_at: form.sla_response_due_at ? toApiDateTime(form.sla_response_due_at) : (isEdit ? '' : undefined),
       sla_resolve_due_at: form.sla_resolve_due_at ? toApiDateTime(form.sla_resolve_due_at) : (isEdit ? '' : undefined),
@@ -158,9 +162,16 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
           label="Customer"
           options={customerOptions}
           value={form.customer_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v }))}
+          onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v, site_uuid: '' }))}
           placeholder="No customer"
           clearable
+        />
+        <SitePicker
+          customerUuid={form.customer_uuid}
+          value={form.site_uuid}
+          onChange={(v, site) =>
+            setForm((f) => ({ ...f, site_uuid: v, ...(site ? siteToAddress(site) : {}) }))
+          }
         />
         <SearchableSelect
           label="Product (the faulty item)"
