@@ -197,6 +197,22 @@ function VisitQueries.createVisit(namespace_id, job_uuid, data, actor_uuid)
     Common.log_activity(namespace_id, job.id, actor_uuid, "visit_scheduled",
         "Visit booked for " .. tostring(start_at):sub(1, 16):gsub("T", " "), { visit_uuid = visit.uuid })
 
+    -- Tell the engineer they've been given a job. Best-effort: never let a
+    -- notification hiccup fail the booking.
+    if engineer then
+        pcall(function()
+            local u = db.query("SELECT id FROM users WHERE uuid = ? LIMIT 1", tostring(engineer))
+            if u and u[1] then
+                require("helper.notification-helper").create(
+                    u[1].id, "fs_visit_assigned", "New job assigned",
+                    (job.title or "A service job") .. " — visit " ..
+                        tostring(start_at):sub(1, 16):gsub("T", " "),
+                    { entity_type = "fs_job", entity_id = job.id }
+                )
+            end
+        end)
+    end
+
     return {
         visit = VisitQueries.getVisit(namespace_id, visit.uuid),
         conflicts = VisitQueries.findConflicts(namespace_id, engineer, start_at, end_at, visit.id),

@@ -445,7 +445,7 @@ function RequestQueries.convertToJob(namespace_id, uuid, actor_uuid, data)
                 scheduled_start = start_at,
             }, actor_uuid)
             if not v then return nil, verr end
-            visit = v
+            visit = v.visit  -- createVisit returns { visit, conflicts }
         end
 
         -- Work has started on the complaint.
