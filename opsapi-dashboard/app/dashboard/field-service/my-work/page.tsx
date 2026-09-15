@@ -132,23 +132,34 @@ function MyWorkContent() {
   const [visits, setVisits] = useState<FsVisit[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // silent = background poll (no spinner, no error toast) so new jobs appear
+  // without a manual refresh.
+  const fetchVisits = useCallback(async (silent: boolean) => {
+    if (!silent) setLoading(true);
     try {
       const from = addDays(startOfDay(new Date()), -3);
       const to = addDays(startOfDay(new Date()), 21);
       const res = await fieldService.getVisits({ mine: true, from: from.toISOString(), to: to.toISOString(), per_page: 200 });
       setVisits(res.data || []);
     } catch (err) {
-      toast.error(apiError(err, 'Failed to load your work'));
+      if (!silent) toast.error(apiError(err, 'Failed to load your work'));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
+  const load = useCallback(() => fetchVisits(false), [fetchVisits]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    const id = setInterval(() => fetchVisits(true), 30000);
+    const onFocus = () => fetchVisits(true);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load, fetchVisits]);
 
   const model = useMemo(() => {
     const today = startOfDay(new Date());
