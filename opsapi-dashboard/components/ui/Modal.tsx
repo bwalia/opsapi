@@ -12,7 +12,7 @@ export interface ModalProps {
   title?: string;
   description?: string;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
   showClose?: boolean;
   /** Action row rendered in a bordered footer (kept out of the scroll area). */
   footer?: React.ReactNode;
@@ -62,9 +62,10 @@ const Modal: React.FC<ModalProps> = ({
   const sizes = {
     sm: 'sm:max-w-sm',
     md: 'sm:max-w-md',
-    lg: 'sm:max-w-lg',
+    lg: 'sm:max-w-xl',
     xl: 'sm:max-w-2xl',
     '2xl': 'sm:max-w-3xl',
+    '3xl': 'sm:max-w-4xl',
   };
 
   return (

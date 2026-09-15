@@ -29,7 +29,13 @@ function customerLabel(c: Customer): string {
 
 export function JobFormModal(props: JobFormModalProps) {
   return (
-    <Modal isOpen={props.isOpen} onClose={props.onClose} title={props.job ? `Edit ${props.job.job_number}` : 'New service job'} size="xl">
+    <Modal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      title={props.job ? `Edit ${props.job.job_number}` : 'New service job'}
+      description={props.job ? undefined : 'Create a job and assign the engineer who does the repair'}
+      size="3xl"
+    >
       {props.isOpen && <JobForm {...props} />}
     </Modal>
   );

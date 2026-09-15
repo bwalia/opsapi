@@ -27,7 +27,7 @@ export function ConvertToJobModal(props: ConvertToJobModalProps) {
       onClose={props.onClose}
       title="Convert to job"
       description={`Turn ${props.request.request_number} into a scheduled job`}
-      size="lg"
+      size="2xl"
     >
       {props.isOpen && <ConvertForm {...props} />}
     </Modal>

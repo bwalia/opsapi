@@ -75,9 +75,27 @@ function formFromRequest(r?: FsServiceRequest | null): RequestForm {
 export function RequestFormModal(props: RequestFormModalProps) {
   const title = props.request ? `Edit ${props.request.request_number}` : 'New service request';
   return (
-    <Modal isOpen={props.isOpen} onClose={props.onClose} title={title} size="lg">
+    <Modal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      title={title}
+      description="Log a customer complaint. It becomes a job once assigned."
+      size="3xl"
+    >
       {props.isOpen && <RequestForm {...props} />}
     </Modal>
+  );
+}
+
+/** Grouped section within a form modal — a small heading + hairline divider. */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-secondary-400 pb-2 mb-3 border-b border-secondary-100">
+        {title}
+      </h3>
+      {children}
+    </section>
   );
 }
 
@@ -143,76 +161,79 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
   };
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <Input
-        label="What's the problem? *"
-        value={form.title}
-        onChange={set('title')}
-        placeholder="e.g. AC not cooling"
-      />
-      <Textarea
-        label="Details"
-        value={form.description}
-        onChange={set('description')}
-        placeholder="What did the caller report?"
-        rows={3}
-      />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <SearchableSelect
-          label="Customer"
-          options={customerOptions}
-          value={form.customer_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v, site_uuid: '' }))}
-          placeholder="No customer"
-          clearable
-        />
-        <SitePicker
-          customerUuid={form.customer_uuid}
-          value={form.site_uuid}
-          onChange={(v, site) =>
-            setForm((f) => ({ ...f, site_uuid: v, ...(site ? siteToAddress(site) : {}) }))
-          }
-        />
-        <SearchableSelect
-          label="Product (the faulty item)"
-          options={productOptions}
-          value={form.product_uuid}
-          onChange={(v) => setForm((f) => ({ ...f, product_uuid: v }))}
-          placeholder="No product"
-          clearable
-        />
-        <Input label="Unit serial / reference" value={form.product_ref} onChange={set('product_ref')} />
-        <SearchableSelect
-          label="Priority"
-          options={PRIORITY_OPTIONS}
-          value={form.priority}
-          onChange={(v) => setForm((f) => ({ ...f, priority: (v as JobPriority) || 'normal' }))}
-          placeholder="Priority"
-        />
-        <SearchableSelect
-          label="Reported via"
-          options={CHANNEL_OPTIONS}
-          value={form.channel}
-          onChange={(v) => setForm((f) => ({ ...f, channel: (v as RequestChannel) || 'phone' }))}
-          placeholder="Channel"
-        />
-        <Input label="Fault category" value={form.fault_category} onChange={set('fault_category')} placeholder="e.g. no_cooling" />
+    <form onSubmit={submit} className="space-y-6">
+      <div className="space-y-4">
+        <Input label="What's the problem? *" value={form.title} onChange={set('title')} placeholder="e.g. AC not cooling" />
+        <Textarea label="Details" value={form.description} onChange={set('description')} placeholder="What did the caller report?" rows={3} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="sm:col-span-2">
-          <Input label="Service address" value={form.service_address} onChange={set('service_address')} placeholder="Where the engineer visits" />
+      <Section title="Customer & location">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SearchableSelect
+            label="Customer"
+            options={customerOptions}
+            value={form.customer_uuid}
+            onChange={(v) => setForm((f) => ({ ...f, customer_uuid: v, site_uuid: '' }))}
+            placeholder="No customer"
+            clearable
+          />
+          <SitePicker
+            customerUuid={form.customer_uuid}
+            value={form.site_uuid}
+            onChange={(v, site) => setForm((f) => ({ ...f, site_uuid: v, ...(site ? siteToAddress(site) : {}) }))}
+          />
+          <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <Input label="Service address" value={form.service_address} onChange={set('service_address')} placeholder="Where the engineer visits" />
+            </div>
+            <Input label="Postcode" value={form.service_postcode} onChange={set('service_postcode')} />
+          </div>
         </div>
-        <Input label="Postcode" value={form.service_postcode} onChange={set('service_postcode')} />
-      </div>
-      <Input label="Reported by" value={form.reported_by} onChange={set('reported_by')} placeholder="Caller's name" />
+      </Section>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Input label="Respond by (SLA)" type="datetime-local" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
-        <Input label="Resolve by (SLA)" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
-      </div>
+      <Section title="Equipment">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SearchableSelect
+            label="Product (the faulty item)"
+            options={productOptions}
+            value={form.product_uuid}
+            onChange={(v) => setForm((f) => ({ ...f, product_uuid: v }))}
+            placeholder="No product"
+            clearable
+          />
+          <Input label="Unit serial / reference" value={form.product_ref} onChange={set('product_ref')} />
+        </div>
+      </Section>
 
-      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
+      <Section title="Logging details">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SearchableSelect
+            label="Priority"
+            options={PRIORITY_OPTIONS}
+            value={form.priority}
+            onChange={(v) => setForm((f) => ({ ...f, priority: (v as JobPriority) || 'normal' }))}
+            placeholder="Priority"
+          />
+          <SearchableSelect
+            label="Reported via"
+            options={CHANNEL_OPTIONS}
+            value={form.channel}
+            onChange={(v) => setForm((f) => ({ ...f, channel: (v as RequestChannel) || 'phone' }))}
+            placeholder="Channel"
+          />
+          <Input label="Fault category" value={form.fault_category} onChange={set('fault_category')} placeholder="e.g. no_cooling" />
+          <Input label="Reported by" value={form.reported_by} onChange={set('reported_by')} placeholder="Caller's name" />
+        </div>
+      </Section>
+
+      <Section title="SLA (optional)">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input label="Respond by" type="datetime-local" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
+          <Input label="Resolve by" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
+        </div>
+      </Section>
+
+      <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
