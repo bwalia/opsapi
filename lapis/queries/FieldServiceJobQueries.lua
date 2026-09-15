@@ -583,7 +583,8 @@ function JobQueries.createJob(namespace_id, actor_uuid, data)
     end)
 end
 
-local JOB_TEXT_FIELDS = { "title", "description", "customer_reference", "notes", "currency" }
+local JOB_TEXT_FIELDS = { "title", "description", "customer_reference", "notes", "currency",
+    "product_ref", "service_address", "service_postcode" }
 
 function JobQueries.updateJob(namespace_id, uuid, data, actor_uuid)
     local job = JobQueries.findJobRow(namespace_id, uuid)
