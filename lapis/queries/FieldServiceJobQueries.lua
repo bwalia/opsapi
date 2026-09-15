@@ -40,7 +40,9 @@ local JOB_TRANSITIONS = {
 }
 
 local PHASE_STATUSES = { pending = true, in_progress = true, blocked = true, completed = true, skipped = true }
-local ITEM_TYPES = { part = true, material = true, labour = true, expense = true, other = true }
+local ITEM_TYPES = { part = true, material = true, labour = true, hire = true, expense = true, other = true }
+-- Labour categories from the engineer's quote sheet (Engineer/Mate × normal/overtime).
+local LABOUR_CATEGORIES = { engineer_nt = true, engineer_ot = true, mate_nt = true, mate_ot = true }
 local OPEN_VISIT_STATUSES = "('scheduled', 'en_route', 'on_site')"
 
 --------------------------------------------------------------------------------
@@ -273,6 +275,10 @@ local function shape_item(it)
         tax_rate = tonumber(it.tax_rate) or 0,
         line_total = round2(qty * price),
         is_billable = it.is_billable,
+        labour_category = it.labour_category,
+        days = it.days ~= nil and tonumber(it.days) or nil,
+        supplier = it.supplier,
+        part_number = it.part_number,
         invoiced = it.invoice_line_item_id ~= nil,
         approval_status = it.approval_status,
         approved_at = it.approved_at,
@@ -917,6 +923,20 @@ local function validate_item(data, partial)
         out.tax_rate = r
     end
     if data.is_billable ~= nil or not partial then out.is_billable = to_bool(data.is_billable, true) end
+    -- Quote-sheet extras: labour category (Engineer/Mate NT/OT), days (labour +
+    -- tool hire), and the material's supplier + free-text part number.
+    if data.labour_category ~= nil then
+        local lc = nilify(data.labour_category)
+        if lc and not LABOUR_CATEGORIES[lc] then return nil, "Invalid labour_category" end
+        out.labour_category = nullable(data.labour_category)
+    end
+    if data.days ~= nil then
+        local d = to_number(data.days)
+        if d and d < 0 then return nil, "days cannot be negative" end
+        out.days = d and round2(d) or db.NULL
+    end
+    if data.supplier ~= nil then out.supplier = nullable(data.supplier) end
+    if data.part_number ~= nil then out.part_number = nullable(data.part_number) end
     return out
 end
 
