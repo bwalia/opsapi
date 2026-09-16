@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Modal, Button, Input, Textarea, SearchableSelect } from '@/components/ui';
+import { Modal, Button, Input, Textarea, SearchableSelect, DateTimeField } from '@/components/ui';
 import {
   fieldService,
   toApiDateTime,
@@ -247,8 +247,8 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
 
       <Section title="SLA (optional)">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="Respond by" type="datetime-local" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
-          <Input label="Resolve by" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
+          <DateTimeField label="Respond by" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
+          <DateTimeField label="Resolve by" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
         </div>
       </Section>
 

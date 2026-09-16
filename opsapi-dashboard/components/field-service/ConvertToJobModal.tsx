@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Modal, Button, Input, SearchableSelect } from '@/components/ui';
+import { Modal, Button, Input, SearchableSelect, DateTimeField } from '@/components/ui';
 import {
   fieldService,
   toApiDateTime,
@@ -110,9 +110,8 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
           placeholder="Choose who does the repair"
           clearable
         />
-        <Input
+        <DateTimeField
           label="First visit"
-          type="datetime-local"
           value={visitAt}
           onChange={(e) => setVisitAt(e.target.value)}
           disabled={!engineerUuid}
@@ -133,7 +132,7 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
           placeholder="Unassigned"
           clearable
         />
-        <Input label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <DateTimeField label="Due date" mode="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
       </div>
       <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-5 border-t border-secondary-200">
         <Button type="button" variant="ghost" onClick={onClose}>

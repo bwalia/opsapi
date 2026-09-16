@@ -8,7 +8,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Modal, Button, Input, Textarea, SearchableSelect, Select } from '@/components/ui';
+import { Modal, Button, Input, Textarea, SearchableSelect, Select, DateTimeField } from '@/components/ui';
 import {
   fieldService,
   formatFsDateTime,
@@ -146,9 +146,8 @@ function VisitForm({ jobUuid, phases, visit, defaultPhaseUuid, onClose, onSaved 
         ))}
       </Select>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Input
+        <DateTimeField
           label="Start *"
-          type="datetime-local"
           value={start}
           onChange={(e) => {
             const next = e.target.value;
@@ -160,7 +159,7 @@ function VisitForm({ jobUuid, phases, visit, defaultPhaseUuid, onClose, onSaved 
             setStart(next);
           }}
         />
-        <Input label="End" type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+        <DateTimeField label="End" value={end} onChange={(e) => setEnd(e.target.value)} />
       </div>
       <Textarea
         label="Instructions for the engineer"

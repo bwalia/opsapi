@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Modal, Button, Input, Textarea, SearchableSelect, Select } from '@/components/ui';
+import { Modal, Button, Input, Textarea, SearchableSelect, Select, DateTimeField } from '@/components/ui';
 import {
   fieldService,
   type FsEngineer,
@@ -201,7 +201,7 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
           <Input label="Postcode" value={form.service_postcode} onChange={setField('service_postcode')} />
         </div>
 
-        <Input label="Due date" type="date" value={form.due_date} onChange={setField('due_date')} />
+        <DateTimeField label="Due date" mode="date" value={form.due_date} onChange={setField('due_date')} />
         <Input label="Customer reference / PO" value={form.customer_reference} onChange={setField('customer_reference')} />
         <div className="grid grid-cols-2 gap-2">
           <Input
