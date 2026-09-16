@@ -774,6 +774,8 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
             permissions = {
                 customers = { "read", "create" },
                 fs_service_requests = { "create", "read", "update" },
+                -- No products grant needed: the faulty-item picker reads the open
+                -- GET /api/v2/products, and telecallers only log complaints.
             },
         },
         {
@@ -782,7 +784,8 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
             permissions = {
                 fs_service_requests = { "manage" }, fs_jobs = { "manage" }, fs_visits = { "manage" },
                 fs_job_types = { "manage" }, fs_parts = { "manage" }, employees = { "manage" },
-                customers = { "manage" }, invoices = { "create", "read" }, timesheets = { "read" },
+                customers = { "manage" }, products = { "manage" }, invoices = { "create", "read" },
+                timesheets = { "read" },
             },
         },
         {
