@@ -58,6 +58,10 @@ function ActionTile({ icon, label, hint, onClick }: { icon: React.ReactNode; lab
 }
 
 function FinishSheet({ visit, onClose, onDone }: { visit: FsVisitDetail; onClose: () => void; onDone: () => void }) {
+  const phase = visit.phase;
+  // Only try to close the linked task when it's actually still open — a job with
+  // no phase behaves as before.
+  const phaseOpen = !!phase && phase.status !== 'completed' && phase.status !== 'skipped';
   const [summary, setSummary] = useState(visit.work_summary || '');
   const [labour, setLabour] = useState(() => hoursSince(visit.checked_in_at) || (visit.labour_hours != null ? String(visit.labour_hours) : ''));
   const [signoff, setSignoff] = useState(visit.customer_signoff_name || '');
@@ -71,12 +75,26 @@ function FinishSheet({ visit, onClose, onDone }: { visit: FsVisitDetail; onClose
     }
     setSaving(true);
     try {
-      await fieldService.checkOut(visit.uuid, {
+      const res = await fieldService.checkOut(visit.uuid, {
         work_summary: summary.trim() || undefined,
         labour_hours: labour.trim() === '' ? undefined : Number(labour),
         customer_signoff_name: signoff.trim() || undefined,
+        // Close the task on finish so the job isn't left open for the office to chase.
+        complete_phase: phaseOpen || undefined,
       });
-      toast.success('Job complete');
+      // The visit always saves; the phase only closes if its checklist/sign-off are
+      // done. If it couldn't, nudge the engineer rather than fail silently.
+      const blocked = phaseOpen && res.warnings.find((w) => /phase not completed/i.test(w));
+      if (blocked) {
+        toast(
+          /sign/i.test(blocked)
+            ? 'Saved — add the customer’s sign-off name to close this task.'
+            : 'Saved — tick off the remaining checklist items to close this task.',
+          { icon: '⚠️', duration: 6000 }
+        );
+      } else {
+        toast.success('Job complete');
+      }
       onDone();
     } catch (err) {
       toast.error(apiError(err, 'Could not finish the job'));
