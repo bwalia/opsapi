@@ -787,7 +787,11 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
                 customers = { "manage" }, products = { "manage" },
                 -- manage (not create/read) so the manager can also send/email/void
                 -- invoices — /send, /email and /void all require invoices.update.
-                invoices = { "manage" }, timesheets = { "read" },
+                invoices = { "manage" },
+                -- record customer payments against invoices
+                payments = { "manage" },
+                -- view/approve/reject engineer timesheets (own hours read via timesheets)
+                timesheets = { "read" }, timesheet_approvals = { "manage" },
             },
         },
         {

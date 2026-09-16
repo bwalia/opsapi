@@ -53,4 +53,27 @@ return {
         ]])
         print("[FieldService] Backfilled service_manager invoices/products grants")
     end,
+
+    -- [3] Backfill payments + timesheet_approvals onto existing service_manager
+    -- roles (892 already ran, so this is a separate step).   (893)
+    -- payments: record customer payments on invoices. timesheet_approvals:
+    -- approve/reject engineer timesheets. Added only where absent, so an admin's
+    -- own settings aren't overwritten.
+    [3] = function()
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"payments":["manage"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'service_manager'
+              AND NOT (permissions::jsonb ? 'payments')
+        ]])
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"timesheet_approvals":["manage"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'service_manager'
+              AND NOT (permissions::jsonb ? 'timesheet_approvals')
+        ]])
+        print("[FieldService] Backfilled service_manager payments/timesheet_approvals grants")
+    end,
 }
