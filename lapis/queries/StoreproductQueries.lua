@@ -1,3 +1,4 @@
+local db = require "lapis.db"
 local StoreproductModel = require "models.StoreproductModel"
 local StoreModel = require "models.StoreModel"
 local Global = require "helper.global"
@@ -39,10 +40,13 @@ function StoreproductQueries.create(params)
         params.weight = tonumber(params.weight)
     end
 
-    if params.compare_price == "null" or params.compare_price == "" then
-        params.compare_price = nil
-    elseif params.compare_price then
+    -- compare_price must be an explicit NULL when absent — omitting it lets the
+    -- column default (0) trip the `compare_price >= price` check for any priced
+    -- product without a compare-at price.
+    if params.compare_price and params.compare_price ~= "null" and params.compare_price ~= "" then
         params.compare_price = tonumber(params.compare_price)
+    else
+        params.compare_price = db.NULL
     end
 
     -- Sanitize text fields
@@ -63,10 +67,18 @@ function StoreproductQueries.create(params)
         params.slug = string.lower(params.name):gsub("[^a-z0-9-]", "-"):gsub("-+", "-")
     end
 
-    -- Validate and convert store_id
-    local store = StoreModel:find({ uuid = params.store_id })
+    -- Resolve the store. An explicit store_id (uuid) wins; otherwise fall back to
+    -- the namespace's store — the field-service catalog has no store picker, so a
+    -- product is simply added to the tenant's own store.
+    -- ponytail: picks the namespace's first store; fine while a tenant has one.
+    local store
+    if params.store_id and params.store_id ~= "" and params.store_id ~= "null" then
+        store = StoreModel:find({ uuid = params.store_id })
+    elseif params.namespace_id then
+        store = StoreModel:find({ namespace_id = params.namespace_id })
+    end
     if not store then
-        error("Store not found")
+        error("No store found for this namespace — create a store first")
     end
     params.store_id = store.id
 
@@ -207,10 +219,13 @@ function StoreproductQueries.update(id, params)
         params.weight = tonumber(params.weight)
     end
 
-    if params.compare_price == "null" or params.compare_price == "" then
-        params.compare_price = nil
-    elseif params.compare_price then
+    -- compare_price must be an explicit NULL when absent — omitting it lets the
+    -- column default (0) trip the `compare_price >= price` check for any priced
+    -- product without a compare-at price.
+    if params.compare_price and params.compare_price ~= "null" and params.compare_price ~= "" then
         params.compare_price = tonumber(params.compare_price)
+    else
+        params.compare_price = db.NULL
     end
 
     -- Sanitize text fields
