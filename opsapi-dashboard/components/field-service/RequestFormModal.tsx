@@ -67,8 +67,8 @@ function formFromRequest(r?: FsServiceRequest | null): RequestForm {
     product_ref: r.product_ref || '',
     service_address: r.service_address || '',
     service_postcode: r.service_postcode || '',
-    sla_response_due_at: toLocalInputValue(r.sla_response_due_at).slice(0, 10),
-    sla_resolve_due_at: toLocalInputValue(r.sla_resolve_due_at).slice(0, 10),
+    sla_response_due_at: toLocalInputValue(r.sla_response_due_at),
+    sla_resolve_due_at: toLocalInputValue(r.sla_resolve_due_at),
   };
 }
 
@@ -247,8 +247,8 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
 
       <Section title="SLA (optional)">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="Respond by" type="date" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
-          <Input label="Resolve by" type="date" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
+          <Input label="Respond by" type="datetime-local" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
+          <Input label="Resolve by" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
         </div>
       </Section>
 
