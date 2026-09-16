@@ -38,6 +38,7 @@ local Common = require("queries.FieldServiceCommon")
 local JobQueries = require("queries.FieldServiceJobQueries")
 local JobPhotoQueries = require("queries.JobPhotoQueries")
 local MinioClient = require("helper.minio")
+local Mail = require("helper.mail")
 
 return function(app)
     -- fs_jobs.<action>, or the caller is an engineer booked on the job.
@@ -271,5 +272,60 @@ return function(app)
             notes = body.notes,
         })
         return Http.result(invoice, err, 201)
+    end))
+
+    -- ============================================================
+    -- QUOTATION
+    -- ============================================================
+
+    -- Email the job's quotation PDF to the customer. The browser builds the PDF
+    -- from the job's quote-sheet lines (labour / materials / hire) and posts it
+    -- as base64; we attach + send and record it in the job activity. This is a
+    -- pre-work estimate — it does not touch invoicing.
+    app:post("/api/v2/field-service/jobs/:uuid/quote-email", Http.guard("fs_jobs", "update", function(self)
+        local body = Http.body(self)
+        local pdf_b64 = body.pdf_base64
+        if not pdf_b64 or pdf_b64 == "" then return Http.fail(400, "pdf_base64 is required") end
+
+        local job = JobQueries.getJob(self.namespace.id, self.params.uuid)
+        if not job then return Http.fail(404, "Job not found") end
+
+        local to = (body.to ~= nil and body.to ~= "" and body.to) or job.customer_email
+        if not to or to == "" then
+            return Http.fail(400, "No customer email on this job — add one to the customer or pass a recipient")
+        end
+
+        local company = self.namespace.name or "Your Company"
+        local number = job.job_number or "job"
+        local ref = "QUO-" .. number
+        local subject = (body.subject ~= nil and body.subject ~= "" and body.subject)
+            or ("Quotation " .. ref .. " from " .. company)
+        local greeting = job.customer_name and ("Dear " .. tostring(job.customer_name) .. ",") or "Hello,"
+        local note = (body.message ~= nil and body.message ~= "") and ("<p>" .. tostring(body.message) .. "</p>") or ""
+        local html = table.concat({
+            "<p>", greeting, "</p>", note,
+            "<p>Please find attached our quotation <strong>", ref, "</strong> for ",
+            tostring(job.title or "the requested work"), ".</p>",
+            "<p>This quotation is valid for 30 days. Let us know if you'd like to go ahead.</p>",
+            "<p>Thank you,<br>", company, "</p>",
+        })
+        local filename = (body.filename ~= nil and body.filename ~= "" and body.filename) or ("Quote-" .. number .. ".pdf")
+
+        local ok, mail_err = Mail.send({
+            to = to,
+            subject = subject,
+            html = html,
+            attachments = {
+                { filename = filename, content_type = "application/pdf", content_b64 = pdf_b64 },
+            },
+        })
+        if not ok then return Http.fail(502, "Could not send email: " .. tostring(mail_err)) end
+
+        local row = JobQueries.findJobRow(self.namespace.id, self.params.uuid)
+        if row then
+            Common.log_activity(self.namespace.id, row.id, Http.actor(self), "quote_sent",
+                "Quotation emailed to " .. to, { to = to, ref = ref })
+        end
+        return Http.ok({ message = "Quotation emailed to " .. to, to = to })
     end))
 end

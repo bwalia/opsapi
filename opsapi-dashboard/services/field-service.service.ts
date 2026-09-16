@@ -907,6 +907,17 @@ export const fieldService = {
     return unwrap<FsInvoiceResult>(await apiClient.post(`${BASE}/jobs/${jobUuid}/invoice`, opts, JSON_BODY));
   },
 
+  // ---------------- Quotation ----------------
+  // Email the job's quotation PDF (built in the browser) to the customer.
+  async emailQuote(
+    jobUuid: string,
+    data: { pdf_base64: string; filename?: string; to?: string; message?: string }
+  ): Promise<{ message: string; to: string }> {
+    return unwrap<{ message: string; to: string }>(
+      await apiClient.post(`${BASE}/jobs/${jobUuid}/quote-email`, data, JSON_BODY)
+    );
+  },
+
   // ---------------- Visits ----------------
   async getVisits(params: FsVisitListParams = {}): Promise<FsPaginated<FsVisit>> {
     return paginated<FsVisit>(await apiClient.get(`${BASE}/visits${qs(params)}`));
