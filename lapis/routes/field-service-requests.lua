@@ -39,6 +39,11 @@ return function(app)
         return Http.result(req, err, 201)
     end))
 
+    -- Distinct fault categories already in use, for the reuse-or-create picker.
+    app:get("/api/v2/field-service/fault-categories", Http.guard_any(READERS, function(self)
+        return Http.ok(RequestQueries.listFaultCategories(self.namespace.id))
+    end))
+
     app:get("/api/v2/field-service/service-requests/:uuid", Http.guard_any(READERS, function(self)
         local req = RequestQueries.getRequest(self.namespace.id, self.params.uuid)
         if not req then return Http.fail(404, "Service request not found") end

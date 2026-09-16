@@ -750,6 +750,11 @@ export const fieldService = {
     return unwrap<FsServiceRequestDetail>(await apiClient.get(`${BASE}/service-requests/${uuid}`));
   },
 
+  // Fault categories already used in this tenant — for a reuse-or-create picker.
+  async getFaultCategories(): Promise<string[]> {
+    return unwrap<string[]>(await apiClient.get(`${BASE}/fault-categories`));
+  },
+
   async createRequest(data: FsPayload): Promise<FsServiceRequestDetail> {
     return unwrap<FsServiceRequestDetail>(await apiClient.post(`${BASE}/service-requests`, data, JSON_BODY));
   },
