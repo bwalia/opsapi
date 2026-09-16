@@ -784,8 +784,10 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
             permissions = {
                 fs_service_requests = { "manage" }, fs_jobs = { "manage" }, fs_visits = { "manage" },
                 fs_job_types = { "manage" }, fs_parts = { "manage" }, employees = { "manage" },
-                customers = { "manage" }, products = { "manage" }, invoices = { "create", "read" },
-                timesheets = { "read" },
+                customers = { "manage" }, products = { "manage" },
+                -- manage (not create/read) so the manager can also send/email/void
+                -- invoices — /send, /email and /void all require invoices.update.
+                invoices = { "manage" }, timesheets = { "read" },
             },
         },
         {

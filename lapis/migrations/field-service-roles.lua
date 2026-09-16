@@ -25,4 +25,32 @@ return {
         print("[FieldService] Seeded field-service roles across " ..
             #namespaces .. " namespace(s): " .. total .. " role(s) created")
     end,
+
+    -- [2] Backfill grants onto EXISTING service_manager roles.   (892)
+    -- Step [1]/createFieldServiceRoles skip roles that already exist, so later
+    -- additions to the seed never reach older tenants. Bring their managers up to
+    -- date: invoices -> manage (so they can send/email/void, not just create), and
+    -- products -> manage (the catalog). Guarded so we only upgrade roles still on
+    -- the old defaults, never clobbering an admin's own customisation.
+    [2] = function()
+        -- invoices: give update/manage where the role still can't send an invoice.
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"invoices":["manage"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'service_manager'
+              AND permissions::jsonb ? 'invoices'
+              AND NOT (permissions::jsonb->'invoices' @> '["update"]'::jsonb)
+              AND NOT (permissions::jsonb->'invoices' @> '["manage"]'::jsonb)
+        ]])
+        -- products: add manage only where the role has no products grant at all.
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"products":["manage"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'service_manager'
+              AND NOT (permissions::jsonb ? 'products')
+        ]])
+        print("[FieldService] Backfilled service_manager invoices/products grants")
+    end,
 }
