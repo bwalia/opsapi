@@ -299,6 +299,20 @@ export function generateInvoicePdf(invoice: InvoiceWithAddress, company: Invoice
 }
 
 /**
+ * Build the same PDF and return it as raw base64 (no `data:` prefix) plus its
+ * filename — for uploading/emailing. Same document the Download button produces.
+ */
+export function invoicePdfBase64(
+  invoice: InvoiceWithAddress,
+  company: InvoiceCompany
+): { base64: string; filename: string } {
+  const uri = buildInvoiceDoc(invoice, company).output('datauristring');
+  const marker = 'base64,';
+  const idx = uri.indexOf(marker);
+  return { base64: idx >= 0 ? uri.slice(idx + marker.length) : uri, filename: invoiceFileName(invoice) };
+}
+
+/**
  * Build the invoice PDF and return an object URL for in-app preview (e.g. an
  * <iframe>). Caller owns the URL and must URL.revokeObjectURL() it when done.
  */

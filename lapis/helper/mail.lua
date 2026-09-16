@@ -529,6 +529,24 @@ local function smtp_send(opts)
         send_opts.text = opts.html:gsub("<br%s*/?>", "\n"):gsub("<[^>]+>", "")
     end
 
+    -- Attachments arrive as { filename, content_type, content_b64 } — base64 so
+    -- the raw bytes survive the cjson async payload. lua-resty-mail wants the
+    -- decoded bytes in `content` (it base64-encodes the MIME part itself).
+    if opts.attachments then
+        local files = {}
+        for _, a in ipairs(opts.attachments) do
+            local content = a.content or (a.content_b64 and ngx.decode_base64(a.content_b64))
+            if content then
+                files[#files + 1] = {
+                    filename = a.filename or "attachment",
+                    content_type = a.content_type or "application/octet-stream",
+                    content = content,
+                }
+            end
+        end
+        if #files > 0 then send_opts.attachments = files end
+    end
+
     local ok2, send_err = mailer:send(send_opts)
     if not ok2 then
         return false, "SMTP send failed: " .. tostring(send_err)
@@ -625,15 +643,16 @@ function Mail.send(opts)
     -- Async mode (default) — fire-and-forget via ngx.timer.at
     local cjson = require("cjson")
     local payload = cjson.encode({
-        to         = opts.to,
-        subject    = opts.subject,
-        html       = opts.html,
-        text       = opts.text,
-        from_email = opts.from_email,
-        from_name  = opts.from_name,
-        cc         = opts.cc,
-        bcc        = opts.bcc,
-        reply_to   = opts.reply_to,
+        to          = opts.to,
+        subject     = opts.subject,
+        html        = opts.html,
+        text        = opts.text,
+        from_email  = opts.from_email,
+        from_name   = opts.from_name,
+        cc          = opts.cc,
+        bcc         = opts.bcc,
+        reply_to    = opts.reply_to,
+        attachments = opts.attachments,  -- carries base64 content (ASCII-safe in JSON)
     })
 
     local ok, timer_err = ngx.timer.at(0, function(premature)
