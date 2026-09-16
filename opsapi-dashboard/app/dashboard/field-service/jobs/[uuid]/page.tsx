@@ -32,6 +32,7 @@ import JobFormModal from '@/components/field-service/JobFormModal';
 import PhasesPanel from '@/components/field-service/PhasesPanel';
 import VisitsPanel from '@/components/field-service/VisitsPanel';
 import ItemsPanel from '@/components/field-service/ItemsPanel';
+import QuotePanel from '@/components/field-service/QuotePanel';
 import BillingPanel from '@/components/field-service/BillingPanel';
 import ActivityFeed from '@/components/field-service/ActivityFeed';
 
@@ -277,6 +278,7 @@ function JobDetailContent() {
           />
         </div>
         <div className="space-y-6">
+          <QuotePanel job={job} canManage={canManage} />
           <BillingPanel job={job} canInvoice={canManage && canCreate('invoices')} onChanged={load} />
           <ActivityFeed activity={job.activity} />
         </div>

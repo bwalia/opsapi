@@ -281,6 +281,15 @@ function ConfigQueries.listEngineers(namespace_id, params)
     end
     local rows = db.query([[
         SELECT u.uuid, u.email, ]] .. Common.user_name_sql("u") .. [[ AS name,
+            -- The member's workspace role, so the picker reads "Name · Service
+            -- Manager / Engineer / …" and it's clear who each person is. Owner
+            -- first, else the highest-priority assigned role.
+            CASE WHEN nm.is_owner THEN 'Owner' ELSE (
+                SELECT nr.display_name FROM namespace_user_roles nur
+                JOIN namespace_roles nr ON nr.id = nur.namespace_role_id
+                WHERE nur.namespace_member_id = nm.id
+                ORDER BY nr.priority DESC LIMIT 1
+            ) END AS role,
             (SELECT COUNT(*) FROM fs_visits v
              WHERE v.namespace_id = nm.namespace_id AND v.engineer_user_uuid = u.uuid
                AND v.deleted_at IS NULL AND v.status IN ('scheduled', 'en_route', 'on_site')) AS open_visits

@@ -17,6 +17,7 @@ import { usePermissions } from '@/contexts/PermissionsContext';
 import { fieldService, type FsEmployee } from '@/services/field-service.service';
 import { FieldServiceNav, Pill, FilterSelect, apiError } from '@/components/field-service/shared';
 import EmployeeFormModal from '@/components/field-service/EmployeeFormModal';
+import TeamMemberModal from '@/components/field-service/TeamMemberModal';
 import type { TableColumn } from '@/types';
 
 const PER_PAGE = 20;
@@ -44,6 +45,7 @@ function EmployeesPageContent() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const [editing, setEditing] = useState<FsEmployee | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FsEmployee | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -212,16 +214,11 @@ function EmployeesPageContent() {
         description="Your staff and engineers, linked to their workspace logins."
         icon={<Users className="w-5 h-5" />}
         actions={
-          canCreate('employees') && (
-            <Button
-              onClick={() => {
-                setEditing(null);
-                setFormOpen(true);
-              }}
-            >
-              <Plus className="w-4 h-4 mr-1.5" /> Add employee
+          canCreate('users') ? (
+            <Button onClick={() => setTeamOpen(true)}>
+              <Plus className="w-4 h-4 mr-1.5" /> Add team member
             </Button>
-          )
+          ) : undefined
         }
       />
       <FieldServiceNav />
@@ -282,6 +279,7 @@ function EmployeesPageContent() {
         />
       </div>
 
+      <TeamMemberModal isOpen={teamOpen} onClose={() => setTeamOpen(false)} onCreated={() => fetchEmployees()} />
       <EmployeeFormModal
         isOpen={formOpen}
         employee={editing}

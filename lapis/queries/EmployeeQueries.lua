@@ -145,6 +145,84 @@ function EmployeeQueries.createEmployee(namespace_id, actor_uuid, data)
     return EmployeeQueries.getEmployee(namespace_id, emp.uuid)
 end
 
+-- A readable-but-strong temporary password: 14 chars, guaranteed upper/lower/digit
+-- (meets the password policy), ambiguous characters (0/O/1/l/I) removed.
+local function generate_temp_password()
+    local sets = { "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789" }
+    local all = sets[1] .. sets[2] .. sets[3]
+    math.randomseed((ngx and ngx.now and math.floor(ngx.now() * 1e6)) or os.time())
+    local out = {}
+    for _, s in ipairs(sets) do local i = math.random(#s); out[#out + 1] = s:sub(i, i) end
+    for _ = 1, 11 do local i = math.random(#all); out[#out + 1] = all:sub(i, i) end
+    for i = #out, 2, -1 do local j = math.random(i); out[i], out[j] = out[j], out[i] end
+    return table.concat(out)
+end
+
+local TEAM_ROLES = { engineer = true, service_manager = true, telecaller = true }
+
+--- One-step "add team member": provision a login + workspace membership + role
+--- (+ an engineer profile) so a non-technical admin never touches the
+--- user/member/role internals. Returns the temp password for the admin to hand
+--- over (it is NOT emailed). Requires the caller to hold users.create.
+-- @param data { first_name, last_name?, email, role_name, phone?, job_title?,
+--   skills?, fgas_certificate_no?, hourly_cost_rate?, is_engineer? }
+function EmployeeQueries.createTeamMember(namespace_id, actor_uuid, data)
+    local first = nilify(data.first_name)
+    local last = nilify(data.last_name)
+    local email = nilify(data.email)
+    local role_name = nilify(data.role_name)
+    if not first then return nil, "First name is required" end
+    if not email then return nil, "Email is required" end
+    if not role_name or not TEAM_ROLES[role_name] then return nil, "Pick a role (engineer, service_manager or telecaller)" end
+
+    if db.query("SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1", email)[1] then
+        return nil, "Someone with this email already has a login"
+    end
+    local role = db.query("SELECT id FROM namespace_roles WHERE namespace_id = ? AND role_name = ? LIMIT 1",
+        namespace_id, role_name)
+    if not role[1] then return nil, "That role does not exist in this workspace" end
+
+    -- Username is required + unique; derive a clean one from the email local part.
+    local base = email:gsub("@.*$", ""):gsub("[^%w]", ""):lower()
+    if #base < 3 then base = "user" .. base end
+    base = base:sub(1, 20)
+    local username, n = base, 0
+    while db.query("SELECT id FROM users WHERE username = ? LIMIT 1", username)[1] do
+        n = n + 1
+        username = base:sub(1, 18) .. tostring(n)
+    end
+
+    local temp_password = generate_temp_password()
+    local UserQueries = require("queries.UserQueries")
+    -- Creates the login AND adds them to this workspace with the chosen role.
+    local ok, user = pcall(UserQueries.create, {
+        username = username, first_name = first, last_name = last, email = email,
+        password = temp_password, active = true, role = "member",
+        namespace_id = namespace_id, namespace_role = role_name,
+    })
+    if not ok or not user or not user.uuid then
+        return nil, "Could not create the login: " .. tostring(user)
+    end
+
+    -- Engineer profile is optional detail; failing it must not undo the login.
+    local is_engineer = to_bool(data.is_engineer, role_name == "engineer")
+    local employee
+    if is_engineer or nilify(data.job_title) or nilify(data.skills) or nilify(data.hourly_cost_rate) then
+        employee = EmployeeQueries.createEmployee(namespace_id, actor_uuid, {
+            user_uuid = user.uuid, is_engineer = is_engineer, is_active = true,
+            job_title = data.job_title, phone = data.phone, region = data.region,
+            skills = data.skills, fgas_certificate_no = data.fgas_certificate_no,
+            hourly_cost_rate = data.hourly_cost_rate,
+        })
+    end
+
+    local name = ((first or "") .. " " .. (last or "")):gsub("^%s+", ""):gsub("%s+$", "")
+    return {
+        user_uuid = user.uuid, email = email, name = name,
+        role_name = role_name, temp_password = temp_password, employee = employee,
+    }
+end
+
 function EmployeeQueries.updateEmployee(namespace_id, uuid, data)
     local id = Common.resolve_id("employees", namespace_id, uuid)
     if not id then return nil, "Employee not found" end

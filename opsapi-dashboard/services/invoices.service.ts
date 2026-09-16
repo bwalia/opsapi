@@ -278,6 +278,20 @@ export const invoicesService = {
   },
 
   /**
+   * Email the invoice PDF to the customer. The browser builds the PDF (base64)
+   * and the backend attaches + sends it, then marks a draft as sent.
+   */
+  async emailInvoice(
+    uuid: string,
+    data: { pdf_base64: string; filename?: string; to?: string; message?: string }
+  ): Promise<{ message: string; to: string; status: string }> {
+    const response = await apiClient.post(`/api/v2/invoices/${uuid}/email`, data, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return response.data?.data ?? response.data;
+  },
+
+  /**
    * Void an invoice
    */
   async voidInvoice(uuid: string): Promise<{ message: string }> {

@@ -98,13 +98,13 @@ function PartForm({ part, onClose, onSaved }: PartFormModalProps) {
     <form onSubmit={submit} className="space-y-4">
       <Input label="Part name *" value={form.name} onChange={set('name')} placeholder="e.g. Compressor 1HP" />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Input label="SKU" value={form.sku} onChange={set('sku')} placeholder="e.g. CMP-100" />
+        <Input label="Part code (SKU)" value={form.sku} onChange={set('sku')} placeholder="e.g. CMP-100" helperText="Your own reference code (optional)" />
         <Input label="Category" value={form.category} onChange={set('category')} placeholder="e.g. spares" />
-        <Input label="Unit cost (buy)" value={form.unit_cost} onChange={set('unit_cost')} inputMode="decimal" />
-        <Input label="Unit price (sell)" value={form.unit_price} onChange={set('unit_price')} inputMode="decimal" />
+        <Input label="Unit cost (buy)" value={form.unit_cost} onChange={set('unit_cost')} inputMode="decimal" helperText="What you pay" />
+        <Input label="Unit price (sell)" value={form.unit_price} onChange={set('unit_price')} inputMode="decimal" helperText="What the customer pays" />
         <Input label="VAT %" value={form.tax_rate} onChange={set('tax_rate')} inputMode="decimal" />
-        <Input label="Stock qty" value={form.stock_quantity} onChange={set('stock_quantity')} inputMode="decimal" />
-        <Input label="Reorder level" value={form.reorder_level} onChange={set('reorder_level')} inputMode="decimal" />
+        <Input label="Stock qty" value={form.stock_quantity} onChange={set('stock_quantity')} inputMode="decimal" helperText="How many you hold now" />
+        <Input label="Reorder level" value={form.reorder_level} onChange={set('reorder_level')} inputMode="decimal" helperText="Warn when stock drops to this" />
       </div>
       <Textarea label="Description" value={form.description} onChange={set('description')} rows={2} />
       <CheckboxField

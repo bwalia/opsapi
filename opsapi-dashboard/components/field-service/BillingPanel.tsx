@@ -10,7 +10,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { AlertTriangle, ExternalLink, Receipt } from 'lucide-react';
-import { Modal, Button, Input } from '@/components/ui';
+import { Modal, Button, Input, DateTimeField } from '@/components/ui';
 import { fieldService, type FsJobDetail, type FsInvoicePreview } from '@/services/field-service.service';
 import { SectionCard, apiError, hours, money, optional, optionalNumber } from './shared';
 
@@ -142,7 +142,7 @@ function InvoiceForm({ job, onClose, onDone }: { job: FsJobDetail; onClose: () =
           inputMode="decimal"
           placeholder="Only if missing"
         />
-        <Input label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <DateTimeField label="Due date" mode="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         <Input label="Invoice notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={`Job ${job.job_number}`} />
       </div>
 

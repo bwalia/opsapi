@@ -312,6 +312,8 @@ export interface FsEngineer {
   uuid: string;
   email: string;
   name: string;
+  /** The member's workspace role (e.g. "Service Manager", "Engineer", "Owner"). */
+  role?: string | null;
   open_visits: number;
 }
 
@@ -699,6 +701,14 @@ export const fieldService = {
     return unwrap<FsEmployee>(await apiClient.post(`${BASE}/employees`, data, JSON_BODY));
   },
 
+  // One-step onboarding: create login + workspace membership + role (+ engineer
+  // profile). Returns the temp password for the admin to hand over.
+  async createTeamMember(data: FsPayload): Promise<{
+    email: string; name: string; role: string; temp_password: string; user_uuid: string;
+  }> {
+    return unwrap(await apiClient.post(`${BASE}/team-members`, data, JSON_BODY));
+  },
+
   async updateEmployee(uuid: string, data: FsPayload): Promise<FsEmployee> {
     return unwrap<FsEmployee>(await apiClient.put(`${BASE}/employees/${uuid}`, data, JSON_BODY));
   },
@@ -748,6 +758,11 @@ export const fieldService = {
 
   async getRequest(uuid: string): Promise<FsServiceRequestDetail> {
     return unwrap<FsServiceRequestDetail>(await apiClient.get(`${BASE}/service-requests/${uuid}`));
+  },
+
+  // Fault categories already used in this tenant — for a reuse-or-create picker.
+  async getFaultCategories(): Promise<string[]> {
+    return unwrap<string[]>(await apiClient.get(`${BASE}/fault-categories`));
   },
 
   async createRequest(data: FsPayload): Promise<FsServiceRequestDetail> {
@@ -905,6 +920,17 @@ export const fieldService = {
     opts: { hourly_rate?: number; labour_tax_rate?: number; due_date?: string; notes?: string } = {}
   ): Promise<FsInvoiceResult> {
     return unwrap<FsInvoiceResult>(await apiClient.post(`${BASE}/jobs/${jobUuid}/invoice`, opts, JSON_BODY));
+  },
+
+  // ---------------- Quotation ----------------
+  // Email the job's quotation PDF (built in the browser) to the customer.
+  async emailQuote(
+    jobUuid: string,
+    data: { pdf_base64: string; filename?: string; to?: string; message?: string }
+  ): Promise<{ message: string; to: string }> {
+    return unwrap<{ message: string; to: string }>(
+      await apiClient.post(`${BASE}/jobs/${jobUuid}/quote-email`, data, JSON_BODY)
+    );
   },
 
   // ---------------- Visits ----------------

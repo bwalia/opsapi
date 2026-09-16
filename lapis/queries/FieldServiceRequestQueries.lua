@@ -475,4 +475,21 @@ function RequestQueries.deleteRequest(namespace_id, uuid)
     return true
 end
 
+--- Distinct fault categories already used in this tenant — powers a reuse-or-create
+--- picker so callers pick an existing category instead of retyping (a new one is
+--- simply saved on the request and appears here next time). Most-used first.
+function RequestQueries.listFaultCategories(namespace_id)
+    local rows = db.query([[
+        SELECT fault_category, COUNT(*) AS n
+        FROM fs_service_requests
+        WHERE namespace_id = ? AND deleted_at IS NULL
+          AND fault_category IS NOT NULL AND fault_category <> ''
+        GROUP BY fault_category
+        ORDER BY n DESC, fault_category ASC
+    ]], namespace_id)
+    local out = {}
+    for _, r in ipairs(rows or {}) do out[#out + 1] = r.fault_category end
+    return arr(out)
+end
+
 return RequestQueries

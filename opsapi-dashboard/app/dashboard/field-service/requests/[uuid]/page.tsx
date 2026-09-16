@@ -12,9 +12,9 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import {
-  ArrowLeft, Pencil, Trash2, Building2, Package, MapPin, User, Phone, Mail, UserPlus, Wrench, Briefcase,
+  ArrowLeft, Pencil, Trash2, Building2, Package, MapPin, User, Phone, Mail, Wrench, Briefcase,
 } from 'lucide-react';
-import { Button, Card, Modal, SearchableSelect, ConfirmDialog } from '@/components/ui';
+import { Button, Card, Modal, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import {
@@ -22,7 +22,6 @@ import {
   formatFsDate,
   formatFsDateTime,
   type FsConvertResult,
-  type FsEngineer,
   type FsServiceRequestDetail,
   type RequestStatus,
 } from '@/services/field-service.service';
@@ -52,74 +51,6 @@ function InfoRow({ icon, label, children }: { icon: React.ReactNode; label: stri
         <div className="text-sm text-secondary-800">{children}</div>
       </div>
     </div>
-  );
-}
-
-function AssignModal({
-  isOpen,
-  request,
-  onClose,
-  onAssigned,
-}: {
-  isOpen: boolean;
-  request: FsServiceRequestDetail;
-  onClose: () => void;
-  onAssigned: (r: FsServiceRequestDetail) => void;
-}) {
-  const [members, setMembers] = useState<FsEngineer[]>([]);
-  const [uuid, setUuid] = useState(request.assigned_manager_uuid || '');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) fieldService.getEngineers().then(setMembers).catch(() => setMembers([]));
-  }, [isOpen]);
-
-  const submit = async () => {
-    if (!uuid) {
-      toast.error('Pick a manager');
-      return;
-    }
-    setSaving(true);
-    try {
-      const r = await fieldService.assignRequest(request.uuid, uuid);
-      toast.success('Assigned');
-      onAssigned(r);
-      onClose();
-    } catch (err) {
-      toast.error(apiError(err, 'Failed to assign'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Assign manager"
-      description="The manager owns and triages this complaint. The engineer who does the repair is assigned when it's converted to a job."
-      size="md"
-    >
-      {isOpen && (
-        <div className="space-y-4">
-          <SearchableSelect
-            label="Manager"
-            options={members.map((m) => ({ value: m.uuid, label: m.name || m.email, hint: m.email }))}
-            value={uuid}
-            onChange={setUuid}
-            placeholder="Select a manager"
-          />
-          <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-1 border-t border-secondary-200">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={submit} isLoading={saving}>
-              Assign
-            </Button>
-          </div>
-        </div>
-      )}
-    </Modal>
   );
 }
 
@@ -185,7 +116,6 @@ function RequestDetailContent() {
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
   const [notesFor, setNotesFor] = useState<RequestStatus | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -323,9 +253,6 @@ function RequestDetailContent() {
                 <Briefcase className="w-4 h-4 mr-1.5" /> Convert to job
               </Button>
             )}
-            <Button variant="secondary" onClick={() => setAssignOpen(true)} disabled={busy}>
-              <UserPlus className="w-4 h-4 mr-1.5" /> {req.assigned_manager_uuid ? 'Reassign' : 'Assign'}
-            </Button>
             <span className="w-px h-6 bg-secondary-200 mx-1" />
             {transitions.length === 0 ? (
               <span className="text-sm text-secondary-400">No further status changes</span>
@@ -381,9 +308,6 @@ function RequestDetailContent() {
               </InfoRow>
               <InfoRow icon={<Wrench className="w-4 h-4" />} label="Fault category">
                 {req.fault_category || '—'}
-              </InfoRow>
-              <InfoRow icon={<User className="w-4 h-4" />} label="Assigned manager">
-                {req.assigned_manager_name || <span className="text-secondary-400">Unassigned</span>}
               </InfoRow>
               {req.sla_response_due_at && (
                 <InfoRow icon={<Phone className="w-4 h-4" />} label="Respond by">
@@ -486,7 +410,6 @@ function RequestDetailContent() {
       </div>
 
       <RequestFormModal isOpen={formOpen} request={req} onClose={() => setFormOpen(false)} onSaved={() => load()} />
-      <AssignModal isOpen={assignOpen} request={req} onClose={() => setAssignOpen(false)} onAssigned={setReq} />
       <ConvertToJobModal isOpen={convertOpen} request={req} onClose={() => setConvertOpen(false)} onConverted={onConverted} />
       <NotesModal
         status={notesFor}

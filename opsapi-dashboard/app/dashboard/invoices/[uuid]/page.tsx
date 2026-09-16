@@ -27,7 +27,7 @@ import {
   type PaymentPayload,
   type InvoicePayload,
 } from '@/services/invoices.service';
-import { generateInvoicePdf, previewInvoicePdfUrl } from '@/lib/invoice-pdf';
+import { generateInvoicePdf, previewInvoicePdfUrl, invoicePdfBase64 } from '@/lib/invoice-pdf';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -572,15 +572,26 @@ function InvoiceDetailContent() {
   // Action handlers
   const handleSendInvoice = useCallback(async () => {
     if (!invoice) return;
+    const to = invoice.customer_email?.trim();
+    if (!to) {
+      toast.error('Add a customer email to this invoice before sending.');
+      return;
+    }
+    if (!window.confirm(`Email invoice ${invoice.invoice_number} to ${to}?`)) return;
     try {
-      await invoicesService.sendInvoice(invoice.uuid);
-      toast.success('Invoice sent successfully');
+      // Attach the same PDF the Download button produces, built in the browser.
+      const { base64, filename } = invoicePdfBase64(invoice, {
+        name: currentNamespace?.name || 'Your Company',
+      });
+      await invoicesService.emailInvoice(invoice.uuid, { pdf_base64: base64, filename });
+      toast.success(`Invoice emailed to ${to}`);
       fetchInvoice();
     } catch (error) {
-      console.error('Failed to send invoice:', error);
-      toast.error('Failed to send invoice');
+      console.error('Failed to email invoice:', error);
+      const msg = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Failed to email invoice');
     }
-  }, [invoice, fetchInvoice]);
+  }, [invoice, currentNamespace, fetchInvoice]);
 
   const handleVoidInvoice = useCallback(async () => {
     if (!invoice) return;

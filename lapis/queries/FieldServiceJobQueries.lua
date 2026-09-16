@@ -398,11 +398,20 @@ local function job_totals(visits, items)
         labour_hours = 0, billable_hours = 0, labour_value = 0, items_value = 0,
         uninvoiced_value = 0, open_visits = 0, missing_rate = false,
     }
+    -- Mirror what actually invoices (see collect_billable): a visit whose labour
+    -- is itemised as an approved quote-sheet labour line bills through that line,
+    -- so its clocked time isn't counted again here.
+    local labour_line_visits = {}
+    for _, it in ipairs(items) do
+        if it.item_type == "labour" and it.is_billable and it.approval_status == "approved" and it.visit_uuid then
+            labour_line_visits[it.visit_uuid] = true
+        end
+    end
     for _, v in ipairs(visits) do
         if v.status == "completed" then
             local hours = tonumber(v.labour_hours) or 0
             t.labour_hours = t.labour_hours + hours
-            if v.is_billable then
+            if v.is_billable and not labour_line_visits[v.uuid] then
                 t.billable_hours = t.billable_hours + hours
                 local rate = v.effective_hourly_rate
                 if not rate and hours > 0 then t.missing_rate = true end
@@ -414,9 +423,15 @@ local function job_totals(visits, items)
             t.open_visits = t.open_visits + 1
         end
     end
+    -- Only approved billable items reach an invoice. Count labour lines as labour
+    -- and everything else as parts/materials so the summary matches the bill.
     for _, it in ipairs(items) do
-        if it.is_billable then
-            t.items_value = t.items_value + it.line_total
+        if it.is_billable and it.approval_status == "approved" then
+            if it.item_type == "labour" then
+                t.labour_value = t.labour_value + it.line_total
+            else
+                t.items_value = t.items_value + it.line_total
+            end
             if not it.invoiced then t.uninvoiced_value = t.uninvoiced_value + it.line_total end
         end
     end
@@ -949,6 +964,28 @@ local function resolve_child(tbl, namespace_id, uuid, job_id, label)
     return id
 end
 
+-- Adjust a catalog part's on-hand stock by `delta` (negative = consumed, positive
+-- = returned). Best-effort and only for catalog-linked parts; logs a low-stock
+-- warning on the job when consumption drops it to/under its reorder level.
+-- ponytail: not wrapped in the item write's transaction — a single UPDATE, so a
+-- rare failure only skews one part's count, correctable via the catalog.
+local function adjust_part_stock(namespace_id, part_id, delta, job_id, actor_uuid, item_desc)
+    if not part_id or not delta or delta == 0 then return end
+    local rows = db.query([[
+        UPDATE fs_parts SET stock_quantity = COALESCE(stock_quantity, 0) + ?, updated_at = NOW()
+        WHERE id = ? AND namespace_id = ?
+        RETURNING stock_quantity, reorder_level, name
+    ]], delta, part_id, namespace_id)
+    local p = rows and rows[1]
+    if not p then return end
+    if delta < 0 and p.reorder_level ~= nil and tonumber(p.stock_quantity) ~= nil
+        and tonumber(p.stock_quantity) <= tonumber(p.reorder_level) then
+        Common.log_activity(namespace_id, job_id, actor_uuid, "part_low_stock",
+            string.format("%s low on stock: %s left (reorder at %s)",
+                p.name or item_desc or "Part", tostring(p.stock_quantity), tostring(p.reorder_level)))
+    end
+end
+
 function JobQueries.addItem(namespace_id, job_uuid, data, actor_uuid)
     local job = JobQueries.findJobRow(namespace_id, job_uuid)
     if not job then return nil, "Job not found" end
@@ -1016,6 +1053,21 @@ function JobQueries.updateItem(namespace_id, uuid, data, actor_uuid)
     if next(fields) == nil then return nil, "No valid fields to update" end
 
     FsJobItemModel:find(item.id):update(fields)
+
+    -- Keep catalog stock in step when an already-approved part line is edited:
+    -- return what the old part/qty consumed, then consume the new part/qty.
+    if item.approval_status == "approved" then
+        local old_part = item.part_id and tonumber(item.part_id) or nil
+        local old_qty = tonumber(item.quantity) or 0
+        local new_part = old_part
+        if fields.part_id ~= nil then new_part = (fields.part_id ~= db.NULL) and tonumber(fields.part_id) or nil end
+        local new_qty = (fields.quantity ~= nil) and (tonumber(fields.quantity) or 0) or old_qty
+        if old_part ~= new_part or old_qty ~= new_qty then
+            adjust_part_stock(namespace_id, old_part, old_qty, item.job_id, actor_uuid, item.description)
+            adjust_part_stock(namespace_id, new_part, -new_qty, item.job_id, actor_uuid, item.description)
+        end
+    end
+
     Common.log_activity(namespace_id, item.job_id, actor_uuid, "item_updated", "Item updated: " .. item.description)
     return JobQueries.getItem(namespace_id, uuid)
 end
@@ -1026,6 +1078,11 @@ function JobQueries.deleteItem(namespace_id, uuid, actor_uuid)
     if item.invoice_line_item_id then return nil, "Item has been invoiced and cannot be removed" end
     db.query("UPDATE fs_job_items SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", item.id)
     Common.log_activity(namespace_id, item.job_id, actor_uuid, "item_removed", "Item removed: " .. item.description)
+    -- Give back the stock an approved catalog part had consumed.
+    local qty = tonumber(item.quantity)
+    if item.approval_status == "approved" and item.part_id and qty then
+        adjust_part_stock(namespace_id, item.part_id, qty, item.job_id, actor_uuid, item.description)
+    end
     return true
 end
 
@@ -1036,6 +1093,7 @@ function JobQueries.setItemApproval(namespace_id, uuid, approve, opts, actor_uui
     if not item then return nil, "Item not found" end
     if item.invoice_line_item_id then return nil, "Item has been invoiced and cannot be changed" end
 
+    local was_approved = item.approval_status == "approved"
     FsJobItemModel:find(item.id):update({
         approval_status = approve and "approved" or "rejected",
         approved_by_uuid = actor_uuid or db.NULL,
@@ -1044,6 +1102,17 @@ function JobQueries.setItemApproval(namespace_id, uuid, approve, opts, actor_uui
     })
     Common.log_activity(namespace_id, item.job_id, actor_uuid, approve and "item_approved" or "item_rejected",
         (approve and "Approved: " or "Rejected: ") .. item.description)
+
+    -- Consume stock when a catalog part is first approved; give it back if an
+    -- already-approved part is rejected.
+    local qty = tonumber(item.quantity)
+    if item.part_id and qty then
+        if approve and not was_approved then
+            adjust_part_stock(namespace_id, item.part_id, -qty, item.job_id, actor_uuid, item.description)
+        elseif not approve and was_approved then
+            adjust_part_stock(namespace_id, item.part_id, qty, item.job_id, actor_uuid, item.description)
+        end
+    end
     return JobQueries.getItem(namespace_id, uuid)
 end
 
@@ -1056,10 +1125,25 @@ end
 -- was already billed through Timesheets -> Invoice is skipped (and vice versa:
 -- the line we create carries timesheet_entry_id, so the timesheet route skips
 -- it) — the same hours are never invoiced twice.
+--
+-- Labour source: "prefer lines, else clocked" — a visit that already has an
+-- approved quote-sheet labour line (item_type 'labour', which keeps the
+-- NT/OT/mate split) bills through that line, so its clocked visit hours are
+-- skipped here. A visit with no labour line falls back to its clocked time.
+-- This stops the same labour being charged twice.
 local function collect_billable(job, opts)
     local fallback_rate = to_number(opts.hourly_rate)
     local labour_tax = to_number(opts.labour_tax_rate) or 0
     local lines, missing_rate = {}, false
+
+    local labour_line_visits = {}
+    for _, r in ipairs(db.query([[
+        SELECT DISTINCT visit_id FROM fs_job_items
+        WHERE job_id = ? AND deleted_at IS NULL AND item_type = 'labour'
+          AND is_billable = true AND approval_status = 'approved' AND visit_id IS NOT NULL
+    ]], job.id) or {}) do
+        labour_line_visits[tostring(r.visit_id)] = true
+    end
 
     local visits = db.query([[
         SELECT v.id, v.uuid, v.labour_hours, v.hourly_rate, v.timesheet_entry_id,
@@ -1082,23 +1166,27 @@ local function collect_billable(job, opts)
     ]], job.id)
 
     for _, v in ipairs(visits or {}) do
-        local rate = JobQueries.visitRate(v) or (fallback_rate and fallback_rate > 0 and fallback_rate) or nil
-        if not rate then missing_rate = true end
-        local hours = tonumber(v.labour_hours)
-        local desc = "Labour"
-        if v.phase_name then desc = desc .. " — " .. v.phase_name end
-        local detail = {}
-        if v.engineer_name then table.insert(detail, v.engineer_name) end
-        if v.work_at then table.insert(detail, tostring(v.work_at):sub(1, 10)) end
-        if #detail > 0 then desc = desc .. " (" .. table.concat(detail, ", ") .. ")" end
-        local calc = InvoiceGenerator.calculateLineTotal(hours, rate or 0, labour_tax, 0)
-        table.insert(lines, {
-            source = "visit", source_id = v.id, source_uuid = v.uuid,
-            timesheet_entry_id = v.timesheet_entry_id,
-            description = desc, quantity = hours, unit_price = rate or 0, tax_rate = labour_tax,
-            net = round2(calc.subtotal), tax = round2(calc.tax), total = round2(calc.total),
-            missing_rate = rate == nil or nil,
-        })
+        -- Skip clocked hours when this visit's labour is itemised as approved
+        -- quote-sheet lines (billed below) — otherwise labour is charged twice.
+        if not labour_line_visits[tostring(v.id)] then
+            local rate = JobQueries.visitRate(v) or (fallback_rate and fallback_rate > 0 and fallback_rate) or nil
+            if not rate then missing_rate = true end
+            local hours = tonumber(v.labour_hours)
+            local desc = "Labour"
+            if v.phase_name then desc = desc .. " — " .. v.phase_name end
+            local detail = {}
+            if v.engineer_name then table.insert(detail, v.engineer_name) end
+            if v.work_at then table.insert(detail, tostring(v.work_at):sub(1, 10)) end
+            if #detail > 0 then desc = desc .. " (" .. table.concat(detail, ", ") .. ")" end
+            local calc = InvoiceGenerator.calculateLineTotal(hours, rate or 0, labour_tax, 0)
+            table.insert(lines, {
+                source = "visit", source_id = v.id, source_uuid = v.uuid,
+                timesheet_entry_id = v.timesheet_entry_id,
+                description = desc, quantity = hours, unit_price = rate or 0, tax_rate = labour_tax,
+                net = round2(calc.subtotal), tax = round2(calc.tax), total = round2(calc.total),
+                missing_rate = rate == nil or nil,
+            })
+        end
     end
 
     local items = db.query([[

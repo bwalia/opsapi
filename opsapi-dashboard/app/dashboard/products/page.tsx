@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Package } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
+import { Button, Input, Textarea, Table, Badge, Pagination, Card, ConfirmDialog, Modal } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { productsService } from '@/services';
@@ -25,6 +25,7 @@ function ProductsPageContent() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<StoreProduct | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -214,7 +215,13 @@ function ProductsPageContent() {
         title="Products"
         description="Manage your product catalog"
         icon={<Package className="h-5 w-5" />}
-        actions={canCreate('products') ? <Button leftIcon={<Plus className="w-4 h-4" />}>Add Product</Button> : undefined}
+        actions={
+          canCreate('products') ? (
+            <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setCreateOpen(true)}>
+              Add Product
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* Filters */}
@@ -281,7 +288,92 @@ function ProductsPageContent() {
         variant="danger"
         isLoading={isDeleting}
       />
+
+      <CreateProductModal isOpen={createOpen} onClose={() => setCreateOpen(false)} onCreated={fetchProducts} />
     </div>
+  );
+}
+
+/** Add a serviceable item to the catalog. Mirrors the detail page's edit payload. */
+function CreateProductModal({ isOpen, onClose, onCreated }: { isOpen: boolean; onClose: () => void; onCreated: () => void }) {
+  const empty = {
+    name: '', sku: '', price: '', cost_price: '', inventory_quantity: '',
+    low_stock_threshold: '', short_description: '', description: '',
+  };
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Reset the form each time the modal opens.
+  useEffect(() => {
+    if (isOpen) setForm(empty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+    if (!form.price || Number(form.price) <= 0) {
+      toast.error('Price must be greater than 0');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: Record<string, unknown> = {
+        name: form.name.trim(),
+        sku: form.sku.trim(),
+        price: form.price.trim(),
+        compare_price: 'null',
+        cost_price: form.cost_price.trim() || '0',
+        inventory_quantity: form.inventory_quantity.trim() || '0',
+        low_stock_threshold: form.low_stock_threshold.trim() || '0',
+        short_description: form.short_description.trim(),
+        description: form.description.trim(),
+        is_active: true,
+        is_featured: false,
+      };
+      await productsService.createStoreProduct(payload);
+      toast.success('Product created');
+      onCreated();
+      onClose();
+    } catch {
+      toast.error('Failed to create product');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Add product" description="Add a serviceable item to the catalog" size="2xl">
+      {isOpen && (
+        <form onSubmit={submit} className="space-y-4">
+          <Input label="Name *" value={form.name} onChange={set('name')} placeholder="e.g. Daikin FTXM50 Air Conditioner" autoFocus />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input label="SKU" value={form.sku} onChange={set('sku')} placeholder="e.g. DAIKIN-FTXM50" />
+            <Input label="Price *" value={form.price} onChange={set('price')} inputMode="decimal" placeholder="0.00" />
+            <Input label="Cost price" value={form.cost_price} onChange={set('cost_price')} inputMode="decimal" placeholder="0.00" />
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Stock qty" value={form.inventory_quantity} onChange={set('inventory_quantity')} inputMode="numeric" />
+              <Input label="Low stock at" value={form.low_stock_threshold} onChange={set('low_stock_threshold')} inputMode="numeric" />
+            </div>
+          </div>
+          <Input label="Short description" value={form.short_description} onChange={set('short_description')} placeholder="One-line summary" />
+          <Textarea label="Description" value={form.description} onChange={set('description')} rows={3} />
+          <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-1 border-t border-secondary-200">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={saving}>
+              Create product
+            </Button>
+          </div>
+        </form>
+      )}
+    </Modal>
   );
 }
 

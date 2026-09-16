@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Modal, Button, Input, Textarea, SearchableSelect } from '@/components/ui';
+import { Modal, Button, Input, Textarea, SearchableSelect, DateTimeField } from '@/components/ui';
 import {
   fieldService,
   toApiDateTime,
@@ -103,12 +103,14 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
   const [form, setForm] = useState<RequestForm>(() => formFromRequest(request));
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const isEdit = !!request;
 
   useEffect(() => {
     customersService.getCustomers({ perPage: 200 }).then((r) => setCustomers(r.data || [])).catch(() => setCustomers([]));
     productsService.getStoreProducts({ perPage: 200 }).then((r) => setProducts(r.data || [])).catch(() => setProducts([]));
+    fieldService.getFaultCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
 
   const customerOptions = useMemo(
@@ -119,6 +121,13 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
     () => products.map((p) => ({ value: p.uuid, label: p.name, hint: p.sku || undefined })),
     [products]
   );
+  // Include the current value so an existing/just-created category still shows
+  // as selected even before the catalog list contains it.
+  const categoryOptions = useMemo(() => {
+    const set = new Set(categories);
+    if (form.fault_category) set.add(form.fault_category);
+    return Array.from(set).map((c) => ({ value: c, label: c }));
+  }, [categories, form.fault_category]);
 
   const set = (key: keyof RequestForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -221,15 +230,25 @@ function RequestForm({ request, onClose, onSaved }: RequestFormModalProps) {
             onChange={(v) => setForm((f) => ({ ...f, channel: (v as RequestChannel) || 'phone' }))}
             placeholder="Channel"
           />
-          <Input label="Fault category" value={form.fault_category} onChange={set('fault_category')} placeholder="e.g. no_cooling" />
+          <SearchableSelect
+            label="Fault category"
+            options={categoryOptions}
+            value={form.fault_category}
+            onChange={(v) => setForm((f) => ({ ...f, fault_category: v }))}
+            placeholder="Search or add a category"
+            searchPlaceholder="Search, or type a new one…"
+            emptyMessage="No matches — type to create"
+            creatable
+            clearable
+          />
           <Input label="Reported by" value={form.reported_by} onChange={set('reported_by')} placeholder="Caller's name" />
         </div>
       </Section>
 
       <Section title="SLA (optional)">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="Respond by" type="datetime-local" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
-          <Input label="Resolve by" type="datetime-local" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
+          <DateTimeField label="Respond by" value={form.sla_response_due_at} onChange={set('sla_response_due_at')} />
+          <DateTimeField label="Resolve by" value={form.sla_resolve_due_at} onChange={set('sla_resolve_due_at')} />
         </div>
       </Section>
 

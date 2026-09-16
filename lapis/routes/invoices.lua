@@ -37,6 +37,7 @@ local cjson = require("cjson.safe")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local InvoiceQueries = require("queries.InvoiceQueries")
+local Mail = require("helper.mail")
 
 -- Configure cjson
 cjson.encode_empty_table_as_object(false)
@@ -404,6 +405,71 @@ return function(app)
                 return api_response(status, nil, err)
             end
             return api_response(200, invoice)
+        end)
+    ))
+
+    -- POST /api/v2/invoices/:uuid/email - Email the invoice PDF to the customer.
+    -- The browser builds the PDF (same one Download produces) and posts it as
+    -- base64; we attach it and send. Emailing also marks a draft as sent.
+    app:post("/api/v2/invoices/:uuid/email", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("invoices", "update", function(self)
+            local body = parse_json_body()
+            local pdf_b64 = body.pdf_base64
+            if not pdf_b64 or pdf_b64 == "" then
+                return api_response(400, nil, "pdf_base64 is required")
+            end
+
+            local invoice = InvoiceQueries.get(self.params.uuid, self.namespace.id)
+            if not invoice then
+                return api_response(404, nil, "Invoice not found")
+            end
+
+            local to = body.to
+            if not to or to == "" then to = invoice.customer_email end
+            if not to or to == "" then
+                return api_response(400, nil, "No customer email on this invoice — add one or pass a recipient")
+            end
+
+            local company = self.namespace.name or "Your Company"
+            local number = invoice.invoice_number or "invoice"
+            local subject = body.subject
+            if not subject or subject == "" then
+                subject = "Invoice " .. number .. " from " .. company
+            end
+
+            local amount = tostring(invoice.currency or "") .. " " .. tostring(invoice.total or invoice.balance_due or "")
+            local greeting = invoice.customer_name and ("Dear " .. tostring(invoice.customer_name) .. ",") or "Hello,"
+            local note = (body.message and body.message ~= "") and ("<p>" .. tostring(body.message) .. "</p>") or ""
+            local html = table.concat({
+                "<p>", greeting, "</p>", note,
+                "<p>Please find attached invoice <strong>", number, "</strong> for ", amount, ".</p>",
+                "<p>Thank you for your business.</p>",
+                "<p>", company, "</p>",
+            })
+
+            local filename = body.filename
+            if not filename or filename == "" then filename = "Invoice-" .. number .. ".pdf" end
+
+            local ok, mail_err = Mail.send({
+                to = to,
+                subject = subject,
+                html = html,
+                attachments = {
+                    { filename = filename, content_type = "application/pdf", content_b64 = pdf_b64 },
+                },
+            })
+            if not ok then
+                return api_response(502, nil, "Could not send email: " .. tostring(mail_err))
+            end
+
+            -- Emailing implies "sent" — flip a draft to sent (best-effort; a
+            -- non-draft just keeps its status).
+            local updated = InvoiceQueries.send(self.params.uuid, self.namespace.id) or invoice
+            return api_response(200, {
+                message = "Invoice emailed to " .. to,
+                to = to,
+                status = updated.status,
+            })
         end)
     ))
 
