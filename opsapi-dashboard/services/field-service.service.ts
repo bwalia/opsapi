@@ -701,6 +701,14 @@ export const fieldService = {
     return unwrap<FsEmployee>(await apiClient.post(`${BASE}/employees`, data, JSON_BODY));
   },
 
+  // One-step onboarding: create login + workspace membership + role (+ engineer
+  // profile). Returns the temp password for the admin to hand over.
+  async createTeamMember(data: FsPayload): Promise<{
+    email: string; name: string; role: string; temp_password: string; user_uuid: string;
+  }> {
+    return unwrap(await apiClient.post(`${BASE}/team-members`, data, JSON_BODY));
+  },
+
   async updateEmployee(uuid: string, data: FsPayload): Promise<FsEmployee> {
     return unwrap<FsEmployee>(await apiClient.put(`${BASE}/employees/${uuid}`, data, JSON_BODY));
   },
