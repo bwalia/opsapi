@@ -55,7 +55,11 @@ function ConvertForm({ request, onClose, onConverted }: ConvertToJobModalProps) 
     [jobTypes]
   );
   const managerOptions = useMemo(
-    () => members.map((m) => ({ value: m.uuid, label: m.name || m.email, hint: m.email })),
+    () => members.map((m) => ({
+      value: m.uuid,
+      label: m.name || m.email,
+      hint: [m.role, m.email].filter(Boolean).join(' · ') || undefined,
+    })),
     [members]
   );
 

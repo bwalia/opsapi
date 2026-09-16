@@ -312,6 +312,8 @@ export interface FsEngineer {
   uuid: string;
   email: string;
   name: string;
+  /** The member's workspace role (e.g. "Service Manager", "Engineer", "Owner"). */
+  role?: string | null;
   open_visits: number;
 }
 

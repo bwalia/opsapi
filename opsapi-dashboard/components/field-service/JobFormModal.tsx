@@ -84,7 +84,11 @@ function JobForm({ job, onClose, onSaved }: JobFormModalProps) {
     [products]
   );
   const engineerOptions = useMemo(
-    () => engineers.map((e) => ({ value: e.uuid, label: e.name || e.email, hint: e.email })),
+    () => engineers.map((e) => ({
+      value: e.uuid,
+      label: e.name || e.email,
+      hint: [e.role, e.email].filter(Boolean).join(' · ') || undefined,
+    })),
     [engineers]
   );
 
