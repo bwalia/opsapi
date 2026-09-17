@@ -178,7 +178,9 @@ function UsersPageContent() {
       width: "w-20",
       render: (user) => (
         <div className="flex items-center gap-2">
-          {canUpdate("users") && user.member_uuid && !user.is_owner && (
+          {/* Owners are editable too: access is role-driven, so restricting an
+              owner to (say) service_manager is a valid, deliberate action. */}
+          {canUpdate("users") && user.member_uuid && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -313,6 +315,7 @@ function UsersPageContent() {
             getFullName(userToEditRoles.first_name, userToEditRoles.last_name) ||
             userToEditRoles.email
           }
+          isOwner={!!userToEditRoles.is_owner}
           currentRoleIds={(userToEditRoles.roles || []).map((r) => Number(r.id))}
           roles={roles}
           onClose={() => setUserToEditRoles(null)}
