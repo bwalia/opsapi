@@ -108,9 +108,14 @@ jobs:
           APP_VERSION=$(git describe --tags --always 2>/dev/null || echo 'dev')
           SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
           IMAGE_TAG="${SAFE_VERSION}-${GITHUB_RUN_NUMBER:-local}"
-          echo "API_URL=$API_URL"     >> "$GITHUB_OUTPUT"
-          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
-          echo "Building ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} (API=${API_URL})"
+          BUILD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo '')
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "API_URL=$API_URL"       >> "$GITHUB_OUTPUT"
+          echo "IMAGE_TAG=$IMAGE_TAG"   >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "BUILD_SHA=$BUILD_SHA"   >> "$GITHUB_OUTPUT"
+          echo "BUILD_TIME=$BUILD_TIME" >> "$GITHUB_OUTPUT"
+          echo "Building ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} (API=${API_URL}) v=${APP_VERSION} @ ${BUILD_TIME}"
 
       - name: Build & push (NEXT_PUBLIC_API_URL baked in)
         uses: docker/build-push-action@v6
@@ -120,6 +125,9 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ steps.meta.outputs.API_URL }}
+            NEXT_PUBLIC_BUILD_VERSION=${{ steps.meta.outputs.APP_VERSION }}
+            NEXT_PUBLIC_BUILD_SHA=${{ steps.meta.outputs.BUILD_SHA }}
+            NEXT_PUBLIC_BUILD_TIME=${{ steps.meta.outputs.BUILD_TIME }}
           tags: |
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.IMAGE_TAG }}
