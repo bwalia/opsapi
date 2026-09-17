@@ -5,6 +5,32 @@ local Global = require "helper.global"
 
 local StoreproductQueries = {}
 
+-- Ensure the namespace has a store to hang products off. A fresh field-service
+-- tenant has none, and the catalog has no store picker, so we provision a default
+-- store (owned by the namespace owner) on first product create instead of forcing
+-- a non-technical user to create an e-commerce "store" by hand. Namespace-scoped.
+local function ensure_namespace_store(namespace_id)
+    local existing = StoreModel:find({ namespace_id = namespace_id })
+    if existing then return existing end
+
+    local owner = db.select(
+        "user_id FROM namespace_members WHERE namespace_id = ? AND is_owner = true LIMIT 1", namespace_id)
+    local ns = db.select("name, slug FROM namespaces WHERE id = ?", namespace_id)
+    if not owner or #owner == 0 or not ns or #ns == 0 then
+        return nil
+    end
+
+    local StoreQueries = require "queries.StoreQueries"
+    local ok, store = pcall(StoreQueries.create, {
+        name = (ns[1].name or "Default") .. " Catalog",
+        slug = (ns[1].slug or ("ns-" .. tostring(namespace_id))) .. "-catalog",
+        user_id = owner[1].user_id,
+        namespace_id = namespace_id,
+        status = "active",
+    })
+    return ok and store or nil
+end
+
 function StoreproductQueries.create(params)
     -- Validate required fields
     if not params.name or params.name == "" then
@@ -76,9 +102,14 @@ function StoreproductQueries.create(params)
         store = StoreModel:find({ uuid = params.store_id })
     elseif params.namespace_id then
         store = StoreModel:find({ namespace_id = params.namespace_id })
+        -- Fresh tenant with no store yet: provision a default one so adding a
+        -- serviceable item just works (no manual "create a store" step).
+        if not store then
+            store = ensure_namespace_store(params.namespace_id)
+        end
     end
     if not store then
-        error("No store found for this namespace — create a store first")
+        error("Could not resolve or create a store for this namespace")
     end
     params.store_id = store.id
 
