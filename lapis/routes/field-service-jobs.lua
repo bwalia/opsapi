@@ -166,6 +166,17 @@ return function(app)
         return Http.result(item, err, 201)
     end))
 
+    -- Post a free-text comment/note to the job timeline. Engineer-allowed (same
+    -- can_work_job gate as items), so an engineer on site can leave a note.
+    app:post("/api/v2/field-service/jobs/:uuid/comments", Http.route(function(self)
+        local job = JobQueries.findJobRow(self.namespace.id, self.params.uuid)
+        if not job then return Http.fail(404, "Job not found") end
+        if not can_work_job(self, job.id, "update") then return Http.forbidden("fs_jobs", "update") end
+        local body = Http.body(self)
+        local ok, err = JobQueries.addComment(self.namespace.id, job.id, Http.actor(self), body.message or body.comment)
+        return Http.result(ok, err, 201)
+    end))
+
     -- Managers edit any item; an engineer only the items they logged.
     local function can_edit_item(self, item)
         if Http.has_perm(self, "fs_jobs", "update") then return true end

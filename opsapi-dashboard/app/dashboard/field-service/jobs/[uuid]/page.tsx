@@ -16,6 +16,7 @@ import { ArrowLeft, Building2, Loader2, MapPin, Pencil, Phone, Trash2, Wrench, M
 import { Button, ConfirmDialog } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
+import { useAuthStore } from '@/store/auth.store';
 import { fieldService, formatFsDate, type FsJobDetail, type JobStatus } from '@/services/field-service.service';
 import {
   FieldServiceNav,
@@ -44,6 +45,7 @@ function JobDetailContent() {
   const uuid = params?.uuid as string;
   const router = useRouter();
   const { canUpdate, canDelete, canCreate } = usePermissions();
+  const currentUserUuid = useAuthStore((s) => s.user?.uuid);
 
   const [job, setJob] = useState<FsJobDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -126,6 +128,10 @@ function JobDetailContent() {
   }
 
   const canManage = canUpdate('fs_jobs');
+  // An engineer booked on one of this job's visits can log parts/materials even
+  // without fs_jobs.update — the backend allows it (is_engineer_on_job), so the
+  // job page should too. Approve/reject stays manager-only (separate prop).
+  const isEngineerOnJob = !!currentUserUuid && (job.visits || []).some((v) => v.engineer_user_uuid === currentUserUuid);
   const editable = job.status !== 'completed' && job.status !== 'cancelled';
   const address = siteAddressFromJob(job);
   const maps = mapsUrl(address);
@@ -273,14 +279,19 @@ function JobDetailContent() {
             items={job.items}
             phases={job.phases}
             currency={job.currency}
-            canEdit={canManage && job.status !== 'cancelled'}
+            canEdit={(canManage || isEngineerOnJob) && job.status !== 'cancelled'}
             onChanged={load}
           />
         </div>
         <div className="space-y-6">
           <QuotePanel job={job} canManage={canManage} />
           <BillingPanel job={job} canInvoice={canManage && canCreate('invoices')} onChanged={load} />
-          <ActivityFeed activity={job.activity} />
+          <ActivityFeed
+            activity={job.activity}
+            jobUuid={job.uuid}
+            canComment={canManage || isEngineerOnJob}
+            onPosted={load}
+          />
         </div>
       </div>
 

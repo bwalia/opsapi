@@ -1019,6 +1019,16 @@ function JobQueries.addItem(namespace_id, job_uuid, data, actor_uuid)
     return JobQueries.getItem(namespace_id, item.uuid)
 end
 
+--- Post a free-text comment/note onto the job's activity timeline. Available to
+--- a manager (fs_jobs.update) or an engineer booked on the job; it shows in the
+--- activity feed like any other entry, so no separate comment table is needed.
+function JobQueries.addComment(namespace_id, job_id, actor_uuid, message)
+    message = nilify(message)
+    if not message then return nil, "Comment cannot be empty" end
+    Common.log_activity(namespace_id, job_id, actor_uuid, "comment", message)
+    return { success = true }
+end
+
 function JobQueries.updateItem(namespace_id, uuid, data, actor_uuid)
     local item = JobQueries.findItemRow(namespace_id, uuid)
     if not item then return nil, "Item not found" end

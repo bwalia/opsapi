@@ -891,6 +891,11 @@ export const fieldService = {
     return unwrap<FsJobItem>(await apiClient.post(`${BASE}/jobs/${jobUuid}/items`, data, JSON_BODY));
   },
 
+  /** Post a free-text comment/note onto the job timeline (engineer-allowed). */
+  async addJobComment(jobUuid: string, message: string): Promise<{ success: boolean }> {
+    return unwrap(await apiClient.post(`${BASE}/jobs/${jobUuid}/comments`, { message }, JSON_BODY));
+  },
+
   async updateItem(uuid: string, data: FsPayload): Promise<FsJobItem> {
     return unwrap<FsJobItem>(await apiClient.put(`${BASE}/job-items/${uuid}`, data, JSON_BODY));
   },
