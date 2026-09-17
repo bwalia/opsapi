@@ -214,9 +214,21 @@ function EmployeesPageContent() {
         description="Your staff and engineers, linked to their workspace logins."
         icon={<Users className="w-5 h-5" />}
         actions={
+          // Follow the permissions: creating a LOGIN needs `users.create`
+          // (full onboarding + welcome email). A user with only `employees.create`
+          // can still add an employee profile for someone already in the workspace.
           canCreate('users') ? (
             <Button onClick={() => setTeamOpen(true)}>
               <Plus className="w-4 h-4 mr-1.5" /> Add team member
+            </Button>
+          ) : canCreate('employees') ? (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-1.5" /> Add employee
             </Button>
           ) : undefined
         }
