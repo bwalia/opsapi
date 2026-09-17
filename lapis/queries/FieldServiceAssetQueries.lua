@@ -717,6 +717,18 @@ function AssetQueries.recordTest(namespace_id, actor_uuid, asset_uuid, body)
         end
 
         local tested_at = nilify(body.tested_at)
+
+        -- The history reads "who did it", so fill the name from the login when the client sends
+        -- only the person (the app knows who is signed in, not how their name is spelled).
+        local technician_uuid = nilify(body.technician_uuid) or actor_uuid
+        local technician_name = nilify(body.technician_name)
+        if not technician_name and technician_uuid then
+            local person = db.query(
+                "SELECT " .. Common.user_name_sql("u") .. " AS name FROM users u WHERE u.uuid = ? LIMIT 1",
+                technician_uuid)[1]
+            technician_name = person and person.name
+        end
+
         local test = db.insert("fs_asset_test_history", {
             uuid = Common.uuid(),
             namespace_id = namespace_id,
@@ -727,8 +739,8 @@ function AssetQueries.recordTest(namespace_id, actor_uuid, asset_uuid, body)
             service_level_id = level_id,
             due_date = due_date,
             tested_at = tested_at or db.raw("NOW()"),
-            technician_uuid = nilify(body.technician_uuid) or actor_uuid or db.NULL,
-            technician_name = nullable(body.technician_name),
+            technician_uuid = technician_uuid or db.NULL,
+            technician_name = technician_name or db.NULL,
             result = result,
             condition_rating = rating or db.NULL,
             readings = cjson.encode(body.readings or {}),
