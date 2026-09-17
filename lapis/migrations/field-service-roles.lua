@@ -76,4 +76,49 @@ return {
         ]])
         print("[FieldService] Backfilled service_manager payments/timesheet_approvals grants")
     end,
+
+    -- [4] Backfill the Simpro-aligned grants (asset register, contracts, quotes,
+    -- report pack incl. F-Gas, sync connector) onto operational roles in namespaces
+    -- created AFTER migrations/simpro-menu.lua [4] ran — e.g. a namespace seeded
+    -- from the older createFieldServiceRoles that lacked these modules. Guarded by
+    -- the absence of the role's marker grant, so tenants that already have them
+    -- (or an admin's customisation) are never clobbered.   (919)
+    [4] = function()
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"fs_assets":["create","read","update","delete"],"fs_contracts":["create","read","update"],"fs_quotes":["create","read","update","delete"],"fs_reports":["read"],"simpro_sync":["read"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'service_manager'
+              AND NOT (permissions::jsonb ? 'fs_reports')
+        ]])
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"fs_assets":["read"],"fs_contracts":["read"],"fs_quotes":["create","read","update"],"fs_reports":["read"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'telecaller'
+              AND NOT (permissions::jsonb ? 'fs_reports')
+        ]])
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"fs_assets":["read","update"],"fs_contracts":["read"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'engineer'
+              AND NOT (permissions::jsonb ? 'fs_assets')
+        ]])
+        print("[FieldService] Backfilled Simpro-aligned grants onto service_manager/telecaller/engineer")
+    end,
+
+    -- [5] Backfill users create/read onto existing service_manager roles so a
+    -- manager can onboard staff (the "Add team member" flow creates a login).
+    -- Added only where absent, so an admin's customisation isn't overwritten.   (920)
+    [5] = function()
+        db.query([[
+            UPDATE namespace_roles
+            SET permissions = (permissions::jsonb || '{"users":["create","read"]}'::jsonb)::text,
+                updated_at = NOW()
+            WHERE role_name = 'service_manager'
+              AND NOT (permissions::jsonb ? 'users')
+        ]])
+        print("[FieldService] Backfilled service_manager users create/read grant")
+    end,
 }

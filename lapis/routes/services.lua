@@ -509,7 +509,7 @@ return function(app)
                 description = params.description,
                 is_required = params.is_required == "true" or params.is_required == true,
                 updated_by = self.current_user.id
-            })
+            }, service.id)
 
             if not ok then
                 return error_response(500, "Failed to update secret", tostring(updated))
@@ -541,7 +541,7 @@ return function(app)
                 return error_response(403, "Service not found in this namespace")
             end
 
-            local ok, result = pcall(ServiceQueries.deleteSecret, self.params.sid)
+            local ok, result = pcall(ServiceQueries.deleteSecret, self.params.sid, service.id)
             if not ok then
                 return error_response(500, "Failed to delete secret", tostring(result))
             end
@@ -649,7 +649,7 @@ return function(app)
                 description = params.description,
                 is_required = params.is_required == "true" or params.is_required == true,
                 default_value = params.default_value
-            })
+            }, service.id)
 
             if not ok then
                 return error_response(500, "Failed to update variable", tostring(updated))
@@ -681,7 +681,7 @@ return function(app)
                 return error_response(403, "Service not found in this namespace")
             end
 
-            local ok, result = pcall(ServiceQueries.deleteVariable, self.params.vid)
+            local ok, result = pcall(ServiceQueries.deleteVariable, self.params.vid, service.id)
             if not ok then
                 return error_response(500, "Failed to delete variable", tostring(result))
             end

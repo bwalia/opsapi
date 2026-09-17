@@ -43,7 +43,7 @@ const initialFormData: FormData = {
   last_name: '',
   phone_no: '',
   address: '',
-  role: 'buyer',
+  role: 'member',
 };
 
 const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
@@ -89,8 +89,14 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
 
     if (!formData.password.trim()) {
       newErrors.password = 'Password is required';
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
+    } else if (formData.password.length < 12) {
+      newErrors.password = 'Password must be at least 12 characters';
+    } else if (
+      !/[A-Z]/.test(formData.password) ||
+      !/[a-z]/.test(formData.password) ||
+      !/\d/.test(formData.password)
+    ) {
+      newErrors.password = 'Include an uppercase letter, a lowercase letter and a number';
     }
 
     if (!formData.username.trim()) {
@@ -151,7 +157,10 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
           last_name: formData.last_name,
           phone_no: formData.phone_no || undefined,
           address: formData.address || undefined,
-          role: formData.role,
+          // The dropdown lists WORKSPACE (namespace) roles, so send the choice as
+          // namespace_role — sending it as `role` (platform) left the membership
+          // defaulting to "member". Platform role is left to the backend default.
+          namespace_role: formData.role,
           active: true,
         });
 
@@ -257,7 +266,7 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
           {/* Role Select */}
           <div className="w-full" data-role-dropdown>
             <label className="block text-sm font-medium text-secondary-700 mb-1.5">
-              Role <span className="text-error-500">*</span>
+              Workspace role <span className="text-error-500">*</span>
             </label>
             <div className="relative">
               <button
@@ -340,7 +349,7 @@ const AddUserModal: React.FC<AddUserModalProps> = memo(function AddUserModal({
           placeholder="Enter password"
           leftIcon={<Lock className="w-4 h-4" />}
           error={errors.password}
-          helperText="Must be at least 6 characters"
+          helperText="At least 12 characters, with an uppercase letter, a lowercase letter and a number"
           disabled={isSubmitting}
           required
         />

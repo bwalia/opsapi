@@ -776,6 +776,9 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
                 fs_service_requests = { "create", "read", "update" },
                 -- No products grant needed: the faulty-item picker reads the open
                 -- GET /api/v2/products, and telecallers only log complaints.
+                -- Simpro-aligned (matches migrations/simpro-menu.lua [4]).
+                fs_assets = { "read" }, fs_contracts = { "read" },
+                fs_quotes = { "create", "read", "update" }, fs_reports = { "read" },
             },
         },
         {
@@ -785,6 +788,10 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
                 fs_service_requests = { "manage" }, fs_jobs = { "manage" }, fs_visits = { "manage" },
                 fs_job_types = { "manage" }, fs_parts = { "manage" }, employees = { "manage" },
                 customers = { "manage" }, products = { "manage" },
+                -- Onboard staff: create workspace logins (the "Add team member" flow)
+                -- and read the user list. Not update/delete/manage — a manager adds
+                -- engineers but doesn't administer accounts or change others' roles.
+                users = { "create", "read" },
                 -- manage (not create/read) so the manager can also send/email/void
                 -- invoices — /send, /email and /void all require invoices.update.
                 invoices = { "manage" },
@@ -792,6 +799,15 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
                 payments = { "manage" },
                 -- view/approve/reject engineer timesheets (own hours read via timesheets)
                 timesheets = { "read" }, timesheet_approvals = { "manage" },
+                -- Simpro-aligned modules (asset register, contracts, quotes, the
+                -- report pack incl. F-Gas, and the sync connector). Kept in step
+                -- with migrations/simpro-menu.lua [4] so new namespaces match the
+                -- backfill older tenants received.
+                fs_assets = { "create", "read", "update", "delete" },
+                fs_contracts = { "create", "read", "update" },
+                fs_quotes = { "create", "read", "update", "delete" },
+                fs_reports = { "read" },
+                simpro_sync = { "read" },
             },
         },
         {
@@ -802,7 +818,10 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
             -- reads the pages but only ever sees the jobs/visits they're the
             -- assigned engineer on. They act on a specific job via being that
             -- assignee (is_engineer_on_job), not via a module grant.
-            permissions = { fs_jobs = { "read" }, fs_visits = { "read" }, fs_parts = { "read" } },
+            -- Simpro-aligned (matches migrations/simpro-menu.lua [4]): engineers
+            -- survey assets on site and read contracts; no report pack or sync.
+            permissions = { fs_jobs = { "read" }, fs_visits = { "read" }, fs_parts = { "read" },
+                fs_assets = { "read", "update" }, fs_contracts = { "read" } },
         },
     }
 

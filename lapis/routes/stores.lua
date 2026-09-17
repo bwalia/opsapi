@@ -208,6 +208,12 @@ return function(app)
                 return error_response(404, "Store not found")
             end
 
+            -- Tenant isolation: don't let stores.update in namespace A act on a
+            -- store owned by namespace B (perms come from the header namespace).
+            if store.namespace_id and tonumber(store.namespace_id) ~= tonumber(self.namespace.id) then
+                return error_response(404, "Store not found")
+            end
+
             -- Check permission: namespace stores.update OR ownership
             local perms = get_store_permissions(self)
             local is_owner = user_owns_store(self, store)
@@ -249,6 +255,12 @@ return function(app)
             end
 
             if not store then
+                return error_response(404, "Store not found")
+            end
+
+            -- Tenant isolation: don't let stores.delete in namespace A act on a
+            -- store owned by namespace B (perms come from the header namespace).
+            if store.namespace_id and tonumber(store.namespace_id) ~= tonumber(self.namespace.id) then
                 return error_response(404, "Store not found")
             end
 
@@ -308,6 +320,12 @@ return function(app)
             end
 
             if not store then
+                return error_response(404, "Store not found")
+            end
+
+            -- Tenant isolation: don't let stores.update in namespace A act on a
+            -- store owned by namespace B (perms come from the header namespace).
+            if store.namespace_id and tonumber(store.namespace_id) ~= tonumber(self.namespace.id) then
                 return error_response(404, "Store not found")
             end
 

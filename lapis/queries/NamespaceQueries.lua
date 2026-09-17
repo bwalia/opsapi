@@ -625,24 +625,46 @@ end
 -- @param user_id number User ID
 -- @return table|nil The namespace or nil
 function NamespaceQueries.getUserDefaultNamespace(user_id)
-    -- First try to get the configured default
+    -- A stored pointer (default/last-active) is only honored if the user STILL has
+    -- an active membership in it AND the namespace is active. Checking only the
+    -- namespace's status (as before) let a stale pointer — e.g. left over from
+    -- sign-up auto-assignment to a namespace the user later left — win at login,
+    -- so the JWT was minted for the wrong tenant. See getForUser for the
+    -- authoritative, membership-scoped list this falls back to.
+    local function member_namespace(namespace_id)
+        if not namespace_id then
+            return nil
+        end
+        local rows = db.query([[
+            SELECT n.id
+            FROM namespaces n
+            JOIN namespace_members nm ON nm.namespace_id = n.id
+            JOIN users u ON nm.user_id = u.id
+            WHERE (u.uuid = ? OR u.id = ?)
+              AND n.id = ?
+              AND nm.status = 'active'
+              AND n.status = 'active'
+            LIMIT 1
+        ]], tostring(user_id), tonumber(user_id) or 0, tonumber(namespace_id) or 0)
+        if rows and rows[1] then
+            return NamespaceQueries.show(rows[1].id)
+        end
+        return nil
+    end
+
     local settings = NamespaceQueries.getUserSettings(user_id)
-    if settings and settings.default_namespace_id then
-        local namespace = NamespaceQueries.show(settings.default_namespace_id)
-        if namespace and namespace.status == "active" then
-            return namespace
+    if settings then
+        local ns = member_namespace(settings.default_namespace_id)
+        if ns then
+            return ns
+        end
+        ns = member_namespace(settings.last_active_namespace_id)
+        if ns then
+            return ns
         end
     end
 
-    -- If no default or default is inactive, try last active
-    if settings and settings.last_active_namespace_id then
-        local namespace = NamespaceQueries.show(settings.last_active_namespace_id)
-        if namespace and namespace.status == "active" then
-            return namespace
-        end
-    end
-
-    -- Finally, get first available namespace for user
+    -- Finally, first namespace the user is actually an active member of
     local namespaces = NamespaceQueries.getForUser(user_id)
     if namespaces and #namespaces > 0 then
         return NamespaceQueries.show(namespaces[1].id)

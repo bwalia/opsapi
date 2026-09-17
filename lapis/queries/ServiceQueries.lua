@@ -727,13 +727,16 @@ end
 -- @param id string|number Secret ID or UUID
 -- @param data table Fields to update
 -- @return table|nil The updated secret (value masked)
-function ServiceQueries.updateSecret(id, data)
+function ServiceQueries.updateSecret(id, data, service_id)
     local secret = ServiceSecrets:find({ uuid = tostring(id) })
     if not secret and tonumber(id) then
         secret = ServiceSecrets:find({ id = tonumber(id) })
     end
 
     if not secret then return nil end
+    -- Tenant isolation: the secret must belong to the service the caller resolved
+    -- (the route only checks the service's namespace, not this child's ownership).
+    if service_id and tonumber(secret.service_id) ~= tonumber(service_id) then return nil end
 
     local update_data = { updated_at = Global.getCurrentTimestamp() }
 
@@ -755,13 +758,14 @@ end
 --- Delete a secret
 -- @param id string|number Secret ID or UUID
 -- @return boolean Success status
-function ServiceQueries.deleteSecret(id)
+function ServiceQueries.deleteSecret(id, service_id)
     local secret = ServiceSecrets:find({ uuid = tostring(id) })
     if not secret and tonumber(id) then
         secret = ServiceSecrets:find({ id = tonumber(id) })
     end
 
     if not secret then return nil end
+    if service_id and tonumber(secret.service_id) ~= tonumber(service_id) then return nil end
     return secret:delete()
 end
 
@@ -825,13 +829,14 @@ end
 -- @param id string|number Variable ID or UUID
 -- @param data table Fields to update
 -- @return table|nil The updated variable
-function ServiceQueries.updateVariable(id, data)
+function ServiceQueries.updateVariable(id, data, service_id)
     local variable = ServiceVariables:find({ uuid = tostring(id) })
     if not variable and tonumber(id) then
         variable = ServiceVariables:find({ id = tonumber(id) })
     end
 
     if not variable then return nil end
+    if service_id and tonumber(variable.service_id) ~= tonumber(service_id) then return nil end
 
     local update_data = { updated_at = Global.getCurrentTimestamp() }
 
@@ -848,13 +853,14 @@ end
 --- Delete a variable
 -- @param id string|number Variable ID or UUID
 -- @return boolean Success status
-function ServiceQueries.deleteVariable(id)
+function ServiceQueries.deleteVariable(id, service_id)
     local variable = ServiceVariables:find({ uuid = tostring(id) })
     if not variable and tonumber(id) then
         variable = ServiceVariables:find({ id = tonumber(id) })
     end
 
     if not variable then return nil end
+    if service_id and tonumber(variable.service_id) ~= tonumber(service_id) then return nil end
     return variable:delete()
 end
 

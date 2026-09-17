@@ -43,7 +43,9 @@ export interface StoreProductDetail {
 }
 
 export const productsService = {
-  async getStoreProducts(params: ProductFilters = {}): Promise<PaginatedResponse<StoreProduct>> {
+  async getStoreProducts(
+    params: ProductFilters = {}
+  ): Promise<PaginatedResponse<StoreProduct> & { currency?: string }> {
     const queryParams: Record<string, number | string> = {};
 
     if (params.page) queryParams.offset = ((params.page - 1) * (params.perPage || 10));
@@ -54,8 +56,14 @@ export const productsService = {
 
     const response = await apiClient.get('/api/v2/products', { params: queryParams });
 
-    // Handle API response
-    const products = Array.isArray(response.data) ? response.data : response.data?.data || [];
+    // Handle API response. storeproducts rows use inventory_quantity / is_active,
+    // but the list UI reads quantity / status — normalise so Stock and Status render.
+    const raw = Array.isArray(response.data) ? response.data : response.data?.data || [];
+    const products = raw.map((p: Record<string, unknown>) => ({
+      ...p,
+      quantity: (p.quantity ?? p.inventory_quantity ?? 0) as number,
+      status: (p.status ?? (p.is_active === false ? 'draft' : 'active')) as 'active' | 'draft' | 'archived',
+    })) as StoreProduct[];
     const total = response.data?.total || products.length;
 
     return {
@@ -64,6 +72,8 @@ export const productsService = {
       page: params.page || 1,
       perPage: params.perPage || 10,
       totalPages: Math.ceil(total / (params.perPage || 10)),
+      // Store-level currency (products inherit it); undefined until first product sets it.
+      currency: response.data?.currency || undefined,
     };
   },
 
@@ -91,6 +101,12 @@ export const productsService = {
 
   async deleteStoreProduct(uuid: string): Promise<void> {
     await apiClient.delete(`/api/v2/products/${uuid}`);
+  },
+
+  /** Set/change the catalog's store-level currency (reused by every product). */
+  async setCurrency(currency: string): Promise<string> {
+    const response = await apiClient.put('/api/v2/products/currency', toFormData({ currency }));
+    return response.data?.currency || currency;
   },
 
   // Categories

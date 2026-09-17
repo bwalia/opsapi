@@ -267,18 +267,21 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
             goto continue
         end
 
+        -- Platform admins (root) see the full menu for this namespace's project,
+        -- including when they aren't a member of it (they bypass RBAC everywhere
+        -- else, so the menu must match). Already filtered to project-relevant,
+        -- namespace-enabled items by the skips above.
+        if is_platform_admin then
+            should_include = true
         -- Always show items marked as always_show (e.g., My Workspace)
-        if item.always_show then
+        elseif item.always_show then
             should_include = true
-        -- Platform admin-only items only shown to platform admins
+        -- Platform admin-only items only shown to platform admins (handled above)
         elseif item.is_admin_only then
-            if is_platform_admin then
-                should_include = true
-            end
-        -- Namespace owners see items for modules in their project
-        elseif is_namespace_owner then
-            should_include = true
-        -- Check permission based on module
+            should_include = false
+        -- Role-driven: an owner's menu follows their role's permissions like any
+        -- member (the owner role grants everything by default; a limited role
+        -- limits the menu). Ownership no longer forces every item in.
         elseif item.module then
             -- Check if user has the required permission in this namespace
             if namespace_permissions then

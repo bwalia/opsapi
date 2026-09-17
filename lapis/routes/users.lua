@@ -242,7 +242,8 @@ return function(app)
             if params.active ~= nil then
                 update_data.active = params.active == "true" or params.active == true or params.active == "1"
             end
-            update_data.updated_by = self.current_user.uuid
+            -- NB: no `updated_by` — the users table has no such column, and setting
+            -- it made every user update fail with a Postgres "column does not exist".
 
             if next(update_data) == nil then
                 return error_response(400, "No data provided for update")

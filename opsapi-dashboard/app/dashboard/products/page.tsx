@@ -3,12 +3,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Edit, Package } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Button, Input, Textarea, Table, Badge, Pagination, Card, ConfirmDialog, Modal } from '@/components/ui';
+import { Button, Input, Textarea, Table, Badge, Pagination, Card, ConfirmDialog, Modal, Select } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { productsService } from '@/services';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import type { StoreProduct, TableColumn, PaginatedResponse } from '@/types';
+import type { StoreProduct, TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
 function ProductsPageContent() {
@@ -26,6 +26,7 @@ function ProductsPageContent() {
   const [productToDelete, setProductToDelete] = useState<StoreProduct | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [currency, setCurrency] = useState('USD');
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -34,7 +35,7 @@ function ProductsPageContent() {
     const fetchId = ++fetchIdRef.current;
     setIsLoading(true);
     try {
-      const response: PaginatedResponse<StoreProduct> = await productsService.getStoreProducts({
+      const response = await productsService.getStoreProducts({
         page: currentPage,
         perPage,
         orderBy: sortColumn,
@@ -47,6 +48,7 @@ function ProductsPageContent() {
         setProducts(response.data || []);
         setTotalPages(response.totalPages || 1);
         setTotalItems(response.total || 0);
+        if (response.currency) setCurrency(response.currency);
       }
     } catch (error) {
       if (fetchId === fetchIdRef.current) {
@@ -72,6 +74,19 @@ function ProductsPageContent() {
       setSortDirection('asc');
     }
     setCurrentPage(1);
+  };
+
+  const handleCurrencyChange = async (next: string) => {
+    const prev = currency;
+    setCurrency(next); // optimistic
+    try {
+      await productsService.setCurrency(next);
+      toast.success(`Catalog currency set to ${next}`);
+      fetchProducts();
+    } catch {
+      setCurrency(prev);
+      toast.error('Failed to change currency');
+    }
   };
 
   const handleDeleteClick = (product: StoreProduct) => {
@@ -127,10 +142,10 @@ function ProductsPageContent() {
       sortable: true,
       render: (product) => (
         <div>
-          <p className="font-semibold text-secondary-900">{formatCurrency(product.price)}</p>
+          <p className="font-semibold text-secondary-900">{formatCurrency(product.price, currency)}</p>
           {product.compare_at_price && product.compare_at_price > product.price && (
             <p className="text-xs text-secondary-400 line-through">
-              {formatCurrency(product.compare_at_price)}
+              {formatCurrency(product.compare_at_price, currency)}
             </p>
           )}
         </div>
@@ -249,6 +264,22 @@ function ProductsPageContent() {
             <option value="draft">Draft</option>
             <option value="archived">Archived</option>
           </select>
+
+          {canUpdate('products') && (
+            <label className="flex items-center gap-2 text-sm text-secondary-500">
+              Currency
+              <select
+                value={currency}
+                onChange={(e) => handleCurrencyChange(e.target.value)}
+                className="px-3 py-2.5 border border-secondary-300 rounded-lg text-sm text-secondary-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-surface"
+                title="Currency for all products in this catalog"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} — {c.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </Card>
 
@@ -289,27 +320,60 @@ function ProductsPageContent() {
         isLoading={isDeleting}
       />
 
-      <CreateProductModal isOpen={createOpen} onClose={() => setCreateOpen(false)} onCreated={fetchProducts} />
+      <CreateProductModal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={fetchProducts}
+        currency={currency}
+        askCurrency={totalItems === 0}
+      />
     </div>
   );
 }
 
+const CURRENCIES = [
+  { code: 'USD', label: 'US Dollar ($)' },
+  { code: 'GBP', label: 'British Pound (£)' },
+  { code: 'EUR', label: 'Euro (€)' },
+  { code: 'AUD', label: 'Australian Dollar (A$)' },
+  { code: 'CAD', label: 'Canadian Dollar (C$)' },
+  { code: 'INR', label: 'Indian Rupee (₹)' },
+  { code: 'AED', label: 'UAE Dirham (AED)' },
+];
+
 /** Add a serviceable item to the catalog. Mirrors the detail page's edit payload. */
-function CreateProductModal({ isOpen, onClose, onCreated }: { isOpen: boolean; onClose: () => void; onCreated: () => void }) {
+function CreateProductModal({
+  isOpen,
+  onClose,
+  onCreated,
+  currency,
+  askCurrency,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+  currency: string;
+  /** True for the first product: let the user pick the catalog currency once. */
+  askCurrency: boolean;
+}) {
   const empty = {
     name: '', sku: '', price: '', cost_price: '', inventory_quantity: '',
     low_stock_threshold: '', short_description: '', description: '',
   };
   const [form, setForm] = useState(empty);
+  const [chosenCurrency, setChosenCurrency] = useState(currency);
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // Reset the form each time the modal opens.
+  // Reset the form (and default the currency to the store's) each time it opens.
   useEffect(() => {
-    if (isOpen) setForm(empty);
+    if (isOpen) {
+      setForm(empty);
+      setChosenCurrency(currency);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, currency]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -333,6 +397,9 @@ function CreateProductModal({ isOpen, onClose, onCreated }: { isOpen: boolean; o
         low_stock_threshold: form.low_stock_threshold.trim() || '0',
         short_description: form.short_description.trim(),
         description: form.description.trim(),
+        // Set once (first product); the backend saves it at the store level and
+        // every later product reuses it.
+        currency: (askCurrency ? chosenCurrency : currency) || 'USD',
         is_active: true,
         is_featured: false,
       };
@@ -361,6 +428,22 @@ function CreateProductModal({ isOpen, onClose, onCreated }: { isOpen: boolean; o
               <Input label="Low stock at" value={form.low_stock_threshold} onChange={set('low_stock_threshold')} inputMode="numeric" />
             </div>
           </div>
+          {askCurrency ? (
+            <div>
+              <Select label="Currency" value={chosenCurrency} onChange={(e) => setChosenCurrency(e.target.value)}>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-secondary-500">
+                Set once for your catalog — every product will use this currency.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-secondary-500">
+              Prices are in <span className="font-medium text-secondary-700">{currency}</span>, set from your first product.
+            </p>
+          )}
           <Input label="Short description" value={form.short_description} onChange={set('short_description')} placeholder="One-line summary" />
           <Textarea label="Description" value={form.description} onChange={set('description')} rows={3} />
           <div className="flex justify-end gap-2 -mx-5 sm:-mx-6 px-5 sm:px-6 pt-4 mt-1 border-t border-secondary-200">

@@ -49,9 +49,15 @@ function OrderQueries.all(params)
     local valid_fields = { id = true, order_number = true, status = true, total_price = true, financial_status = true, fulfillment_status = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
-    local paginated = OrderModel:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage
-    })
+    -- Defensive tenant scope: this helper is not currently routed, but if it is
+    -- wired up it must not return every tenant's orders. Callers pass namespace_id.
+    local paginated
+    if params.namespace_id then
+        paginated = OrderModel:paginated("where namespace_id = ? order by " .. orderField .. " " .. orderDir,
+            tonumber(params.namespace_id), { per_page = perPage })
+    else
+        paginated = OrderModel:paginated("order by " .. orderField .. " " .. orderDir, { per_page = perPage })
+    end
 
     return {
         data = paginated:get_page(page),

@@ -17,6 +17,7 @@ import {
 import { Button, Input, Table, Badge, Pagination, Card, ConfirmDialog } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { EditRolesModal } from '@/components/namespace/EditRolesModal';
 import { namespaceService } from '@/services';
 import { formatDate, getInitials } from '@/lib/utils';
 import type { NamespaceMember, NamespaceRole, TableColumn, PaginatedResponse } from '@/types';
@@ -35,6 +36,7 @@ export default function NamespaceMembersPage() {
   const [memberToRemove, setMemberToRemove] = useState<NamespaceMember | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [memberToEdit, setMemberToEdit] = useState<NamespaceMember | null>(null);
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -191,7 +193,7 @@ export default function NamespaceMembersPage() {
           {!member.is_owner && (
             <>
               <button
-                onClick={() => {/* TODO: Edit member roles */}}
+                onClick={() => setMemberToEdit(member)}
                 className="p-1.5 text-secondary-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
                 title="Edit roles"
               >
@@ -295,6 +297,21 @@ export default function NamespaceMembersPage() {
           onClose={() => setInviteModalOpen(false)}
           onSuccess={() => {
             setInviteModalOpen(false);
+            fetchMembers();
+          }}
+        />
+      )}
+
+      {/* Edit Roles Modal */}
+      {memberToEdit && (
+        <EditRolesModal
+          memberUuid={memberToEdit.uuid}
+          memberName={memberToEdit.user?.full_name || memberToEdit.user?.email || 'this member'}
+          currentRoleIds={(memberToEdit.roles || []).map((r) => Number(r.id))}
+          roles={roles}
+          onClose={() => setMemberToEdit(null)}
+          onSuccess={() => {
+            setMemberToEdit(null);
             fetchMembers();
           }}
         />

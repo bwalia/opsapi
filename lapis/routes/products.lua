@@ -106,8 +106,29 @@ return function(app)
             response.json.permissions = get_product_permissions(self)
         end
 
+        -- Surface the tenant's store currency so the catalog UI can display prices
+        -- and knows whether the currency has been chosen yet (first product).
+        if self.namespace then
+            local StoreModel = require("models.StoreModel")
+            local store = StoreModel:find({ namespace_id = self.namespace.id })
+            response.json.currency = store and store.currency or nil
+        end
+
         return response
     end))
+
+    -- Set/change the catalog currency (store-level; every product reuses it).
+    -- Declared before /:id so the literal path is matched, not treated as an id.
+    app:put("/api/v2/products/currency", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("products", "update", function(self)
+            local params = RequestParser.parse_request(self)
+            local ok, currency = pcall(StoreproductQueries.setNamespaceCurrency, self.namespace.id, params.currency)
+            if not ok or not currency then
+                return error_response(400, "Failed to set currency", tostring(currency))
+            end
+            return { status = 200, json = { success = true, currency = currency } }
+        end)
+    ))
 
     -- GET single product (public)
     app:get("/api/v2/products/:id", NamespaceMiddleware.optionalNamespace(function(self)
@@ -194,6 +215,12 @@ return function(app)
                 return error_response(404, "Product not found")
             end
 
+            -- Tenant isolation: a product from another namespace must not be
+            -- editable here even if the caller has products.update in THEIR namespace.
+            if tonumber(product.namespace_id) ~= tonumber(self.namespace.id) then
+                return error_response(404, "Product not found")
+            end
+
             -- Check permission: namespace products.update OR store ownership
             local perms = get_product_permissions(self)
             local is_store_owner = user_owns_product_store(self, product)
@@ -234,6 +261,12 @@ return function(app)
             end
 
             if not product then
+                return error_response(404, "Product not found")
+            end
+
+            -- Tenant isolation: a product from another namespace must not be
+            -- deletable here even if the caller has products.delete in THEIR namespace.
+            if tonumber(product.namespace_id) ~= tonumber(self.namespace.id) then
                 return error_response(404, "Product not found")
             end
 

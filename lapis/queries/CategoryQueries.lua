@@ -41,19 +41,28 @@ function CategoryQueries.all(params)
     local valid_fields = { id = true, name = true, slug = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
-    local where_clause = ""
+    local conditions = {}
     local where_params = {}
+
+    -- Scope to the caller's namespace when in context (route sets namespace_id).
+    -- Without this, omitting store_id returned every tenant's categories.
+    if params.namespace_id then
+        table.insert(conditions, "namespace_id = ?")
+        table.insert(where_params, tonumber(params.namespace_id))
+    end
 
     if params.store_id and params.store_id ~= "" then
         local store = StoreQueries.showByUUID(params.store_id)
         if store then
-            where_clause = "WHERE store_id = ?"
+            table.insert(conditions, "store_id = ?")
             table.insert(where_params, store.id)
         else
             -- Return empty if store not found
             return { data = {}, total = 0 }
         end
     end
+
+    local where_clause = #conditions > 0 and ("WHERE " .. table.concat(conditions, " AND ")) or ""
 
     local paginated = CategoryModel:paginated(
         where_clause .. " order by " .. orderField .. " " .. orderDir,

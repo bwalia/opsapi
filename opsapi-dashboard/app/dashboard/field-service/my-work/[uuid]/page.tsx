@@ -57,51 +57,84 @@ function ActionTile({ icon, label, hint, onClick }: { icon: React.ReactNode; lab
   );
 }
 
+type FinishOutcome = 'done' | 'revisit' | 'no_access';
+
 function FinishSheet({ visit, onClose, onDone }: { visit: FsVisitDetail; onClose: () => void; onDone: () => void }) {
   const phase = visit.phase;
   // Only try to close the linked task when it's actually still open — a job with
   // no phase behaves as before.
   const phaseOpen = !!phase && phase.status !== 'completed' && phase.status !== 'skipped';
+  const [outcome, setOutcome] = useState<FinishOutcome>('done');
   const [summary, setSummary] = useState(visit.work_summary || '');
   const [labour, setLabour] = useState(() => hoursSince(visit.checked_in_at) || (visit.labour_hours != null ? String(visit.labour_hours) : ''));
   const [signoff, setSignoff] = useState(visit.customer_signoff_name || '');
+  const [followUp, setFollowUp] = useState(visit.follow_up_notes || '');
+  const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const needsHours = !visit.checked_in_at;
 
-  const complete = async () => {
-    if (needsHours && !labour.trim()) {
-      toast.error('Enter how many hours you were on site');
-      return;
-    }
+  const OUTCOMES: { key: FinishOutcome; label: string; hint: string }[] = [
+    { key: 'done', label: 'Finished', hint: 'Work complete' },
+    { key: 'revisit', label: 'Coming back', hint: 'More work needed' },
+    { key: 'no_access', label: 'No access', hint: 'Couldn’t get in' },
+  ];
+
+  const submit = async () => {
     setSaving(true);
     try {
+      // Couldn't get on site — record it and leave the job open for a revisit.
+      if (outcome === 'no_access') {
+        if (!reason.trim()) {
+          toast.error('Add a short reason (e.g. nobody on site)');
+          setSaving(false);
+          return;
+        }
+        await fieldService.markNoAccess(visit.uuid, reason.trim());
+        toast.success('Reported — no access. The job stays open for a return visit.');
+        onDone();
+        return;
+      }
+      if (needsHours && !labour.trim()) {
+        toast.error('Enter how many hours you were on site');
+        setSaving(false);
+        return;
+      }
       const res = await fieldService.checkOut(visit.uuid, {
         work_summary: summary.trim() || undefined,
         labour_hours: labour.trim() === '' ? undefined : Number(labour),
-        customer_signoff_name: signoff.trim() || undefined,
-        // Close the task on finish so the job isn't left open for the office to chase.
-        complete_phase: phaseOpen || undefined,
+        customer_signoff_name: outcome === 'done' ? (signoff.trim() || undefined) : undefined,
+        // Only close the task when the work is actually finished. A revisit leaves
+        // the phase (and job) open and flags a follow-up so the office can rebook.
+        complete_phase: outcome === 'done' ? (phaseOpen || undefined) : false,
+        follow_up_required: outcome === 'revisit' ? true : undefined,
+        follow_up_notes: outcome === 'revisit' ? (followUp.trim() || undefined) : undefined,
       });
-      // The visit always saves; the phase only closes if its checklist/sign-off are
-      // done. If it couldn't, nudge the engineer rather than fail silently.
-      const blocked = phaseOpen && res.warnings.find((w) => /phase not completed/i.test(w));
-      if (blocked) {
-        toast(
-          /sign/i.test(blocked)
-            ? 'Saved — add the customer’s sign-off name to close this task.'
-            : 'Saved — tick off the remaining checklist items to close this task.',
-          { icon: '⚠️', duration: 6000 }
-        );
+      if (outcome === 'revisit') {
+        toast.success('Saved — marked for a return visit');
       } else {
-        toast.success('Job complete');
+        // The phase only closes if its checklist/sign-off are done. Nudge if not.
+        const blocked = phaseOpen && res.warnings.find((w) => /phase not completed/i.test(w));
+        if (blocked) {
+          toast(
+            /sign/i.test(blocked)
+              ? 'Saved — add the customer’s sign-off name to close this task.'
+              : 'Saved — tick off the remaining checklist items to close this task.',
+            { icon: '⚠️', duration: 6000 }
+          );
+        } else {
+          toast.success('Job complete');
+        }
       }
       onDone();
     } catch (err) {
-      toast.error(apiError(err, 'Could not finish the job'));
+      toast.error(apiError(err, 'Could not save'));
     } finally {
       setSaving(false);
     }
   };
+
+  const title = outcome === 'no_access' ? 'No access' : outcome === 'revisit' ? 'Pause — return visit' : 'Finish job';
+  const submitLabel = outcome === 'no_access' ? 'Report no access' : outcome === 'revisit' ? 'Save & mark revisit' : 'Complete job';
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
@@ -111,13 +144,62 @@ function FinishSheet({ visit, onClose, onDone }: { visit: FsVisitDetail; onClose
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sm:hidden mx-auto h-1.5 w-10 rounded-full bg-secondary-200" />
-        <h2 className="text-xl font-bold text-secondary-900">Finish job</h2>
-        <Textarea label="What did you do?" rows={3} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="e.g. Recharged system, replaced capacitor, tested — cooling OK" />
-        <Input label={needsHours ? 'Hours on site *' : 'Hours on site'} inputMode="decimal" value={labour} onChange={(e) => setLabour(e.target.value)} placeholder="e.g. 1.5" />
-        <Input label="Customer name (sign-off)" value={signoff} onChange={(e) => setSignoff(e.target.value)} placeholder="Who signed off the work" />
+        <h2 className="text-xl font-bold text-secondary-900">{title}</h2>
+
+        {/* How did the visit end? */}
+        <div className="grid grid-cols-3 gap-2">
+          {OUTCOMES.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setOutcome(o.key)}
+              className={`rounded-xl border p-2 text-center transition ${
+                outcome === o.key
+                  ? 'border-primary-500 bg-primary-50 text-primary-700'
+                  : 'border-secondary-200 text-secondary-600 hover:border-secondary-300'
+              }`}
+            >
+              <span className="block text-sm font-semibold">{o.label}</span>
+              <span className="block text-[11px] text-secondary-500">{o.hint}</span>
+            </button>
+          ))}
+        </div>
+
+        {outcome === 'no_access' ? (
+          <Textarea
+            label="Why couldn’t you access the site? *"
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Nobody on site, no key left, gate locked"
+          />
+        ) : (
+          <>
+            <Textarea
+              label="What did you do?"
+              rows={3}
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              placeholder="e.g. Recharged system, replaced capacitor, tested — cooling OK"
+            />
+            <Input label={needsHours ? 'Hours on site *' : 'Hours on site'} inputMode="decimal" value={labour} onChange={(e) => setLabour(e.target.value)} placeholder="e.g. 1.5" />
+            {outcome === 'revisit' ? (
+              <Textarea
+                label="What’s left / when you’ll return"
+                rows={2}
+                value={followUp}
+                onChange={(e) => setFollowUp(e.target.value)}
+                placeholder="e.g. Waiting on a compressor — back Tue AM"
+              />
+            ) : (
+              <Input label="Customer name (sign-off)" value={signoff} onChange={(e) => setSignoff(e.target.value)} placeholder="Who signed off the work" />
+            )}
+          </>
+        )}
+
         <div className="flex gap-3 pt-1">
-          <Button variant="ghost" onClick={onClose} disabled={saving} className="flex-1">Not yet</Button>
-          <Button onClick={complete} isLoading={saving} className="flex-1" leftIcon={<CheckCircle2 className="w-5 h-5" />}>Complete job</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving} className="flex-1">Cancel</Button>
+          <Button onClick={submit} isLoading={saving} className="flex-1" leftIcon={<CheckCircle2 className="w-5 h-5" />}>{submitLabel}</Button>
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   ReactNode,
 } from 'react';
 import { useAuthStore } from '@/store/auth.store';
@@ -134,6 +135,43 @@ export function NamespaceProvider({ children }: NamespaceProviderProps) {
     }
   }, [user, _hasHydrated, currentNamespace, setCurrentNamespace, setUserSettings]);
 
+  // Reconcile a stale/leaked selection against the user's real memberships.
+  // The effect above only fills an EMPTY selection, so a namespace persisted from
+  // a previous session (even a different user's) survives login and wins over the
+  // one the backend chose. If the selected namespace isn't one this user actually
+  // belongs to, drop it and adopt the login default (or first available). A
+  // deliberately switched namespace is always in the member list, so this never
+  // fights a real switch; a platform admin's list is comprehensive for the same
+  // reason. Reconciled once per stale uuid to avoid loops on a failed switch.
+  const reconciledStaleRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isAuthenticated || !_hasHydrated) return;
+    if (namespacesLoading || isSwitching) return;
+    if (!currentNamespace || namespaces.length === 0) return;
+
+    if (namespaces.some((n) => n.uuid === currentNamespace.uuid)) {
+      reconciledStaleRef.current = null;
+      return;
+    }
+    if (reconciledStaleRef.current === currentNamespace.uuid) return;
+    reconciledStaleRef.current = currentNamespace.uuid;
+
+    const jwtUuid = (user as unknown as { namespace?: { uuid?: string } } | null)?.namespace?.uuid;
+    const target = (jwtUuid && namespaces.find((n) => n.uuid === jwtUuid)) || namespaces[0];
+    if (target?.uuid) {
+      switchNamespaceAction(target.uuid);
+    }
+  }, [
+    isAuthenticated,
+    _hasHydrated,
+    namespacesLoading,
+    isSwitching,
+    currentNamespace,
+    namespaces,
+    user,
+    switchNamespaceAction,
+  ]);
+
   // Permission check helpers
   const hasPermission = useCallback(
     (module: NamespaceModule, action: PermissionAction): boolean => {
@@ -144,13 +182,13 @@ export function NamespaceProvider({ children }: NamespaceProviderProps) {
 
   const canAccess = useCallback(
     (module: NamespaceModule): boolean => {
-      // Can access if has any permission on the module
-      if (isNamespaceOwner) return true;
+      // Role-driven: an owner's access comes from their role permissions
+      // (seeded by the backend), not from ownership itself.
       if (!namespacePermissions) return false;
       const modulePerms = namespacePermissions[module];
       return Array.isArray(modulePerms) && modulePerms.length > 0;
     },
-    [namespacePermissions, isNamespaceOwner]
+    [namespacePermissions]
   );
 
   const canCreate = useCallback(

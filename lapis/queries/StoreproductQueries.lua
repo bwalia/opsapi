@@ -5,6 +5,32 @@ local Global = require "helper.global"
 
 local StoreproductQueries = {}
 
+-- Ensure the namespace has a store to hang products off. A fresh field-service
+-- tenant has none, and the catalog has no store picker, so we provision a default
+-- store (owned by the namespace owner) on first product create instead of forcing
+-- a non-technical user to create an e-commerce "store" by hand. Namespace-scoped.
+local function ensure_namespace_store(namespace_id)
+    local existing = StoreModel:find({ namespace_id = namespace_id })
+    if existing then return existing end
+
+    local owner = db.select(
+        "user_id FROM namespace_members WHERE namespace_id = ? AND is_owner = true LIMIT 1", namespace_id)
+    local ns = db.select("name, slug FROM namespaces WHERE id = ?", namespace_id)
+    if not owner or #owner == 0 or not ns or #ns == 0 then
+        return nil
+    end
+
+    local StoreQueries = require "queries.StoreQueries"
+    local ok, store = pcall(StoreQueries.create, {
+        name = (ns[1].name or "Default") .. " Catalog",
+        slug = (ns[1].slug or ("ns-" .. tostring(namespace_id))) .. "-catalog",
+        user_id = owner[1].user_id,
+        namespace_id = namespace_id,
+        status = "active",
+    })
+    return ok and store or nil
+end
+
 function StoreproductQueries.create(params)
     -- Validate required fields
     if not params.name or params.name == "" then
@@ -76,11 +102,25 @@ function StoreproductQueries.create(params)
         store = StoreModel:find({ uuid = params.store_id })
     elseif params.namespace_id then
         store = StoreModel:find({ namespace_id = params.namespace_id })
+        -- Fresh tenant with no store yet: provision a default one so adding a
+        -- serviceable item just works (no manual "create a store" step).
+        if not store then
+            store = ensure_namespace_store(params.namespace_id)
+        end
     end
     if not store then
-        error("No store found for this namespace — create a store first")
+        error("Could not resolve or create a store for this namespace")
     end
     params.store_id = store.id
+
+    -- Currency lives at the store level (products inherit it). The first product
+    -- sets it for the whole catalog; the rest reuse it. `currency` is not a
+    -- storeproducts column, so capture and strip it before the product insert.
+    local currency = params.currency
+    params.currency = nil
+    if currency and currency ~= "" and currency ~= "null" and store.currency ~= currency then
+        pcall(function() store:update({ currency = currency }) end)
+    end
 
     -- Validate category if provided
     if params.category_id and params.category_id ~= "" then
@@ -96,6 +136,21 @@ function StoreproductQueries.create(params)
     end
 
     return StoreproductModel:create(params, { returning = "*" })
+end
+
+-- Set (or change) the catalog currency for a namespace. Currency lives on the
+-- store, so we provision one if the tenant has none yet. Used by the products
+-- page's "change currency" control and the first-product currency picker.
+function StoreproductQueries.setNamespaceCurrency(namespace_id, currency)
+    if not currency or currency == "" then
+        return nil, "Currency is required"
+    end
+    local store = ensure_namespace_store(namespace_id)
+    if not store then
+        return nil, "Could not resolve or create a store for this namespace"
+    end
+    store:update({ currency = currency })
+    return currency
 end
 
 function StoreproductQueries.updateInventory(product_uuid, quantity_change)
@@ -150,9 +205,15 @@ function StoreproductQueries.all(params)
     local valid_fields = { id = true, name = true, sku = true, price = true, quantity = true, status = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
-    local paginated = StoreproductModel:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage
-    })
+    -- Scope to the caller's namespace when in context (route sets namespace_id).
+    -- Without this the legacy /api/v2/storeproducts list leaked every tenant's products.
+    local paginated
+    if params.namespace_id then
+        paginated = StoreproductModel:paginated("where namespace_id = ? order by " .. orderField .. " " .. orderDir,
+            tonumber(params.namespace_id), { per_page = perPage })
+    else
+        paginated = StoreproductModel:paginated("order by " .. orderField .. " " .. orderDir, { per_page = perPage })
+    end
 
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
@@ -287,6 +348,16 @@ function StoreproductQueries.searchProducts(params)
 
     local where_conditions = { "is_active = true" }
     local where_params = {}
+
+    -- Scope to the caller's namespace when one is in context (authenticated
+    -- dashboard use). Without this the list leaks every tenant's products — e.g.
+    -- a field-service picker in an empty workspace offered another tenant's
+    -- product, which the (correctly namespace-scoped) create then rejected.
+    -- Public/marketplace browsing passes no namespace_id, so it still sees all.
+    if params.namespace_id then
+        table.insert(where_conditions, "namespace_id = ?")
+        table.insert(where_params, params.namespace_id)
+    end
 
     if search and search ~= "" then
         table.insert(where_conditions, "(name ILIKE ? OR description ILIKE ? OR tags ILIKE ?)")
