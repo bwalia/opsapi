@@ -362,17 +362,22 @@ return function(app)
             last_name = self.current_user.last_name or ""
         }
 
+        -- Access is role-driven, so the creator's permissions must come from
+        -- their (owner) role, not an empty map that used to rely on owner-bypass.
+        local namespace_permissions = NamespaceMemberQueries.getPermissions(result.membership.id)
+
         local token = JWTHelper.generateNamespaceToken(user_obj, result.namespace, {
             is_owner = true
         }, {
             user_roles = platform_roles,
-            namespace_permissions = {}
+            namespace_permissions = namespace_permissions
         })
 
         return success_response({
             message = "Namespace created successfully",
             namespace = result.namespace,
             membership = result.membership,
+            permissions = namespace_permissions,
             token = token
         }, 201)
     end)))

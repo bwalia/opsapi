@@ -363,7 +363,20 @@ end
 -- @param role_ids table List of role IDs
 -- @return boolean Success status
 function NamespaceMemberQueries.setRoles(member_id, role_ids)
-    role_ids = role_ids or {}
+    -- Normalise: the form parser yields a scalar for a single value and a table
+    -- for repeated keys (role_ids=1&role_ids=2), and values arrive as strings.
+    -- Accept both shapes and coerce to a clean numeric id list.
+    if type(role_ids) ~= "table" then
+        role_ids = role_ids ~= nil and { role_ids } or {}
+    end
+    local ids = {}
+    for _, rid in ipairs(role_ids) do
+        local n = tonumber(rid)
+        if n then
+            table.insert(ids, n)
+        end
+    end
+    role_ids = ids
 
     db.query("BEGIN")
     local ok, err = pcall(function()
@@ -436,6 +449,21 @@ function NamespaceMemberQueries.getPermissions(member_id)
         end
     end
 
+    -- Access is role-driven: ownership no longer bypasses permission checks on
+    -- its own (menus/routes/client all read this map). But an owner must never
+    -- be stranded — if they hold NO effective permissions (e.g. every role was
+    -- removed), fall back to full access. An owner WITH a role (even a limited
+    -- one like service_manager) is governed by that role.
+    if next(result) == nil then
+        local member = NamespaceMembers:find({ id = tonumber(member_id) })
+            or NamespaceMembers:find({ uuid = tostring(member_id) })
+        local is_owner = member and (member.is_owner == true or member.is_owner == "t" or member.is_owner == 1)
+        if is_owner then
+            local NamespaceRoleQueries = require("queries.NamespaceRoleQueries")
+            return NamespaceRoleQueries.getOwnerPermissions()
+        end
+    end
+
     return result
 end
 
@@ -450,13 +478,19 @@ function NamespaceMemberQueries.hasPermission(member_id, module, action)
         return false
     end
 
-    -- Owners have all permissions
-    if member.is_owner then
-        return true
-    end
-
+    -- Access is role-driven; getPermissions() already applies the owner
+    -- no-lock-out fallback, so ownership is not special-cased here.
     local permissions = NamespaceMemberQueries.getPermissions(member_id)
-    return permissions[module] and permissions[module][action]
+    local module_perms = permissions[module]
+    if not module_perms then
+        return false
+    end
+    for _, perm in ipairs(module_perms) do
+        if perm == action or perm == "manage" then
+            return true
+        end
+    end
+    return false
 end
 
 --- Transfer ownership

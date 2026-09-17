@@ -52,6 +52,10 @@ export interface User {
   created_at: string;
   updated_at: string;
   roles?: Role[];
+  // Present when the users list is namespace-scoped: the caller's membership in
+  // the current namespace, so their namespace role can be edited from the list.
+  member_uuid?: string;
+  is_owner?: boolean;
   // For creation only (not returned from API)
   password?: string;
   role?: string;
@@ -776,6 +780,7 @@ export interface CreateNamespaceResponse {
   message: string;
   namespace: Namespace;
   membership: NamespaceMember;
+  permissions?: NamespacePermissions;
   token: string;
 }
 

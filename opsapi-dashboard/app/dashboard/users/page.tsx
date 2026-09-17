@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Search, Trash2, Edit, Mail, Users } from "lucide-react";
+import { Plus, Search, Trash2, Edit, Mail, Users, Shield } from "lucide-react";
 import {
   Button,
   Input,
@@ -13,11 +13,12 @@ import {
 } from "@/components/ui";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { AddUserModal } from "@/components/users";
+import { EditRolesModal } from "@/components/namespace/EditRolesModal";
 import { RoleBadge, ProtectedPage } from "@/components/permissions";
 import { usePermissions } from "@/contexts/PermissionsContext";
-import { usersService } from "@/services";
+import { usersService, namespaceService } from "@/services";
 import { formatDate, getInitials, getFullName } from "@/lib/utils";
-import type { User, TableColumn, PaginatedResponse } from "@/types";
+import type { User, NamespaceRole, TableColumn, PaginatedResponse } from "@/types";
 import toast from "react-hot-toast";
 
 function UsersPageContent() {
@@ -34,6 +35,8 @@ function UsersPageContent() {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [addUserModalOpen, setAddUserModalOpen] = useState(false);
+  const [roles, setRoles] = useState<NamespaceRole[]>([]);
+  const [userToEditRoles, setUserToEditRoles] = useState<User | null>(null);
   const fetchIdRef = useRef(0);
 
   const perPage = 10;
@@ -70,6 +73,15 @@ function UsersPageContent() {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  // Namespace roles for the "change role" action (only needed if the admin can edit).
+  useEffect(() => {
+    if (!canUpdate("users")) return;
+    namespaceService
+      .getRoles()
+      .then(setRoles)
+      .catch(() => setRoles([]));
+  }, [canUpdate]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -166,6 +178,18 @@ function UsersPageContent() {
       width: "w-20",
       render: (user) => (
         <div className="flex items-center gap-2">
+          {canUpdate("users") && user.member_uuid && !user.is_owner && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setUserToEditRoles(user);
+              }}
+              className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+              title="Change role"
+            >
+              <Shield className="w-4 h-4" />
+            </button>
+          )}
           {canUpdate("users") && (
             <button
               onClick={(e) => {
@@ -173,6 +197,7 @@ function UsersPageContent() {
                 window.location.href = `/dashboard/users/${user.uuid}`;
               }}
               className="p-1.5 text-secondary-500 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+              title="Edit profile"
             >
               <Edit className="w-4 h-4" />
             </button>
@@ -279,6 +304,24 @@ function UsersPageContent() {
         onClose={() => setAddUserModalOpen(false)}
         onSuccess={fetchUsers}
       />
+
+      {/* Change Role Modal */}
+      {userToEditRoles?.member_uuid && (
+        <EditRolesModal
+          memberUuid={userToEditRoles.member_uuid}
+          memberName={
+            getFullName(userToEditRoles.first_name, userToEditRoles.last_name) ||
+            userToEditRoles.email
+          }
+          currentRoleIds={(userToEditRoles.roles || []).map((r) => Number(r.id))}
+          roles={roles}
+          onClose={() => setUserToEditRoles(null)}
+          onSuccess={() => {
+            setUserToEditRoles(null);
+            fetchUsers();
+          }}
+        />
+      )}
     </div>
   );
 }

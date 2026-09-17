@@ -6,6 +6,7 @@ import { User as UserIcon, Mail, Phone, MapPin, AtSign, ArrowLeft, Save, Loader2
 import { Card, Input, Button, Badge } from '@/components/ui';
 import { cn, getInitials, getFullName } from '@/lib/utils';
 import { usersService } from '@/services';
+import { UserWorkspaceRolesCard } from './UserWorkspaceRolesCard';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import type { User } from '@/types';
@@ -304,6 +305,12 @@ const UserEditForm: React.FC<UserEditFormProps> = memo(function UserEditForm({
 
           {/* Sidebar - 1 column */}
           <div className="space-y-6">
+            {/* Workspace roles (namespace-scoped role, e.g. Service Manager) */}
+            <UserWorkspaceRolesCard
+              userUuid={user.uuid}
+              userName={getFullName(user.first_name, user.last_name) || user.email}
+            />
+
             {/* Account Status */}
             <Card className="p-6">
               <h3 className="text-sm font-semibold text-secondary-500 uppercase tracking-wider mb-4">

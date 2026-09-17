@@ -214,11 +214,15 @@ export const useNamespaceStore = create<NamespaceStore>()(
         try {
           const response = await namespaceService.createNamespace(data);
 
-          // Set as current namespace (user is owner)
+          // Set as current namespace. Access is role-driven, so seed the
+          // creator's permissions from the response (their owner role) instead
+          // of null — otherwise the new owner would see nothing until re-login.
           set({
             currentNamespace: response.namespace,
             isNamespaceOwner: true,
-            namespacePermissions: null, // Owner has all permissions
+            namespacePermissions: response.permissions
+              ? namespaceService.parsePermissions(response.permissions)
+              : null,
             isSwitching: false,
           });
 
@@ -247,12 +251,11 @@ export const useNamespaceStore = create<NamespaceStore>()(
       },
 
       hasPermission: (module, action) => {
-        const { isNamespaceOwner, namespacePermissions } = get();
+        const { namespacePermissions } = get();
 
-        // Owners have all permissions
-        if (isNamespaceOwner) return true;
-
-        // No permissions loaded
+        // Access is role-driven: ownership does not bypass. Owners receive their
+        // (owner) role's permissions — or a full-access fallback when they have
+        // no role — from the backend, so the map below is authoritative.
         if (!namespacePermissions) return false;
 
         return namespaceService.hasPermission(namespacePermissions, module, action);

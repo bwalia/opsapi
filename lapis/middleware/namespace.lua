@@ -280,12 +280,10 @@ function NamespaceMiddleware.requirePermission(module, action, handler)
             return handler(self)
         end
 
-        -- Namespace owners have all permissions within their namespace
-        if self.is_namespace_owner then
-            return handler(self)
-        end
-
-        -- Check specific permission
+        -- Access is role-driven — ownership does NOT bypass here. An owner's
+        -- access comes from their assigned role(s); the owner role grants
+        -- everything by default, and getPermissions() gives an owner with no
+        -- roles a full-access fallback, so no owner is ever locked out.
         local permissions = self.namespace_permissions or {}
         local module_perms = permissions[module]
 
@@ -366,11 +364,8 @@ function NamespaceMiddleware.hasPermission(self, module, action)
         return true
     end
 
-    -- Namespace owners have all permissions within their namespace
-    if self.is_namespace_owner then
-        return true
-    end
-
+    -- Role-driven: ownership does not bypass (see requirePermission). Owner
+    -- access flows through self.namespace_permissions like everyone else.
     local permissions = self.namespace_permissions or {}
     local module_perms = permissions[module]
 

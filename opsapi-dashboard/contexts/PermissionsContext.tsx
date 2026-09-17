@@ -206,8 +206,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       // Platform admin has all permissions
       if (isAdmin) return true;
 
-      // Namespace owner has all permissions within their namespace
-      if (isNamespaceOwner && currentNamespace) return true;
+      // Access is role-driven: ownership no longer grants blanket access here.
+      // An owner's permissions come from their role (the backend gives an owner
+      // the owner role by default, and a full-access fallback if they somehow
+      // have none), so they flow through storeNamespacePermissions like anyone else.
 
       // Check namespace permissions first (from store/JWT)
       if (storeNamespacePermissions) {
@@ -233,7 +235,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const canAccess = useCallback(
     (module: DashboardModule | NamespaceModule): boolean => {
       if (isAdmin) return true;
-      if (isNamespaceOwner && currentNamespace) return true;
+      // Role-driven: ownership does not bypass (see hasPermission).
 
       // When in namespace context, use namespace permissions exclusively
       if (currentNamespace) {

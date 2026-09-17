@@ -33,7 +33,9 @@ export const usersService = {
     return response.data?.data || response.data;
   },
 
-  async createUser(data: Partial<User>): Promise<User> {
+  async createUser(
+    data: Partial<User> & { namespace_role?: string; active?: boolean }
+  ): Promise<User> {
     const response = await apiClient.post(
       '/api/v2/users',
       toFormData(data as Record<string, unknown>)

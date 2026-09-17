@@ -275,10 +275,9 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
             if is_platform_admin then
                 should_include = true
             end
-        -- Namespace owners see items for modules in their project
-        elseif is_namespace_owner then
-            should_include = true
-        -- Check permission based on module
+        -- Role-driven: an owner's menu follows their role's permissions like any
+        -- member (the owner role grants everything by default; a limited role
+        -- limits the menu). Ownership no longer forces every item in.
         elseif item.module then
             -- Check if user has the required permission in this namespace
             if namespace_permissions then

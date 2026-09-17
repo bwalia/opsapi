@@ -132,11 +132,73 @@ end
 function UserQueries.all(params)
     local page = params.page or 1
     local perPage = params.perPage or 10
+    local namespace_id = params.namespace_id
 
     -- Validate ORDER BY to prevent SQL injection
     local valid_fields = { id = true, first_name = true, last_name = true, email = true, username = true, active = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
+    -- The /api/v2/users screen is per-tenant, so when a namespace is in scope we
+    -- list that namespace's ACTIVE members with their NAMESPACE role — not the
+    -- global platform role, and not users belonging to other tenants (which the
+    -- old Users:paginated path leaked, and which could only ever show the platform
+    -- role because the passed namespace_id was ignored).
+    if namespace_id then
+        local db = require("lapis.db")
+        local offset = (page - 1) * perPage
+        local rows = db.query([[
+            SELECT
+                u.id, u.uuid, u.first_name, u.last_name, u.username, u.email, u.active,
+                u.created_at, u.updated_at,
+                nm.uuid AS member_uuid, nm.is_owner, nm.status AS member_status, nm.joined_at,
+                (
+                    SELECT json_agg(json_build_object(
+                        'id', nr.id,
+                        'uuid', nr.uuid,
+                        'role_name', nr.role_name,
+                        'name', nr.display_name,
+                        'display_name', nr.display_name
+                    ))
+                    FROM namespace_user_roles nur
+                    JOIN namespace_roles nr ON nur.namespace_role_id = nr.id
+                    WHERE nur.namespace_member_id = nm.id
+                ) AS roles
+            FROM namespace_members nm
+            JOIN users u ON nm.user_id = u.id
+            WHERE nm.namespace_id = ?
+              AND nm.status = 'active'
+            ORDER BY u.]] .. orderField .. " " .. orderDir .. [[
+            LIMIT ? OFFSET ?
+        ]], namespace_id, perPage, offset)
+
+        local total_row = db.query([[
+            SELECT COUNT(*) AS c
+            FROM namespace_members nm
+            WHERE nm.namespace_id = ? AND nm.status = 'active'
+        ]], namespace_id)
+        local total = total_row and total_row[1] and tonumber(total_row[1].c) or 0
+
+        for _, user in ipairs(rows or {}) do
+            local is_owner = user.is_owner == true or user.is_owner == "t" or user.is_owner == 1
+            if type(user.roles) == "string" then
+                user.roles = Json.decode(user.roles)
+            end
+            if type(user.roles) ~= "table" then
+                user.roles = nil
+            end
+            -- An owner with no explicit role row still reads as "Owner".
+            if (not user.roles) or #user.roles == 0 then
+                user.roles = is_owner and { { role_name = "owner", name = "Owner", display_name = "Owner" } } or {}
+            end
+            user.is_owner = is_owner
+            user.internal_id = user.id
+            user.id = user.uuid
+        end
+
+        return { data = rows or {}, total = total }
+    end
+
+    -- Fallback (no tenant context): platform-wide list with platform roles.
     local paginated = Users:paginated("order by " .. orderField .. " " .. orderDir, {
         per_page = perPage,
         fields = "id, uuid, first_name, last_name, username, email, active, created_at, updated_at"
@@ -201,6 +263,7 @@ function UserQueries.showDetailed(id)
     local memberships = db.query([[
         SELECT
             nm.id as membership_id,
+            nm.uuid as membership_uuid,
             nm.status as membership_status,
             nm.is_owner,
             nm.created_at as joined_at,

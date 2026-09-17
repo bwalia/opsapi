@@ -4,6 +4,7 @@ import React, { useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Users, ShoppingCart, Package, Store, DollarSign } from 'lucide-react';
 import { usePermissions } from '@/contexts/PermissionsContext';
+import { useMenu } from '@/hooks';
 import { StatsCard, RecentOrdersTable, OrdersChart, HealthStatus } from '@/components/dashboard';
 import { PendingInvitationsBanner } from '@/components/namespace/invitations';
 import { Stagger, RevealItem } from '@/components/motion/Reveal';
@@ -33,12 +34,33 @@ const fetchDashboardData = async () => {
 export default function DashboardPage() {
   const router = useRouter();
   const { canRead, canUpdate, isLoading: permsLoading } = usePermissions();
+  const { allMenu, isHydrated: menuHydrated, isLoading: menuLoading } = useMenu();
+
   // Engineers can see visits but can't dispatch them — send them straight to
   // the simplified "My Work" home instead of this manager dashboard.
   const isEngineer = canRead('fs_visits') && !canUpdate('fs_visits');
+
+  // The default dashboard body is e-commerce (orders/stores/revenue). For a
+  // field-service tenant that's meaningless, so land managers/owners on the
+  // Service Jobs board instead. The backend menu is project-filtered, so the
+  // presence of a field-service item is the tenant's own signal — no client-side
+  // project guessing.
+  // ponytail: redirects any tenant whose menu includes field service; add a
+  // per-namespace "home path" setting if a mixed tenant ever needs the e-commerce home.
+  const menuReady = menuHydrated && !menuLoading;
+  const isFieldService = useMemo(
+    () => allMenu.some((m) => typeof m.path === 'string' && m.path.startsWith('/dashboard/field-service')),
+    [allMenu]
+  );
+
   useEffect(() => {
-    if (!permsLoading && isEngineer) router.replace('/dashboard/field-service/my-work');
-  }, [permsLoading, isEngineer, router]);
+    if (permsLoading || !menuReady) return;
+    if (isEngineer) {
+      router.replace('/dashboard/field-service/my-work');
+    } else if (isFieldService) {
+      router.replace('/dashboard/field-service');
+    }
+  }, [permsLoading, menuReady, isEngineer, isFieldService, router]);
 
   // Single data fetch for all dashboard data using custom hook
   const { data, isLoading, refetch } = useDataFetch<{
@@ -104,8 +126,9 @@ export default function DashboardPage() {
   const recentOrders = useMemo(() => stats?.recentOrders || [], [stats?.recentOrders]);
 
   // Memoize refresh handler to prevent inline function recreation
-  // Redirecting engineers away — don't flash the manager dashboard.
-  const redirecting = permsLoading || isEngineer;
+  // Redirecting field-service users away — don't flash the e-commerce dashboard
+  // while we wait for the menu to tell us the tenant's shape.
+  const redirecting = permsLoading || !menuReady || isEngineer || isFieldService;
 
   const handleRefresh = useCallback(() => {
     refetch();
