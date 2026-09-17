@@ -347,6 +347,10 @@ return {
                 visit_id BIGINT REFERENCES fs_visits(id) ON DELETE SET NULL,
                 service_level_id BIGINT REFERENCES fs_asset_service_levels(id) ON DELETE SET NULL,
                 tested_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                -- The service level's due date at the moment this test was
+                -- recorded. The level itself moves on afterwards, so without this
+                -- "was it done in the month it was due?" cannot be answered later.
+                due_date DATE,
                 technician_uuid TEXT,
                 technician_name TEXT,
                 -- pass | fail | advisory — "fail" is what the failure-history
@@ -650,8 +654,8 @@ return {
         -- rows land somewhere sensible rather than all sitting in 'pending'.
         db.query([[
             UPDATE fs_jobs SET stage = CASE
-                WHEN status IN ('completed', 'invoiced', 'closed') THEN 'complete'
-                WHEN status IN ('cancelled', 'archived') THEN 'archived'
+                WHEN status = 'completed' THEN 'complete'
+                WHEN status = 'cancelled' THEN 'archived'
                 WHEN status IN ('scheduled', 'in_progress', 'on_hold') THEN 'progress'
                 ELSE 'pending' END
             WHERE stage = 'pending'
@@ -674,6 +678,7 @@ return {
             "fs_asset_service_levels", "fs_asset_test_history", "fs_contracts",
             "fs_jobs", "fs_job_cost_centres", "fs_quotes", "fs_visits",
             "fs_service_requests", "fs_parts", "invoices", "employees",
+            "employee_licences",
         }
         for _, t in ipairs(tables) do
             -- Guarded per table: a build with FIELD_SERVICE off part-way through
