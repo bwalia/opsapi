@@ -19,6 +19,8 @@ import toast from 'react-hot-toast';
 interface EditRolesModalProps {
   memberUuid: string;
   memberName: string;
+  /** True when this member owns the workspace — restricting them is reversible only by a platform admin. */
+  isOwner?: boolean;
   currentRoleIds: number[];
   roles: NamespaceRole[];
   onClose: () => void;
@@ -28,6 +30,7 @@ interface EditRolesModalProps {
 export function EditRolesModal({
   memberUuid,
   memberName,
+  isOwner = false,
   currentRoleIds,
   roles,
   onClose,
@@ -65,6 +68,13 @@ export function EditRolesModal({
       <div className="relative bg-surface rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
         <h2 className="text-xl font-semibold text-secondary-900 mb-1">Edit roles</h2>
         <p className="text-sm text-secondary-500 mb-4">Choose what {memberName} can do in this workspace.</p>
+
+        {isOwner && (
+          <p className="text-xs text-warning-700 bg-warning-50 border border-warning-200 rounded-lg px-3 py-2 mb-4">
+            This is the workspace owner. Restricting them to a limited role (e.g. Service Manager)
+            takes effect immediately — only a platform admin can restore full access afterwards.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="max-h-72 overflow-y-auto space-y-2 -mx-1 px-1">
