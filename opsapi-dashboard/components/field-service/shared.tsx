@@ -24,9 +24,13 @@ const NAV = [
   { href: '/dashboard/field-service/requests', label: 'Service Requests', match: (p: string) => p.startsWith('/dashboard/field-service/requests') },
   { href: '/dashboard/field-service', label: 'Jobs', match: (p: string) => p === '/dashboard/field-service' || p.startsWith('/dashboard/field-service/jobs') },
   { href: '/dashboard/field-service/visits', label: 'Site Visits', match: (p: string) => p.startsWith('/dashboard/field-service/visits') },
+  { href: '/dashboard/field-service/assets', label: 'Assets', match: (p: string) => p.startsWith('/dashboard/field-service/assets') },
+  { href: '/dashboard/field-service/contracts', label: 'Contracts', match: (p: string) => p.startsWith('/dashboard/field-service/contracts') },
   { href: '/dashboard/field-service/parts', label: 'Parts', match: (p: string) => p.startsWith('/dashboard/field-service/parts') },
   { href: '/dashboard/field-service/employees', label: 'Employees', match: (p: string) => p.startsWith('/dashboard/field-service/employees') },
   { href: '/dashboard/field-service/job-types', label: 'Job Types', match: (p: string) => p.startsWith('/dashboard/field-service/job-types') },
+  { href: '/dashboard/field-service/reports', label: 'Reports', match: (p: string) => p.startsWith('/dashboard/field-service/reports') },
+  { href: '/dashboard/field-service/simpro', label: 'Simpro Sync', match: (p: string) => p.startsWith('/dashboard/field-service/simpro') },
 ];
 
 export function FieldServiceNav() {
