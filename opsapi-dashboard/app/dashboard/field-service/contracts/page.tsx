@@ -19,6 +19,10 @@ import { formatFsDate } from '@/services/field-service.service';
 import { simproCrm, type Contract } from '@/services/simpro-crm.service';
 import type { TableColumn } from '@/types';
 
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
 function ExpiryPill({ days }: { days?: number | null }) {
   if (days === null || days === undefined) return <Pill className="bg-secondary-100 text-secondary-600">Open-ended</Pill>;
   if (days < 0) return <Pill className="bg-red-50 text-red-700">Expired</Pill>;
@@ -94,7 +98,7 @@ function ContractsPageContent() {
         header: 'Covers',
         render: (c) => (
           <span className="text-sm whitespace-nowrap">
-            {c.asset_count ?? 0} assets · {c.site_count ?? 0} sites
+            {plural(c.asset_count ?? 0, 'asset')} · {plural(c.site_count ?? 0, 'site')}
           </span>
         ),
       },
