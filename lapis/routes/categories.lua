@@ -1,13 +1,19 @@
 local respond_to = require("lapis.application").respond_to
 local CategoryQueries = require "queries.CategoryQueries"
 local AuthMiddleware = require "middleware.auth"
+local NamespaceMiddleware = require "middleware.namespace"
 local StoreQueries = require "queries.StoreQueries"
 
 return function(app)
     app:match("categories", "/api/v2/categories", respond_to({
-        GET = function(self)
+        -- optionalNamespace: scoped to the tenant when a namespace header is present
+        -- (dashboard), all categories for anonymous marketplace browse.
+        GET = NamespaceMiddleware.optionalNamespace(function(self)
+            if self.namespace then
+                self.params.namespace_id = self.namespace.id
+            end
             return { json = CategoryQueries.all(self.params) }
-        end,
+        end),
         POST = AuthMiddleware.requireRole("seller", function(self)
             -- Verify store ownership if store_id is provided
             if self.params.store_id then

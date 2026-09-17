@@ -127,9 +127,11 @@ return function(app)
                 return error_response(404, "Customer not found")
             end
 
-            -- Verify customer belongs to current namespace (if namespace-scoped)
-            if customer.namespace_id and customer.namespace_id ~= self.namespace.id then
-                return error_response(403, "Customer not found in this namespace")
+            -- Verify customer belongs to current namespace. Compare numerically and
+            -- WITHOUT a nil-guard: a legacy row with NULL namespace_id must be denied,
+            -- not treated as "belongs to everyone" (that was a cross-tenant hole).
+            if tonumber(customer.namespace_id) ~= tonumber(self.namespace.id) then
+                return error_response(404, "Customer not found in this namespace")
             end
 
             return {
@@ -159,9 +161,11 @@ return function(app)
                 return error_response(404, "Customer not found")
             end
 
-            -- Verify customer belongs to current namespace (if namespace-scoped)
-            if customer.namespace_id and customer.namespace_id ~= self.namespace.id then
-                return error_response(403, "Customer not found in this namespace")
+            -- Verify customer belongs to current namespace. Compare numerically and
+            -- WITHOUT a nil-guard: a legacy row with NULL namespace_id must be denied,
+            -- not treated as "belongs to everyone" (that was a cross-tenant hole).
+            if tonumber(customer.namespace_id) ~= tonumber(self.namespace.id) then
+                return error_response(404, "Customer not found in this namespace")
             end
 
             local params = RequestParser.parse_request(self)
@@ -201,9 +205,11 @@ return function(app)
                 return error_response(404, "Customer not found")
             end
 
-            -- Verify customer belongs to current namespace (if namespace-scoped)
-            if customer.namespace_id and customer.namespace_id ~= self.namespace.id then
-                return error_response(403, "Customer not found in this namespace")
+            -- Verify customer belongs to current namespace. Compare numerically and
+            -- WITHOUT a nil-guard: a legacy row with NULL namespace_id must be denied,
+            -- not treated as "belongs to everyone" (that was a cross-tenant hole).
+            if tonumber(customer.namespace_id) ~= tonumber(self.namespace.id) then
+                return error_response(404, "Customer not found in this namespace")
             end
 
             local ok2, result = pcall(CustomerQueries.destroy, customer_id)

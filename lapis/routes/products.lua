@@ -194,6 +194,12 @@ return function(app)
                 return error_response(404, "Product not found")
             end
 
+            -- Tenant isolation: a product from another namespace must not be
+            -- editable here even if the caller has products.update in THEIR namespace.
+            if tonumber(product.namespace_id) ~= tonumber(self.namespace.id) then
+                return error_response(404, "Product not found")
+            end
+
             -- Check permission: namespace products.update OR store ownership
             local perms = get_product_permissions(self)
             local is_store_owner = user_owns_product_store(self, product)
@@ -234,6 +240,12 @@ return function(app)
             end
 
             if not product then
+                return error_response(404, "Product not found")
+            end
+
+            -- Tenant isolation: a product from another namespace must not be
+            -- deletable here even if the caller has products.delete in THEIR namespace.
+            if tonumber(product.namespace_id) ~= tonumber(self.namespace.id) then
                 return error_response(404, "Product not found")
             end
 

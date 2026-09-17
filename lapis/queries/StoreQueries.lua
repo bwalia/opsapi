@@ -103,9 +103,17 @@ function StoreQueries.all(params)
     local valid_fields = { id = true, name = true, slug = true, status = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
-    local paginated = StoreModel:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage
-    })
+    -- Scope to the caller's namespace when one is in context (the route sets
+    -- params.namespace_id from self.namespace). Without this the list leaked
+    -- every tenant's stores to an authenticated user. Public (no namespace)
+    -- browse still returns all.
+    local paginated
+    if params.namespace_id then
+        paginated = StoreModel:paginated("where namespace_id = ? order by " .. orderField .. " " .. orderDir,
+            tonumber(params.namespace_id), { per_page = perPage })
+    else
+        paginated = StoreModel:paginated("order by " .. orderField .. " " .. orderDir, { per_page = perPage })
+    end
 
     return {
         data = paginated:get_page(page),

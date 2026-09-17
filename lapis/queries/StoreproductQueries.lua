@@ -150,9 +150,15 @@ function StoreproductQueries.all(params)
     local valid_fields = { id = true, name = true, sku = true, price = true, quantity = true, status = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
-    local paginated = StoreproductModel:paginated("order by " .. orderField .. " " .. orderDir, {
-        per_page = perPage
-    })
+    -- Scope to the caller's namespace when in context (route sets namespace_id).
+    -- Without this the legacy /api/v2/storeproducts list leaked every tenant's products.
+    local paginated
+    if params.namespace_id then
+        paginated = StoreproductModel:paginated("where namespace_id = ? order by " .. orderField .. " " .. orderDir,
+            tonumber(params.namespace_id), { per_page = perPage })
+    else
+        paginated = StoreproductModel:paginated("order by " .. orderField .. " " .. orderDir, { per_page = perPage })
+    end
 
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
@@ -287,6 +293,16 @@ function StoreproductQueries.searchProducts(params)
 
     local where_conditions = { "is_active = true" }
     local where_params = {}
+
+    -- Scope to the caller's namespace when one is in context (authenticated
+    -- dashboard use). Without this the list leaks every tenant's products — e.g.
+    -- a field-service picker in an empty workspace offered another tenant's
+    -- product, which the (correctly namespace-scoped) create then rejected.
+    -- Public/marketplace browsing passes no namespace_id, so it still sees all.
+    if params.namespace_id then
+        table.insert(where_conditions, "namespace_id = ?")
+        table.insert(where_params, params.namespace_id)
+    end
 
     if search and search ~= "" then
         table.insert(where_conditions, "(name ILIKE ? OR description ILIKE ? OR tags ILIKE ?)")
