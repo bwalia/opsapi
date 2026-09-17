@@ -362,6 +362,7 @@ local field_service_parts_menu_migrations = load_if_enabled(ProjectConfig.FEATUR
 local field_service_v2_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-v2") or {}
 local field_service_roles_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-roles") or {}
 local field_service_fgas_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-fgas") or {}
+local simpro_alignment_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.simpro-alignment") or {}
 local field_service_sites_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-sites") or {}
 local field_service_quote_lines_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-quote-lines") or {}
 local field_service_photos_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-photos") or {}
@@ -2448,6 +2449,30 @@ local _migrations = {
     ['892_fs_backfill_manager_grants'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 2),
     ['893_fs_backfill_manager_billing'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 3),
     ['886_fs_fgas_refrigerant_log'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_fgas_migrations, 1),
+
+    -- Simpro alignment: customers, sites, contacts, assets (type/service level/test
+    -- history), contracts, quotes, job cost centres and the sync bookkeeping that
+    -- lets an OpsAPI tenant sit in front of a Simpro build.
+    ['894_fs_create_contacts'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 1),
+    ['895_fs_create_contracts'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 2),
+    ['896_fs_create_asset_types'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 3),
+    ['897_fs_create_assets'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 4),
+    ['898_fs_create_asset_service_levels'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 5),
+    ['899_fs_create_asset_test_history'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 6),
+    ['900_fs_assets_last_test_fk'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 7),
+    ['901_create_employee_licences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 8),
+    ['902_fs_create_job_cost_centres'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 9),
+    ['903_fs_create_job_sections'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 10),
+    ['904_fs_create_quotes'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 11),
+    ['905_customers_simpro_shape'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 12),
+    ['906_fs_sites_simpro_shape'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 13),
+    ['907_fs_jobs_simpro_shape'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 14),
+    ['908_simpro_sync_columns'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 15),
+    ['909_create_simpro_sync_log'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 16),
+    ['910_create_simpro_connections'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 17),
+    ['911_invoices_simpro_shape'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 18),
+    ['912_employees_simpro_shape'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 19),
+    ['913_fs_visits_simpro_shape'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, simpro_alignment_migrations, 20),
     ['887_fs_create_customer_sites'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 1),
     ['888_fs_jobs_requests_site_id'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 2),
     ['889_fs_job_items_quote_lines'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_quote_lines_migrations, 1),
