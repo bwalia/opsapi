@@ -56,7 +56,13 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 2
 
-# Pin to debworker00 (debian node with disk headroom), matching the API pod.
+# Default: any amd64 node (keeps it off the arm64 Pi). Each env overlay pins
+# further — prod → kubernetes.io/hostname: cloud003; int → net-region: home.
+# Do NOT put a single-host pin here: Helm map-merges nodeSelector, so a base
+# hostname pin leaks into every overlay that sets *other* keys (int sets
+# net-region/arch, so it can't override it) and hard-pins the pod to one node.
+# That stranded int Pending when debworker00 hit its pod cap. Host pins belong
+# in the per-env overlay, which overrides the same key cleanly.
 nodeSelector:
-  kubernetes.io/hostname: debworker00
+  kubernetes.io/arch: amd64
 tolerations: []

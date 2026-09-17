@@ -22,9 +22,10 @@ ingress:
   annotations: {}
   tls: []
 
-# Schedule on ANY healthy LAN amd64 node (see the API chart's note for why).
-# A single-node pin (debian010) went NotReady and left the dashboard Pending for
-# ~18h. net-region=home keeps it on the LAN; arch=amd64 keeps it off the arm64 Pi.
+# Pin to debian006 — a LAN (home) amd64 node with pod/disk headroom. Explicitly
+# a home node, NOT a cloud edge node. The old pin was debworker00, which hit its
+# 110-pod cap and stranded the rollout Pending (helm --wait timed out).
+# NOTE: this is a single-host pin. If debian006 goes NotReady the dashboard won't
+# reschedule until it's back — repoint this hostname to another home node then.
 nodeSelector:
-  net-region: home
-  kubernetes.io/arch: amd64
+  kubernetes.io/hostname: debian006
