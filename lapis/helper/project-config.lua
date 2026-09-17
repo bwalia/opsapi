@@ -516,6 +516,11 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "employees", name = "Employees", description = "Staff directory and engineer profiles", category = "Field Service" },
         { machine_name = "fs_service_requests", name = "Service Requests", description = "Customer complaints and service requests (the intake queue)", category = "Field Service" },
         { machine_name = "fs_parts", name = "Parts", description = "Parts / products catalog for field service", category = "Field Service" },
+        { machine_name = "fs_assets", name = "Customer Assets", description = "Equipment installed at customer sites: register, condition surveys and test history", category = "Field Service" },
+        { machine_name = "fs_contracts", name = "Contracts", description = "Maintenance contracts, SLAs and the service levels they cover", category = "Field Service" },
+        { machine_name = "fs_quotes", name = "Quotes", description = "Remedial and project quotations, and their conversion into jobs", category = "Field Service" },
+        { machine_name = "fs_reports", name = "Reports", description = "Asset, compliance, labour and performance reports (CSV / PDF / Power BI)", category = "Field Service" },
+        { machine_name = "simpro_sync", name = "Simpro Sync", description = "Connection to the Simpro build, and the push/pull audit trail", category = "Field Service" },
     },
 
     -- Theme system (platform-level; always on)

@@ -77,6 +77,10 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     MapPin: icons.MapPin,
     ClipboardList: icons.ClipboardList,
     Boxes: icons.Boxes,
+    // Simpro-aligned field service (Assets / Contracts / Reports / Simpro Sync)
+    HardDrive: icons.HardDrive,
+    ScrollText: icons.ScrollText,
+    RefreshCw: icons.RefreshCw,
     // Explicit alias — "pound-sign" normalizes to "poundsign", which doesn't
     // match "PoundSterling", so it needs its own key.
     'pound-sign': icons.PoundSterling,

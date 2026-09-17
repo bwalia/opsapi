@@ -12,7 +12,8 @@ import { useNamespaceStore } from '@/store/namespace.store';
  * fonts and radii come from the tenant's active theme (ThemeStyles), so this
  * is the only hard-coded piece of identity left.
  *
- * No logo_url set => the OpsAPI house brand below.
+ * No logo_url set => NEXT_PUBLIC_BRAND_NAME / NEXT_PUBLIC_BRAND_LOGO_URL if the
+ * deployment is white-labelled, otherwise the OpsAPI house brand below.
  */
 
 export interface Brand {
@@ -26,6 +27,16 @@ export interface Brand {
  * render outside the provider — the store is persisted, so a returning tenant
  * user keeps their branding on the login screen.
  */
+// A white-label deployment (e.g. the DBS Ltd demo) sets these at build time so
+// the login screen is branded before anyone has signed in and a namespace is
+// known. A signed-in tenant's own logo_url still wins.
+const DEPLOYMENT_BRAND: Brand | null = process.env.NEXT_PUBLIC_BRAND_NAME
+  ? {
+      name: process.env.NEXT_PUBLIC_BRAND_NAME,
+      logoUrl: process.env.NEXT_PUBLIC_BRAND_LOGO_URL || undefined,
+    }
+  : null;
+
 export function useBrand(): Brand {
   const current = useNamespaceStore((s) => s.currentNamespace);
   const all = useNamespaceStore((s) => s.namespaces);
@@ -34,8 +45,8 @@ export function useBrand(): Brand {
   const logoUrl =
     current?.logo_url || all.find((n) => n.uuid === current?.uuid)?.logo_url || undefined;
 
-  if (!logoUrl) return { name: 'OpsAPI' };
-  return { name: current?.name || 'OpsAPI', logoUrl };
+  if (!logoUrl) return DEPLOYMENT_BRAND ?? { name: 'OpsAPI' };
+  return { name: current?.name || DEPLOYMENT_BRAND?.name || 'OpsAPI', logoUrl };
 }
 
 /**
@@ -122,7 +133,7 @@ export function Logo({
       <LogoMark size={size} />
       {showWordmark && (
         <span className={`font-semibold tracking-tight ${base}`} style={{ fontSize: size * 0.6 }}>
-          {logoUrl ? name : <>Ops<span className="text-primary-500">API</span></>}
+          {logoUrl || name !== 'OpsAPI' ? name : <>Ops<span className="text-primary-500">API</span></>}
         </span>
       )}
     </span>
