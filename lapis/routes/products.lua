@@ -106,8 +106,29 @@ return function(app)
             response.json.permissions = get_product_permissions(self)
         end
 
+        -- Surface the tenant's store currency so the catalog UI can display prices
+        -- and knows whether the currency has been chosen yet (first product).
+        if self.namespace then
+            local StoreModel = require("models.StoreModel")
+            local store = StoreModel:find({ namespace_id = self.namespace.id })
+            response.json.currency = store and store.currency or nil
+        end
+
         return response
     end))
+
+    -- Set/change the catalog currency (store-level; every product reuses it).
+    -- Declared before /:id so the literal path is matched, not treated as an id.
+    app:put("/api/v2/products/currency", AuthMiddleware.requireAuth(
+        NamespaceMiddleware.requirePermission("products", "update", function(self)
+            local params = RequestParser.parse_request(self)
+            local ok, currency = pcall(StoreproductQueries.setNamespaceCurrency, self.namespace.id, params.currency)
+            if not ok or not currency then
+                return error_response(400, "Failed to set currency", tostring(currency))
+            end
+            return { status = 200, json = { success = true, currency = currency } }
+        end)
+    ))
 
     -- GET single product (public)
     app:get("/api/v2/products/:id", NamespaceMiddleware.optionalNamespace(function(self)

@@ -113,6 +113,15 @@ function StoreproductQueries.create(params)
     end
     params.store_id = store.id
 
+    -- Currency lives at the store level (products inherit it). The first product
+    -- sets it for the whole catalog; the rest reuse it. `currency` is not a
+    -- storeproducts column, so capture and strip it before the product insert.
+    local currency = params.currency
+    params.currency = nil
+    if currency and currency ~= "" and currency ~= "null" and store.currency ~= currency then
+        pcall(function() store:update({ currency = currency }) end)
+    end
+
     -- Validate category if provided
     if params.category_id and params.category_id ~= "" then
         local CategoryModel = require "models.CategoryModel"
@@ -127,6 +136,21 @@ function StoreproductQueries.create(params)
     end
 
     return StoreproductModel:create(params, { returning = "*" })
+end
+
+-- Set (or change) the catalog currency for a namespace. Currency lives on the
+-- store, so we provision one if the tenant has none yet. Used by the products
+-- page's "change currency" control and the first-product currency picker.
+function StoreproductQueries.setNamespaceCurrency(namespace_id, currency)
+    if not currency or currency == "" then
+        return nil, "Currency is required"
+    end
+    local store = ensure_namespace_store(namespace_id)
+    if not store then
+        return nil, "Could not resolve or create a store for this namespace"
+    end
+    store:update({ currency = currency })
+    return currency
 end
 
 function StoreproductQueries.updateInventory(product_uuid, quantity_change)
