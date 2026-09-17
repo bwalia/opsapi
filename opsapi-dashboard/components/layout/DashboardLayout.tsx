@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import ThemeStyles from './ThemeStyles';
+import BuildFooter from './BuildFooter';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
 import { NamespaceProvider } from '@/contexts/NamespaceContext';
@@ -149,6 +150,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
 
             {/* Main content */}
             <main id="main-content" className="p-4 sm:p-6">{children}</main>
+
+            {/* Build/version stamp — so it's obvious which build is live */}
+            <BuildFooter />
           </div>
         </div>
       </PermissionsProvider>

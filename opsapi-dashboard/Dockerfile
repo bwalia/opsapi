@@ -30,7 +30,16 @@ RUN --mount=type=cache,target=/root/.npm \
 FROM node:24.14-alpine AS builder
 WORKDIR /app
 ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:4010
+# Build stamp — surfaced in the footer so it's obvious which build is live.
+# CI passes the git tag/describe, short sha and an ISO build time; they're
+# inlined into the bundle here (NEXT_PUBLIC_* are baked at `next build`).
+ARG NEXT_PUBLIC_BUILD_VERSION=dev
+ARG NEXT_PUBLIC_BUILD_SHA=
+ARG NEXT_PUBLIC_BUILD_TIME=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_BUILD_VERSION=$NEXT_PUBLIC_BUILD_VERSION \
+    NEXT_PUBLIC_BUILD_SHA=$NEXT_PUBLIC_BUILD_SHA \
+    NEXT_PUBLIC_BUILD_TIME=$NEXT_PUBLIC_BUILD_TIME \
     NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
