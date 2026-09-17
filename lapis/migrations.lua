@@ -2450,6 +2450,7 @@ local _migrations = {
     ['892_fs_backfill_manager_grants'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 2),
     ['893_fs_backfill_manager_billing'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 3),
     ['919_fs_backfill_simpro_role_grants'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 4),
+    ['920_fs_backfill_manager_users_grant'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_roles_migrations, 5),
     ['886_fs_fgas_refrigerant_log'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_fgas_migrations, 1),
 
     -- Simpro alignment: customers, sites, contacts, assets (type/service level/test

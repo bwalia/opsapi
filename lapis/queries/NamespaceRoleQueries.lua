@@ -788,6 +788,10 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
                 fs_service_requests = { "manage" }, fs_jobs = { "manage" }, fs_visits = { "manage" },
                 fs_job_types = { "manage" }, fs_parts = { "manage" }, employees = { "manage" },
                 customers = { "manage" }, products = { "manage" },
+                -- Onboard staff: create workspace logins (the "Add team member" flow)
+                -- and read the user list. Not update/delete/manage — a manager adds
+                -- engineers but doesn't administer accounts or change others' roles.
+                users = { "create", "read" },
                 -- manage (not create/read) so the manager can also send/email/void
                 -- invoices — /send, /email and /void all require invoices.update.
                 invoices = { "manage" },
