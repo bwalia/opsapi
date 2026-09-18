@@ -1,0 +1,69 @@
+name: tmp deploy ollama diytax auth rule
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout diy-tax-return-uk
+        uses: actions/checkout@v4
+        with:
+          repository: bwalia/diy-tax-return-uk
+          ref: main
+          path: diy
+
+      - name: Login to lon1 and activate ollama.diytaxreturn.co.uk auth rule
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          GATEWAY: https://lon1.pop0.uk
+          EMAIL: debian@wslproxy.org
+        run: |
+          set -euo pipefail
+          RESP=$(curl -sS -X POST "${GATEWAY%/}/api/user/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"email\": \"$EMAIL\", \"password\": \"$ADMIN_PASSWORD\"}")
+          TOKEN=$(echo "$RESP" | jq -r '.data.accessToken // empty')
+          if [ -z "$TOKEN" ]; then
+            echo "LOGIN FAILED: $(echo "$RESP" | jq -c '.')"
+            exit 1
+          fi
+          echo "LOGIN OK"
+          echo "::add-mask::$TOKEN"
+
+          RULE_FILE="diy/.github/wslproxy/data/rules/prod/90775fe0-2ba3-435d-9710-08844ffb1d00.json"
+          SERVER_FILE="diy/.github/wslproxy/data/servers/prod/host:ollama.diytaxreturn.co.uk.json"
+          test -f "$RULE_FILE"
+          test -f "$SERVER_FILE"
+
+          # Import the new auth rule (preserves id)
+          RULES_BODY=$(jq -c '{data: [.], dataType: "rules"}' "$RULE_FILE")
+          HTTP=$(curl -sS -o /tmp/import.json -w '%{http_code}' \
+            -X POST "${GATEWAY%/}/api/projects/import?_format=json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-platform: react-admin" \
+            -H "Content-Type: application/json" \
+            --data-binary "$RULES_BODY")
+          echo "import rule http=$HTTP"
+          jq -c '.' /tmp/import.json || cat /tmp/import.json
+          case "$HTTP" in 200|201|204) ;; *) exit 1 ;; esac
+
+          # PUT server with config_status=true so nginx reloads
+          # Decode base64 config if present (createUpdateServer re-encodes)
+          SERVER_PAYLOAD=$(jq -c '
+            .config_status = true
+            | if (.config|type)=="string" and (.config|length)>0 and (.config|test("^[A-Za-z0-9+/=]+$")) then
+                .config = (.config | @base64d)
+              else . end
+          ' "$SERVER_FILE")
+          SID=$(jq -r .id "$SERVER_FILE")
+          HTTP=$(curl -sS -o /tmp/put.json -w '%{http_code}' \
+            -X PUT "${GATEWAY%/}/api/servers/${SID}?_format=json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-platform: react-admin" \
+            -H "Content-Type: application/json" \
+            --data-binary "$SERVER_PAYLOAD")
+          echo "PUT server http=$HTTP"
+          jq -c '{id, server_name, rules, config_status}' /tmp/put.json 2>/dev/null || cat /tmp/put.json
+          case "$HTTP" in 200|201) ;; *) exit 1 ;; esac
+
+          echo "Deployed auth rule 90775fe0… for ollama.diytaxreturn.co.uk"
