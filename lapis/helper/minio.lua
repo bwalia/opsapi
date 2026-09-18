@@ -665,6 +665,11 @@ function MinioClient:createBucket(bucket)
     local res, err = httpc:request_uri(url, {
         method = "PUT",
         headers = headers,
+        -- lua-resty-http refuses a PUT with a nil body ("Request body is nil but PUT
+        -- method expects a body"), and creating a bucket is precisely that: a PUT with
+        -- nothing in it. The request is already signed over the empty payload
+        -- (x-amz-content-sha256 = sha256("")), so this sends exactly what was signed.
+        body = "",
         ssl_verify = false
     })
 
