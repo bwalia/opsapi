@@ -9,8 +9,45 @@ import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Check, Lock, Package, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Modal, Button, Input, Select, SearchableSelect, ConfirmDialog } from '@/components/ui';
-import { fieldService, type FsJobItem, type FsPart, type FsPhase, type JobItemType } from '@/services/field-service.service';
+import { fieldService, type FsJobItem, type FsJobPhoto, type FsPart, type FsPhase, type JobItemType } from '@/services/field-service.service';
 import { CheckboxField, Pill, SectionCard, apiError, money } from './shared';
+
+/**
+ * Fault-evidence photos an engineer attached to a proposed part. Shown to the
+ * manager on the item so they can verify the request before approving. Renders
+ * nothing when the item has no photos (e.g. an office-entered line).
+ */
+function ItemEvidence({ itemUuid }: { itemUuid: string }) {
+  const [photos, setPhotos] = useState<FsJobPhoto[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fieldService
+      .getItemPhotos(itemUuid)
+      .then((p) => alive && setPhotos(p))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [itemUuid]);
+  if (photos.length === 0) return null;
+  return (
+    <span className="mt-1.5 flex flex-wrap gap-1.5">
+      {photos.map((p) => (
+        <a
+          key={p.uuid}
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Fault evidence — open"
+          className="block w-12 h-12 rounded-md overflow-hidden border border-secondary-200"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={p.url} alt="Fault evidence" loading="lazy" className="w-full h-full object-cover" />
+        </a>
+      ))}
+    </span>
+  );
+}
 
 const ITEM_TYPE_LABELS: Record<JobItemType, string> = {
   part: 'Part',
@@ -221,6 +258,7 @@ export function ItemsTable({
                   {!it.is_billable && ' · non-billable'}
                   {it.tax_rate ? ` · VAT ${it.tax_rate}%` : ''}
                 </p>
+                {it.approval_status === 'pending' && <ItemEvidence itemUuid={it.uuid} />}
               </td>
               <td className="py-2 pr-3 text-right">{it.quantity}</td>
               <td className="py-2 pr-3 text-right">{money(it.unit_price, currency)}</td>

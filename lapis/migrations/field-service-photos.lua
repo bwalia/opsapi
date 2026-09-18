@@ -36,4 +36,16 @@ return {
         ]])
         index([[CREATE INDEX IF NOT EXISTS fs_job_photos_job_idx ON fs_job_photos (job_id) WHERE deleted_at IS NULL]])
     end,
+
+    -- [2] Tie a photo to a specific job item (921). Lets an engineer's
+    -- part-replacement proposal carry its own fault-evidence photos, which the
+    -- manager reviews before approving. Nullable — existing job/visit photos are
+    -- unaffected; CASCADE so a proposal's photos vanish with the item.
+    [2] = function()
+        db.query([[
+            ALTER TABLE fs_job_photos
+                ADD COLUMN IF NOT EXISTS job_item_id BIGINT REFERENCES fs_job_items(id) ON DELETE CASCADE
+        ]])
+        index([[CREATE INDEX IF NOT EXISTS fs_job_photos_item_idx ON fs_job_photos (job_item_id) WHERE deleted_at IS NULL]])
+    end,
 }

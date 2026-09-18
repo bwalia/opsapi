@@ -28,6 +28,7 @@ import { FGasCard } from '@/components/field-service/FGasCard';
 import { PhotosCard } from '@/components/field-service/PhotosCard';
 import { PhaseChecklist } from '@/components/field-service/PhasesPanel';
 import { QuoteLineModal, LABOUR_LABEL, type LineKind } from '@/components/field-service/QuoteLineModal';
+import { PartProposalModal } from '@/components/field-service/PartProposalModal';
 import { getPosition } from '@/components/field-service/CheckOutModal';
 
 /** Hours between check-in and now, rounded to 2dp (for the finish default). */
@@ -215,6 +216,7 @@ function GuidedVisitContent() {
   const [busy, setBusy] = useState(false);
   const [showFinish, setShowFinish] = useState(false);
   const [line, setLine] = useState<LineKind | null>(null);
+  const [showPart, setShowPart] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -372,7 +374,7 @@ function GuidedVisitContent() {
             <>
               <div className="grid grid-cols-2 gap-3">
                 <ActionTile icon={<HardHat className="w-5 h-5 text-primary-600" />} label="Labour" hint="Engineer / mate time" onClick={() => setLine('labour')} />
-                <ActionTile icon={<Package className="w-5 h-5 text-primary-600" />} label="Materials" hint="Parts fitted" onClick={() => setLine('material')} />
+                <ActionTile icon={<Package className="w-5 h-5 text-primary-600" />} label="Replace part" hint="Photo + manager OK" onClick={() => setShowPart(true)} />
                 <ActionTile icon={<Truck className="w-5 h-5 text-primary-600" />} label="Hire" hint="Tools / access" onClick={() => setLine('hire')} />
                 <ActionTile icon={<Snowflake className="w-5 h-5 text-primary-600" />} label="Refrigerant" hint="F-Gas log" onClick={() => document.getElementById('fgas')?.scrollIntoView({ behavior: 'smooth' })} />
               </div>
@@ -435,6 +437,13 @@ function GuidedVisitContent() {
         visitUuid={visit.uuid}
         onClose={() => setLine(null)}
         onSaved={() => { setLine(null); load(); }}
+      />
+      <PartProposalModal
+        isOpen={showPart}
+        jobUuid={visit.job_uuid}
+        visitUuid={visit.uuid}
+        onClose={() => setShowPart(false)}
+        onSaved={() => { setShowPart(false); load(); }}
       />
     </div>
   );

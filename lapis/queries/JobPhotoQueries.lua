@@ -58,6 +58,20 @@ function JobPhotoQueries.listByJobId(job_id)
     return arr(out)
 end
 
+--- Evidence photos attached to a specific job item (by numeric id), newest first.
+function JobPhotoQueries.listByItemId(item_id)
+    local rows = db.query([[
+        SELECT ph.*, v.uuid AS visit_uuid
+        FROM fs_job_photos ph
+        LEFT JOIN fs_visits v ON v.id = ph.visit_id
+        WHERE ph.job_item_id = ? AND ph.deleted_at IS NULL
+        ORDER BY ph.created_at DESC, ph.id DESC
+    ]], item_id)
+    local out = {}
+    for _, p in ipairs(rows or {}) do table.insert(out, shape(p)) end
+    return arr(out)
+end
+
 function JobPhotoQueries.listByJob(namespace_id, job_uuid)
     local job_id = Common.resolve_id("fs_jobs", namespace_id, job_uuid)
     if not job_id then return nil, "Job not found" end
@@ -75,11 +89,21 @@ function JobPhotoQueries.addPhoto(namespace_id, job_uuid, data, actor_uuid)
         visit_id = Common.resolve_id("fs_visits", namespace_id, data.visit_uuid)
     end
 
+    -- Optional link to a specific proposed item (fault-evidence photos).
+    local job_item_id
+    if nilify(data.item_uuid) then
+        job_item_id = Common.resolve_id("fs_job_items", namespace_id, data.item_uuid)
+        if not job_item_id then return nil, "Item not found" end
+    elseif data.job_item_id then
+        job_item_id = tonumber(data.job_item_id)
+    end
+
     local photo = FsJobPhotoModel:create({
         uuid = Common.uuid(),
         namespace_id = namespace_id,
         job_id = job_id,
         visit_id = visit_id,
+        job_item_id = job_item_id,
         url = tostring(data.url),
         object_key = nilify(data.object_key) or object_key_of({ url = tostring(data.url) }),
         filename = nilify(data.filename),
