@@ -262,6 +262,14 @@ function NamespaceRoleQueries.update(id, params)
 
     role:update(params)
 
+    -- If the role's permissions changed, every member holding it now has a
+    -- different effective map — bust their cached permissions. (params.id/uuid
+    -- are cleared above but permissions survives, except for the owner role
+    -- whose perms are immutable, so this correctly no-ops there.)
+    if params.permissions ~= nil then
+        require("helper.permission-cache").invalidateRole(role.id)
+    end
+
     -- Re-parse permissions for return
     if role.permissions and type(role.permissions) == "string" then
         local ok, parsed = pcall(cjson.decode, role.permissions)
