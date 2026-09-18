@@ -73,7 +73,9 @@ spec:
                   # ✅ Debug: Check if file exists before copying
                   ls -lh "$BACKUP_FILE"
 
-                  # ✅ Upload to MinIO
+                  # ✅ Ensure the backups bucket exists (a fresh MinIO — e.g. this
+                  # release's own workstation-minio — won't have it yet), then upload.
+                  mc mb --ignore-existing myminio/"opsapi-test-pg"
                   echo "Uploading backup to MinIO..."
                   mc cp "$BACKUP_FILE" myminio/"opsapi-test-pg"/ || { echo "MinIO upload failed!"; exit 1; }
 
@@ -86,21 +88,46 @@ spec:
                   mountPath: /backup
 
               env:
+                # MinIO: prefer THIS release's own store (.Values.minio) so the
+                # backup uploads to a REACHABLE MinIO with matching creds. The
+                # shared Vault secret points at diytaxreturn-minio (cloud region),
+                # which a LAN-pinned backup pod cannot reach — same root cause as
+                # the app deployment. Falls back to the Vault secret for releases
+                # that set no minio block (legacy diytaxreturn-lapis), so their
+                # behaviour is unchanged. Mirrors the deployment.yaml override.
                 - name: MINIO_ENDPOINT
+                  {{- if and .Values.minio .Values.minio.endpoint }}
+                  value: {{ .Values.minio.endpoint | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_ENDPOINT
+                  {{- end }}
                 - name: MINIO_ACCESS_KEY
+                  {{- if and .Values.minio .Values.minio.credsSecret }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.minio.credsSecret | quote }}
+                      key: {{ .Values.minio.accessKeyKey | default "MINIO_ROOT_USER" | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_ACCESS_KEY
+                  {{- end }}
                 - name: MINIO_SECRET_KEY
+                  {{- if and .Values.minio .Values.minio.credsSecret }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.minio.credsSecret | quote }}
+                      key: {{ .Values.minio.secretKeyKey | default "MINIO_ROOT_PASSWORD" | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_SECRET_KEY
+                  {{- end }}
                 - name: MINIO_BUCKET
                   valueFrom:
                     secretKeyRef:
@@ -230,7 +257,9 @@ spec:
                   # ✅ Debug: Check if file exists before copying
                   ls -lh "$BACKUP_FILE"
 
-                  # ✅ Upload to MinIO
+                  # ✅ Ensure the backups bucket exists (a fresh MinIO — e.g. this
+                  # release's own workstation-minio — won't have it yet), then upload.
+                  mc mb --ignore-existing myminio/"opsapi-test-pg"
                   echo "Uploading backup to MinIO..."
                   mc cp "$BACKUP_FILE" myminio/"opsapi-test-pg"/ || { echo "MinIO upload failed!"; exit 1; }
 
@@ -242,21 +271,46 @@ spec:
                 - name: {{ .Release.Name }}-backup-storage
                   mountPath: /backup
               env:
+                # MinIO: prefer THIS release's own store (.Values.minio) so the
+                # backup uploads to a REACHABLE MinIO with matching creds. The
+                # shared Vault secret points at diytaxreturn-minio (cloud region),
+                # which a LAN-pinned backup pod cannot reach — same root cause as
+                # the app deployment. Falls back to the Vault secret for releases
+                # that set no minio block (legacy diytaxreturn-lapis), so their
+                # behaviour is unchanged. Mirrors the deployment.yaml override.
                 - name: MINIO_ENDPOINT
+                  {{- if and .Values.minio .Values.minio.endpoint }}
+                  value: {{ .Values.minio.endpoint | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_ENDPOINT
+                  {{- end }}
                 - name: MINIO_ACCESS_KEY
+                  {{- if and .Values.minio .Values.minio.credsSecret }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.minio.credsSecret | quote }}
+                      key: {{ .Values.minio.accessKeyKey | default "MINIO_ROOT_USER" | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_ACCESS_KEY
+                  {{- end }}
                 - name: MINIO_SECRET_KEY
+                  {{- if and .Values.minio .Values.minio.credsSecret }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.minio.credsSecret | quote }}
+                      key: {{ .Values.minio.secretKeyKey | default "MINIO_ROOT_PASSWORD" | quote }}
+                  {{- else }}
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Release.Name }}-secrets
                       key: MINIO_SECRET_KEY
+                  {{- end }}
                 - name: MINIO_BUCKET
                   valueFrom:
                     secretKeyRef:

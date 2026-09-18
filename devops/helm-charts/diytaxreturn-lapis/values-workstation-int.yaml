@@ -113,6 +113,21 @@ postgresSsl: "false"
 externalSecret:
   enabled: true
 
+# MINIO — this release's OWN isolated object store (workstation-minio), NOT
+# diytaxreturn's. See devops/k8s/workstation-minio.yaml. Without this the app
+# inherits MINIO_* from the shared Vault secret, which points at
+# diytaxreturn-minio in the cloud region — unroutable from this LAN-pinned pod,
+# so server-side uploads time out (int-opsapi.workstation.co.uk/health showed
+# minio "degraded": internal endpoint timeout). `endpoint` is the LAN ClusterIP
+# (reachable, same region as this pod); `externalUrl` is workstation-minio's own
+# ingress (already defined in workstation-minio.yaml) used for browser image
+# URLs; creds come from workstation-minio-creds so they always match the server
+# (the app auto-creates its bucket on first upload).
+minio:
+  endpoint: http://workstation-minio.int.svc.cluster.local:9000
+  externalUrl: https://int-minio.workstation.co.uk
+  credsSecret: workstation-minio-creds
+
 # Bootstrap super-admin for the fresh workstation_opsapi DB (created on first
 # boot by scripts/setup-namespace). Email is safe to commit; the password is
 # NOT set here (this repo is public) — it defaults to the setup-namespace

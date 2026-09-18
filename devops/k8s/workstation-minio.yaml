@@ -28,6 +28,19 @@
 #
 # Apply with:
 #   kubectl apply -f devops/k8s/workstation-minio.yaml
+#
+# Image: quay.io/minio/minio, NOT docker.io/minio/minio.
+# -----------------------------------------------------
+# The LAN (net-region=home) nodes route docker.io through the private
+# `spectoncr` pull-through mirror, and that mirror denies `minio/minio`
+# ("insufficient_scope: authorization failed") — so a fresh pull ImagePullBackOffs
+# on a home node (verified on debian002), even though the cloud nodes pull
+# docker.io directly and run it fine. This pod is home-pinned (co-located with
+# workstation-opsapi so the ClusterIP is reachable), so it MUST use a registry
+# the home nodes can reach: quay.io is MinIO's official mirror and is not
+# intercepted (verified: pulls in ~360ms on debian002). Pin an explicit RELEASE
+# tag (matches the version already running elsewhere in this cluster) so a
+# floating :latest can never reintroduce a denied/surprise pull.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -61,7 +74,8 @@ spec:
     spec:
       containers:
         - name: workstation-minio
-          image: minio/minio:latest
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          imagePullPolicy: IfNotPresent
           args: ["server", "/data", "--console-address", ":9001"]
           envFrom:
             - secretRef: { name: workstation-minio-creds }
@@ -147,7 +161,8 @@ spec:
     spec:
       containers:
         - name: workstation-minio
-          image: minio/minio:latest
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          imagePullPolicy: IfNotPresent
           args: ["server", "/data", "--console-address", ":9001"]
           envFrom:
             - secretRef: { name: workstation-minio-creds }
@@ -233,7 +248,8 @@ spec:
     spec:
       containers:
         - name: workstation-minio
-          image: minio/minio:latest
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          imagePullPolicy: IfNotPresent
           args: ["server", "/data", "--console-address", ":9001"]
           envFrom:
             - secretRef: { name: workstation-minio-creds }
