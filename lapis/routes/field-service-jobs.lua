@@ -211,6 +211,80 @@ return function(app)
             Http.actor(self)))
     end))
 
+    -- Engineer part-replacement proposal (multipart). The engineer picks a part
+    -- that ALREADY EXISTS in the namespace catalogue (part_uuid — they can't
+    -- invent parts), says what they're fixing (reason) and attaches a fault
+    -- photo. Evidence is MANDATORY: the item and its first photo are created in
+    -- one request, so a proposal can never exist without a photo for the manager
+    -- to verify. The item lands approval_status='pending' (addItem does this for
+    -- parts); the manager approves via the existing approve/reject routes, which
+    -- is what lets it reach the invoice. Extra photos post to the photos route
+    -- above with item_uuid. Allowed to the engineer booked on the job.
+    app:post("/api/v2/field-service/jobs/:uuid/part-proposals", Http.route(function(self)
+        local job = JobQueries.findJobRow(self.namespace.id, self.params.uuid)
+        if not job then return Http.fail(404, "Job not found") end
+        if not can_work_job(self, job.id, "update") then return Http.forbidden("fs_jobs", "update") end
+
+        if not self.params.part_uuid or self.params.part_uuid == "" then
+            return Http.fail(400, "Select a part from the catalogue")
+        end
+        local file = self.params.photo or self.params.file or self.params.image
+        if type(file) ~= "table" or not file.content or file.content == "" then
+            return Http.fail(400, "A photo of the fault is required to propose a part")
+        end
+        if #file.content > 15 * 1024 * 1024 then
+            return Http.fail(413, "Photo is too large (max 15MB)")
+        end
+
+        -- Upload the evidence first: if MinIO fails we create nothing, so we
+        -- never leave an evidence-less proposal behind.
+        local url, uerr, meta = MinioClient.quickUpload(file, {
+            prefix = "field-service/jobs/" .. job.uuid .. "/photos",
+        })
+        if not url then return Http.fail(502, "Photo upload failed: " .. tostring(uerr)) end
+
+        -- Create the pending part line. Price/tax come from the caller (the form
+        -- copies them off the picked catalogue part) so the invoice is right.
+        local item, ierr = JobQueries.addItem(self.namespace.id, self.params.uuid, {
+            item_type = "part",
+            part_uuid = self.params.part_uuid,
+            quantity = self.params.quantity,
+            description = self.params.reason or self.params.description,
+            unit_price = self.params.unit_price,
+            tax_rate = self.params.tax_rate,
+            visit_uuid = self.params.visit_uuid,
+            is_billable = true,
+        }, Http.actor(self))
+        if not item then return Http.from_error(ierr) end
+
+        local photo, perr = JobPhotoQueries.addPhoto(self.namespace.id, self.params.uuid, {
+            url = url,
+            object_key = meta and meta.object_key,
+            filename = file.filename,
+            content_type = file.content_type,
+            caption = "Fault evidence",
+            visit_uuid = self.params.visit_uuid,
+            item_uuid = item.uuid,
+        }, Http.actor(self))
+        -- The evidence link is the whole point — if it fails, don't keep a
+        -- proposal without it.
+        if not photo then
+            JobQueries.deleteItem(self.namespace.id, item.uuid, Http.actor(self))
+            return Http.fail(502, "Could not attach evidence photo: " .. tostring(perr))
+        end
+
+        return Http.ok({ item = item, photo = photo }, 201)
+    end))
+
+    -- Evidence photos for a proposed item. Manager (fs_jobs) or the engineer
+    -- booked on the job can view them.
+    app:get("/api/v2/field-service/job-items/:uuid/photos", Http.route(function(self)
+        local item = JobQueries.findItemRow(self.namespace.id, self.params.uuid)
+        if not item then return Http.fail(404, "Item not found") end
+        if not can_work_job(self, item.job_id, "read") then return Http.forbidden("fs_jobs", "read") end
+        return Http.ok(JobPhotoQueries.listByItemId(item.id))
+    end))
+
     -- ============================================================
     -- PHOTOS (site / fault photos for the quote sheet)
     -- ============================================================
@@ -249,6 +323,7 @@ return function(app)
             content_type = file.content_type,
             caption = self.params.caption,
             visit_uuid = self.params.visit_uuid,
+            item_uuid = self.params.item_uuid,   -- optional: tie to a proposed item
         }, Http.actor(self))
         return Http.result(photo, perr, 201)
     end))

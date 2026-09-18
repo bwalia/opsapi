@@ -739,16 +739,26 @@ export const fieldService = {
     return unwrap<FsJobPhoto[]>(await apiClient.get(`${BASE}/jobs/${jobUuid}/photos`)) || [];
   },
 
-  async uploadJobPhoto(jobUuid: string, file: File, opts?: { visit_uuid?: string; caption?: string }): Promise<FsJobPhoto> {
+  async uploadJobPhoto(
+    jobUuid: string,
+    file: File,
+    opts?: { visit_uuid?: string; caption?: string; item_uuid?: string }
+  ): Promise<FsJobPhoto> {
     const fd = new FormData();
     fd.append('photo', file);
     if (opts?.visit_uuid) fd.append('visit_uuid', opts.visit_uuid);
     if (opts?.caption) fd.append('caption', opts.caption);
+    if (opts?.item_uuid) fd.append('item_uuid', opts.item_uuid); // tie to a proposed item
     return unwrap<FsJobPhoto>(await apiClient.post(`${BASE}/jobs/${jobUuid}/photos`, fd));
   },
 
   async deleteJobPhoto(uuid: string): Promise<void> {
     await apiClient.delete(`${BASE}/job-photos/${uuid}`);
+  },
+
+  /** Evidence photos attached to a specific proposed job item. */
+  async getItemPhotos(itemUuid: string): Promise<FsJobPhoto[]> {
+    return unwrap<FsJobPhoto[]>(await apiClient.get(`${BASE}/job-items/${itemUuid}/photos`)) || [];
   },
 
   // ---------------- Service requests (complaints) ----------------
@@ -910,6 +920,37 @@ export const fieldService = {
 
   async rejectItem(uuid: string, reason?: string): Promise<FsJobItem> {
     return unwrap<FsJobItem>(await apiClient.post(`${BASE}/job-items/${uuid}/reject`, { reason }, JSON_BODY));
+  },
+
+  /**
+   * Engineer proposes replacing a part they picked from the catalogue, with a
+   * mandatory fault photo. Item + first photo are created in one multipart
+   * request (the backend rejects it with no photo); the item lands pending for
+   * the manager to approve. Price/VAT come from the picked catalogue part.
+   */
+  async createPartProposal(
+    jobUuid: string,
+    data: {
+      part_uuid: string;
+      quantity: number | string;
+      reason: string;
+      unit_price?: number | string | null;
+      tax_rate?: number | string | null;
+      visit_uuid?: string;
+    },
+    photo: File
+  ): Promise<{ item: FsJobItem; photo: FsJobPhoto }> {
+    const fd = new FormData();
+    fd.append('part_uuid', data.part_uuid);
+    fd.append('quantity', String(data.quantity ?? 1));
+    fd.append('reason', data.reason);
+    if (data.unit_price != null) fd.append('unit_price', String(data.unit_price));
+    if (data.tax_rate != null) fd.append('tax_rate', String(data.tax_rate));
+    if (data.visit_uuid) fd.append('visit_uuid', data.visit_uuid);
+    fd.append('photo', photo);
+    return unwrap<{ item: FsJobItem; photo: FsJobPhoto }>(
+      await apiClient.post(`${BASE}/jobs/${jobUuid}/part-proposals`, fd)
+    );
   },
 
   // ---------------- Invoicing ----------------

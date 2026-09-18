@@ -2485,6 +2485,7 @@ local _migrations = {
     ['888_fs_jobs_requests_site_id'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_sites_migrations, 2),
     ['889_fs_job_items_quote_lines'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_quote_lines_migrations, 1),
     ['890_fs_create_job_photos'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_photos_migrations, 1),
+    ['921_fs_job_photos_add_item_id'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_photos_migrations, 2),
     ['891_fs_inapp_notification_cols'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_notif_migrations, 1),
 
     -- Theme system foundation (Phase 0): drop obsolete scaffold.
