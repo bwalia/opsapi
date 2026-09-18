@@ -87,16 +87,32 @@ export default function ThemeStyles() {
     }
   }, [slug, version]);
 
-  // White-labelled tenants get their own favicon too; the OpsAPI one (declared
-  // in app/layout.tsx metadata) stands when the namespace has no logo.
+  // White-labelled tenants get their own favicon; the OpsAPI one (declared in
+  // app/layout.tsx metadata) stands when the namespace has no logo.
+  //
+  // We manage ONLY our own <link id="ops-tenant-favicon"> (created imperatively,
+  // so React/Next never owns it) and update it in place. We must NOT remove the
+  // favicon Next renders from metadata: deleting a React/Next-managed node out
+  // from under it makes React crash on the next reconciliation with
+  // "Cannot read properties of null (reading 'removeChild')", which on a
+  // white-label tenant (e.g. workstation) turned every client-side navigation
+  // after login into a crash/reload loop. A tenant icon appended after Next's
+  // wins in the browser, so the tenant logo still takes over.
   useEffect(() => {
-    if (typeof document === 'undefined' || !logoUrl) return;
-    document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((el) => el.remove());
-    const icon = document.createElement('link');
-    icon.rel = 'icon';
-    icon.href = logoUrl;
-    document.head.appendChild(icon);
-    return () => icon.remove();
+    if (typeof document === 'undefined') return;
+    const ID = 'ops-tenant-favicon';
+    let icon = document.getElementById(ID) as HTMLLinkElement | null;
+    if (!logoUrl) {
+      if (icon) icon.remove(); // only our own node; leave Next's default
+      return;
+    }
+    if (!icon) {
+      icon = document.createElement('link');
+      icon.id = ID;
+      icon.rel = 'icon';
+      document.head.appendChild(icon);
+    }
+    if (icon.href !== logoUrl) icon.href = logoUrl;
   }, [logoUrl]);
 
   return null;
