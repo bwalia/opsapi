@@ -5,13 +5,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout diy-tax-return-uk
-        uses: actions/checkout@v4
-        with:
-          repository: bwalia/diy-tax-return-uk
-          ref: main
-          path: diy
-
       - name: Login to lon1 and activate ollama.diytaxreturn.co.uk auth rule
         env:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
@@ -30,13 +23,10 @@ jobs:
           echo "LOGIN OK"
           echo "::add-mask::$TOKEN"
 
-          RULE_FILE="diy/.github/wslproxy/data/rules/prod/90775fe0-2ba3-435d-9710-08844ffb1d00.json"
-          SERVER_FILE="diy/.github/wslproxy/data/servers/prod/host:ollama.diytaxreturn.co.uk.json"
-          test -f "$RULE_FILE"
-          test -f "$SERVER_FILE"
+          RULE_JSON='{"id":"90775fe0-2ba3-435d-9710-08844ffb1d00","name":"ollama-diytaxreturn-jwt-auth","profile_id":"prod","priority":1,"version":1,"_schema_version":2,"rules_tags":{},"servers":["host:ollama.diytaxreturn.co.uk"],"match":{"rules":{"path":"/","path_key":"starts_with","jwt_token_validation":"header_jwt_token_validation","jwt_token_validation_value":"x-api-key","jwt_token_validation_key":"bTdROXZYMnBMOHpSNG5UNmNIMWFLNXNXMGRGM3VKOUI"},"response":{"code":305,"allow":false,"strip_path":false,"is_consul":false,"auto_redirect_https":false,"routing":{"mode":"least_conn"},"redirect_uri":"vpnhh.workstation.co.uk:8888","backends":[{"address":"vpnhh.workstation.co.uk:8888","weight":100,"label":"vpnhh.workstation.co.uk:8888-origin"}]}}}'
+          SERVER_JSON='{"custom_location_block":{},"rate_limit":{"requests_per_second":100,"burst":50},"proxy_pass":"http://localhost","config":"CnNlcnZlciB7CiAgICBsaXN0ZW4gODA7CiAgICBzZXJ2ZXJfbmFtZSBvbGxhbWEuZGl5dGF4cmV0dXJuLmNvLnVrOwogICAgbG9jYXRpb24gLy53ZWxsLWtub3duL2FjbWUtY2hhbGxlbmdlLyB7IGNvbnRlbnRfYnlfbHVhX2Jsb2NrIHsgYXV0b19zc2w6Y2hhbGxlbmdlX3NlcnZlcigpIH0gfQogICAgbG9jYXRpb24gLyB7IHJldHVybiAzMDEgaHR0cHM6Ly8kaG9zdCRyZXF1ZXN0X3VyaTsgfQp9CnNlcnZlciB7CiAgICAgIGxpc3RlbiA4MDsKICAgICAgCiAgICAgIGxpc3RlbiA0NDMgc3NsIGh0dHAyOwogICAgICBzc2xfY2VydGlmaWNhdGVfYnlfbHVhX2Jsb2NrIHsgYXV0b19zc2w6c3NsX2NlcnRpZmljYXRlKCkgfQogICAgICBzc2xfY2VydGlmaWNhdGUgL2V0Yy9zc2wvcmVzdHktYXV0by1zc2wtZmFsbGJhY2suY3J0OwogICAgICBzc2xfY2VydGlmaWNhdGVfa2V5IC9ldGMvc3NsL3Jlc3R5LWF1dG8tc3NsLWZhbGxiYWNrLmtleTsKICAgICAgc3NsX3Nlc3Npb25fdGltZW91dCAxZDsKICAgICAgc3NsX3Nlc3Npb25fY2FjaGUgc2hhcmVkOlNTTDo1MG07CiAgICAgIHNzbF9zZXNzaW9uX3RpY2tldHMgb2ZmOwogICAgICBzc2xfcHJvdG9jb2xzIFRMU3YxLjIgVExTdjEuMzsKICAgICAgc3NsX2NpcGhlcnMgRUNESEUtRUNEU0EtQUVTMTI4LUdDTS1TSEEyNTY6RUNESEUtUlNBLUFFUzEyOC1HQ00tU0hBMjU2OkVDREhFLUVDRFNBLUFFUzI1Ni1HQ00tU0hBMzg0OkVDREhFLVJTQS1BRVMyNTYtR0NNLVNIQTM4NDpFQ0RIRS1FQ0RTQS1DSEFDSEEyMC1QT0xZMTMwNTpFQ0RIRS1SU0EtQ0hBQ0hBMjAtUE9MWTEzMDU6REhFLVJTQS1BRVMxMjgtR0NNLVNIQTI1NjpESEUtUlNBLUFFUzI1Ni1HQ00tU0hBMzg0OwogICAgICBzc2xfcHJlZmVyX3NlcnZlcl9jaXBoZXJzIG9mZjsKICAgICAgYWRkX2hlYWRlciBTdHJpY3QtVHJhbnNwb3J0LVNlY3VyaXR5ICJtYXgtYWdlMzE1MzYwMDA7IGluY2x1ZGVTdWJEb21haW5zIiBhbHdheXM7CiAgICAgIHNlcnZlcl9uYW1lIG9sbGFtYS5kaXl0YXhyZXR1cm4uY28udWs7CiAgICAgIHJvb3QgL3Zhci93d3cvaHRtbDsKICAgICAgaW5kZXggaW5kZXguaHRtbDsKICAgICAgYWNjZXNzX2xvZyBsb2dzL2FjY2Vzcy5sb2c7CiAgICAgIGVycm9yX2xvZyBsb2dzL2Vycm9yLmxvZzsKICAgICAgCiAgICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgICAgY29udGVudF9ieV9sdWFfYmxvY2sgeyBhdXRvX3NzbDpjaGFsbGVuZ2Vfc2VydmVyKCkgfQogICAgICB9CiAgICAgIAogICAgICAKICB9CiAgCiAg","config_status":false,"ssl_auto_renew":true,"created_at":1782717390,"rate_limit_enabled":false,"custom_headers":{},"listens":[{"listen":"80"}],"custom_response_headers":{},"server_name":"ollama.diytaxreturn.co.uk","cached_mime_types":{},"pop_ids":{},"cache_bypass_auth":false,"rules":"90775fe0-2ba3-435d-9710-08844ffb1d00","ssl_enabled":true,"access_log":"logs/access.log","custom_http_block":{},"custom_block":{},"varnish_config":{"backend_between_bytes_timeout":10,"cache_ttl_default":120,"listen_address":"0.0.0.0","listen_port":"6081","cache_size":"256m","cache_keep":7200,"admin_listen_port":"6082","cache_grace":3600,"backend_connect_timeout":5,"health_check_enabled":false,"health_check_url":"/health","backend_first_byte_timeout":60,"health_check_interval":5,"health_check_timeout":2},"ssl_email":"balinder.walia@gmail.com","servers_tags":{},"ssl_force_https":true,"ssl_staging":false,"cache_enabled":false,"varnish_snippets":{},"cache_ttl":3600,"profile_id":"prod","locations":{},"index":"index.html","match_cases":{},"waf_enabled":false,"root":"/var/www/html","dns_record_type":"A","error_log":"logs/error.log","id":"host:ollama.diytaxreturn.co.uk","varnish_enabled":false}'
 
-          # Import the new auth rule (preserves id)
-          RULES_BODY=$(jq -c '{data: [.], dataType: "rules"}' "$RULE_FILE")
+          RULES_BODY=$(printf '%s' "$RULE_JSON" | jq -c '{data: [.], dataType: "rules"}')
           HTTP=$(curl -sS -o /tmp/import.json -w '%{http_code}' \
             -X POST "${GATEWAY%/}/api/projects/import?_format=json" \
             -H "Authorization: Bearer $TOKEN" \
@@ -47,15 +37,13 @@ jobs:
           jq -c '.' /tmp/import.json || cat /tmp/import.json
           case "$HTTP" in 200|201|204) ;; *) exit 1 ;; esac
 
-          # PUT server with config_status=true so nginx reloads
-          # Decode base64 config if present (createUpdateServer re-encodes)
-          SERVER_PAYLOAD=$(jq -c '
+          SERVER_PAYLOAD=$(printf '%s' "$SERVER_JSON" | jq -c '
             .config_status = true
-            | if (.config|type)=="string" and (.config|length)>0 and (.config|test("^[A-Za-z0-9+/=]+$")) then
-                .config = (.config | @base64d)
+            | if (.config|type)=="string" and (.config|length)>0 then
+                try (.config = (.config | @base64d)) catch .
               else . end
-          ' "$SERVER_FILE")
-          SID=$(jq -r .id "$SERVER_FILE")
+          ')
+          SID=$(printf '%s' "$SERVER_JSON" | jq -r .id)
           HTTP=$(curl -sS -o /tmp/put.json -w '%{http_code}' \
             -X PUT "${GATEWAY%/}/api/servers/${SID}?_format=json" \
             -H "Authorization: Bearer $TOKEN" \
@@ -63,7 +51,6 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary "$SERVER_PAYLOAD")
           echo "PUT server http=$HTTP"
-          jq -c '{id, server_name, rules, config_status}' /tmp/put.json 2>/dev/null || cat /tmp/put.json
+          jq -c '{id, server_name, rules, config_status}' /tmp/put.json 2>/dev/null || head -c 500 /tmp/put.json
           case "$HTTP" in 200|201) ;; *) exit 1 ;; esac
-
-          echo "Deployed auth rule 90775fe0… for ollama.diytaxreturn.co.uk"
+          echo "Deployed auth rule for ollama.diytaxreturn.co.uk"
