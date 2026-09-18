@@ -1,0 +1,85 @@
+name: tmp sync wslproxy creds to diy-tax
+on:
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login + sync password to diy-tax-return-uk
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          RING_PROMOTER_TOKEN: ${{ secrets.RING_PROMOTER_TOKEN }}
+          GATEWAY: https://lon1.pop0.uk
+        run: |
+          set -euo pipefail
+
+          login() {
+            local email="$1"
+            curl -sS -X POST "${GATEWAY%/}/api/user/login" \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\": \"$email\", \"password\": \"$ADMIN_PASSWORD\"}"
+          }
+
+          echo "Testing opsapi ADMIN_PASSWORD against lon1..."
+          EMAIL_USED=""
+          for email in debian@wslproxy.org admin@wslproxy.com admin@diytaxreturn.co.uk; do
+            RESP=$(login "$email")
+            TOKEN=$(echo "$RESP" | jq -r '.data.accessToken // empty')
+            if [ -n "$TOKEN" ]; then
+              EMAIL_USED="$email"
+              break
+            fi
+            echo "login failed for $email: $(echo "$RESP" | jq -c '.error // .')"
+          done
+          if [ -z "$EMAIL_USED" ]; then
+            echo "LOGIN FAILED for all candidate emails"
+            exit 1
+          fi
+          echo "LOGIN OK as $EMAIL_USED"
+          echo "::add-mask::$TOKEN"
+
+          if [ -z "${RING_PROMOTER_TOKEN:-}" ]; then
+            echo "RING_PROMOTER_TOKEN empty — cannot sync secret"
+            exit 2
+          fi
+
+          echo "Fetching diy-tax-return-uk actions public key..."
+          HTTP=$(curl -sS -o /tmp/gh.json -w '%{http_code}' \
+            -H "Authorization: Bearer $RING_PROMOTER_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/bwalia/diy-tax-return-uk/actions/secrets/public-key")
+          echo "public-key http=$HTTP"
+          if [ "$HTTP" != "200" ]; then
+            echo "Cannot read public key — token lacks secrets scope?"
+            cat /tmp/gh.json
+            exit 3
+          fi
+
+          KEY_ID=$(jq -r .key_id /tmp/gh.json)
+          KEY=$(jq -r .key /tmp/gh.json)
+          pip install -q pynacl
+
+          ENCRYPTED=$(KEY="$KEY" ADMIN_PASSWORD="$ADMIN_PASSWORD" python3 - <<'PY'
+          import os, base64
+          from nacl import encoding, public
+          public_key = public.PublicKey(os.environ["KEY"].encode("utf-8"), encoding.Base64Encoder())
+          sealed_box = public.SealedBox(public_key)
+          encrypted = sealed_box.encrypt(os.environ["ADMIN_PASSWORD"].encode("utf-8"))
+          print(base64.b64encode(encrypted).decode("utf-8"))
+          PY
+          )
+
+          for secret_name in WSLPROXY_ADMIN_PASSWORD ADMIN_PASSWORD; do
+            HTTP=$(curl -sS -o /tmp/set.json -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer $RING_PROMOTER_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/bwalia/diy-tax-return-uk/actions/secrets/${secret_name}" \
+              -d "{\"encrypted_value\":\"$ENCRYPTED\",\"key_id\":\"$KEY_ID\"}")
+            echo "set $secret_name http=$HTTP body=$(cat /tmp/set.json)"
+          done
+
+          # Keep the working admin email in diy-tax vars if different
+          if [ "$EMAIL_USED" != "debian@wslproxy.org" ]; then
+            echo "NOTE: working email is $EMAIL_USED (diy-tax var is debian@wslproxy.org)"
+          fi
