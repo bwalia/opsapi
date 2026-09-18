@@ -218,6 +218,50 @@ spec:
             - name: CORS_ALLOWED_ORIGINS
               value: {{ .Values.corsAllowedOrigins | quote }}
             {{- end }}
+            # ── MinIO object storage isolation ─────────────────────────────
+            # By default this release inherits MINIO_* from the shared Vault
+            # ExternalSecret (envFrom above), which points at ANOTHER product's
+            # MinIO (diytaxreturn-minio). That both breaks isolation and, because
+            # that MinIO runs in the cloud region while this pod is pinned to the
+            # LAN (net-region=home), leaves its internal endpoint UNROUTABLE from
+            # here — server-side uploads (MINIO_ENDPOINT) time out while browser
+            # reads via the external URL still work, so it fails silently.
+            #
+            # Setting `.Values.minio` points THIS release at its OWN
+            # workstation-minio (devops/k8s/workstation-minio.yaml), co-located
+            # on the LAN so the ClusterIP is reachable. Credentials come from
+            # that server's own secret (so the keys always match — no drift), and
+            # explicit `env` WINS over the `envFrom` secretRef for each key.
+            # `endpoint` = internal S3 endpoint used for the app's PUT/GET.
+            # `externalUrl` = public host baked into browser <img> URLs.
+            {{- if .Values.minio }}
+            {{- if .Values.minio.endpoint }}
+            - name: MINIO_ENDPOINT
+              value: {{ .Values.minio.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.minio.externalUrl }}
+            - name: MINIO_ENDPOINT_WEB_EXTERNAL
+              value: {{ .Values.minio.externalUrl | quote }}
+            - name: MINIO_PUBLIC_URL
+              value: {{ .Values.minio.externalUrl | quote }}
+            {{- end }}
+            {{- if .Values.minio.bucket }}
+            - name: MINIO_BUCKET
+              value: {{ .Values.minio.bucket | quote }}
+            {{- end }}
+            {{- if .Values.minio.credsSecret }}
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.credsSecret | quote }}
+                  key: {{ .Values.minio.accessKeyKey | default "MINIO_ROOT_USER" | quote }}
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.credsSecret | quote }}
+                  key: {{ .Values.minio.secretKeyKey | default "MINIO_ROOT_PASSWORD" | quote }}
+            {{- end }}
+            {{- end }}
       volumes:
         - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
           configMap:
