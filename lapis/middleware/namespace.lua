@@ -248,6 +248,11 @@ function NamespaceMiddleware.optionalNamespace(handler)
                 self.namespace = namespace
 
                 if self.current_user then
+                    -- Match requireNamespace: a platform admin must read as one
+                    -- here too, or hasPermission()/checks behind this middleware
+                    -- would under-privilege them.
+                    self.is_platform_admin = isPlatformAdmin(self.current_user)
+
                     local membership = NamespaceMemberQueries.findByUserAndNamespace(
                         self.current_user.uuid,
                         namespace.id

@@ -80,21 +80,17 @@ function MenuQueries.create(data)
         updated_at = timestamp
     })
 
-    -- Initialize menu config for all existing namespaces
+    -- Enable this new item for every existing namespace in ONE set-based insert
+    -- (was one round-trip per namespace — O(tenants)). ON CONFLICT covers the
+    -- UNIQUE(namespace_id, menu_item_id) so re-runs are idempotent.
     if result and result.id then
-        local namespaces = db.select("id FROM namespaces")
-        for _, ns in ipairs(namespaces or {}) do
-            pcall(function()
-                db.insert("namespace_menu_config", {
-                    uuid = MigrationUtils.generateUUID(),
-                    namespace_id = ns.id,
-                    menu_item_id = result.id,
-                    is_enabled = true,
-                    created_at = timestamp,
-                    updated_at = timestamp
-                })
-            end)
-        end
+        db.query([[
+            INSERT INTO namespace_menu_config
+                (uuid, namespace_id, menu_item_id, is_enabled, created_at, updated_at)
+            SELECT gen_random_uuid()::text, n.id, ?, true, ?, ?
+            FROM namespaces n
+            ON CONFLICT (namespace_id, menu_item_id) DO NOTHING
+        ]], result.id, timestamp, timestamp)
     end
 
     return MenuQueries.show(result.id)
@@ -486,29 +482,16 @@ function MenuQueries.initNamespaceMenus(namespace_id)
     local MigrationUtils = require("helper.migration-utils")
     local timestamp = MigrationUtils.getCurrentTimestamp()
 
-    local menu_items = db.select("* FROM menu_items WHERE is_active = true")
-    if not menu_items then return end
-
-    for _, item in ipairs(menu_items) do
-        -- Check if already exists
-        local existing = db.select([[
-            * FROM namespace_menu_config
-            WHERE namespace_id = ? AND menu_item_id = ?
-        ]], namespace_id, item.id)
-
-        if #existing == 0 then
-            pcall(function()
-                db.insert("namespace_menu_config", {
-                    uuid = MigrationUtils.generateUUID(),
-                    namespace_id = namespace_id,
-                    menu_item_id = item.id,
-                    is_enabled = true,
-                    created_at = timestamp,
-                    updated_at = timestamp
-                })
-            end)
-        end
-    end
+    -- Enable all active items for this namespace in one insert. ON CONFLICT
+    -- makes it idempotent, replacing the old per-item exists-check + insert loop.
+    db.query([[
+        INSERT INTO namespace_menu_config
+            (uuid, namespace_id, menu_item_id, is_enabled, created_at, updated_at)
+        SELECT gen_random_uuid()::text, ?, mi.id, true, ?, ?
+        FROM menu_items mi
+        WHERE mi.is_active = true
+        ON CONFLICT (namespace_id, menu_item_id) DO NOTHING
+    ]], namespace_id, timestamp, timestamp)
 end
 
 -- Get child menu items

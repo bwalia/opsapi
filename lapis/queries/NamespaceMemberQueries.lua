@@ -287,6 +287,9 @@ function NamespaceMemberQueries.update(id, params)
     end
 
     member:update(params)
+    -- Defensive: is_owner/status changes here affect the owner no-lock-out
+    -- fallback in getPermissions. Cold path, so an unconditional bust is fine.
+    require("helper.permission-cache").invalidateMember(member.id)
     return member
 end
 
@@ -331,13 +334,18 @@ function NamespaceMemberQueries.assignRole(member_id, role_id)
         return existing[1]
     end
 
-    return NamespaceUserRoles:create({
+    local assignment = NamespaceUserRoles:create({
         uuid = Global.generateUUID(),
         namespace_member_id = member_id,
         namespace_role_id = role_id,
         created_at = timestamp,
         updated_at = timestamp
     }, { returning = "*" })
+
+    -- Self-invalidating so any caller (e.g. academy invite) is safe. setRoles
+    -- deliberately does NOT route through here (it busts once, outside its txn).
+    require("helper.permission-cache").invalidateMember(member_id)
+    return assignment
 end
 
 --- Remove a role from a member
@@ -354,7 +362,9 @@ function NamespaceMemberQueries.removeRole(member_id, role_id)
         return false
     end
 
-    return assignment:delete()
+    local deleted = assignment:delete()
+    require("helper.permission-cache").invalidateMember(member_id)
+    return deleted
 end
 
 --- Set member roles (replace all existing roles)
@@ -369,23 +379,37 @@ function NamespaceMemberQueries.setRoles(member_id, role_ids)
     if type(role_ids) ~= "table" then
         role_ids = role_ids ~= nil and { role_ids } or {}
     end
-    local ids = {}
+    -- De-dupe: the raw insert below would trip UNIQUE(member,role) on a repeat
+    -- id (the old assignRole loop silently deduped — preserve that).
+    local ids, seen = {}, {}
     for _, rid in ipairs(role_ids) do
         local n = tonumber(rid)
-        if n then
+        if n and not seen[n] then
+            seen[n] = true
             table.insert(ids, n)
         end
     end
     role_ids = ids
+
+    local timestamp = Global.getCurrentTimestamp()
 
     db.query("BEGIN")
     local ok, err = pcall(function()
         -- Remove all existing roles
         db.delete("namespace_user_roles", { namespace_member_id = member_id })
 
-        -- Add new roles
+        -- Add new roles. Insert directly rather than via assignRole: the delete
+        -- above cleared the set (so no dedup needed) and, more importantly, this
+        -- keeps Redis calls out of the DB transaction — permission-cache is
+        -- busted once after COMMIT instead of per row inside it.
         for _, role_id in ipairs(role_ids) do
-            NamespaceMemberQueries.assignRole(member_id, role_id)
+            NamespaceUserRoles:create({
+                uuid = Global.generateUUID(),
+                namespace_member_id = member_id,
+                namespace_role_id = role_id,
+                created_at = timestamp,
+                updated_at = timestamp
+            })
         end
     end)
 
@@ -395,6 +419,7 @@ function NamespaceMemberQueries.setRoles(member_id, role_ids)
     end
 
     db.query("COMMIT")
+    require("helper.permission-cache").invalidateMember(member_id)
     return true
 end
 
@@ -415,6 +440,15 @@ end
 -- @param member_id number Member ID
 -- @return table Combined permissions from all roles
 function NamespaceMemberQueries.getPermissions(member_id)
+    -- Cache-aside: this runs on every authenticated namespaced request. Busted
+    -- explicitly on any role/permission change (see helper.permission-cache),
+    -- so a cache hit is never staler than the last write across all pods.
+    local PermissionCache = require("helper.permission-cache")
+    local cached = PermissionCache.get(member_id)
+    if cached then
+        return cached
+    end
+
     local roles = NamespaceMemberQueries.getRoles(member_id)
     local permissions = {}
 
@@ -460,10 +494,13 @@ function NamespaceMemberQueries.getPermissions(member_id)
         local is_owner = member and (member.is_owner == true or member.is_owner == "t" or member.is_owner == 1)
         if is_owner then
             local NamespaceRoleQueries = require("queries.NamespaceRoleQueries")
-            return NamespaceRoleQueries.getOwnerPermissions()
+            result = NamespaceRoleQueries.getOwnerPermissions()
         end
     end
 
+    -- Cache the final map (owner-fallback included). Ownership-flag changes bust
+    -- this via transferOwnership/update, so a cached owner map can't go stale.
+    PermissionCache.set(member_id, result)
     return result
 end
 
@@ -547,6 +584,11 @@ function NamespaceMemberQueries.transferOwnership(namespace_id, from_user_id, to
     end
 
     db.query("COMMIT")
+    -- Both members' effective access can change: the old owner loses the
+    -- no-role owner fallback, the new owner gains it.
+    local PermissionCache = require("helper.permission-cache")
+    PermissionCache.invalidateMember(current_owner[1].id)
+    PermissionCache.invalidateMember(to_member_id)
     return true
 end
 
