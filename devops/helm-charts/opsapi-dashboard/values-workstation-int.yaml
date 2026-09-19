@@ -15,9 +15,12 @@ apiUrl: https://int-opsapi.workstation.co.uk
 # ingress.hostname below.
 host: int-opsapi-ui.workstation.co.uk
 
+# traefik-edge, not wslproxy: the wslproxy ingress class is a black hole while
+# its controller cannot authenticate to its own OpenResty admin API — see the
+# note in diytaxreturn-lapis/values-workstation-int.yaml.
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik-edge
   hostname: int-opsapi-ui.workstation.co.uk
   annotations: {}
   tls: []

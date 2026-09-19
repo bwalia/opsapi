@@ -48,18 +48,25 @@ service:
   type: ClusterIP
   port: 80
 
-# Dedicated Ingress for this release. className `wslproxy` = the k3s1 ingress
-# class the WSL Proxy edge routes to — identical to the working beacon
-# (monitoring-go) *.workstation.co.uk hosts (e.g. grafana/prometheus.workstation
-# .co.uk). The edge proxies to the shared k3s ingress entry 193.237.176.232:8888
-# (see the opsapi-prod-default rule backend), which serves this release's Host
-# over plain HTTP. NO cert-manager / NO tls block: TLS is terminated at the WSL
-# Proxy edge (ssl_enabled in the committed server JSON); traefik serves plain
-# HTTP :80 behind it, routing by Host header. The pod is pinned to a debian node
-# (nodeSelector below) — placement is independent of routing.
+# Dedicated Ingress for this release. The WSL Proxy edge terminates TLS and
+# proxies to the shared k3s ingress entry 193.237.176.232:8888 (the
+# opsapi-prod-default rule backend), which routes by Host header over plain
+# HTTP — so NO cert-manager and NO tls block here.
+#
+# className is `traefik-edge`, which is what actually serves the working
+# *.workstation.co.uk hosts behind that edge (beacon, int.workstation.co.uk).
+# It was `wslproxy` until 2026-09-19, when every host on that class started
+# returning a bare "404 page not found": the wslproxy ingress controller cannot
+# program its own data plane, because the OpenResty it pushes backends to runs
+# the main bwalia/wslproxy image, whose nginx config puts /api/* behind the
+# dashboard JWT. The controller sends no token, so each push is refused with
+# `401 Missing token`, and when the OpenResty pods restarted they came back with
+# no routes at all. Move back to `wslproxy` once the controller authenticates to
+# that API (or the ingress-controller chart's own nginx.conf, which leaves
+# /api/internal open in-cluster, is the one actually deployed).
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik-edge
   annotations: {}
   hosts:
     - host: int-opsapi.workstation.co.uk
