@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   ChevronDown,
   Plus,
+  Tag,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
@@ -17,6 +18,8 @@ import {
   KanbanBoard,
   TaskDetailModal,
   CreateTaskModal,
+  CreateBoardModal,
+  LabelManagerModal,
 } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
 import { kanbanService } from '@/services/kanban.service';
@@ -26,6 +29,7 @@ import type {
   CreateKanbanColumnDto,
   CreateKanbanTaskDto,
   UpdateKanbanTaskDto,
+  CreateKanbanBoardDto,
   KanbanBoard as KanbanBoardType,
 } from '@/types';
 import { cn } from '@/lib/utils';
@@ -149,6 +153,7 @@ export default function ProjectDetailPage() {
     loadBoardFull,
     loadLabels,
     loadMembers,
+    createBoard,
     createColumn,
     updateColumn,
     deleteColumn,
@@ -172,6 +177,9 @@ export default function ProjectDetailPage() {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
   const [createTaskColumnId, setCreateTaskColumnId] = useState<number | null>(null);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+  const [isCreateBoardModalOpen, setIsCreateBoardModalOpen] = useState(false);
+  const [isCreatingBoard, setIsCreatingBoard] = useState(false);
+  const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
 
   // Load project data
   useEffect(() => {
@@ -204,9 +212,27 @@ export default function ProjectDetailPage() {
   }, []);
 
   const handleCreateBoard = useCallback(() => {
-    // TODO: Implement create board modal
-    toast.error('Create board modal coming soon');
+    setIsCreateBoardModalOpen(true);
   }, []);
+
+  const handleCreateBoardSubmit = useCallback(
+    async (data: CreateKanbanBoardDto) => {
+      setIsCreatingBoard(true);
+      try {
+        const board = await createBoard(projectUuid, data);
+        if (board) {
+          toast.success('Board created');
+          setIsCreateBoardModalOpen(false);
+          setCurrentBoardUuid(board.uuid); // switch to the new board
+        } else {
+          toast.error('Failed to create board');
+        }
+      } finally {
+        setIsCreatingBoard(false);
+      }
+    },
+    [createBoard, projectUuid]
+  );
 
   const handleTaskClick = useCallback(
     async (task: KanbanTask) => {
@@ -491,6 +517,12 @@ export default function ProjectDetailPage() {
               {currentProject?.member_count || 0}
             </Button>
 
+            {/* Labels */}
+            <Button variant="ghost" size="sm" onClick={() => setIsLabelManagerOpen(true)}>
+              <Tag size={18} className="mr-1" />
+              Labels
+            </Button>
+
             {/* Scrum Board */}
             <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/sprints`)}>
               <LayoutGrid size={18} className="mr-1" />
@@ -563,6 +595,23 @@ export default function ProjectDetailPage() {
           onToggleChecklistItem={handleToggleChecklistItem}
           onAddChecklist={handleAddChecklist}
           onAddChecklistItem={handleAddChecklistItem}
+        />
+
+        {/* Label Manager Modal */}
+        <LabelManagerModal
+          isOpen={isLabelManagerOpen}
+          onClose={() => setIsLabelManagerOpen(false)}
+          projectUuid={projectUuid}
+          labels={labels}
+          onChanged={() => loadLabels(projectUuid)}
+        />
+
+        {/* Create Board Modal */}
+        <CreateBoardModal
+          isOpen={isCreateBoardModalOpen}
+          onClose={() => setIsCreateBoardModalOpen(false)}
+          onSubmit={handleCreateBoardSubmit}
+          isLoading={isCreatingBoard}
         />
 
         {/* Create Task Modal */}
