@@ -11,6 +11,10 @@ MCP-compatible agent) work an employee's OpsAPI kanban tasks:
 The agent acts **as a specific employee**, so `list_my_tasks` returns *their*
 tasks and logged time is attributed to *them*.
 
+> 👉 **New here? Start with the plain-English setup guide:
+> [GETTING-STARTED.md](GETTING-STARTED.md).** This README is the full technical
+> reference.
+
 ## How it authenticates: a personal API key
 
 OpsAPI API keys can be **bound to a user** (a "personal access token"). Such a
