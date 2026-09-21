@@ -45,6 +45,7 @@ interface PermissionsContextValue {
   isLoading: boolean;
   userRole: string | null;
   namespaceRole: string | null;
+  landingPath: string | null;
   isNamespaceOwner: boolean;
   hasPermission: (module: DashboardModule | NamespaceModule, action: PermissionAction) => boolean;
   canAccess: (module: DashboardModule | NamespaceModule) => boolean;
@@ -66,6 +67,7 @@ const PermissionsContext = createContext<PermissionsContextValue>({
   isLoading: true,
   userRole: null,
   namespaceRole: null,
+  landingPath: null,
   isNamespaceOwner: false,
   hasPermission: () => false,
   canAccess: () => false,
@@ -141,6 +143,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
 
     return null;
+  }, [user]);
+
+  // Where this user's role wants them to land after login (data-driven redirect,
+  // set per namespace role). null => the app default (/dashboard).
+  const landingPath = useMemo(() => {
+    if (!user) return null;
+    const userData = user as User & { namespace?: { landing_path?: string } };
+    return userData.namespace?.landing_path || null;
   }, [user]);
 
   // Check if user is platform admin (has "administrative" role — exact match only)
@@ -290,6 +300,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       isLoading,
       userRole,
       namespaceRole,
+      landingPath,
       isNamespaceOwner,
       hasPermission,
       canAccess,
@@ -307,6 +318,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       isLoading,
       userRole,
       namespaceRole,
+      landingPath,
       isNamespaceOwner,
       hasPermission,
       canAccess,

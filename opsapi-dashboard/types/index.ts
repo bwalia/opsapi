@@ -81,6 +81,8 @@ export interface LoginNamespace {
   is_owner?: boolean;
   role?: string;
   permissions?: NamespacePermissions;
+  /** Where this user's role wants them to land after login. */
+  landing_path?: string;
 }
 
 /** Returned when admin 2FA is required — no JWT issued yet */
@@ -571,6 +573,8 @@ export interface NamespaceRole {
   is_system: boolean;
   is_default: boolean;
   priority: number;
+  /** Post-login landing path for users with this role (null = app default). */
+  landing_path?: string | null;
   created_at: string;
   updated_at: string;
   member_count?: number;
@@ -682,6 +686,8 @@ export interface CreateNamespaceRoleDto {
   permissions?: NamespacePermissions;
   is_default?: boolean;
   priority?: number;
+  /** Optional post-login landing path for users with this role. */
+  landing_path?: string;
 }
 
 export interface UpdateNamespaceRoleDto extends Partial<CreateNamespaceRoleDto> {}

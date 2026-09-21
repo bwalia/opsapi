@@ -104,6 +104,8 @@ function NamespaceRoleQueries.create(data)
         is_system = data.is_system or false,
         is_default = data.is_default or false,
         priority = data.priority or 0,
+        -- Where users with this role land after login (NULL = app default).
+        landing_path = data.landing_path,
         created_at = timestamp,
         updated_at = timestamp
     }
@@ -755,6 +757,22 @@ function NamespaceRoleQueries.createDefaultRoles(namespace_id, project_code)
     })
     table.insert(created_roles, member_role)
 
+    -- Developer role: an employee who is assigned project/kanban tasks. Seeded
+    -- with empty permissions so each namespace configures what a developer may
+    -- do (dynamic RBAC); task-level edit also comes from kanban project roles /
+    -- task assignment. Not a system role, so it can be renamed/tuned per tenant.
+    local developer_role = NamespaceRoleQueries.create({
+        namespace_id = namespace_id,
+        role_name = "developer",
+        display_name = "Developer",
+        description = "Works on assigned project tasks",
+        permissions = NamespaceRoleQueries.getEmptyPermissions(project_code),
+        is_system = false,
+        is_default = false,
+        priority = 20
+    })
+    table.insert(created_roles, developer_role)
+
     -- Field-service operational roles, when this deployment has that module.
     local ProjectConfig = require("helper.project-config")
     if ProjectConfig.isFeatureEnabled(ProjectConfig.FEATURES.FIELD_SERVICE) then
@@ -779,6 +797,7 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
         {
             role_name = "telecaller", display_name = "Telecaller", priority = 30,
             description = "Logs customer complaints as service requests",
+            landing_path = "/dashboard/field-service",
             permissions = {
                 customers = { "read", "create" },
                 fs_service_requests = { "create", "read", "update" },
@@ -792,6 +811,7 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
         {
             role_name = "service_manager", display_name = "Service Manager", priority = 50,
             description = "Assigns jobs to engineers, approves parts, and invoices",
+            landing_path = "/dashboard/field-service",
             permissions = {
                 fs_service_requests = { "manage" }, fs_jobs = { "manage" }, fs_visits = { "manage" },
                 fs_job_types = { "manage" }, fs_parts = { "manage" }, employees = { "manage" },
@@ -821,6 +841,7 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
         {
             role_name = "engineer", display_name = "Engineer", priority = 20,
             description = "Works only the jobs and visits assigned to them",
+            landing_path = "/dashboard/field-service/my-work",
             -- read (not manage): the Jobs/Visits list routes scope a caller to
             -- their own work whenever they lack module.update, so an engineer
             -- reads the pages but only ever sees the jobs/visits they're the
@@ -853,6 +874,7 @@ function NamespaceRoleQueries.createFieldServiceRoles(namespace_id)
                 role_name = def.role_name, display_name = def.display_name,
                 description = def.description, permissions = perms,
                 is_system = true, is_default = false, priority = def.priority,
+                landing_path = def.landing_path,
             })
             if ok then table.insert(created, role) end
         end

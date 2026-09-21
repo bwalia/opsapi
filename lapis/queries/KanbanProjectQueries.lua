@@ -486,6 +486,50 @@ end
 -- Project Member Operations
 --------------------------------------------------------------------------------
 
+-- Namespace-level authority over a project. A user who is the OWNER of the
+-- project's namespace, a platform admin, or holds the namespace `projects.manage`
+-- permission may manage ANY project in that namespace — even without an explicit
+-- kanban membership row. This bridges the tenant's RBAC into kanban so a manager/
+-- owner isn't locked out of their own projects.
+--
+-- Only evaluated when the cheap membership check misses (namespace admins are the
+-- uncommon path), so the hot member path stays a single query.
+-- ponytail: uncached per-call lookups; add a request-scoped memo if this shows up
+-- hot, but the common (member) path never reaches here.
+local function nsPrivileged(project_id, user_uuid)
+    if not project_id or not user_uuid then return false end
+    local proj = db.query("SELECT namespace_id FROM kanban_projects WHERE id = ? LIMIT 1", project_id)
+    local ns_id = proj and proj[1] and proj[1].namespace_id
+    if not ns_id or ns_id == ngx.null then return false end
+
+    -- Namespace owner of this project's tenant?
+    local owner = db.query([[
+        SELECT 1 FROM namespace_members nm
+        JOIN users u ON u.id = nm.user_id
+        WHERE u.uuid = ? AND nm.namespace_id = ? AND nm.is_owner = true
+        LIMIT 1
+    ]], user_uuid, ns_id)
+    if owner and #owner > 0 then return true end
+
+    -- Platform admin?
+    local ok_admin, AdminCheck = pcall(require, "helper.admin-check")
+    if ok_admin and AdminCheck.isPlatformAdmin({ uuid = user_uuid }) then return true end
+
+    -- Holds `projects.manage` in this namespace?
+    local ok_perm, perms = pcall(function()
+        local NMQ = require("queries.NamespaceMemberQueries")
+        local member = NMQ.findByUserAndNamespace(user_uuid, ns_id)
+        if not member then return nil end
+        return NMQ.getPermissions(member.id)
+    end)
+    if ok_perm and type(perms) == "table" and type(perms.projects) == "table" then
+        for _, a in ipairs(perms.projects) do
+            if a == "manage" then return true end
+        end
+    end
+    return false
+end
+
 --- Check if user is a member of project
 -- @param project_id number Project ID
 -- @param user_uuid string User UUID
@@ -497,7 +541,8 @@ function KanbanProjectQueries.isMember(project_id, user_uuid)
         WHERE project_id = ? AND user_uuid = ? AND left_at IS NULL
     ]]
     local result = db.query(sql, project_id, user_uuid)
-    return result and result[1] and tonumber(result[1].count) > 0
+    if result and result[1] and tonumber(result[1].count) > 0 then return true end
+    return nsPrivileged(project_id, user_uuid)
 end
 
 --- Check if user has admin permissions on project
@@ -512,7 +557,8 @@ function KanbanProjectQueries.isAdmin(project_id, user_uuid)
           AND role IN ('owner', 'admin')
     ]]
     local result = db.query(sql, project_id, user_uuid)
-    return result and result[1] and tonumber(result[1].count) > 0
+    if result and result[1] and tonumber(result[1].count) > 0 then return true end
+    return nsPrivileged(project_id, user_uuid)
 end
 
 --- Check if user may EDIT the project (a member whose role is not read-only).
@@ -529,7 +575,8 @@ function KanbanProjectQueries.isEditor(project_id, user_uuid)
           AND role IN ('owner', 'admin', 'member')
     ]]
     local result = db.query(sql, project_id, user_uuid)
-    return result and result[1] and tonumber(result[1].count) > 0
+    if result and result[1] and tonumber(result[1].count) > 0 then return true end
+    return nsPrivileged(project_id, user_uuid)
 end
 
 --- Check if user is owner of project

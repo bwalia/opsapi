@@ -1305,7 +1305,9 @@ return function(app)
                 description = params.description,
                 permissions = params.permissions,
                 is_default = params.is_default,
-                priority = params.priority
+                priority = params.priority,
+                -- Where users with this role land after login (optional).
+                landing_path = params.landing_path
             })
 
             if not ok then
