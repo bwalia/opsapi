@@ -21,6 +21,7 @@ interface ColumnHeaderProps {
   onEdit?: (column: KanbanColumnType) => void;
   onDelete?: (column: KanbanColumnType) => void;
   onAddTask?: () => void;
+  canEdit?: boolean;
 }
 
 const ColumnHeader = memo(function ColumnHeader({
@@ -29,6 +30,7 @@ const ColumnHeader = memo(function ColumnHeader({
   onEdit,
   onDelete,
   onAddTask,
+  canEdit = true,
 }: ColumnHeaderProps) {
   const [showMenu, setShowMenu] = useState(false);
 
@@ -94,6 +96,9 @@ const ColumnHeader = memo(function ColumnHeader({
       </div>
 
       <div className="flex items-center gap-1">
+        {/* Editors only: add-task + column edit/delete menu */}
+        {canEdit && (
+        <>
         {/* Add Task Button */}
         <button
           onClick={onAddTask}
@@ -138,6 +143,8 @@ const ColumnHeader = memo(function ColumnHeader({
             </>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );
@@ -155,6 +162,7 @@ export interface KanbanColumnProps {
   onAddTask?: (columnId: number) => Promise<void>;
   isDragOver?: boolean;
   isDragging?: boolean;
+  canEdit?: boolean;
   className?: string;
 }
 
@@ -166,6 +174,7 @@ const KanbanColumn = memo(function KanbanColumn({
   onAddTask,
   isDragOver: externalIsDragOver,
   isDragging,
+  canEdit = true,
   className,
 }: KanbanColumnProps) {
   // Make this column a drop target
@@ -211,6 +220,7 @@ const KanbanColumn = memo(function KanbanColumn({
         onEdit={onEditColumn}
         onDelete={onDeleteColumn}
         onAddTask={handleAddTaskClick}
+        canEdit={canEdit}
       />
 
       {/* Tasks Container with Droppable Area */}
@@ -259,17 +269,19 @@ const KanbanColumn = memo(function KanbanColumn({
         )}
       </div>
 
-      {/* Add Task Footer */}
-      <button
-        onClick={handleAddTaskClick}
-        className={cn(
-          'flex items-center gap-2 px-3 py-2 text-sm text-secondary-500 hover:text-secondary-700 hover:bg-secondary-200 rounded-b-lg transition-colors',
-          isDragging && 'pointer-events-none opacity-50'
-        )}
-      >
-        <Plus size={16} />
-        Add a task
-      </button>
+      {/* Add Task Footer (editors only) */}
+      {canEdit && (
+        <button
+          onClick={handleAddTaskClick}
+          className={cn(
+            'flex items-center gap-2 px-3 py-2 text-sm text-secondary-500 hover:text-secondary-700 hover:bg-secondary-200 rounded-b-lg transition-colors',
+            isDragging && 'pointer-events-none opacity-50'
+          )}
+        >
+          <Plus size={16} />
+          Add a task
+        </button>
+      )}
     </div>
   );
 });

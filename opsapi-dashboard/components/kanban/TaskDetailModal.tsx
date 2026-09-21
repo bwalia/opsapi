@@ -74,21 +74,24 @@ const PriorityIcon = ({ priority }: { priority: KanbanTaskPriority }) => {
 interface PrioritySelectorProps {
   value: KanbanTaskPriority;
   onChange: (priority: KanbanTaskPriority) => void;
+  disabled?: boolean;
 }
 
 const PrioritySelector = memo(function PrioritySelector({
   value,
   onChange,
+  disabled,
 }: PrioritySelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
         className={cn(
           'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border transition-colors',
-          getPriorityColor(value)
+          getPriorityColor(value),
+          disabled && 'cursor-default'
         )}
       >
         <PriorityIcon priority={value} />
@@ -131,21 +134,24 @@ const STATUSES: KanbanTaskStatus[] = ['open', 'in_progress', 'blocked', 'review'
 interface StatusSelectorProps {
   value: KanbanTaskStatus;
   onChange: (status: KanbanTaskStatus) => void;
+  disabled?: boolean;
 }
 
 const StatusSelector = memo(function StatusSelector({
   value,
   onChange,
+  disabled,
 }: StatusSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
         className={cn(
           'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border transition-colors',
-          getTaskStatusColor(value)
+          getTaskStatusColor(value),
+          disabled && 'cursor-default'
         )}
       >
         {formatTaskStatus(value)}
@@ -197,6 +203,7 @@ interface AssigneesSectionProps {
   members: KanbanProjectMember[];
   onAdd: (userUuid: string) => void;
   onRemove: (userUuid: string) => void;
+  canEdit?: boolean;
 }
 
 const AssigneesSection = memo(function AssigneesSection({
@@ -204,6 +211,7 @@ const AssigneesSection = memo(function AssigneesSection({
   members,
   onAdd,
   onRemove,
+  canEdit = true,
 }: AssigneesSectionProps) {
   const [showPicker, setShowPicker] = useState(false);
 
@@ -229,15 +237,18 @@ const AssigneesSection = memo(function AssigneesSection({
             <span className="text-sm">
               {assignee.user?.first_name} {assignee.user?.last_name}
             </span>
-            <button
-              onClick={() => onRemove(assignee.user_uuid)}
-              className="text-secondary-400 hover:text-secondary-600"
-            >
-              <X size={14} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => onRemove(assignee.user_uuid)}
+                className="text-secondary-400 hover:text-secondary-600"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
         ))}
 
+        {canEdit && (
         <div className="relative">
           <button
             onClick={() => setShowPicker(!showPicker)}
@@ -273,6 +284,7 @@ const AssigneesSection = memo(function AssigneesSection({
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -287,6 +299,7 @@ interface LabelsSectionProps {
   projectLabels: KanbanLabel[];
   onAdd: (labelId: number) => void;
   onRemove: (labelId: number) => void;
+  canEdit?: boolean;
 }
 
 const LabelsSection = memo(function LabelsSection({
@@ -294,6 +307,7 @@ const LabelsSection = memo(function LabelsSection({
   projectLabels,
   onAdd,
   onRemove,
+  canEdit = true,
 }: LabelsSectionProps) {
   const [showPicker, setShowPicker] = useState(false);
 
@@ -317,15 +331,18 @@ const LabelsSection = memo(function LabelsSection({
             }}
           >
             <span>{label.name}</span>
-            <button
-              onClick={() => onRemove(label.id)}
-              className="hover:opacity-70"
-            >
-              <X size={12} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => onRemove(label.id)}
+                className="hover:opacity-70"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
         ))}
 
+        {canEdit && (
         <div className="relative">
           <button
             onClick={() => setShowPicker(!showPicker)}
@@ -359,6 +376,7 @@ const LabelsSection = memo(function LabelsSection({
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -373,6 +391,7 @@ interface CommentsSectionProps {
   onAddComment: (content: string) => void;
   onDeleteComment: (uuid: string) => void;
   isAddingComment?: boolean;
+  canEdit?: boolean;
 }
 
 const CommentsSection = memo(function CommentsSection({
@@ -380,6 +399,7 @@ const CommentsSection = memo(function CommentsSection({
   onAddComment,
   onDeleteComment,
   isAddingComment,
+  canEdit = true,
 }: CommentsSectionProps) {
   const [newComment, setNewComment] = useState('');
 
@@ -424,25 +444,27 @@ const CommentsSection = memo(function CommentsSection({
         ))}
       </div>
 
-      {/* Add Comment Form */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-          placeholder="Write a comment..."
-          className="flex-1 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-          disabled={isAddingComment}
-        />
-        <Button
-          type="submit"
-          size="sm"
-          disabled={!newComment.trim() || isAddingComment}
-          isLoading={isAddingComment}
-        >
-          <Send size={14} />
-        </Button>
-      </form>
+      {/* Add Comment Form (editors only) */}
+      {canEdit && (
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <input
+            type="text"
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            placeholder="Write a comment..."
+            className="flex-1 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            disabled={isAddingComment}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!newComment.trim() || isAddingComment}
+            isLoading={isAddingComment}
+          >
+            <Send size={14} />
+          </Button>
+        </form>
+      )}
     </div>
   );
 });
@@ -456,6 +478,7 @@ interface ChecklistSectionProps {
   onToggleItem: (itemUuid: string) => void;
   onAddChecklist: (name: string) => void;
   onAddItem: (checklistUuid: string, content: string) => void;
+  canEdit?: boolean;
 }
 
 const ChecklistSection = memo(function ChecklistSection({
@@ -463,6 +486,7 @@ const ChecklistSection = memo(function ChecklistSection({
   onToggleItem,
   onAddChecklist,
   onAddItem,
+  canEdit = true,
 }: ChecklistSectionProps) {
   const [showAddChecklist, setShowAddChecklist] = useState(false);
   const [newChecklistName, setNewChecklistName] = useState('');
@@ -493,12 +517,14 @@ const ChecklistSection = memo(function ChecklistSection({
           <CheckSquare size={14} />
           <span>Checklists</span>
         </div>
-        <button
-          onClick={() => setShowAddChecklist(true)}
-          className="text-sm text-primary-600 hover:text-primary-700"
-        >
-          + Add checklist
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setShowAddChecklist(true)}
+            className="text-sm text-primary-600 hover:text-primary-700"
+          >
+            + Add checklist
+          </button>
+        )}
       </div>
 
       {/* Add Checklist Form */}
@@ -558,12 +584,13 @@ const ChecklistSection = memo(function ChecklistSection({
                     className="flex items-center gap-2 p-1 hover:bg-secondary-50 rounded"
                   >
                     <button
-                      onClick={() => onToggleItem(item.uuid)}
+                      onClick={() => canEdit && onToggleItem(item.uuid)}
                       className={cn(
                         'w-4 h-4 rounded border flex items-center justify-center',
                         item.is_completed
                           ? 'bg-green-500 border-green-500 text-white'
-                          : 'border-secondary-300'
+                          : 'border-secondary-300',
+                        !canEdit && 'cursor-default'
                       )}
                     >
                       {item.is_completed && <Check size={12} />}
@@ -579,8 +606,8 @@ const ChecklistSection = memo(function ChecklistSection({
                   </div>
                 ))}
 
-                {/* Add Item */}
-                {addingItemTo === checklist.uuid ? (
+                {/* Add Item (editors only) */}
+                {canEdit && (addingItemTo === checklist.uuid ? (
                   <div className="flex gap-2 mt-2">
                     <input
                       type="text"
@@ -605,7 +632,7 @@ const ChecklistSection = memo(function ChecklistSection({
                   >
                     + Add item
                   </button>
-                )}
+                ))}
               </div>
             </div>
           );
@@ -623,6 +650,8 @@ export interface TaskDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   task: KanbanTask | null;
+  /** When false, the modal is read-only: no edit/delete/comment/checklist controls. */
+  canEdit?: boolean;
   members: KanbanProjectMember[];
   labels: KanbanLabel[];
   isLoading?: boolean;
@@ -643,6 +672,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
   isOpen,
   onClose,
   task,
+  canEdit = true,
   members,
   labels,
   isLoading,
@@ -765,16 +795,18 @@ const TaskDetailModal = memo(function TaskDetailModal({
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
                     <div className="absolute right-0 mt-1 w-40 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
-                      <button
-                        onClick={() => {
-                          setIsEditing(true);
-                          setShowMenu(false);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50"
-                      >
-                        <Edit2 size={14} />
-                        Edit
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => {
+                            setIsEditing(true);
+                            setShowMenu(false);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary-50"
+                        >
+                          <Edit2 size={14} />
+                          Edit
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(task.uuid);
@@ -785,13 +817,15 @@ const TaskDetailModal = memo(function TaskDetailModal({
                         <Copy size={14} />
                         Copy ID
                       </button>
-                      <button
-                        onClick={handleDelete}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-                      >
-                        <Trash2 size={14} />
-                        Delete
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={handleDelete}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -800,8 +834,8 @@ const TaskDetailModal = memo(function TaskDetailModal({
 
             {/* Status & Priority */}
             <div className="flex items-center gap-3 mt-3">
-              <StatusSelector value={task.status} onChange={handleStatusChange} />
-              <PrioritySelector value={task.priority} onChange={handlePriorityChange} />
+              <StatusSelector value={task.status} onChange={handleStatusChange} disabled={!canEdit} />
+              <PrioritySelector value={task.priority} onChange={handlePriorityChange} disabled={!canEdit} />
               {overdue && (
                 <span className="text-sm text-red-600 font-medium">Overdue</span>
               )}
@@ -848,6 +882,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
           <div className="mb-6">
             <ChecklistSection
               checklists={task.checklists}
+              canEdit={canEdit}
               onToggleItem={onToggleChecklistItem}
               onAddChecklist={(name) => onAddChecklist(task.uuid, name)}
               onAddItem={onAddChecklistItem}
@@ -858,6 +893,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
           <div>
             <CommentsSection
               comments={task.comments}
+              canEdit={canEdit}
               onAddComment={(content) => onAddComment(task.uuid, content)}
               onDeleteComment={onDeleteComment}
             />
@@ -870,6 +906,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
           <AssigneesSection
             assignees={task.assignees}
             members={members}
+            canEdit={canEdit}
             onAdd={(userUuid) => onAddAssignee(task.uuid, userUuid)}
             onRemove={(userUuid) => onRemoveAssignee(task.uuid, userUuid)}
           />
@@ -878,6 +915,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
           <LabelsSection
             taskLabels={task.labels}
             projectLabels={labels}
+            canEdit={canEdit}
             onAdd={(labelId) => onAddLabel(task.uuid, labelId)}
             onRemove={(labelId) => onRemoveLabel(task.uuid, labelId)}
           />
@@ -891,10 +929,11 @@ const TaskDetailModal = memo(function TaskDetailModal({
             <input
               type="date"
               value={task.due_date?.split('T')[0] || ''}
+              disabled={!canEdit}
               onChange={(e) =>
                 onUpdate(task.uuid, { due_date: e.target.value || undefined })
               }
-              className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary-50 disabled:text-secondary-500"
             />
           </div>
 
@@ -997,13 +1036,14 @@ const TaskDetailModal = memo(function TaskDetailModal({
               type="number"
               min="0"
               value={task.story_points || ''}
+              disabled={!canEdit}
               onChange={(e) =>
                 onUpdate(task.uuid, {
                   story_points: e.target.value ? parseInt(e.target.value) : undefined,
                 })
               }
               placeholder="0"
-              className="w-20 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-20 px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary-50 disabled:text-secondary-500"
             />
           </div>
 

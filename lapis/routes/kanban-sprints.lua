@@ -384,6 +384,9 @@ return function(app)
         if not KanbanProjectQueries.isMember(sprint.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
         end
+        if not KanbanProjectQueries.isEditor(sprint.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
+        end
 
         local data = parse_request_body()
 
@@ -413,6 +416,9 @@ return function(app)
 
         if not KanbanProjectQueries.isMember(sprint.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(sprint.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local data = parse_request_body()

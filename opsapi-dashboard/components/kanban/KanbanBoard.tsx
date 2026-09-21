@@ -208,8 +208,10 @@ const AddColumn = memo(function AddColumn({ onAdd, isLoading }: AddColumnProps) 
 
 const EmptyState = memo(function EmptyState({
   onAddColumn,
+  canEdit = true,
 }: {
   onAddColumn: () => void;
+  canEdit?: boolean;
 }) {
   return (
     <div className="flex flex-col items-center justify-center h-96 text-secondary-500">
@@ -218,12 +220,16 @@ const EmptyState = memo(function EmptyState({
       </div>
       <h3 className="text-lg font-medium mb-2">No columns yet</h3>
       <p className="text-sm text-secondary-400 mb-4">
-        Create your first column to start organizing tasks
+        {canEdit
+          ? 'Create your first column to start organizing tasks'
+          : 'This board has no columns yet.'}
       </p>
-      <Button onClick={onAddColumn}>
-        <Plus size={16} className="mr-2" />
-        Add column
-      </Button>
+      {canEdit && (
+        <Button onClick={onAddColumn}>
+          <Plus size={16} className="mr-2" />
+          Add column
+        </Button>
+      )}
     </div>
   );
 });
@@ -234,6 +240,8 @@ const EmptyState = memo(function EmptyState({
 
 export interface KanbanBoardProps {
   data: KanbanBoardFullResponse;
+  /** When false, the board is read-only: no drag, no add/edit/delete controls. */
+  canEdit?: boolean;
   onTaskClick?: (task: KanbanTask) => void;
   onEditColumn?: (column: KanbanColumnType) => void;
   onDeleteColumn?: (column: KanbanColumnType) => void;
@@ -252,6 +260,7 @@ export interface KanbanBoardProps {
 
 const KanbanBoard = memo(function KanbanBoard({
   data,
+  canEdit = true,
   onTaskClick,
   onEditColumn,
   onDeleteColumn,
@@ -492,10 +501,11 @@ const KanbanBoard = memo(function KanbanBoard({
       {/* Board Content with DnD Context */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-6 snap-x snap-mandatory md:snap-none scroll-smooth">
         {sortedColumns.length === 0 ? (
-          <EmptyState onAddColumn={() => handleAddColumn({ name: 'To Do' })} />
+          <EmptyState canEdit={canEdit} onAddColumn={() => handleAddColumn({ name: 'To Do' })} />
         ) : (
           <DndContext
-            sensors={sensors}
+            // Read-only board: no sensors → tasks can't be dragged.
+            sensors={canEdit ? sensors : []}
             collisionDetection={closestCorners}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
@@ -507,6 +517,7 @@ const KanbanBoard = memo(function KanbanBoard({
                 <KanbanColumn
                   key={column.uuid}
                   column={column}
+                  canEdit={canEdit}
                   onTaskClick={onTaskClick}
                   onEditColumn={onEditColumn}
                   onDeleteColumn={onDeleteColumn}
@@ -516,8 +527,8 @@ const KanbanBoard = memo(function KanbanBoard({
                 />
               ))}
 
-              {/* Add Column */}
-              <AddColumn onAdd={handleAddColumn} isLoading={isAddingColumn} />
+              {/* Add Column (editors only) */}
+              {canEdit && <AddColumn onAdd={handleAddColumn} isLoading={isAddingColumn} />}
             </div>
 
             {/* Drag Overlay - Shows the task being dragged */}

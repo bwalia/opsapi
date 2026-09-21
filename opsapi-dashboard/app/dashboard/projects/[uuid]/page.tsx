@@ -39,6 +39,7 @@ interface BoardSelectorProps {
   currentBoardUuid: string;
   onBoardChange: (boardUuid: string) => void;
   onCreateBoard: () => void;
+  canEdit?: boolean;
 }
 
 const BoardSelector = React.memo(function BoardSelector({
@@ -46,6 +47,7 @@ const BoardSelector = React.memo(function BoardSelector({
   currentBoardUuid,
   onBoardChange,
   onCreateBoard,
+  canEdit = true,
 }: BoardSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const currentBoard = boards.find((b) => b.uuid === currentBoardUuid);
@@ -84,17 +86,21 @@ const BoardSelector = React.memo(function BoardSelector({
                 )}
               </button>
             ))}
-            <hr className="my-1" />
-            <button
-              onClick={() => {
-                onCreateBoard();
-                setIsOpen(false);
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-primary-600 hover:bg-secondary-50"
-            >
-              <Plus size={14} />
-              Create new board
-            </button>
+            {canEdit && (
+              <>
+                <hr className="my-1" />
+                <button
+                  onClick={() => {
+                    onCreateBoard();
+                    setIsOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-primary-600 hover:bg-secondary-50"
+                >
+                  <Plus size={14} />
+                  Create new board
+                </button>
+              </>
+            )}
           </div>
         </>
       )}
@@ -172,6 +178,13 @@ export default function ProjectDetailPage() {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
   const [createTaskColumnId, setCreateTaskColumnId] = useState<number | null>(null);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+
+  // Editing is role-driven: owner/admin/member can edit; viewer/guest are
+  // read-only (mirrors the backend's isEditor gate). Until the project loads we
+  // default to read-only so edit controls never flash for a viewer.
+  const projectRole = currentProject?.current_user_role;
+  const canEdit =
+    projectRole === 'owner' || projectRole === 'admin' || projectRole === 'member';
 
   // Load project data
   useEffect(() => {
@@ -482,6 +495,7 @@ export default function ProjectDetailPage() {
                 currentBoardUuid={currentBoardUuid}
                 onBoardChange={handleBoardChange}
                 onCreateBoard={handleCreateBoard}
+                canEdit={canEdit}
               />
             )}
 
@@ -528,6 +542,7 @@ export default function ProjectDetailPage() {
           {boardData && (
             <KanbanBoard
               data={boardData}
+              canEdit={canEdit}
               onTaskClick={handleTaskClick}
               onEditColumn={handleEditColumn}
               onDeleteColumn={handleDeleteColumn}
@@ -549,6 +564,7 @@ export default function ProjectDetailPage() {
           isOpen={!!selectedTask}
           onClose={clearSelectedTask}
           task={selectedTask}
+          canEdit={canEdit}
           members={members}
           labels={labels}
           isLoading={selectedTaskLoading}

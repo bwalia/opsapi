@@ -325,8 +325,11 @@ end
 --- Get single project by UUID with details
 -- @param uuid string Project UUID
 -- @param user_uuid string Optional user UUID to get membership info
+-- @param namespace_id number Optional namespace id — when given, the project must
+--   belong to it or nil is returned (multi-tenant isolation: a project UUID from
+--   another namespace must not be readable/operable from this one).
 -- @return table|nil Project with details
-function KanbanProjectQueries.show(uuid, user_uuid)
+function KanbanProjectQueries.show(uuid, user_uuid, namespace_id)
     local sql = [[
         SELECT p.*,
                n.name as namespace_name,
@@ -338,7 +341,13 @@ function KanbanProjectQueries.show(uuid, user_uuid)
         WHERE p.uuid = ?
     ]]
 
-    local result = db.query(sql, uuid)
+    local values = { uuid }
+    if namespace_id then
+        sql = sql .. " AND p.namespace_id = ?"
+        table.insert(values, namespace_id)
+    end
+
+    local result = db.query(sql, table.unpack(values))
     if not result or #result == 0 then
         return nil
     end
@@ -501,6 +510,23 @@ function KanbanProjectQueries.isAdmin(project_id, user_uuid)
         FROM kanban_project_members
         WHERE project_id = ? AND user_uuid = ? AND left_at IS NULL
           AND role IN ('owner', 'admin')
+    ]]
+    local result = db.query(sql, project_id, user_uuid)
+    return result and result[1] and tonumber(result[1].count) > 0
+end
+
+--- Check if user may EDIT the project (a member whose role is not read-only).
+-- Editors are owner/admin/member; viewer/guest are read-only. Allow-list (not
+-- deny-list) so any unknown/future role defaults to read-only — fail-safe.
+-- @param project_id number Project ID
+-- @param user_uuid string User UUID
+-- @return boolean
+function KanbanProjectQueries.isEditor(project_id, user_uuid)
+    local sql = [[
+        SELECT COUNT(*) as count
+        FROM kanban_project_members
+        WHERE project_id = ? AND user_uuid = ? AND left_at IS NULL
+          AND role IN ('owner', 'admin', 'member')
     ]]
     local result = db.query(sql, project_id, user_uuid)
     return result and result[1] and tonumber(result[1].count) > 0
