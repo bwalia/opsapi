@@ -36,14 +36,14 @@ const nextConfig: NextConfig = {
   // Allow dev-server/HMR access from these hosts (see note above).
   allowedDevOrigins,
 
-  // Poll the filesystem for changes. Required when the source is bind-mounted
-  // into the container over Colima/virtiofs: native inotify events don't cross
-  // that boundary, so Turbopack's watcher never sees host edits and hot reload
-  // silently stops working. Polling makes edits reliably trigger a recompile.
-  // (Only active in dev; ignored for production builds.)
-  watchOptions: {
-    pollIntervalMs: 1000,
-  },
+  // Filesystem polling — ONLY when bind-mounted into Docker over Colima/virtiofs
+  // (set NEXT_DEV_POLLING=true there): native inotify events don't cross that
+  // boundary, so without polling hot reload silently stops. Running the dev
+  // server natively on the host (start.sh -N) leaves this OFF so it uses fast
+  // native inotify instead of the CPU-heavy 1s poll — the difference between
+  // seconds-per-page and minutes-per-page. (Dev-only; ignored in prod builds.)
+  watchOptions:
+    process.env.NEXT_DEV_POLLING === "true" ? { pollIntervalMs: 1000 } : undefined,
 
   // Enable standalone output for Docker deployment
   output: "standalone",
