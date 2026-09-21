@@ -23,6 +23,7 @@ import {
   LabelManagerModal,
 } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
+import { useKanbanSocket } from '@/hooks';
 import { kanbanService } from '@/services/kanban.service';
 import type {
   KanbanTask,
@@ -178,6 +179,10 @@ export default function ProjectDetailPage() {
     moveTask,
     moveTaskOptimistic,
   } = useKanbanStore();
+
+  // Live board sync: refetch when another user changes a task on this project.
+  // No-op until NEXT_PUBLIC_WS_URL is configured.
+  useKanbanSocket(projectUuid);
 
   const [currentBoardUuid, setCurrentBoardUuid] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');

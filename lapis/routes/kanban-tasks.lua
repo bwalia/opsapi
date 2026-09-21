@@ -50,6 +50,7 @@ local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local KanbanBoardQueries = require "queries.KanbanBoardQueries"
 local KanbanTaskQueries = require "queries.KanbanTaskQueries"
 local KanbanNotificationQueries = require "queries.KanbanNotificationQueries"
+local KanbanWS = require "lib.kanban-ws"
 local Global = require "helper.global"
 local db = require("lapis.db")
 
@@ -168,6 +169,19 @@ return function(app)
             return false, "Missing required fields: " .. table.concat(missing, ", ")
         end
         return true
+    end
+
+    -- Push a live board event to everyone watching this project's WebSocket
+    -- channel. Best-effort: a broadcast failure must never affect the mutation's
+    -- own response, so it is pcall-wrapped. `actor_uuid` lets the client ignore
+    -- the echo of its own action (it already applied it optimistically).
+    local function broadcast_board(board, event, task_uuid, actor_uuid, extra)
+        if not board then return end
+        local data = { board_uuid = board.uuid, task_uuid = task_uuid, actor_uuid = actor_uuid }
+        if extra then
+            for k, v in pairs(extra) do data[k] = v end
+        end
+        pcall(KanbanWS.broadcast, board.project_id, event, data)
     end
 
     -- Tenant-isolation + authorization helpers.
@@ -360,6 +374,8 @@ return function(app)
 
         ngx.log(ngx.INFO, "[Kanban] Task created: ", task.uuid, " #", task.task_number, " by user: ", user.uuid)
 
+        broadcast_board(board, "task:created", task.uuid, user.uuid)
+
         return api_response(201, task)
     end)
 
@@ -455,6 +471,8 @@ return function(app)
             notify_safe("notifyTaskStatusChanged", task, task.status, update_params.status, user.uuid, get_namespace_id())
         end
 
+        broadcast_board(board, "task:updated", self.params.uuid, user.uuid)
+
         return api_response(200, updated)
     end)
 
@@ -487,6 +505,8 @@ return function(app)
 
         -- Log activity
         KanbanTaskQueries.logActivity(task.id, user.uuid, "archived", "task", task.id)
+
+        broadcast_board(board, "task:deleted", self.params.uuid, user.uuid)
 
         return api_response(200, { message = "Task archived successfully" })
     end)
@@ -528,6 +548,8 @@ return function(app)
         if not moved then
             return api_response(400, nil, move_err or "Failed to move task")
         end
+
+        broadcast_board(board, "task:moved", self.params.uuid, user.uuid, { column_id = data.column_id })
 
         return api_response(200, moved)
     end)
