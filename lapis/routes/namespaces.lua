@@ -1639,6 +1639,22 @@ return function(app)
                 end
             end
 
+            -- Namespace default post-login landing path lives in settings (JSONB).
+            -- Merge it in so other settings keys are preserved. An empty string
+            -- clears it.
+            local settings = params.settings
+            if params.default_landing_path ~= nil then
+                local current = namespace.settings
+                if type(current) == "string" and current ~= "" then
+                    local ok_s, parsed = pcall(cjson.decode, current)
+                    if ok_s then current = parsed end
+                end
+                if type(current) ~= "table" then current = {} end
+                local lp = tostring(params.default_landing_path)
+                current.default_landing_path = (lp ~= "" and lp) or nil
+                settings = cjson.encode(current)
+            end
+
             -- Update namespace
             local updated, err = NamespaceQueries.update(namespace.id, {
                 name = params.name,
@@ -1651,7 +1667,7 @@ return function(app)
                 plan = params.plan,
                 max_users = params.max_users and tonumber(params.max_users),
                 max_stores = params.max_stores and tonumber(params.max_stores),
-                settings = params.settings
+                settings = settings
             })
 
             if not updated then

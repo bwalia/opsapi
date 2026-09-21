@@ -147,6 +147,7 @@ function JWTHelper.generateNamespaceToken(user, namespace, membership, options)
     local namespace_landing_path
     do
         local db = require("lapis.db")
+        -- 1) The role's own landing path (most specific).
         local ok, rows = pcall(db.query,
             "SELECT landing_path FROM namespace_roles WHERE namespace_id = ? AND role_name = ? LIMIT 1",
             namespace.id, namespace_role)
@@ -154,6 +155,23 @@ function JWTHelper.generateNamespaceToken(user, namespace, membership, options)
             local lp = rows[1].landing_path
             if lp and lp ~= ngx.null and lp ~= "" then
                 namespace_landing_path = lp
+            end
+        end
+        -- 2) Fall back to the namespace's default landing (settings.default_landing_path),
+        --    so an admin can set one place for the whole tenant.
+        if not namespace_landing_path then
+            local ok2, ns_rows = pcall(db.query,
+                "SELECT settings FROM namespaces WHERE id = ? LIMIT 1", namespace.id)
+            if ok2 and ns_rows and ns_rows[1] then
+                local s = ns_rows[1].settings
+                if type(s) == "string" and s ~= "" then
+                    local okp, parsed = pcall(cjson.decode, s)
+                    if okp then s = parsed end
+                end
+                if type(s) == "table" and type(s.default_landing_path) == "string"
+                    and s.default_landing_path ~= "" then
+                    namespace_landing_path = s.default_landing_path
+                end
             end
         end
     end

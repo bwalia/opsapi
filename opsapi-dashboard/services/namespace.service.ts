@@ -641,6 +641,8 @@ export const namespaceService = {
     plan?: string;
     max_users?: number;
     max_stores?: number;
+    /** Default post-login landing path for the whole namespace (stored in settings). */
+    default_landing_path?: string;
   }): Promise<Namespace> {
     const response = await apiClient.put<{ message: string; namespace: Namespace }>(
       `/api/v2/admin/namespaces/${id}`,
