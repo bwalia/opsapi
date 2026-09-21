@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Settings,
@@ -11,6 +11,7 @@ import {
   Plus,
   Tag,
   BarChart3,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
@@ -27,6 +28,7 @@ import { useKanbanSocket } from '@/hooks';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { kanbanService } from '@/services/kanban.service';
 import { namespaceService } from '@/services/namespace.service';
+import { epicService } from '@/services/epic.service';
 import type {
   KanbanTask,
   KanbanColumn,
@@ -36,6 +38,7 @@ import type {
   CreateKanbanBoardDto,
   KanbanBoard as KanbanBoardType,
   KanbanProjectMember,
+  KanbanEpic,
 } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -142,6 +145,7 @@ const LoadingSkeleton = () => (
 
 export default function ProjectDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const projectUuid = params.uuid as string;
 
@@ -195,6 +199,13 @@ export default function ProjectDetailPage() {
   const [isCreateBoardModalOpen, setIsCreateBoardModalOpen] = useState(false);
   const [isCreatingBoard, setIsCreatingBoard] = useState(false);
   const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
+  const [epics, setEpics] = useState<KanbanEpic[]>([]);
+  // Seeded from ?epic=<id> so "View tasks on board" on the epics page lands
+  // here already filtered.
+  const epicParam = searchParams.get('epic');
+  const [epicFilter, setEpicFilter] = useState<number | null>(
+    epicParam ? parseInt(epicParam, 10) : null
+  );
 
   // Editing is role-driven: owner/admin/member can edit; viewer/guest are
   // read-only (mirrors the backend's isEditor gate). Namespace authority also
@@ -261,6 +272,20 @@ export default function ProjectDetailPage() {
       loadMembers(projectUuid);
     }
   }, [projectUuid, loadProject, loadBoards, loadLabels, loadMembers]);
+
+  // Epics power the board filter and the task modal's epic selector. Kept in
+  // page state rather than the kanban store, which holds no sprint state either.
+  const reloadEpics = useCallback(() => {
+    if (!projectUuid) return;
+    epicService
+      .getEpics(projectUuid, { perPage: 100 })
+      .then((res) => setEpics(res.data || []))
+      .catch(() => setEpics([]));
+  }, [projectUuid]);
+
+  useEffect(() => {
+    reloadEpics();
+  }, [reloadEpics]);
 
   // Set default board when boards are loaded
   useEffect(() => {
@@ -601,6 +626,12 @@ export default function ProjectDetailPage() {
               Scrum
             </Button>
 
+            {/* Epics */}
+            <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/epics`)}>
+              <Layers size={18} className="mr-1" />
+              Epics
+            </Button>
+
             {/* Analytics */}
             <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/analytics`)}>
               <BarChart3 size={18} className="mr-1" />
@@ -651,6 +682,9 @@ export default function ProjectDetailPage() {
               isAddingColumn={isCreatingColumn}
               searchValue={searchValue}
               onSearchChange={setSearchValue}
+              epics={epics}
+              epicFilter={epicFilter}
+              onEpicFilterChange={setEpicFilter}
             />
           )}
         </div>
@@ -663,6 +697,7 @@ export default function ProjectDetailPage() {
           canEdit={canEdit}
           members={assignableMembers}
           labels={labels}
+          epics={epics}
           isLoading={selectedTaskLoading}
           onUpdate={handleUpdateTask}
           onDelete={handleDeleteTask}

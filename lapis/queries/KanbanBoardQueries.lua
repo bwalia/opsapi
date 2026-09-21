@@ -339,8 +339,12 @@ function KanbanBoardQueries.getFullBoard(uuid)
                    (SELECT json_agg(json_build_object('id', l.id, 'name', l.name, 'color', l.color))
                     FROM kanban_task_labels l
                     JOIN kanban_task_label_links ll ON ll.label_id = l.id
-                    WHERE ll.task_id = t.id) as labels
+                    WHERE ll.task_id = t.id) as labels,
+                   e.uuid as epic_uuid,
+                   e.name as epic_name,
+                   e.color as epic_color
             FROM kanban_tasks t
+            LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL
             WHERE t.column_id = ? AND t.archived_at IS NULL AND t.parent_task_id IS NULL
             ORDER BY t.position ASC
         ]]

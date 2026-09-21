@@ -49,6 +49,7 @@ local cJson = require("cjson")
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local KanbanBoardQueries = require "queries.KanbanBoardQueries"
 local KanbanTaskQueries = require "queries.KanbanTaskQueries"
+local KanbanEpicQueries = require "queries.KanbanEpicQueries"
 local KanbanNotificationQueries = require "queries.KanbanNotificationQueries"
 local KanbanWS = require "lib.kanban-ws"
 local Global = require "helper.global"
@@ -284,6 +285,7 @@ return function(app)
             status = self.params.status,
             priority = self.params.priority,
             assignee_uuid = self.params.assignee_uuid,
+            epic_id = self.params.epic_id and tonumber(self.params.epic_id),
             search = self.params.search or self.params.q,
             include_subtasks = self.params.include_subtasks == "true"
         }
@@ -350,6 +352,7 @@ return function(app)
             board_id = board.id,
             column_id = column_id,
             parent_task_id = data.parent_task_id,
+            epic_id = KanbanEpicQueries.normaliseEpicId(data.epic_id),
             title = data.title,
             description = data.description,
             status = data.status or "open",
@@ -457,6 +460,14 @@ return function(app)
                     update_params[field] = data[field]
                 end
             end
+        end
+
+        -- epic_id is handled separately: "" / 0 / null mean "detach", which has
+        -- to reach the DB as a real NULL. Sending 0 would violate
+        -- kanban_tasks_epic_fk (the DEFAULT 0 trap migration [41] repaired).
+        if data.epic_id ~= nil then
+            local epic_id = KanbanEpicQueries.normaliseEpicId(data.epic_id)
+            update_params.epic_id = epic_id or db.raw("NULL")
         end
 
         if next(update_params) == nil then

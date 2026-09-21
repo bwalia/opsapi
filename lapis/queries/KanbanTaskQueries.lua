@@ -58,6 +58,9 @@ function KanbanTaskQueries.create(params)
     if params.sprint_id == nil or params.sprint_id == "" or params.sprint_id == 0 then
         params.sprint_id = nil
     end
+    if params.epic_id == nil or params.epic_id == "" or params.epic_id == 0 then
+        params.epic_id = nil
+    end
 
     params.created_at = db.raw("NOW()")
     params.updated_at = db.raw("NOW()")
@@ -111,6 +114,11 @@ function KanbanTaskQueries.getByBoard(board_id, params)
         table.insert(where_values, params.search)
     end
 
+    if params.epic_id then
+        table.insert(where_clauses, "t.epic_id = ?")
+        table.insert(where_values, params.epic_id)
+    end
+
     -- Exclude subtasks from main list unless requested
     if not params.include_subtasks then
         table.insert(where_clauses, "t.parent_task_id IS NULL")
@@ -121,9 +129,13 @@ function KanbanTaskQueries.getByBoard(board_id, params)
     local sql = string.format([[
         SELECT t.*,
                c.name as column_name,
-               c.color as column_color
+               c.color as column_color,
+               e.uuid as epic_uuid,
+               e.name as epic_name,
+               e.color as epic_color
         FROM kanban_tasks t
         LEFT JOIN kanban_columns c ON c.id = t.column_id
+        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL
         WHERE %s
         ORDER BY t.column_id ASC, t.position ASC
         LIMIT ? OFFSET ?
@@ -170,21 +182,35 @@ function KanbanTaskQueries.getByAssignee(user_uuid, namespace_id, params)
     local perPage = params.perPage or 20
     local offset = (page - 1) * perPage
 
+    -- Optional epic filter. Interpolated (not a bound param) because the
+    -- ORDER BY below is followed by positional LIMIT/OFFSET placeholders;
+    -- the value is forced through tonumber() by the caller contract.
+    local epic_filter = ""
+    local epic_id = tonumber(params.epic_id)
+    if epic_id then
+        epic_filter = string.format(" AND t.epic_id = %d", epic_id)
+    end
+
     local sql = [[
         SELECT t.*,
                c.name as column_name,
                b.name as board_name,
                p.name as project_name,
-               p.uuid as project_uuid
+               p.uuid as project_uuid,
+               e.uuid as epic_uuid,
+               e.name as epic_name,
+               e.color as epic_color
         FROM kanban_tasks t
         INNER JOIN kanban_task_assignees ta ON ta.task_id = t.id
         INNER JOIN kanban_boards b ON b.id = t.board_id
         INNER JOIN kanban_projects p ON p.id = b.project_id
         LEFT JOIN kanban_columns c ON c.id = t.column_id
+        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL
         WHERE ta.user_uuid = ?
           AND p.namespace_id = ?
           AND t.archived_at IS NULL
           AND t.status NOT IN ('completed', 'cancelled')
+    ]] .. epic_filter .. [[
         ORDER BY
             CASE t.priority
                 WHEN 'critical' THEN 1
@@ -209,7 +235,7 @@ function KanbanTaskQueries.getByAssignee(user_uuid, namespace_id, params)
           AND p.namespace_id = ?
           AND t.archived_at IS NULL
           AND t.status NOT IN ('completed', 'cancelled')
-    ]]
+    ]] .. epic_filter
     local count_result = db.query(count_sql, user_uuid, namespace_id)
     local total = count_result and count_result[1] and count_result[1].total or 0
 
@@ -233,6 +259,9 @@ function KanbanTaskQueries.show(uuid)
                p.name as project_name,
                p.uuid as project_uuid,
                p.namespace_id,
+               e.uuid as epic_uuid,
+               e.name as epic_name,
+               e.color as epic_color,
                u.first_name as reporter_first_name,
                u.last_name as reporter_last_name,
                u.email as reporter_email
@@ -240,6 +269,7 @@ function KanbanTaskQueries.show(uuid)
         LEFT JOIN kanban_columns c ON c.id = t.column_id
         INNER JOIN kanban_boards b ON b.id = t.board_id
         INNER JOIN kanban_projects p ON p.id = b.project_id
+        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL
         LEFT JOIN users u ON u.uuid = t.reporter_user_uuid
         WHERE t.uuid = ?
     ]]

@@ -24,6 +24,7 @@ import {
   Plus,
   Send,
   Check,
+  Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -35,6 +36,7 @@ import type {
   KanbanTaskStatus,
   KanbanProjectMember,
   KanbanTaskTimeSummary,
+  KanbanEpic,
   UpdateKanbanTaskDto,
 } from '@/types';
 import Button from '@/components/ui/Button';
@@ -655,6 +657,8 @@ export interface TaskDetailModalProps {
   canEdit?: boolean;
   members: KanbanProjectMember[];
   labels: KanbanLabel[];
+  /** Epics of the task's project; omit to hide the epic selector. */
+  epics?: KanbanEpic[];
   isLoading?: boolean;
   onUpdate: (uuid: string, data: UpdateKanbanTaskDto) => Promise<void>;
   onDelete: (uuid: string) => Promise<void>;
@@ -676,6 +680,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
   canEdit = true,
   members,
   labels,
+  epics,
   isLoading,
   onUpdate,
   onDelete,
@@ -740,6 +745,14 @@ const TaskDetailModal = memo(function TaskDetailModal({
   const handleStatusChange = async (status: KanbanTaskStatus) => {
     if (task) {
       await onUpdate(task.uuid, { status });
+    }
+  };
+
+  // "" from the <select> means "no epic" — passed on as null, which the
+  // service turns into the empty string the API reads as SQL NULL.
+  const handleEpicChange = async (value: string) => {
+    if (task) {
+      await onUpdate(task.uuid, { epic_id: value ? parseInt(value, 10) : null });
     }
   };
 
@@ -1029,6 +1042,29 @@ const TaskDetailModal = memo(function TaskDetailModal({
               );
             })()}
           </div>
+
+          {/* Epic */}
+          {epics && epics.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
+                <Layers size={14} />
+                <span>Epic</span>
+              </div>
+              <select
+                value={task.epic_id ?? ''}
+                disabled={!canEdit}
+                onChange={(e) => handleEpicChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary-50 disabled:text-secondary-500"
+              >
+                <option value="">No epic</option>
+                {epics.map((epic) => (
+                  <option key={epic.uuid} value={epic.id}>
+                    {epic.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Story Points */}
           <div>

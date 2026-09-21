@@ -1,4 +1,5 @@
 import { apiClient, buildQueryString, toFormData } from '@/lib/api-client';
+import { epicIdForWire } from '@/services/epic.service';
 import type {
   KanbanProject,
   KanbanBoard,
@@ -480,6 +481,9 @@ export const kanbanService = {
     if (data.label_ids) {
       formData.label_ids = JSON.stringify(data.label_ids);
     }
+    if (data.epic_id !== undefined) {
+      formData.epic_id = epicIdForWire(data.epic_id);
+    }
     const response = await apiClient.post<ApiDataResponse<KanbanTask>>(
       `/api/v2/kanban/boards/${boardUuid}/tasks`,
       toFormData(formData)
@@ -497,6 +501,10 @@ export const kanbanService = {
     }
     if (data.label_ids) {
       formData.label_ids = JSON.stringify(data.label_ids);
+    }
+    // toFormData drops null, so "detach from epic" has to become "" here.
+    if (data.epic_id !== undefined) {
+      formData.epic_id = epicIdForWire(data.epic_id);
     }
     const response = await apiClient.put<ApiDataResponse<KanbanTask>>(
       `/api/v2/kanban/tasks/${uuid}`,

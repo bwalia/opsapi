@@ -22,6 +22,7 @@ import type {
   KanbanBoardFullResponse,
   KanbanTask,
   KanbanColumn as KanbanColumnType,
+  KanbanEpic,
   CreateKanbanColumnDto,
 } from '@/types';
 import KanbanColumn from './KanbanColumn';
@@ -43,6 +44,9 @@ interface BoardHeaderProps {
   isRefreshing?: boolean;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
+  epics?: KanbanEpic[];
+  epicFilter?: number | null;
+  onEpicFilterChange?: (epicId: number | null) => void;
 }
 
 const BoardHeader = memo(function BoardHeader({
@@ -55,6 +59,9 @@ const BoardHeader = memo(function BoardHeader({
   isRefreshing,
   searchValue,
   onSearchChange,
+  epics,
+  epicFilter,
+  onEpicFilterChange,
 }: BoardHeaderProps) {
   const [showSearch, setShowSearch] = useState(false);
 
@@ -71,6 +78,25 @@ const BoardHeader = memo(function BoardHeader({
       </div>
 
       <div className="flex items-center gap-1 md:gap-2 shrink-0">
+        {/* Epic filter */}
+        {epics && epics.length > 0 && (
+          <select
+            value={epicFilter ?? ''}
+            onChange={(e) =>
+              onEpicFilterChange?.(e.target.value ? parseInt(e.target.value, 10) : null)
+            }
+            aria-label="Filter by epic"
+            className="hidden sm:block max-w-[10rem] px-2 py-1.5 text-sm border border-secondary-300 rounded-lg bg-surface focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All epics</option>
+            {epics.map((epic) => (
+              <option key={epic.uuid} value={epic.id}>
+                {epic.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         {/* Search */}
         {showSearch ? (
           <div className="flex items-center gap-1 md:gap-2">
@@ -255,6 +281,10 @@ export interface KanbanBoardProps {
   isAddingColumn?: boolean;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
+  /** Epics of this project; omit to hide the epic filter. */
+  epics?: KanbanEpic[];
+  epicFilter?: number | null;
+  onEpicFilterChange?: (epicId: number | null) => void;
   className?: string;
 }
 
@@ -274,6 +304,9 @@ const KanbanBoard = memo(function KanbanBoard({
   isAddingColumn,
   searchValue,
   onSearchChange,
+  epics,
+  epicFilter,
+  onEpicFilterChange,
   className,
 }: KanbanBoardProps) {
   const { board, columns, project } = data;
@@ -308,19 +341,25 @@ const KanbanBoard = memo(function KanbanBoard({
   // Calculate total task count
   const totalTaskCount = columns.reduce((sum, col) => sum + col.tasks.length, 0);
 
-  // Filter tasks by search
+  // Filter tasks by search and by epic
   const filteredColumns = useMemo(() => {
-    if (!searchValue) return sortedColumns;
+    if (!searchValue && epicFilter == null) return sortedColumns;
+
+    const needle = searchValue?.toLowerCase();
 
     return sortedColumns.map((col) => ({
       ...col,
-      tasks: col.tasks.filter((task) =>
-        task.title.toLowerCase().includes(searchValue.toLowerCase()) ||
-        task.description?.toLowerCase().includes(searchValue.toLowerCase()) ||
-        task.task_number.toString().includes(searchValue)
-      ),
+      tasks: col.tasks.filter((task) => {
+        if (epicFilter != null && task.epic_id !== epicFilter) return false;
+        if (!needle) return true;
+        return (
+          task.title.toLowerCase().includes(needle) ||
+          task.description?.toLowerCase().includes(needle) ||
+          task.task_number.toString().includes(needle)
+        );
+      }),
     }));
-  }, [sortedColumns, searchValue]);
+  }, [sortedColumns, searchValue, epicFilter]);
 
   // Create a map of task UUID to task for quick lookup
   const taskMap = useMemo(() => {
@@ -474,6 +513,9 @@ const KanbanBoard = memo(function KanbanBoard({
         onFilter={onFilter}
         isRefreshing={isRefreshing}
         searchValue={searchValue}
+        epics={epics}
+        epicFilter={epicFilter}
+        onEpicFilterChange={onEpicFilterChange}
         onSearchChange={onSearchChange}
       />
 
