@@ -88,6 +88,7 @@ export default function ApiKeysPage() {
         <div className="flex items-center gap-2">
           <Key className="w-4 h-4 text-secondary-400 shrink-0" />
           <span className="font-medium text-secondary-900">{k.name}</span>
+          {k.user_uuid && <Badge variant="info" title="Personal access token — acts as a member">Personal</Badge>}
         </div>
       ),
     },
