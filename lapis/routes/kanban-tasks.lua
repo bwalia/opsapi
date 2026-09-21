@@ -210,6 +210,28 @@ return function(app)
         return rows[1]
     end
 
+    -- Write gate: like authorize_checklist(_item) but also requires an editor
+    -- role (not viewer/guest). Returns ctx OR nil, status, message — so a
+    -- read-only member gets 403 while a non-member/cross-tenant caller still
+    -- gets 404 (no existence leak).
+    local function authorize_checklist_edit(checklist_uuid, user_uuid)
+        local ctx, err = authorize_checklist(checklist_uuid, user_uuid)
+        if not ctx then return nil, 404, err end
+        if not KanbanProjectQueries.isEditor(ctx.project_id, user_uuid) then
+            return nil, 403, "Read-only access: this action requires an editor role"
+        end
+        return ctx
+    end
+
+    local function authorize_checklist_item_edit(item_uuid, user_uuid)
+        local ctx, err = authorize_checklist_item(item_uuid, user_uuid)
+        if not ctx then return nil, 404, err end
+        if not KanbanProjectQueries.isEditor(ctx.project_id, user_uuid) then
+            return nil, 403, "Read-only access: this action requires an editor role"
+        end
+        return ctx
+    end
+
     ----------------- Task CRUD Routes --------------------
 
     -- GET /api/v2/kanban/boards/:board_uuid/tasks - List tasks for board
@@ -273,6 +295,9 @@ return function(app)
         if not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
         end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
+        end
 
         local data = parse_json_body()
 
@@ -333,15 +358,9 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        local task = KanbanTaskQueries.show(self.params.uuid)
+        local task, _, auth_err = authorize_task(self.params.uuid, user.uuid)
         if not task then
-            return api_response(404, nil, "Task not found")
-        end
-
-        -- Check membership via project
-        local board = KanbanBoardQueries.getById(task.board_id)
-        if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
-            return api_response(403, nil, "Access denied")
+            return api_response(404, nil, auth_err or "Task not found")
         end
 
         -- Get additional details
@@ -367,6 +386,9 @@ return function(app)
         local board = KanbanBoardQueries.getById(task.board_id)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local data = parse_json_body()
@@ -434,6 +456,9 @@ return function(app)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
         end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
+        end
 
         local archived = KanbanTaskQueries.archive(self.params.uuid)
 
@@ -463,6 +488,9 @@ return function(app)
         local board = KanbanBoardQueries.getById(task.board_id)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local data = parse_json_body()
@@ -526,6 +554,9 @@ return function(app)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
         end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
+        end
 
         local data = parse_json_body()
 
@@ -565,6 +596,9 @@ return function(app)
         local board = KanbanBoardQueries.getById(task.board_id)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local success, unassign_err = KanbanTaskQueries.unassignUser(
@@ -615,6 +649,9 @@ return function(app)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
         end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
+        end
 
         local data = parse_json_body()
 
@@ -646,6 +683,9 @@ return function(app)
         local board = KanbanBoardQueries.getById(task.board_id)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local success = KanbanTaskQueries.removeLabel(task.id, tonumber(self.params.label_id))
@@ -707,6 +747,9 @@ return function(app)
         local board = KanbanBoardQueries.getById(task.board_id)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local data = parse_json_body()
@@ -840,6 +883,9 @@ return function(app)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
         end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
+        end
 
         local data = parse_json_body()
 
@@ -867,10 +913,10 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        -- Tenant + membership check before deleting.
-        local _, chk_err = authorize_checklist(self.params.uuid, user.uuid)
-        if chk_err then
-            return api_response(404, nil, chk_err)
+        -- Tenant + membership + editor check before deleting.
+        local chk, chk_status, chk_msg = authorize_checklist_edit(self.params.uuid, user.uuid)
+        if not chk then
+            return api_response(chk_status, nil, chk_msg)
         end
 
         local success = KanbanTaskQueries.deleteChecklist(self.params.uuid)
@@ -895,10 +941,10 @@ return function(app)
             return api_response(400, nil, "content is required")
         end
 
-        -- Tenant + membership check; resolves the checklist's internal id.
-        local checklist, chk_err = authorize_checklist(self.params.uuid, user.uuid)
-        if chk_err then
-            return api_response(404, nil, chk_err)
+        -- Tenant + membership + editor check; resolves the checklist's internal id.
+        local checklist, chk_status, chk_msg = authorize_checklist_edit(self.params.uuid, user.uuid)
+        if not checklist then
+            return api_response(chk_status, nil, chk_msg)
         end
 
         local item = KanbanTaskQueries.addChecklistItem({
@@ -923,10 +969,10 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        -- Tenant + membership check before mutating.
-        local _, item_err = authorize_checklist_item(self.params.uuid, user.uuid)
-        if item_err then
-            return api_response(404, nil, item_err)
+        -- Tenant + membership + editor check before mutating.
+        local item_ctx, item_status, item_msg = authorize_checklist_item_edit(self.params.uuid, user.uuid)
+        if not item_ctx then
+            return api_response(item_status, nil, item_msg)
         end
 
         local item = KanbanTaskQueries.toggleChecklistItem(self.params.uuid, user.uuid)
@@ -945,10 +991,10 @@ return function(app)
             return api_response(401, nil, err)
         end
 
-        -- Tenant + membership check before deleting.
-        local _, item_err = authorize_checklist_item(self.params.uuid, user.uuid)
-        if item_err then
-            return api_response(404, nil, item_err)
+        -- Tenant + membership + editor check before deleting.
+        local item_ctx, item_status, item_msg = authorize_checklist_item_edit(self.params.uuid, user.uuid)
+        if not item_ctx then
+            return api_response(item_status, nil, item_msg)
         end
 
         local success = KanbanTaskQueries.deleteChecklistItem(self.params.uuid)
@@ -1029,6 +1075,9 @@ return function(app)
         local board = KanbanBoardQueries.getById(task.board_id)
         if not board or not KanbanProjectQueries.isMember(board.project_id, user.uuid) then
             return api_response(403, nil, "Access denied")
+        end
+        if not KanbanProjectQueries.isEditor(board.project_id, user.uuid) then
+            return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
         local data = parse_json_body()

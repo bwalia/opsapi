@@ -515,6 +515,23 @@ function KanbanProjectQueries.isAdmin(project_id, user_uuid)
     return result and result[1] and tonumber(result[1].count) > 0
 end
 
+--- Check if user may EDIT the project (a member whose role is not read-only).
+-- Editors are owner/admin/member; viewer/guest are read-only. Allow-list (not
+-- deny-list) so any unknown/future role defaults to read-only — fail-safe.
+-- @param project_id number Project ID
+-- @param user_uuid string User UUID
+-- @return boolean
+function KanbanProjectQueries.isEditor(project_id, user_uuid)
+    local sql = [[
+        SELECT COUNT(*) as count
+        FROM kanban_project_members
+        WHERE project_id = ? AND user_uuid = ? AND left_at IS NULL
+          AND role IN ('owner', 'admin', 'member')
+    ]]
+    local result = db.query(sql, project_id, user_uuid)
+    return result and result[1] and tonumber(result[1].count) > 0
+end
+
 --- Check if user is owner of project
 -- @param project_id number Project ID
 -- @param user_uuid string User UUID
