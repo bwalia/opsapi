@@ -49,6 +49,7 @@ local cJson = require("cjson")
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local KanbanBoardQueries = require "queries.KanbanBoardQueries"
 local KanbanTaskQueries = require "queries.KanbanTaskQueries"
+local KanbanNotificationQueries = require "queries.KanbanNotificationQueries"
 local Global = require "helper.global"
 local db = require("lapis.db")
 
@@ -143,6 +144,17 @@ return function(app)
                 data = data
             }
         }
+    end
+
+    -- Emit a kanban notification as a best-effort side effect. A failure here
+    -- (bad data, DB hiccup) must never break the mutation that triggered it, so
+    -- every call is pcall-wrapped and only logged. The notify* helpers already
+    -- skip self-notification and honour per-user preferences.
+    local function notify_safe(method, ...)
+        local ok, err = pcall(KanbanNotificationQueries[method], ...)
+        if not ok then
+            ngx.log(ngx.ERR, "[Kanban] notification ", method, " failed: ", tostring(err))
+        end
     end
 
     local function validate_required(data, fields)
@@ -436,6 +448,13 @@ return function(app)
             return api_response(500, nil, "Failed to update task")
         end
 
+        -- Notify on a real status change (the helper only fires for "completed",
+        -- notifying the reporter). task.status is the pre-update value.
+        if update_params.status and update_params.status ~= task.status then
+            task.project_id = board.project_id
+            notify_safe("notifyTaskStatusChanged", task, task.status, update_params.status, user.uuid, get_namespace_id())
+        end
+
         return api_response(200, updated)
     end)
 
@@ -576,6 +595,11 @@ return function(app)
         end
 
         ngx.log(ngx.INFO, "[Kanban] User assigned to task: ", task.uuid, " user: ", data.user_uuid, " chat: ", result.chat_channel_uuid)
+
+        -- kanban_tasks has no project_id column; enrich from the board so the
+        -- notification links to the project.
+        task.project_id = board.project_id
+        notify_safe("notifyTaskAssigned", task, data.user_uuid, user.uuid, namespace_id)
 
         return api_response(201, result)
     end)
@@ -768,6 +792,10 @@ return function(app)
         if not comment then
             return api_response(500, nil, "Failed to add comment")
         end
+
+        -- Notify the task's assignees + reporter (self is skipped in the helper).
+        task.project_id = board.project_id
+        notify_safe("notifyTaskCommented", task, comment, user.uuid, get_namespace_id(), {})
 
         return api_response(201, comment)
     end)
