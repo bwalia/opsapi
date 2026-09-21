@@ -439,7 +439,8 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
 
   return (
     <div className={styles.editorShell}>
-      {editor && <Toolbar editor={editor} sourceMode={sourceMode} onToggleSource={toggleSource} />}
+      {/* No toolbar in read-only mode — used to render stored HTML safely. */}
+      {editor && editable && <Toolbar editor={editor} sourceMode={sourceMode} onToggleSource={toggleSource} />}
       {sourceMode ? (
         <textarea
           className="block w-full min-h-80 resize-y bg-surface p-4 font-mono text-[13px] leading-relaxed text-secondary-900 focus:outline-none"

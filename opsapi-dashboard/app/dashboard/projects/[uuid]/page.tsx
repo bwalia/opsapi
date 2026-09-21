@@ -17,7 +17,6 @@ import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import {
   KanbanBoard,
-  TaskDetailModal,
   CreateTaskModal,
   CreateBoardModal,
   LabelManagerModal,
@@ -25,14 +24,12 @@ import {
 import { useKanbanStore } from '@/store/kanban.store';
 import { useKanbanSocket } from '@/hooks';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { kanbanService } from '@/services/kanban.service';
 import { namespaceService } from '@/services/namespace.service';
 import type {
   KanbanTask,
   KanbanColumn,
   CreateKanbanColumnDto,
   CreateKanbanTaskDto,
-  UpdateKanbanTaskDto,
   CreateKanbanBoardDto,
   KanbanBoard as KanbanBoardType,
   KanbanProjectMember,
@@ -153,12 +150,8 @@ export default function ProjectDetailPage() {
     boardData,
     boardDataLoading,
     boardDataError,
-    selectedTask,
-    selectedTaskLoading,
     labels,
-    members,
     isCreatingColumn,
-    isCreatingTask,
     loadProject,
     loadBoards,
     loadBoardFull,
@@ -169,15 +162,6 @@ export default function ProjectDetailPage() {
     updateColumn,
     deleteColumn,
     createTask,
-    updateTask,
-    deleteTask,
-    loadTask,
-    setSelectedTask,
-    clearSelectedTask,
-    addTaskAssignee,
-    removeTaskAssignee,
-    addTaskLabel,
-    removeTaskLabel,
     refreshBoardData,
     moveTask,
     moveTaskOptimistic,
@@ -391,128 +375,6 @@ export default function ProjectDetailPage() {
     [createTask, currentBoardUuid]
   );
 
-  const handleUpdateTask = useCallback(
-    async (uuid: string, data: UpdateKanbanTaskDto) => {
-      const result = await updateTask(uuid, data);
-      if (!result) {
-        toast.error('Failed to update task');
-      }
-    },
-    [updateTask]
-  );
-
-  const handleDeleteTask = useCallback(
-    async (uuid: string) => {
-      const success = await deleteTask(uuid);
-      if (success) {
-        toast.success('Task deleted');
-        clearSelectedTask();
-      } else {
-        toast.error('Failed to delete task');
-      }
-    },
-    [deleteTask, clearSelectedTask]
-  );
-
-  const handleAddAssignee = useCallback(
-    async (taskUuid: string, userUuid: string) => {
-      await addTaskAssignee(taskUuid, userUuid);
-      toast.success('Assignee added');
-    },
-    [addTaskAssignee]
-  );
-
-  const handleRemoveAssignee = useCallback(
-    async (taskUuid: string, userUuid: string) => {
-      await removeTaskAssignee(taskUuid, userUuid);
-      toast.success('Assignee removed');
-    },
-    [removeTaskAssignee]
-  );
-
-  const handleAddLabel = useCallback(
-    async (taskUuid: string, labelId: number) => {
-      await addTaskLabel(taskUuid, labelId);
-    },
-    [addTaskLabel]
-  );
-
-  const handleRemoveLabel = useCallback(
-    async (taskUuid: string, labelId: number) => {
-      await removeTaskLabel(taskUuid, labelId);
-    },
-    [removeTaskLabel]
-  );
-
-  const handleAddComment = useCallback(
-    async (taskUuid: string, content: string) => {
-      try {
-        await kanbanService.addComment(taskUuid, { content });
-        await loadTask(taskUuid);
-        toast.success('Comment added');
-      } catch {
-        toast.error('Failed to add comment');
-      }
-    },
-    [loadTask]
-  );
-
-  const handleDeleteComment = useCallback(
-    async (commentUuid: string) => {
-      try {
-        await kanbanService.deleteComment(commentUuid);
-        if (selectedTask) {
-          await loadTask(selectedTask.uuid);
-        }
-        toast.success('Comment deleted');
-      } catch {
-        toast.error('Failed to delete comment');
-      }
-    },
-    [loadTask, selectedTask]
-  );
-
-  const handleToggleChecklistItem = useCallback(
-    async (itemUuid: string) => {
-      try {
-        await kanbanService.toggleChecklistItem(itemUuid);
-        if (selectedTask) {
-          await loadTask(selectedTask.uuid);
-        }
-      } catch {
-        toast.error('Failed to toggle checklist item');
-      }
-    },
-    [loadTask, selectedTask]
-  );
-
-  const handleAddChecklist = useCallback(
-    async (taskUuid: string, name: string) => {
-      try {
-        await kanbanService.createChecklist(taskUuid, { name });
-        await loadTask(taskUuid);
-        toast.success('Checklist added');
-      } catch {
-        toast.error('Failed to add checklist');
-      }
-    },
-    [loadTask]
-  );
-
-  const handleAddChecklistItem = useCallback(
-    async (checklistUuid: string, content: string) => {
-      try {
-        await kanbanService.addChecklistItem(checklistUuid, { content });
-        if (selectedTask) {
-          await loadTask(selectedTask.uuid);
-        }
-      } catch {
-        toast.error('Failed to add checklist item');
-      }
-    },
-    [loadTask, selectedTask]
-  );
-
   const handleMoveTask = useCallback(
     async (taskUuid: string, targetColumnId: number, position: number) => {
       // Find source column ID for optimistic update
@@ -656,27 +518,7 @@ export default function ProjectDetailPage() {
           )}
         </div>
 
-        {/* Task Detail Modal */}
-        <TaskDetailModal
-          isOpen={!!selectedTask}
-          onClose={clearSelectedTask}
-          task={selectedTask}
-          canEdit={canEdit}
-          members={assignableMembers}
-          labels={labels}
-          isLoading={selectedTaskLoading}
-          onUpdate={handleUpdateTask}
-          onDelete={handleDeleteTask}
-          onAddAssignee={handleAddAssignee}
-          onRemoveAssignee={handleRemoveAssignee}
-          onAddLabel={handleAddLabel}
-          onRemoveLabel={handleRemoveLabel}
-          onAddComment={handleAddComment}
-          onDeleteComment={handleDeleteComment}
-          onToggleChecklistItem={handleToggleChecklistItem}
-          onAddChecklist={handleAddChecklist}
-          onAddChecklistItem={handleAddChecklistItem}
-        />
+        {/* Task detail is a full page now (/tasks/:uuid) — no modal. */}
 
         {/* Label Manager Modal */}
         <LabelManagerModal

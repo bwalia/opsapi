@@ -20,6 +20,7 @@ import {
   formatTimeMinutes,
 } from '@/services/kanban.service';
 import { TimerButton } from '@/components/time-tracking';
+import RichTextEditor from '@/components/academy/RichTextEditor';
 import type {
   KanbanTask, KanbanProjectMember, KanbanActivity, KanbanTaskStatus, KanbanTaskPriority,
 } from '@/types';
@@ -27,6 +28,10 @@ import { cn } from '@/lib/utils';
 
 const STATUSES: KanbanTaskStatus[] = ['open', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'];
 const PRIORITIES: KanbanTaskPriority[] = ['critical', 'high', 'medium', 'low', 'none'];
+
+// Shared modern input style — soft filled field that lifts to white on focus.
+const INPUT =
+  'w-full rounded-lg border border-secondary-200 bg-secondary-50/60 px-3 py-2 text-sm text-secondary-800 transition focus:bg-surface focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20';
 
 const initials = (f?: string, l?: string) => `${(f || '?')[0] || '?'}${(l || '')[0] || ''}`.toUpperCase();
 const shortDate = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : '');
@@ -163,7 +168,7 @@ export default function TaskDetailPage() {
   const doneSubtasks = subtasks.filter((s) => s.status === 'completed').length;
 
   return (
-    <div className="mx-auto w-full max-w-6xl pb-16">
+    <div className="w-full pb-16">
       {/* Top bar */}
       <div className="flex items-center gap-2 py-3 text-sm">
         <button onClick={() => router.push(boardHref)} className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-secondary-200 text-secondary-500 hover:text-secondary-800 hover:border-secondary-300 transition-colors" aria-label="Back to board">
@@ -203,13 +208,13 @@ export default function TaskDetailPage() {
       {/* Editable title */}
       <InlineTitle value={task.title} canEdit={canEdit} onSave={(v) => patch({ title: v })} />
 
-      <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div className="mt-5 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
         {/* Main column */}
-        <div className="lg:col-span-2 space-y-8">
+        <div className="min-w-0 space-y-8">
           {/* Description */}
           <section>
             <SectionTitle icon={<span className="w-1.5 h-4 rounded bg-primary-400" />}>Description</SectionTitle>
-            <InlineDescription value={task.description || ''} canEdit={canEdit} onSave={(v) => patch({ description: v })} />
+            <DescriptionEditor value={task.description || ''} canEdit={canEdit} onSave={(v) => patch({ description: v })} />
           </section>
 
           {/* Subtasks */}
@@ -327,7 +332,9 @@ export default function TaskDetailPage() {
                         <button onClick={async () => { await kanbanService.deleteComment(c.uuid); refresh(); }} className="ml-auto text-secondary-400 hover:text-error-500" aria-label="Delete comment"><Trash2 size={13} /></button>
                       )}
                     </div>
-                    <p className="text-sm text-secondary-700 whitespace-pre-wrap mt-0.5">{c.content}</p>
+                    <div className="mt-1 text-sm text-secondary-700 rich-content">
+                      <RichTextEditor value={c.content} editable={false} />
+                    </div>
                   </div>
                 </li>
               ))}
@@ -434,14 +441,14 @@ export default function TaskDetailPage() {
             <Field label="Due date" icon={<Calendar size={14} />}>
               <input type="date" disabled={!canEdit} value={task.due_date ? String(task.due_date).slice(0, 10) : ''}
                 onChange={(e) => patch({ due_date: e.target.value || undefined })}
-                className="w-full rounded-lg border border-secondary-300 px-2.5 py-1.5 text-sm disabled:opacity-70" />
+                className={cn(INPUT, 'disabled:opacity-70')} />
             </Field>
 
             {/* Story points */}
             <Field label="Story points" icon={<Target size={14} />}>
               <input type="number" min={0} disabled={!canEdit} defaultValue={task.story_points || 0}
                 onBlur={(e) => { const v = parseInt(e.target.value) || 0; if (v !== (task.story_points || 0)) patch({ story_points: v }); }}
-                className="w-24 rounded-lg border border-secondary-300 px-2.5 py-1.5 text-sm disabled:opacity-70" />
+                className={cn(INPUT, 'w-28 disabled:opacity-70')} style={{ width: '7rem' }} />
             </Field>
 
             {/* Time tracking */}
@@ -508,27 +515,29 @@ function InlineTitle({ value, canEdit, onSave }: { value: string; canEdit: boole
   );
 }
 
-// ── Inline description ───────────────────────────────────────────────────────
-function InlineDescription({ value, canEdit, onSave }: { value: string; canEdit: boolean; onSave: (v: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(value);
-  const start = () => { if (canEdit) { setText(value); setEditing(true); } };
-  if (!editing) {
-    return (
-      <div onClick={start} className={cn('text-sm text-secondary-700 whitespace-pre-wrap min-h-10 rounded-lg', canEdit && 'cursor-text hover:bg-secondary-50 p-2 -m-2')}>
-        {value || <span className="text-secondary-400">{canEdit ? 'Add a description…' : 'No description'}</span>}
-      </div>
-    );
+// ── Description (WYSIWYG, auto-saves ~1s after you stop typing) ───────────────
+function DescriptionEditor({ value, canEdit, onSave }: { value: string; canEdit: boolean; onSave: (v: string) => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSaved = useRef(value);
+  useEffect(() => { lastSaved.current = value; }, [value]);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  if (!canEdit) {
+    return value
+      ? <div className="rich-content"><RichTextEditor value={value} editable={false} /></div>
+      : <p className="text-sm text-secondary-400">No description</p>;
   }
   return (
-    <div>
-      <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={5}
-        className="w-full rounded-lg border border-secondary-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-      <div className="mt-2 flex gap-2">
-        <button onClick={() => { setEditing(false); if (text !== value) onSave(text); }} className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm text-white hover:bg-primary-700">Save</button>
-        <button onClick={() => { setText(value); setEditing(false); }} className="rounded-lg px-3 py-1.5 text-sm text-secondary-600 hover:bg-secondary-100">Cancel</button>
-      </div>
-    </div>
+    <RichTextEditor
+      value={value}
+      placeholder="Add a description…"
+      onChange={(html) => {
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => {
+          if (html !== lastSaved.current) { lastSaved.current = html; onSave(html); }
+        }, 1000);
+      }}
+    />
   );
 }
 
@@ -545,31 +554,36 @@ function AddInput({ placeholder, onAdd, small }: { placeholder: string; onAdd: (
     <div className="flex items-center gap-2">
       <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
         placeholder={placeholder}
-        className={cn('flex-1 rounded-lg border border-secondary-300 focus:outline-none focus:ring-2 focus:ring-primary-500', small ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-sm')} />
-      <button onClick={submit} disabled={!v.trim() || busy} className={cn('rounded-lg text-primary-600 hover:bg-primary-50 disabled:opacity-40', small ? 'p-1' : 'p-1.5')} aria-label="Add"><Plus size={small ? 14 : 16} /></button>
+        className={cn('flex-1 rounded-lg border border-secondary-200 bg-secondary-50/60 text-secondary-800 transition focus:bg-surface focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20', small ? 'px-2.5 py-1.5 text-xs' : 'px-3.5 py-2.5 text-sm')} />
+      <button onClick={submit} disabled={!v.trim() || busy} className={cn('rounded-lg bg-primary-600 text-white transition hover:bg-primary-700 disabled:opacity-40', small ? 'p-1.5' : 'p-2.5')} aria-label="Add"><Plus size={small ? 14 : 18} /></button>
     </div>
   );
 }
 
-// ── Comment composer ─────────────────────────────────────────────────────────
+// ── Comment composer (WYSIWYG rich text) ─────────────────────────────────────
 function CommentComposer({ taskUuid, onAdded }: { taskUuid: string; onAdded: () => void }) {
-  const [v, setV] = useState('');
+  const [html, setHtml] = useState('');
   const [busy, setBusy] = useState(false);
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const [seed, setSeed] = useState(0); // remount the editor to clear it after posting
+  const isEmpty = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === '';
   const submit = async () => {
-    if (!v.trim() || busy) return;
+    if (isEmpty || busy) return;
     setBusy(true);
-    try { await kanbanService.addComment(taskUuid, { content: v.trim() }); setV(''); onAdded(); }
-    catch { toast.error('Failed to add comment'); } finally { setBusy(false); }
+    try {
+      await kanbanService.addComment(taskUuid, { content: html });
+      setHtml(''); setSeed((s) => s + 1); onAdded();
+    } catch { toast.error('Failed to add comment'); } finally { setBusy(false); }
   };
   return (
-    <div className="flex items-start gap-2">
-      <textarea ref={ref} value={v} onChange={(e) => setV(e.target.value)} rows={2} placeholder="Write a comment…"
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } }}
-        className="flex-1 rounded-lg border border-secondary-300 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none" />
-      <button onClick={submit} disabled={!v.trim() || busy} className="rounded-lg bg-primary-600 p-2.5 text-white hover:bg-primary-700 disabled:opacity-40" aria-label="Send comment">
-        {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-      </button>
+    <div>
+      <RichTextEditor key={seed} value="" onChange={(h) => setHtml(h)} placeholder="Write a comment… rich text & HTML supported" />
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-secondary-400">Formatting, links, code, tables — and an HTML source view.</span>
+        <button onClick={submit} disabled={isEmpty || busy}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-700 disabled:opacity-40">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Comment
+        </button>
+      </div>
     </div>
   );
 }
@@ -591,8 +605,8 @@ function AttachmentAdder({ taskUuid, onAdded }: { taskUuid: string; onAdded: () 
   }
   return (
     <div className="rounded-lg border border-secondary-200 p-3 space-y-2">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Design spec)" className="w-full rounded-lg border border-secondary-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-      <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className="w-full rounded-lg border border-secondary-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Design spec)" className={INPUT} />
+      <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className={INPUT} />
       <div className="flex gap-2">
         <button onClick={submit} disabled={!name.trim() || !url.trim() || busy} className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm text-white hover:bg-primary-700 disabled:opacity-40">Attach</button>
         <button onClick={() => setOpen(false)} className="rounded-lg px-3 py-1.5 text-sm text-secondary-600 hover:bg-secondary-100">Cancel</button>
