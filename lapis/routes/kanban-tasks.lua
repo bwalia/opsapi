@@ -369,6 +369,27 @@ return function(app)
             return api_response(500, nil, "Failed to create task")
         end
 
+        -- Persist assignees selected at creation. The client sends them as a
+        -- JSON array (string, via form-encoding); assignUser enforces the
+        -- namespace boundary on each. Without this the task was created with no
+        -- assignees even though the picker showed them selected.
+        local assignee_list = data.assignee_uuids
+        if type(assignee_list) == "string" and assignee_list ~= "" then
+            local ok_dec, decoded = pcall(cJson.decode, assignee_list)
+            assignee_list = ok_dec and decoded or nil
+        end
+        if type(assignee_list) == "table" and #assignee_list > 0 then
+            local namespace_id = get_namespace_id()
+            for _, assignee_uuid in ipairs(assignee_list) do
+                if type(assignee_uuid) == "string" and assignee_uuid ~= "" then
+                    pcall(KanbanTaskQueries.assignUser, task.id, assignee_uuid, user.uuid, namespace_id)
+                end
+            end
+            -- Return the task WITH its assignees so the board card + detail show
+            -- them immediately (show() attaches assignees/labels/etc.).
+            task = KanbanTaskQueries.show(task.uuid) or task
+        end
+
         -- Log activity
         KanbanTaskQueries.logActivity(task.id, user.uuid, "created", "task", task.id)
 

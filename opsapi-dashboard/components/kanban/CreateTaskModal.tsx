@@ -11,6 +11,7 @@ import {
   Target,
   ChevronDown,
   ChevronUp,
+  Check,
 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
@@ -104,6 +105,7 @@ const MemberSelect = memo(function MemberSelect({
     } else {
       onChange([...selectedUuids, uuid]);
     }
+    setIsOpen(false); // close after a choice so it doesn't linger open
   };
 
   const selectedMembers = members.filter((m) => selectedUuids.includes(m.user_uuid));
@@ -146,7 +148,7 @@ const MemberSelect = memo(function MemberSelect({
                     {member.user?.first_name} {member.user?.last_name}
                   </span>
                   {selectedUuids.includes(member.user_uuid) && (
-                    <span className="ml-auto text-primary-600">✓</span>
+                    <Check size={14} className="ml-auto text-primary-600" />
                   )}
                 </button>
               ))
