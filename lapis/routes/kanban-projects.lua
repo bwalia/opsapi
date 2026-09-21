@@ -25,8 +25,18 @@ local db = require("lapis.db")
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local KanbanBoardQueries = require "queries.KanbanBoardQueries"
 local KanbanTaskQueries = require "queries.KanbanTaskQueries"
+local KanbanNotificationQueries = require "queries.KanbanNotificationQueries"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+
+-- Emit a kanban notification as a best-effort side effect: a failure must never
+-- break the mutation that triggered it, so the call is pcall-wrapped + logged.
+local function notify_safe(method, ...)
+    local ok, err = pcall(KanbanNotificationQueries[method], ...)
+    if not ok then
+        ngx.log(ngx.ERR, "[Kanban] notification ", method, " failed: ", tostring(err))
+    end
+end
 
 return function(app)
     ----------------- Helper Functions --------------------
@@ -457,6 +467,8 @@ return function(app)
             if not member then
                 return api_response(400, nil, add_err or "Failed to add member")
             end
+
+            notify_safe("notifyProjectInvited", project, data.user_uuid, user.uuid, role, self.namespace.id)
 
             return api_response(201, member)
         end)

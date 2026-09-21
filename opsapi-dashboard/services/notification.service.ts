@@ -41,6 +41,18 @@ interface NotificationListResponse {
   per_page: number;
 }
 
+// The kanban notifications list endpoint returns the house envelope:
+// { success, data: [...], meta: { total, unread_count, page, perPage } }.
+interface NotificationListEnvelope {
+  data: KanbanNotification[];
+  meta?: {
+    total?: number;
+    unread_count?: number;
+    page?: number;
+    perPage?: number;
+  };
+}
+
 // ============================================
 // Notification Service
 // ============================================
@@ -73,15 +85,23 @@ export const notificationService = {
       type: params?.type,
       project_id: params?.project_id,
     });
+    const perPage = params?.perPage || 20;
     try {
-      const response = await apiClient.get<NotificationListResponse>(
+      const response = await apiClient.get<NotificationListEnvelope>(
         `/api/v2/kanban/notifications${queryString}`
       );
-      return response.data;
+      const { data = [], meta } = response.data;
+      return {
+        data,
+        total: meta?.total ?? data.length,
+        unread_count: meta?.unread_count ?? 0,
+        page: meta?.page ?? params?.page ?? 1,
+        per_page: meta?.perPage ?? perPage,
+      };
     } catch {
       // Return empty result when notifications endpoint is unavailable
       // (e.g., kanban feature disabled for this project)
-      return { data: [], total: 0, unread_count: 0, page: 1, per_page: params?.perPage || 20 };
+      return { data: [], total: 0, unread_count: 0, page: 1, per_page: perPage };
     }
   },
 
@@ -90,10 +110,10 @@ export const notificationService = {
    */
   async getUnreadCount(): Promise<number> {
     try {
-      const response = await apiClient.get<ApiDataResponse<{ count: number }>>(
+      const response = await apiClient.get<ApiDataResponse<{ unread_count: number }>>(
         '/api/v2/kanban/notifications/unread-count'
       );
-      return response.data.data.count;
+      return response.data.data.unread_count ?? 0;
     } catch {
       return 0;
     }
@@ -114,8 +134,8 @@ export const notificationService = {
     if (projectId) {
       data.project_id = projectId;
     }
-    const response = await apiClient.put<ApiDataResponse<{ count: number }>>(
-      '/api/v2/kanban/notifications/read-all',
+    const response = await apiClient.post<ApiDataResponse<{ count: number }>>(
+      '/api/v2/kanban/notifications/mark-all-read',
       toFormData(data)
     );
     return response.data.data;
@@ -148,7 +168,7 @@ export const notificationService = {
   async getPreferences(projectId?: number): Promise<NotificationPreferences> {
     const queryString = projectId ? `?project_id=${projectId}` : '';
     const response = await apiClient.get<ApiDataResponse<NotificationPreferences>>(
-      `/api/v2/kanban/notifications/preferences${queryString}`
+      `/api/v2/kanban/notification-preferences${queryString}`
     );
     return response.data.data;
   },
@@ -168,7 +188,7 @@ export const notificationService = {
       data.preferences = JSON.stringify(params.preferences);
     }
     const response = await apiClient.put<ApiDataResponse<NotificationPreferences>>(
-      '/api/v2/kanban/notifications/preferences',
+      '/api/v2/kanban/notification-preferences',
       toFormData(data)
     );
     return response.data.data;
