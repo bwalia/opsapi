@@ -676,9 +676,13 @@ export const kanbanService = {
    * Add a comment to a task
    */
   async addComment(taskUuid: string, data: CreateKanbanCommentDto): Promise<KanbanComment> {
+    const body: Record<string, unknown> = { ...data };
+    // Backend decodes mentioned_uuids as a JSON string (same convention as
+    // assignee_uuids on task create), then sends each a mention notification.
+    if (data.mentioned_uuids) body.mentioned_uuids = JSON.stringify(data.mentioned_uuids);
     const response = await apiClient.post<ApiDataResponse<KanbanComment>>(
       `/api/v2/kanban/tasks/${taskUuid}/comments`,
-      toFormData(data as unknown as Record<string, unknown>)
+      toFormData(body)
     );
     return response.data.data;
   },
@@ -805,20 +809,39 @@ export const kanbanService = {
   },
 
   /**
-   * Upload an attachment
+   * Upload a real file and attach it to a task. Two steps: the binary goes to
+   * the shared MinIO uploader (`/api/v2/documents/upload`) which returns a
+   * public URL, then that URL is recorded as a task attachment (the kanban
+   * attachments endpoint stores file_name/file_url references, not binaries).
    */
   async uploadAttachment(taskUuid: string, file: File): Promise<KanbanAttachment> {
-    const formData = new FormData();
-    formData.append('file', file);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('prefix', 'kanban-attachments');
+    const up = await apiClient.post<
+      ApiDataResponse<{ url: string; filename: string; content_type?: string; size?: number }>
+    >('/api/v2/documents/upload', fd);
+    const { url, filename, content_type, size } = up.data.data;
+    return this.addAttachmentByUrl(taskUuid, {
+      file_name: file.name || filename,
+      file_url: url,
+      file_type: content_type || file.type || undefined,
+      file_size: size ?? file.size,
+    });
+  },
 
+  /**
+   * Attach a link (URL reference) to a task. The backend stores a file_name +
+   * file_url reference (no binary upload), so this is how you attach a Google
+   * Doc, Figma, PR, spec, etc.
+   */
+  async addAttachmentByUrl(
+    taskUuid: string,
+    data: { file_name: string; file_url: string; file_type?: string; file_size?: number }
+  ): Promise<KanbanAttachment> {
     const response = await apiClient.post<ApiDataResponse<KanbanAttachment>>(
       `/api/v2/kanban/tasks/${taskUuid}/attachments`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      toFormData(data as unknown as Record<string, unknown>)
     );
     return response.data.data;
   },
