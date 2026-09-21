@@ -40,6 +40,7 @@
     12. kanban_checklist_items  - Items within checklists
     13. kanban_task_activities  - Activity log for tasks
     14. kanban_sprints          - Sprint management (optional)
+    15. kanban_epics            - Epics: project-level containers that group tasks
 ]]
 
 local schema = require("lapis.db.schema")
@@ -2123,5 +2124,122 @@ return {
             db.query([[CREATE INDEX IF NOT EXISTS idx_kanban_projects_customer_id
                        ON kanban_projects (customer_id)]])
         end)
+    end,
+
+    -- ========================================
+    -- [43] Create kanban_epics table
+    --
+    -- Epics are a project-level container that groups tasks. They live in
+    -- their OWN table (modelled on kanban_sprints) rather than as a row type
+    -- inside kanban_tasks: board/list queries already filter
+    -- `parent_task_id IS NULL`, and folding epics into kanban_tasks would
+    -- force an extra exclusion into every one of those queries and into the
+    -- cached counters.
+    -- ========================================
+    [43] = function()
+        if not table_exists("kanban_epics") then
+            schema.create_table("kanban_epics", {
+                { "id",           types.serial },
+                { "uuid",         types.varchar({ unique = true }) },
+                { "project_id",   types.integer },
+                { "namespace_id", types.integer },
+                { "name",         types.varchar },
+                { "description",  types.text({ null = true }) },
+                { "status",       types.varchar({ default = "open" }) },
+                { "color",        types.varchar({ null = true }) },
+                { "start_date",   types.date({ null = true }) },
+                { "due_date",     types.date({ null = true }) },
+                { "created_by",   types.varchar },
+                { "created_at",   types.time({ default = db.raw("NOW()") }) },
+                { "updated_at",   types.time({ default = db.raw("NOW()") }) },
+                { "deleted_at",   types.time({ null = true }) },
+                "PRIMARY KEY (id)"
+            })
+
+            -- Foreign keys
+            pcall(function()
+                db.query([[
+                    ALTER TABLE kanban_epics
+                    ADD CONSTRAINT kanban_epics_project_fk
+                    FOREIGN KEY (project_id) REFERENCES kanban_projects(id) ON DELETE CASCADE
+                ]])
+            end)
+
+            pcall(function()
+                db.query([[
+                    ALTER TABLE kanban_epics
+                    ADD CONSTRAINT kanban_epics_namespace_fk
+                    FOREIGN KEY (namespace_id) REFERENCES namespaces(id) ON DELETE CASCADE
+                ]])
+            end)
+
+            -- Status constraint
+            pcall(function()
+                db.query([[
+                    ALTER TABLE kanban_epics
+                    ADD CONSTRAINT kanban_epics_status_check
+                    CHECK (status IN ('open', 'in_progress', 'done', 'cancelled'))
+                ]])
+            end)
+        end
+
+        -- types.integer emits `DEFAULT 0`, which on an FK column is the bug that
+        -- [41] had to repair on kanban_tasks (and that 761_drop_namespace_id_defaults
+        -- sweeps globally -- but 761 sorts BEFORE this migration, so it cannot catch
+        -- kanban_epics). Strip the defaults here instead, so a project-less or
+        -- tenant-less insert fails loudly rather than silently writing 0.
+        -- Deliberately outside the table_exists guard: DROP DEFAULT is idempotent,
+        -- so this also repairs a database created by an earlier run of this step.
+        pcall(function()
+            db.query("ALTER TABLE kanban_epics ALTER COLUMN project_id DROP DEFAULT")
+        end)
+        pcall(function()
+            db.query("ALTER TABLE kanban_epics ALTER COLUMN namespace_id DROP DEFAULT")
+        end)
+
+        -- Indexes
+        if not index_exists("idx_kanban_epics_uuid") then
+            db.query("CREATE UNIQUE INDEX idx_kanban_epics_uuid ON kanban_epics (uuid)")
+        end
+        if not index_exists("idx_kanban_epics_project_active") then
+            db.query([[
+                CREATE INDEX idx_kanban_epics_project_active
+                ON kanban_epics (project_id)
+                WHERE deleted_at IS NULL
+            ]])
+        end
+        if not index_exists("idx_kanban_epics_namespace") then
+            db.query("CREATE INDEX idx_kanban_epics_namespace ON kanban_epics (namespace_id)")
+        end
+    end,
+
+    -- ========================================
+    -- [44] Add epic_id to kanban_tasks
+    --
+    -- Mirrors [29] (sprint_id) exactly. Raw "integer" with NO DEFAULT: a
+    -- `DEFAULT 0` (what types.integer({ null = true }) emits) would violate
+    -- kanban_tasks_epic_fk on every task created without an epic -- the bug
+    -- [41] exists to repair. Do not reintroduce it.
+    -- ========================================
+    [44] = function()
+        if column_exists("kanban_tasks", "epic_id") then return end
+
+        schema.add_column("kanban_tasks", "epic_id", "integer")
+
+        pcall(function()
+            db.query([[
+                ALTER TABLE kanban_tasks
+                ADD CONSTRAINT kanban_tasks_epic_fk
+                FOREIGN KEY (epic_id) REFERENCES kanban_epics(id) ON DELETE SET NULL
+            ]])
+        end)
+
+        if not index_exists("idx_kanban_tasks_epic_active") then
+            db.query([[
+                CREATE INDEX idx_kanban_tasks_epic_active
+                ON kanban_tasks (epic_id)
+                WHERE epic_id IS NOT NULL AND deleted_at IS NULL
+            ]])
+        end
     end
 }

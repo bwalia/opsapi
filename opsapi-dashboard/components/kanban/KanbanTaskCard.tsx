@@ -14,6 +14,7 @@ import {
   Circle,
   User,
   GripVertical,
+  Layers,
 } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -89,6 +90,31 @@ const AssigneeAvatars = memo(function AssigneeAvatars({
           +{remaining}
         </div>
       )}
+    </div>
+  );
+});
+
+// ============================================
+// Epic Badge Component
+// ============================================
+
+const DEFAULT_EPIC_COLOR = '#7C3AED';
+
+const EpicBadge = memo(function EpicBadge({ task }: { task: KanbanTask }) {
+  if (!task.epic_name) return null;
+
+  const color = task.epic_color || DEFAULT_EPIC_COLOR;
+
+  return (
+    <div className="flex items-center gap-1 mb-1">
+      <Layers size={11} style={{ color }} className="shrink-0" />
+      <span
+        className="inline-block max-w-full truncate px-1.5 py-0.5 text-[11px] font-semibold rounded"
+        style={{ backgroundColor: `${color}1A`, color }}
+        title={task.epic_name}
+      >
+        {task.epic_name}
+      </span>
     </div>
   );
 });
@@ -313,6 +339,9 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
           />
         </div>
       )}
+
+      {/* Epic */}
+      <EpicBadge task={task} />
 
       {/* Labels */}
       <LabelTags labels={task.labels} />

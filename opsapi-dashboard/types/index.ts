@@ -1002,6 +1002,7 @@ export type KanbanTaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | '
 export type KanbanTaskPriority = 'critical' | 'high' | 'medium' | 'low' | 'none';
 export type KanbanMemberRole = 'owner' | 'admin' | 'member' | 'viewer' | 'guest';
 export type KanbanSprintStatus = 'planned' | 'active' | 'completed' | 'cancelled';
+export type KanbanEpicStatus = 'open' | 'in_progress' | 'done' | 'cancelled';
 export type BudgetCurrency = 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY' | 'CNY';
 
 export interface KanbanProject {
@@ -1133,6 +1134,7 @@ export interface KanbanTask {
   column_id: number;
   parent_task_id?: number;
   sprint_id?: number;
+  epic_id?: number | null;
   task_number: number;
   title: string;
   description?: string;
@@ -1184,6 +1186,10 @@ export interface KanbanTask {
   };
   parent_task?: KanbanTask;
   subtasks?: KanbanTask[];
+  // Epic badge — flattened by the API (kanban_epics joined on epic_id), not nested
+  epic_uuid?: string | null;
+  epic_name?: string | null;
+  epic_color?: string | null;
 }
 
 export interface KanbanTaskAssignee {
@@ -1344,6 +1350,54 @@ export interface KanbanSprint {
   deleted_at?: string;
 }
 
+/**
+ * An epic: a project-level container that groups tasks.
+ *
+ * Epics are their own table (like sprints), NOT a task_type on kanban_tasks —
+ * board queries filter `parent_task_id IS NULL`, and folding epics into tasks
+ * would risk rendering one as a stray card.
+ *
+ * The rollups below are computed in SQL on read, so unlike KanbanSprint there
+ * are no denormalised counter columns behind them.
+ */
+export interface KanbanEpic {
+  id: number;
+  uuid: string;
+  project_id: number;
+  namespace_id: number;
+  name: string;
+  description?: string;
+  status: KanbanEpicStatus;
+  color?: string;
+  start_date?: string;
+  due_date?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string;
+  // Rollups (computed on read)
+  task_count: number;
+  completed_task_count: number;
+  total_points: number;
+  completed_points: number;
+  /** 0-100, by points when the epic has any, else by task count */
+  progress: number;
+  // Populated on the single-epic read
+  project_name?: string;
+  project_uuid?: string;
+}
+
+export interface CreateKanbanEpicDto {
+  name: string;
+  description?: string;
+  status?: KanbanEpicStatus;
+  color?: string;
+  start_date?: string;
+  due_date?: string;
+}
+
+export type UpdateKanbanEpicDto = Partial<CreateKanbanEpicDto>;
+
 export interface KanbanActivity {
   id: number;
   uuid: string;
@@ -1434,6 +1488,8 @@ export interface CreateKanbanTaskDto {
   cover_color?: string;
   parent_task_id?: number;
   sprint_id?: number;
+  /** null detaches the task from its epic (sent as "" on the wire) */
+  epic_id?: number | null;
   assignee_uuids?: string[];
   label_ids?: number[];
 }

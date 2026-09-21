@@ -1292,6 +1292,12 @@ local _migrations = {
     -- [42] CRM billing link: adds customer_id/customer_uuid (soft ref) to kanban_projects.
     ['762_kanban_projects_customer_link'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_project_migrations, 42),
+    -- [43]/[44] Epics: a project-level container that groups tasks. Own table
+    -- (like kanban_sprints) + a nullable kanban_tasks.epic_id with NO DEFAULT.
+    ['766_kanban_create_epics_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 43),
+    ['767_kanban_tasks_epic_link'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
+        kanban_project_migrations, 44),
     -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
     -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
     ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
