@@ -824,6 +824,22 @@ export const kanbanService = {
   },
 
   /**
+   * Attach a link (URL reference) to a task. The backend stores a file_name +
+   * file_url reference (no binary upload), so this is how you attach a Google
+   * Doc, Figma, PR, spec, etc.
+   */
+  async addAttachmentByUrl(
+    taskUuid: string,
+    data: { file_name: string; file_url: string; file_type?: string }
+  ): Promise<KanbanAttachment> {
+    const response = await apiClient.post<ApiDataResponse<KanbanAttachment>>(
+      `/api/v2/kanban/tasks/${taskUuid}/attachments`,
+      toFormData(data as unknown as Record<string, unknown>)
+    );
+    return response.data.data;
+  },
+
+  /**
    * Delete an attachment
    */
   async deleteAttachment(uuid: string): Promise<void> {

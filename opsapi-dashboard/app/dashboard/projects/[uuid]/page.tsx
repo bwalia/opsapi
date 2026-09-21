@@ -305,11 +305,12 @@ export default function ProjectDetailPage() {
     [createBoard, projectUuid]
   );
 
+  // Open the full task page (Jira-style) instead of the quick modal.
   const handleTaskClick = useCallback(
-    async (task: KanbanTask) => {
-      await loadTask(task.uuid);
+    (task: KanbanTask) => {
+      router.push(`/dashboard/projects/${projectUuid}/tasks/${task.uuid}`);
     },
-    [loadTask]
+    [router, projectUuid]
   );
 
   const handleEditColumn = useCallback(
