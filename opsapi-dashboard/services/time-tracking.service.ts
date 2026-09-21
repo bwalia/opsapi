@@ -82,7 +82,7 @@ export const timeTrackingService = {
     if (description) data.description = description;
 
     const response = await apiClient.post<ApiDataResponse<RunningTimer>>(
-      '/api/v2/kanban/time-tracking/start',
+      '/api/v2/kanban/timer/start',
       toFormData(data)
     );
     return response.data.data;
@@ -93,26 +93,22 @@ export const timeTrackingService = {
    */
   async stopTimer(): Promise<TimeEntry> {
     const response = await apiClient.post<ApiDataResponse<TimeEntry>>(
-      '/api/v2/kanban/time-tracking/stop'
+      '/api/v2/kanban/timer/stop'
     );
     return response.data.data;
   },
 
   /**
-   * Get the current running timer (if any)
+   * Get the current running timer (if any). The backend returns { running: false }
+   * (a truthy object) when idle, so normalise that to null.
    */
   async getRunningTimer(): Promise<RunningTimer | null> {
-    const response = await apiClient.get<ApiDataResponse<RunningTimer | null>>(
-      '/api/v2/kanban/time-tracking/current'
+    const response = await apiClient.get<ApiDataResponse<RunningTimer | (RunningTimer & { running?: boolean })>>(
+      '/api/v2/kanban/timer/current'
     );
-    return response.data.data;
-  },
-
-  /**
-   * Discard the current running timer without saving
-   */
-  async discardTimer(): Promise<void> {
-    await apiClient.delete('/api/v2/kanban/time-tracking/current');
+    const data = response.data.data as (RunningTimer & { running?: boolean }) | null;
+    if (!data || data.running === false) return null;
+    return data;
   },
 
   // ============================================
