@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Loader2, MoreHorizontal, Trash2, Plus, X, Check, Send,
   CheckSquare, MessageSquare, ListTree, Paperclip, Activity as ActivityIcon,
-  Users, Tag, Flag, Calendar, Clock, Target, Link2, ExternalLink,
+  Users, Tag, Flag, Calendar, Clock, Target, Link2, ExternalLink, Upload,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useKanbanStore } from '@/store/kanban.store';
@@ -319,7 +319,7 @@ export default function TaskDetailPage() {
           {/* Comments */}
           <section>
             <SectionTitle icon={<MessageSquare size={16} className="text-secondary-500" />}>Comments ({task.comments?.length ?? 0})</SectionTitle>
-            <CommentComposer taskUuid={task.uuid} onAdded={refresh} />
+            {canEdit && <CommentComposer taskUuid={task.uuid} onAdded={refresh} members={assignableMembers} />}
             <ul className="mt-4 space-y-4">
               {(task.comments ?? []).map((c) => (
                 <li key={c.uuid} className="flex gap-3">
@@ -560,25 +560,67 @@ function AddInput({ placeholder, onAdd, small }: { placeholder: string; onAdd: (
   );
 }
 
-// ── Comment composer (WYSIWYG rich text) ─────────────────────────────────────
-function CommentComposer({ taskUuid, onAdded }: { taskUuid: string; onAdded: () => void }) {
+// ── Comment composer (WYSIWYG rich text + @mentions) ─────────────────────────
+function CommentComposer({
+  taskUuid, onAdded, members,
+}: { taskUuid: string; onAdded: () => void; members: KanbanProjectMember[] }) {
   const [html, setHtml] = useState('');
   const [busy, setBusy] = useState(false);
   const [seed, setSeed] = useState(0); // remount the editor to clear it after posting
+  const [mentions, setMentions] = useState<KanbanProjectMember[]>([]);
   const isEmpty = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === '';
+  const mentionedSet = new Set(mentions.map((m) => m.user_uuid));
+
   const submit = async () => {
     if (isEmpty || busy) return;
     setBusy(true);
     try {
-      await kanbanService.addComment(taskUuid, { content: html });
-      setHtml(''); setSeed((s) => s + 1); onAdded();
+      // Mentions render as a trailing highlighted line (the shared editor is
+      // uncontrolled, so we append rather than inject at the caret) and each
+      // mentioned member gets a notification via mentioned_uuids.
+      const cc = mentions.length
+        ? `<p>${mentions.map((m) => `<span style="color:#2563eb;font-weight:500">@${m.user?.first_name ?? ''} ${m.user?.last_name ?? ''}</span>`).join(' ')}</p>`
+        : '';
+      await kanbanService.addComment(taskUuid, {
+        content: html + cc,
+        mentioned_uuids: mentions.length ? mentions.map((m) => m.user_uuid) : undefined,
+      });
+      setHtml(''); setMentions([]); setSeed((s) => s + 1); onAdded();
     } catch { toast.error('Failed to add comment'); } finally { setBusy(false); }
   };
+
   return (
     <div>
       <RichTextEditor key={seed} value="" onChange={(h) => setHtml(h)} placeholder="Write a comment… rich text & HTML supported" />
+      {mentions.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-secondary-400">Notifying:</span>
+          {mentions.map((m) => (
+            <span key={m.user_uuid} className="inline-flex items-center gap-1 rounded-full bg-primary-50 pl-0.5 pr-2 py-0.5 text-xs text-primary-700">
+              <Avatar f={m.user?.first_name} l={m.user?.last_name} size={18} />
+              {m.user?.first_name}
+              <button onClick={() => setMentions((prev) => prev.filter((x) => x.user_uuid !== m.user_uuid))} className="text-primary-400 hover:text-error-500"><X size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-xs text-secondary-400">Formatting, links, code, tables — and an HTML source view.</span>
+        <Picker label="Mention">
+          {(close) => members.length === 0
+            ? <div className="px-3 py-2 text-xs text-secondary-400">No members</div>
+            : members.map((m) => {
+                const on = mentionedSet.has(m.user_uuid);
+                return (
+                  <button key={m.user_uuid}
+                    onClick={() => { setMentions((prev) => on ? prev.filter((x) => x.user_uuid !== m.user_uuid) : [...prev, m]); close(); }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary-50">
+                    <Avatar f={m.user?.first_name} l={m.user?.last_name} size={22} />
+                    <span className="flex-1 text-left truncate">{m.user?.first_name} {m.user?.last_name}</span>
+                    {on && <Check size={14} className="text-primary-600" />}
+                  </button>
+                );
+              })}
+        </Picker>
         <button onClick={submit} disabled={isEmpty || busy}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-700 disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Comment
@@ -588,29 +630,60 @@ function CommentComposer({ taskUuid, onAdded }: { taskUuid: string; onAdded: () 
   );
 }
 
-// ── Attachment adder (by URL — backend stores a link reference) ───────────────
+// ── Attachment adder — real file upload (MinIO) + drag/drop, or link reference ─
 function AttachmentAdder({ taskUuid, onAdded }: { taskUuid: string; onAdded: () => void }) {
-  const [open, setOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const submit = async () => {
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const uploadFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (!list.length || busy) return;
+    setBusy(true);
+    try {
+      for (const f of list) await kanbanService.uploadAttachment(taskUuid, f);
+      onAdded();
+    } catch { toast.error('Upload failed'); } finally { setBusy(false); }
+  };
+
+  const submitLink = async () => {
     if (!name.trim() || !url.trim() || busy) return;
     setBusy(true);
-    try { await kanbanService.addAttachmentByUrl(taskUuid, { file_name: name.trim(), file_url: url.trim() }); setName(''); setUrl(''); setOpen(false); onAdded(); }
-    catch { toast.error('Failed to add attachment'); } finally { setBusy(false); }
+    try { await kanbanService.addAttachmentByUrl(taskUuid, { file_name: name.trim(), file_url: url.trim() }); setName(''); setUrl(''); setLinkOpen(false); onAdded(); }
+    catch { toast.error('Failed to add link'); } finally { setBusy(false); }
   };
-  if (!open) {
-    return <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:underline"><Link2 size={14} /> Attach a link</button>;
-  }
+
   return (
-    <div className="rounded-lg border border-secondary-200 p-3 space-y-2">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Design spec)" className={INPUT} />
-      <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className={INPUT} />
-      <div className="flex gap-2">
-        <button onClick={submit} disabled={!name.trim() || !url.trim() || busy} className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm text-white hover:bg-primary-700 disabled:opacity-40">Attach</button>
-        <button onClick={() => setOpen(false)} className="rounded-lg px-3 py-1.5 text-sm text-secondary-600 hover:bg-secondary-100">Cancel</button>
+    <div className="space-y-2">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); uploadFiles(e.dataTransfer.files); }}
+        onClick={() => !busy && fileRef.current?.click()}
+        className={cn(
+          'flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-4 text-sm transition-colors',
+          drag ? 'border-primary-400 bg-primary-50 text-primary-700' : 'border-secondary-200 text-secondary-500 hover:border-primary-300 hover:text-primary-600'
+        )}
+      >
+        {busy ? <><Loader2 size={16} className="animate-spin" /> Uploading…</> : <><Upload size={16} /> Drop a file or click to upload</>}
       </div>
+      <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = ''; }} />
+
+      {!linkOpen ? (
+        <button onClick={() => setLinkOpen(true)} className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:underline"><Link2 size={14} /> …or attach a link</button>
+      ) : (
+        <div className="rounded-lg border border-secondary-200 p-3 space-y-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Design spec)" className={INPUT} />
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className={INPUT} />
+          <div className="flex gap-2">
+            <button onClick={submitLink} disabled={!name.trim() || !url.trim() || busy} className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm text-white hover:bg-primary-700 disabled:opacity-40">Attach</button>
+            <button onClick={() => setLinkOpen(false)} className="rounded-lg px-3 py-1.5 text-sm text-secondary-600 hover:bg-secondary-100">Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

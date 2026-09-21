@@ -1458,6 +1458,8 @@ export interface UpdateKanbanLabelDto extends Partial<CreateKanbanLabelDto> {}
 export interface CreateKanbanCommentDto {
   content: string;
   parent_comment_id?: number;
+  /** UUIDs of members @mentioned in the comment — each gets a mention notification. */
+  mentioned_uuids?: string[];
 }
 
 export interface UpdateKanbanCommentDto {
