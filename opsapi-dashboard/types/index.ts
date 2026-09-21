@@ -725,6 +725,8 @@ export interface ApiKey {
   revoked_at?: string | null;
   revoked: boolean;
   created_at: string;
+  /** Set when the key is a personal access token bound to this namespace member. */
+  user_uuid?: string | null;
 }
 
 export interface CreateApiKeyDto {
@@ -732,6 +734,13 @@ export interface CreateApiKeyDto {
   scopes: ApiKeyScopes;
   /** ISO date/datetime string, e.g. "2027-01-31". Optional = never expires. */
   expires_at?: string;
+  /**
+   * Bind the key to a namespace member — a "personal access token" that
+   * authenticates AS that user (e.g. to power an agent/MCP acting as an
+   * employee). Omit for an ordinary machine key. The user must be a member of
+   * the key's namespace.
+   */
+  user_uuid?: string;
 }
 
 /** Returned ONCE from create — carries the raw secret `key`, never retrievable again. */

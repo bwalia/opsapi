@@ -15,16 +15,19 @@ import {
   Loader2,
   RotateCw,
   Sparkles,
+  UserCog,
+  X,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { apiKeysService, rolesService } from '@/services';
+import { apiKeysService, rolesService, namespaceService } from '@/services';
 import type {
   CreatedApiKey,
   ApiKeyScopes,
   NamespaceModuleMeta,
   NamespaceActionMeta,
+  NamespaceMember,
 } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -61,6 +64,15 @@ export default function NewApiKeyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedApiKey | null>(null);
 
+  // Optional employee binding — a "personal access token" that acts AS a member
+  // (e.g. an agent/MCP working an employee's tasks). Only offered for the current
+  // namespace (the members list + the backend's membership check are ns-scoped).
+  const canBind = !isForeign;
+  const [members, setMembers] = useState<NamespaceMember[]>([]);
+  const [memberQuery, setMemberQuery] = useState('');
+  const [boundUuid, setBoundUuid] = useState('');
+  const boundMember = members.find((m) => m.user?.uuid === boundUuid);
+
   const loadMeta = useCallback(async () => {
     setMetaLoading(true);
     setMetaError(false);
@@ -82,6 +94,16 @@ export default function NewApiKeyPage() {
   useEffect(() => {
     if (canManage) loadMeta();
   }, [canManage, loadMeta]);
+
+  useEffect(() => {
+    if (!canManage || !canBind) return;
+    let cancelled = false;
+    namespaceService
+      .getMembers({ perPage: 200, status: 'active' })
+      .then((res) => { if (!cancelled) setMembers((res.data || []).filter((m) => m.user)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [canManage, canBind]);
 
   const toggle = (mod: string, action: string) =>
     setScopes((prev) => {
@@ -118,6 +140,18 @@ export default function NewApiKeyPage() {
       )
     : modules;
 
+  const memberName = (m: NamespaceMember) =>
+    `${m.user?.first_name ?? ''} ${m.user?.last_name ?? ''}`.trim() || m.user?.username || m.user?.email || 'Member';
+  const mq = memberQuery.trim().toLowerCase();
+  const filteredMembers = (mq
+    ? members.filter((m) =>
+        [m.user?.first_name, m.user?.last_name, m.user?.email]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(mq)),
+      )
+    : members
+  ).slice(0, 30);
+
   const today = new Date().toISOString().slice(0, 10);
 
   const submit = async () => {
@@ -130,6 +164,7 @@ export default function NewApiKeyPage() {
         name: name.trim(),
         scopes,
         expires_at: expiresAt || undefined,
+        user_uuid: canBind && boundUuid ? boundUuid : undefined,
       }, isForeign ? targetNsId : undefined);
       setCreated(result);
       toast.success('API key created');
@@ -207,6 +242,79 @@ export default function NewApiKeyPage() {
             />
             <p className="text-xs text-secondary-500">A label to recognise this key later — not secret.</p>
           </Card>
+
+          {/* Act as a team member (optional) — personal access token */}
+          {canBind && (
+            <Card className="p-6 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-secondary-800 flex items-center gap-1.5">
+                    <UserCog className="w-4 h-4 text-secondary-400" /> Act as a team member
+                    <span className="font-normal text-secondary-400">(optional)</span>
+                  </h2>
+                  <p className="text-xs text-secondary-500 mt-0.5">
+                    Bind this key to a member and it becomes a <strong>personal access token</strong> — requests act
+                    as that person (e.g. an agent or MCP working their tasks). Leave empty for a plain machine key.
+                  </p>
+                </div>
+                {boundMember && (
+                  <button
+                    type="button"
+                    onClick={() => setBoundUuid('')}
+                    className="text-xs font-semibold text-secondary-500 hover:text-error-600 inline-flex items-center gap-1 shrink-0"
+                  >
+                    <X className="w-3.5 h-3.5" /> Clear
+                  </button>
+                )}
+              </div>
+
+              {boundMember ? (
+                <div className="flex items-center gap-3 rounded-xl border border-primary-300 bg-primary-500/[0.04] px-3 py-2.5">
+                  <div className="w-8 h-8 rounded-full bg-primary-500/10 flex items-center justify-center text-xs font-semibold text-primary-700 shrink-0">
+                    {(boundMember.user?.first_name?.[0] || boundMember.user?.email?.[0] || '?').toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-secondary-900 truncate">{memberName(boundMember)}</div>
+                    <div className="text-xs text-secondary-500 truncate">{boundMember.user?.email}</div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-secondary-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      value={memberQuery}
+                      onChange={(e) => setMemberQuery(e.target.value)}
+                      placeholder={members.length ? `Search ${members.length} members…` : 'Loading members…'}
+                      className="w-full rounded-lg border border-secondary-300 pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition"
+                      aria-label="Search members"
+                    />
+                  </div>
+                  {filteredMembers.length > 0 && (
+                    <div className="max-h-52 overflow-y-auto rounded-lg border border-secondary-200 divide-y divide-secondary-100">
+                      {filteredMembers.map((m) => (
+                        <button
+                          key={m.user!.uuid}
+                          type="button"
+                          onClick={() => { setBoundUuid(m.user!.uuid); setMemberQuery(''); }}
+                          className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary-50 transition-colors"
+                        >
+                          <div className="w-8 h-8 rounded-full bg-secondary-100 flex items-center justify-center text-xs font-semibold text-secondary-600 shrink-0">
+                            {(m.user?.first_name?.[0] || m.user?.email?.[0] || '?').toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-secondary-800 truncate">{memberName(m)}</div>
+                            <div className="text-xs text-secondary-500 truncate">{m.user?.email}</div>
+                          </div>
+                          {m.is_owner && <Badge variant="secondary" className="ml-auto shrink-0">owner</Badge>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </Card>
+          )}
 
           {/* Permissions */}
           <Card className="p-6 space-y-4">
@@ -326,6 +434,16 @@ export default function NewApiKeyPage() {
               never reach another tenant, and can never manage keys, members, or roles.
             </p>
           </Card>
+
+          {boundMember && (
+            <Card className="p-5 flex items-start gap-2.5 bg-secondary-50 border-secondary-200">
+              <UserCog className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-secondary-600">
+                Personal token — acts as <strong className="text-secondary-900">{memberName(boundMember)}</strong>.
+                Requests are attributed to them and limited to what they can access.
+              </p>
+            </Card>
+          )}
 
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
