@@ -2398,6 +2398,8 @@ local _migrations = {
 
     -- API keys (core): namespace-scoped machine credentials.
     ['845_create_api_keys'] = api_key_migrations[1],
+    -- Optional user binding — a key can act as a specific user (personal token).
+    ['846_add_api_keys_user_uuid'] = api_key_migrations[2],
 
     -- =========================================================================
     -- FIELD SERVICE (850-861). Feature-gated. Numbered after CRM (500s),

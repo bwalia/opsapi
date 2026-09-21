@@ -117,12 +117,14 @@ function ApiKey.authenticate(raw)
 
     local rows = db.query([[
         SELECT ak.id, ak.uuid, ak.name, ak.namespace_id, ak.scopes,
-               ak.expires_at, ak.revoked_at,
+               ak.expires_at, ak.revoked_at, ak.user_uuid,
                (ak.expires_at IS NOT NULL AND ak.expires_at < NOW()) AS is_expired,
                ns.id AS ns_id, ns.uuid AS ns_uuid, ns.slug AS ns_slug,
-               ns.name AS ns_name, ns.status AS ns_status
+               ns.name AS ns_name, ns.status AS ns_status,
+               u.username AS user_username
         FROM api_keys ak
         JOIN namespaces ns ON ns.id = ak.namespace_id
+        LEFT JOIN users u ON u.uuid = ak.user_uuid
         WHERE ak.key_hash = ?
         LIMIT 1
     ]], ApiKey.hash(raw))
@@ -150,7 +152,7 @@ function ApiKey.authenticate(raw)
 
     touch_last_used(row.id)
 
-    return {
+    local principal = {
         api_key = true,
         key_id = row.id,
         key_uuid = row.uuid,
@@ -164,12 +166,26 @@ function ApiKey.authenticate(raw)
             status = row.ns_status,
         },
         scopes = scopes,
-        -- User-ish fields so downstream code that reads a user degrades
-        -- gracefully: the uuid matches no users row, so admin lookups and
-        -- author resolution simply come back empty.
-        uuid = row.uuid,
-        username = "api-key:" .. (row.name or row.uuid),
-    }, nil, nil
+    }
+
+    -- Identity. A user-bound key (personal access token) acts AS that user:
+    -- principal.uuid = the user's uuid, so every request-time authz that reads
+    -- the current user's uuid (kanban isMember/isEditor/getByAssignee, time-entry
+    -- attribution, author resolution) behaves as the employee. An unbound key
+    -- keeps its historical machine identity (uuid = key uuid, matches no users
+    -- row). Note: namespace RBAC still evaluates the KEY's scopes, not the
+    -- user's role (see middleware/namespace.lua) — this only sets identity.
+    local bound = row.user_uuid
+    if bound ~= nil and bound ~= ngx.null and bound ~= "" then
+        principal.uuid = bound
+        principal.user_bound = true
+        principal.username = row.user_username or ("user:" .. bound)
+    else
+        principal.uuid = row.uuid
+        principal.username = "api-key:" .. (row.name or row.uuid)
+    end
+
+    return principal, nil, nil
 end
 
 return ApiKey
