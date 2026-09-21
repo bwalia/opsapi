@@ -40,7 +40,8 @@ show_help() {
     echo "  -r, --reset-db        Reset database (removes volumes and wipes data)"
     echo "  -c, --check-env       Only check and update .env file, don't start containers"
     echo "  -C, --ci              CI/CD mode: uses docker-compose.override.ci.yml (no dev volume mounts)"
-    echo "  -D, --dashboard-dev   Run the Next.js dashboard in dev mode (hot reload, no image build)"
+    echo "  -D, --dashboard-dev   Run the Next.js dashboard in dev mode inside Docker (hot reload, no image build)"
+    echo "  -N, --dashboard-native  Run the dashboard dev server on the HOST (Turbopack, fast); backend stays in Docker"
     echo "  -B, --no-build        Start from the existing image without rebuilding (skips Docker Hub base-image pull; avoids 429 rate limits)"
     echo "  -h, --help            Show this help message"
     echo ""
@@ -112,6 +113,7 @@ CHECK_ENV_ONLY=false
 PROTOCOL=""
 CI_MODE=false
 DASHBOARD_DEV=false
+DASHBOARD_NATIVE=false
 NO_BUILD=false
 PROJECT_CODE=""
 APEX_DOMAIN=""
@@ -170,6 +172,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -D|--dashboard-dev)
             DASHBOARD_DEV=true
+            shift
+            ;;
+        -N|--dashboard-native)
+            DASHBOARD_NATIVE=true
             shift
             ;;
         -B|--no-build)
@@ -1066,6 +1072,22 @@ cd lapis
 
 #sed -i 's/COPY lapis\/\. \/app/COPY . \/app/' lapis/Dockerfil
 
+# Native dashboard dev (-N): backend runs in Docker, but the Next.js dev server
+# runs on the HOST instead of a container. On macOS, `next dev` in Docker reads
+# every module over the Colima/virtiofs bind mount and polls the filesystem —
+# minutes per page. Native dev uses the local FS + inotify + Turbopack (seconds).
+# We bring the stack up WITHOUT the dashboard container (--scale dashboard=0) so
+# port 8039 is free for the host dev server, launched at the very end.
+DASHBOARD_UP_ARGS=""
+if $DASHBOARD_NATIVE; then
+    if $DASHBOARD_DEV; then
+        echo -e "${YELLOW}[!] Both -D and -N given — using -N (native host dev).${NC}"
+        DASHBOARD_DEV=false
+    fi
+    echo -e "${BLUE}[i] Native dashboard dev: backend in Docker, Next.js dev on the host (Turbopack, fast)${NC}"
+    DASHBOARD_UP_ARGS="--scale dashboard=0"
+fi
+
 # Build docker compose command based on CI / dashboard-dev mode
 # CI mode uses a separate compose file without dev volume mounts.
 # Dashboard-dev mode layers an override that runs Next.js via `next dev`
@@ -1106,17 +1128,17 @@ BUILD_IMAGE="lapis-lapis:latest"   # docker compose default: <project>-<service>
 
 if $NO_BUILD; then
     echo -e "${BLUE}[i] --no-build set: starting from the existing image (no rebuild, no base-image pull)${NC}"
-    if ! $COMPOSE_CMD up -d; then
+    if ! $COMPOSE_CMD up -d $DASHBOARD_UP_ARGS; then
         echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
         $COMPOSE_CMD logs --tail=100
         exit 1
     fi
-elif ! $COMPOSE_CMD up --build -d; then
+elif ! $COMPOSE_CMD up --build -d $DASHBOARD_UP_ARGS; then
     if docker image inspect "$BUILD_IMAGE" >/dev/null 2>&1; then
         echo -e "${YELLOW}[!] Build/start failed — this is usually a Docker Hub pull rate limit (HTTP 429).${NC}"
         echo -e "${YELLOW}[!] An existing '${BUILD_IMAGE}' image was found — retrying WITHOUT --build...${NC}"
         echo -e "${YELLOW}    (Tip: run 'docker login' to raise the limit, or pass -B/--no-build to skip building.)${NC}"
-        if ! $COMPOSE_CMD up -d; then
+        if ! $COMPOSE_CMD up -d $DASHBOARD_UP_ARGS; then
             echo -e "${RED}[!] docker compose up failed — aborting.${NC}"
             $COMPOSE_CMD logs --tail=100
             exit 1
@@ -1340,3 +1362,37 @@ else
 fi
 
 sleep 5
+
+# ------------------------------------------------------------------
+# Native dashboard dev server (-N). The backend is already up in Docker; run
+# Next.js dev on the HOST for fast reloads (Turbopack + native inotify), instead
+# of the slow Docker/virtiofs path. Foreground: Ctrl-C stops only the dev server;
+# the backend containers keep running. cwd here is lapis/, dashboard is one up.
+# ------------------------------------------------------------------
+if [ "${DASHBOARD_NATIVE:-false}" = true ]; then
+    if ! command -v npm >/dev/null 2>&1; then
+        echo -e "${RED}[!] -N needs Node/npm on the host, but 'npm' was not found.${NC}"
+        echo -e "${YELLOW}    Install Node 24 (nvm/brew), or use -D for the (slower) in-Docker dev.${NC}"
+        exit 1
+    fi
+    # cwd is lapis/. Point the browser at the backend the same way the container
+    # would — read NEXT_PUBLIC_API_URL from lapis/.env (the user's real host port,
+    # e.g. 4020) rather than assuming 4010. Env var > lapis/.env > default.
+    DASH_API_URL="${NEXT_PUBLIC_API_URL:-}"
+    if [ -z "$DASH_API_URL" ] && [ -f .env ]; then
+        DASH_API_URL="$(grep -E '^NEXT_PUBLIC_API_URL=' .env | tail -1 | cut -d '=' -f2- | tr -d '"\r')"
+    fi
+    DASH_API_URL="${DASH_API_URL:-http://127.0.0.1:4010}"
+
+    cd ../opsapi-dashboard || { echo -e "${RED}[!] opsapi-dashboard directory not found${NC}"; exit 1; }
+    if [ ! -d node_modules ]; then
+        echo -e "${GREEN}[+] Installing dashboard deps on the host (first run; skipping the Cypress binary)...${NC}"
+        CYPRESS_INSTALL_BINARY=0 npm install
+    fi
+    echo ""
+    echo -e "${GREEN}[+] Dashboard dev (native, Turbopack) → http://127.0.0.1:8039${NC}"
+    echo -e "${BLUE}    Backend API: ${DASH_API_URL} (in Docker). Ctrl-C stops only the dev server.${NC}"
+    NEXT_PUBLIC_API_URL="$DASH_API_URL" \
+    FRONTEND_URL="${FRONTEND_URL:-http://127.0.0.1:8039}" \
+    exec npm run dev
+fi
