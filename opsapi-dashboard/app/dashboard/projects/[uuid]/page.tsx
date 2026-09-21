@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Plus,
   Tag,
+  BarChart3,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
@@ -541,6 +542,12 @@ export default function ProjectDetailPage() {
             <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/sprints`)}>
               <LayoutGrid size={18} className="mr-1" />
               Scrum
+            </Button>
+
+            {/* Analytics */}
+            <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/analytics`)}>
+              <BarChart3 size={18} className="mr-1" />
+              Analytics
             </Button>
 
             {/* Settings */}
