@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import Mention from '@tiptap/extension-mention';
+import type { SuggestionOptions, SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion';
 import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -110,6 +112,88 @@ const VideoEmbed = Node.create({
   },
 });
 
+export interface MentionItem {
+  id: string;
+  label: string;
+}
+
+// ------------------------------------------------------------
+// @mention suggestion (inline "@" → member dropdown)
+// ------------------------------------------------------------
+// A dependency-light popup: no tippy.js. The dropdown is a plain fixed-position
+// element appended to <body> and positioned at the caret's client rect. `getItems`
+// is read lazily so async-loaded members are picked up without re-mounting the editor.
+function buildMentionSuggestion(getItems: () => MentionItem[]): Omit<SuggestionOptions, 'editor'> {
+  return {
+    char: '@',
+    items: ({ query }) => {
+      const q = query.toLowerCase();
+      return getItems()
+        .filter((i) => i.label.toLowerCase().includes(q))
+        .slice(0, 8);
+    },
+    render: () => {
+      let el: HTMLDivElement | null = null;
+      let items: MentionItem[] = [];
+      let selected = 0;
+      let command: ((item: MentionItem) => void) | null = null;
+
+      const paint = () => {
+        if (!el) return;
+        if (items.length === 0) { el.style.display = 'none'; return; }
+        el.style.display = 'block';
+        el.innerHTML = '';
+        items.forEach((item, idx) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = `@${item.label}`;
+          b.style.cssText =
+            `display:block;width:100%;text-align:left;padding:6px 12px;font-size:13px;` +
+            `border:0;cursor:pointer;background:${idx === selected ? '#eff6ff' : 'transparent'};` +
+            `color:${idx === selected ? '#1d4ed8' : '#334155'};`;
+          b.onmousedown = (e) => { e.preventDefault(); command?.(item); };
+          el!.appendChild(b);
+        });
+      };
+
+      const place = (rect: DOMRect | null | undefined) => {
+        if (!el || !rect) return;
+        el.style.left = `${rect.left}px`;
+        el.style.top = `${rect.bottom + 4}px`;
+      };
+
+      return {
+        onStart: (props: SuggestionProps<MentionItem>) => {
+          items = props.items; selected = 0; command = props.command;
+          el = document.createElement('div');
+          el.style.cssText =
+            'position:fixed;z-index:9999;min-width:180px;max-height:240px;overflow-y:auto;' +
+            'background:#fff;border:1px solid #e2e8f0;border-radius:8px;' +
+            'box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px 0;';
+          document.body.appendChild(el);
+          paint();
+          place(props.clientRect?.());
+        },
+        onUpdate: (props: SuggestionProps<MentionItem>) => {
+          items = props.items; selected = 0; command = props.command;
+          paint();
+          place(props.clientRect?.());
+        },
+        onKeyDown: (props: SuggestionKeyDownProps) => {
+          if (!items.length) return false;
+          const { key } = props.event;
+          if (key === 'ArrowDown') { selected = (selected + 1) % items.length; paint(); return true; }
+          if (key === 'ArrowUp') { selected = (selected - 1 + items.length) % items.length; paint(); return true; }
+          if (key === 'Enter' || key === 'Tab') { command?.(items[selected]); return true; }
+          if (key === 'Escape') { el?.remove(); el = null; return true; }
+          return false;
+        },
+        onExit: () => { el?.remove(); el = null; },
+      };
+    },
+  };
+}
+
 export interface RichTextEditorProps {
   /** Initial / controlled HTML value */
   value?: string;
@@ -117,6 +201,8 @@ export interface RichTextEditorProps {
   onChange?: (html: string, json: string) => void;
   placeholder?: string;
   editable?: boolean;
+  /** When provided, typing "@" opens a mention picker over these items. */
+  mentionItems?: MentionItem[];
 }
 
 // ------------------------------------------------------------
@@ -381,7 +467,13 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   onChange,
   placeholder = 'Start writing your lesson content…',
   editable = true,
+  mentionItems,
 }) => {
+  // Read the latest items lazily so async-loaded members work without remounting.
+  const mentionItemsRef = useRef<MentionItem[]>(mentionItems ?? []);
+  useEffect(() => { mentionItemsRef.current = mentionItems ?? []; }, [mentionItems]);
+  const withMentions = mentionItems !== undefined;
+
   const editor = useEditor({
     immediatelyRender: false, // required for Next.js SSR (avoids hydration mismatch)
     editable,
@@ -403,6 +495,15 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       TableHeader,
       TableCell,
       Placeholder.configure({ placeholder }),
+      ...(withMentions
+        ? [Mention.configure({
+            HTMLAttributes: { class: 'mention', style: 'color:#2563eb;font-weight:500' },
+            // The getter is invoked by TipTap on keystroke (never during render),
+            // so reading the ref here is safe.
+            // eslint-disable-next-line react-hooks/refs
+            suggestion: buildMentionSuggestion(() => mentionItemsRef.current),
+          })]
+        : []),
     ],
     content: value,
     onUpdate: ({ editor: ed }) => {

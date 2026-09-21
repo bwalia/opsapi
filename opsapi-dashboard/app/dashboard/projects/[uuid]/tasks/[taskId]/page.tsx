@@ -560,67 +560,48 @@ function AddInput({ placeholder, onAdd, small }: { placeholder: string; onAdd: (
   );
 }
 
-// ── Comment composer (WYSIWYG rich text + @mentions) ─────────────────────────
+// Pull @mention user UUIDs out of the editor HTML (TipTap Mention renders
+// <span data-type="mention" data-id="<uuid>">). Deduped.
+function extractMentionUuids(html: string): string[] {
+  if (typeof window === 'undefined' || !html.includes('data-type="mention"')) return [];
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const ids = Array.from(doc.querySelectorAll('[data-type="mention"]'))
+    .map((el) => el.getAttribute('data-id'))
+    .filter((id): id is string => !!id);
+  return Array.from(new Set(ids));
+}
+
+// ── Comment composer (WYSIWYG rich text + inline @mentions) ──────────────────
 function CommentComposer({
   taskUuid, onAdded, members,
 }: { taskUuid: string; onAdded: () => void; members: KanbanProjectMember[] }) {
   const [html, setHtml] = useState('');
   const [busy, setBusy] = useState(false);
   const [seed, setSeed] = useState(0); // remount the editor to clear it after posting
-  const [mentions, setMentions] = useState<KanbanProjectMember[]>([]);
   const isEmpty = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === '';
-  const mentionedSet = new Set(mentions.map((m) => m.user_uuid));
+
+  const mentionItems = members
+    .filter((m) => m.user)
+    .map((m) => ({ id: m.user_uuid, label: `${m.user?.first_name ?? ''} ${m.user?.last_name ?? ''}`.trim() || m.user!.email }));
 
   const submit = async () => {
     if (isEmpty || busy) return;
     setBusy(true);
     try {
-      // Mentions render as a trailing highlighted line (the shared editor is
-      // uncontrolled, so we append rather than inject at the caret) and each
-      // mentioned member gets a notification via mentioned_uuids.
-      const cc = mentions.length
-        ? `<p>${mentions.map((m) => `<span style="color:#2563eb;font-weight:500">@${m.user?.first_name ?? ''} ${m.user?.last_name ?? ''}</span>`).join(' ')}</p>`
-        : '';
+      const mentioned = extractMentionUuids(html);
       await kanbanService.addComment(taskUuid, {
-        content: html + cc,
-        mentioned_uuids: mentions.length ? mentions.map((m) => m.user_uuid) : undefined,
+        content: html,
+        mentioned_uuids: mentioned.length ? mentioned : undefined,
       });
-      setHtml(''); setMentions([]); setSeed((s) => s + 1); onAdded();
+      setHtml(''); setSeed((s) => s + 1); onAdded();
     } catch { toast.error('Failed to add comment'); } finally { setBusy(false); }
   };
 
   return (
     <div>
-      <RichTextEditor key={seed} value="" onChange={(h) => setHtml(h)} placeholder="Write a comment… rich text & HTML supported" />
-      {mentions.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-secondary-400">Notifying:</span>
-          {mentions.map((m) => (
-            <span key={m.user_uuid} className="inline-flex items-center gap-1 rounded-full bg-primary-50 pl-0.5 pr-2 py-0.5 text-xs text-primary-700">
-              <Avatar f={m.user?.first_name} l={m.user?.last_name} size={18} />
-              {m.user?.first_name}
-              <button onClick={() => setMentions((prev) => prev.filter((x) => x.user_uuid !== m.user_uuid))} className="text-primary-400 hover:text-error-500"><X size={11} /></button>
-            </span>
-          ))}
-        </div>
-      )}
+      <RichTextEditor key={seed} value="" onChange={(h) => setHtml(h)} mentionItems={mentionItems} placeholder="Write a comment…  type @ to mention a teammate" />
       <div className="mt-2 flex items-center justify-between gap-2">
-        <Picker label="Mention">
-          {(close) => members.length === 0
-            ? <div className="px-3 py-2 text-xs text-secondary-400">No members</div>
-            : members.map((m) => {
-                const on = mentionedSet.has(m.user_uuid);
-                return (
-                  <button key={m.user_uuid}
-                    onClick={() => { setMentions((prev) => on ? prev.filter((x) => x.user_uuid !== m.user_uuid) : [...prev, m]); close(); }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary-50">
-                    <Avatar f={m.user?.first_name} l={m.user?.last_name} size={22} />
-                    <span className="flex-1 text-left truncate">{m.user?.first_name} {m.user?.last_name}</span>
-                    {on && <Check size={14} className="text-primary-600" />}
-                  </button>
-                );
-              })}
-        </Picker>
+        <span className="text-xs text-secondary-400">Type <span className="font-semibold text-secondary-500">@</span> to mention · rich text, links, code &amp; tables supported</span>
         <button onClick={submit} disabled={isEmpty || busy}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-700 disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Comment
