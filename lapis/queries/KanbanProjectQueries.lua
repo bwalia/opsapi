@@ -325,8 +325,11 @@ end
 --- Get single project by UUID with details
 -- @param uuid string Project UUID
 -- @param user_uuid string Optional user UUID to get membership info
+-- @param namespace_id number Optional namespace id — when given, the project must
+--   belong to it or nil is returned (multi-tenant isolation: a project UUID from
+--   another namespace must not be readable/operable from this one).
 -- @return table|nil Project with details
-function KanbanProjectQueries.show(uuid, user_uuid)
+function KanbanProjectQueries.show(uuid, user_uuid, namespace_id)
     local sql = [[
         SELECT p.*,
                n.name as namespace_name,
@@ -338,7 +341,13 @@ function KanbanProjectQueries.show(uuid, user_uuid)
         WHERE p.uuid = ?
     ]]
 
-    local result = db.query(sql, uuid)
+    local values = { uuid }
+    if namespace_id then
+        sql = sql .. " AND p.namespace_id = ?"
+        table.insert(values, namespace_id)
+    end
+
+    local result = db.query(sql, table.unpack(values))
     if not result or #result == 0 then
         return nil
     end

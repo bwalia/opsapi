@@ -253,7 +253,7 @@ return function(app)
     app:get("/api/v2/kanban/projects/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid, user.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, user.uuid, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -283,7 +283,7 @@ return function(app)
     app:put("/api/v2/kanban/projects/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "update", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -333,7 +333,7 @@ return function(app)
     app:delete("/api/v2/kanban/projects/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "delete", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -361,7 +361,7 @@ return function(app)
     app:get("/api/v2/kanban/projects/:uuid/stats", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -385,7 +385,7 @@ return function(app)
     app:get("/api/v2/kanban/projects/:uuid/members", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -423,7 +423,7 @@ return function(app)
     app:post("/api/v2/kanban/projects/:uuid/members", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "manage", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -467,7 +467,7 @@ return function(app)
     app:delete("/api/v2/kanban/projects/:uuid/members/:user_uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -500,7 +500,7 @@ return function(app)
     app:put("/api/v2/kanban/projects/:uuid/members/:user_uuid/role", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "manage", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
@@ -541,7 +541,7 @@ return function(app)
     app:post("/api/v2/kanban/projects/:uuid/star", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "read", function(self)
             local user = self.current_user
-            local project = KanbanProjectQueries.show(self.params.uuid)
+            local project = KanbanProjectQueries.show(self.params.uuid, nil, self.namespace.id)
 
             if not project then
                 return api_response(404, nil, "Project not found")
