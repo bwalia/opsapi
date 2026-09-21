@@ -783,7 +783,8 @@ export const kanbanService = {
    * Toggle checklist item completion
    */
   async toggleChecklistItem(uuid: string): Promise<KanbanChecklistItem> {
-    const response = await apiClient.post<ApiDataResponse<KanbanChecklistItem>>(
+    // Backend registers this as PUT (routes/kanban-tasks.lua); POST 404s.
+    const response = await apiClient.put<ApiDataResponse<KanbanChecklistItem>>(
       `/api/v2/kanban/checklist-items/${uuid}/toggle`
     );
     return response.data.data;
