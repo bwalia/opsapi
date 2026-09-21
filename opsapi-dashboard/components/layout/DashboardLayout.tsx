@@ -6,6 +6,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import ThemeStyles from './ThemeStyles';
 import BuildFooter from './BuildFooter';
+import { GlobalTimerWidget } from '@/components/time-tracking';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
 import { NamespaceProvider } from '@/contexts/NamespaceContext';
@@ -155,6 +156,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
             <BuildFooter />
           </div>
         </div>
+
+        {/* Floating running-timer widget (self-hides when no timer runs) */}
+        <GlobalTimerWidget />
       </PermissionsProvider>
     </NamespaceProvider>
   );

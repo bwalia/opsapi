@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
-import { Play, Square, Clock, Pause, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Square, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { timeTrackingService, formatTimerDisplay, calculateElapsedSeconds } from '@/services/time-tracking.service';
 import type { RunningTimer, KanbanTask } from '@/types';
@@ -15,12 +15,15 @@ interface TimerButtonProps {
   task: KanbanTask;
   size?: 'sm' | 'md';
   className?: string;
+  /** Called after a successful start/stop so callers can refresh time totals. */
+  onChange?: () => void;
 }
 
 export const TimerButton = memo(function TimerButton({
   task,
   size = 'sm',
   className,
+  onChange,
 }: TimerButtonProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [runningTimer, setRunningTimer] = useState<RunningTimer | null>(null);
@@ -61,13 +64,14 @@ export const TimerButton = memo(function TimerButton({
         setIsRunning(true);
         toast.success('Timer started');
       }
+      onChange?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to toggle timer';
       toast.error(message);
     } finally {
       setIsLoading(false);
     }
-  }, [isRunning, task.uuid]);
+  }, [isRunning, task.uuid, onChange]);
 
   const sizeClasses = {
     sm: 'p-1.5',
@@ -171,21 +175,6 @@ export const GlobalTimerWidget = memo(function GlobalTimerWidget({
     }
   }, []);
 
-  const handleDiscard = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      await timeTrackingService.discardTimer();
-      setRunningTimer(null);
-      setElapsedSeconds(0);
-      toast.success('Timer discarded');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to discard timer';
-      toast.error(message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
   if (!runningTimer) {
     return null;
   }
@@ -269,19 +258,11 @@ export const GlobalTimerWidget = memo(function GlobalTimerWidget({
             </div>
           </div>
 
-          <div className="flex gap-2 mt-4">
-            <button
-              onClick={handleDiscard}
-              disabled={isLoading}
-              className="flex-1 py-2 text-sm font-medium text-secondary-600 hover:bg-secondary-100 rounded-lg transition-colors"
-            >
-              <X className="w-4 h-4 inline-block mr-1" />
-              Discard
-            </button>
+          <div className="mt-4">
             <button
               onClick={handleStop}
               disabled={isLoading}
-              className="flex-1 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+              className="w-full py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
             >
               <Square className="w-4 h-4 inline-block mr-1" />
               Stop & Save

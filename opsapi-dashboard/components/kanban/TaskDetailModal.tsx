@@ -39,6 +39,7 @@ import type {
 } from '@/types';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import { TimerButton } from '@/components/time-tracking';
 import {
   kanbanService,
   formatPriority,
@@ -704,24 +705,21 @@ const TaskDetailModal = memo(function TaskDetailModal({
   // Load the combined time spent (kanban timer + Timesheets module) for this
   // task whenever the modal opens, so "Spent" reflects every tracking surface.
   const taskUuid = task?.uuid;
+  const reloadTimeSummary = useCallback(() => {
+    if (!taskUuid) return;
+    kanbanService
+      .getTaskTimeSummary(taskUuid)
+      .then(setTimeSummary)
+      .catch(() => setTimeSummary(null));
+  }, [taskUuid]);
+
   useEffect(() => {
     if (!isOpen || !taskUuid) {
       setTimeSummary(null);
       return;
     }
-    let cancelled = false;
-    kanbanService
-      .getTaskTimeSummary(taskUuid)
-      .then((summary) => {
-        if (!cancelled) setTimeSummary(summary);
-      })
-      .catch(() => {
-        if (!cancelled) setTimeSummary(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, taskUuid]);
+    reloadTimeSummary();
+  }, [isOpen, taskUuid, reloadTimeSummary]);
 
   const handleSave = async () => {
     if (task && editedTitle.trim()) {
@@ -939,9 +937,14 @@ const TaskDetailModal = memo(function TaskDetailModal({
 
           {/* Time Tracking */}
           <div>
-            <div className="flex items-center gap-2 text-sm text-secondary-500 mb-2">
-              <Clock size={14} />
-              <span>Time tracking</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-sm text-secondary-500">
+                <Clock size={14} />
+                <span>Time tracking</span>
+              </div>
+              {canEdit && (
+                <TimerButton task={task} size="md" onChange={reloadTimeSummary} />
+              )}
             </div>
             {(() => {
               // Combined total spans the kanban timer AND time logged via the
