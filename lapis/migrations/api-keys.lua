@@ -30,6 +30,14 @@ local function index_exists(name)
     local r = db.query([[SELECT EXISTS (SELECT FROM pg_indexes WHERE indexname = ?) as exists]], name)
     return r[1] and r[1].exists
 end
+local function column_exists(table_name, column_name)
+    local r = db.query(
+        [[SELECT EXISTS (SELECT FROM information_schema.columns
+          WHERE table_name = ? AND column_name = ?) as exists]],
+        table_name, column_name
+    )
+    return r[1] and r[1].exists
+end
 
 return {
     -- ========================================================================
@@ -73,6 +81,19 @@ return {
                 ON api_keys (namespace_id)
                 WHERE revoked_at IS NULL
             ]])
+        end
+    end,
+
+    -- ========================================================================
+    -- [2] Bind a key to a user (personal access token). NULL = machine key
+    -- (unchanged behaviour); when set, authenticate() makes the principal act
+    -- as this user. Soft reference to users.uuid — matches the existing soft
+    -- created_by (no hard FK). ponytail: nullable varchar, no FK; add a FK only
+    -- if orphaned bindings ever become a problem.
+    -- ========================================================================
+    [2] = function()
+        if not column_exists("api_keys", "user_uuid") then
+            db.query("ALTER TABLE api_keys ADD COLUMN user_uuid varchar")
         end
     end,
 }

@@ -1,0 +1,28 @@
+{
+  "name": "opsapi-kanban-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing OpsAPI kanban project management to Claude Code / any MCP-compatible agent: list an employee's tasks, log time per task, and attach the PR link on completion.",
+  "type": "module",
+  "bin": {
+    "opsapi-kanban-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

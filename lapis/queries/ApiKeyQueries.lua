@@ -14,7 +14,7 @@ local ApiKeys = require("models.ApiKeyModel")
 local ApiKeyQueries = {}
 
 --- Persist a new key.
--- @param params table {namespace_id, name, key_prefix, key_hash, scopes(json string), created_by?, expires_at?}
+-- @param params table {namespace_id, name, key_prefix, key_hash, scopes(json string), created_by?, expires_at?, user_uuid?}
 -- @return table The created row (without key_hash)
 function ApiKeyQueries.create(params)
     local row = ApiKeys:create({
@@ -26,6 +26,8 @@ function ApiKeyQueries.create(params)
         scopes = params.scopes,
         created_by = params.created_by,
         expires_at = params.expires_at,
+        -- Optional: bind the key to a user so it authenticates AS them.
+        user_uuid = params.user_uuid,
     }, { returning = "*" })
     row.key_hash = nil
     return row
@@ -37,7 +39,7 @@ end
 function ApiKeyQueries.listByNamespace(namespace_id)
     return db.query([[
         SELECT uuid, name, key_prefix, scopes, last_used_at,
-               expires_at, revoked_at, created_at
+               expires_at, revoked_at, created_at, user_uuid
         FROM api_keys
         WHERE namespace_id = ?
         ORDER BY created_at DESC

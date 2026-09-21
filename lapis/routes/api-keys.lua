@@ -18,6 +18,7 @@ local cjson = require("cjson")
 local db = require("lapis.db")
 local ApiKeyHelper = require("helper.api-key")
 local ApiKeyQueries = require("queries.ApiKeyQueries")
+local NamespaceMemberQueries = require("queries.NamespaceMemberQueries")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 
@@ -88,6 +89,8 @@ local function present(row)
         revoked_at = revoked_at,
         revoked = revoked_at ~= nil,
         created_at = row.created_at,
+        -- Which user this key acts as (nil = machine key).
+        user_uuid = (row.user_uuid ~= nil and row.user_uuid ~= ngx.null and row.user_uuid ~= "") and row.user_uuid or nil,
     }
 end
 
@@ -120,6 +123,25 @@ return function(app)
                 end
             end
 
+            -- Optional: bind the key to a user (a "personal access token" that
+            -- authenticates AS that user). The user must be a member of THIS
+            -- namespace — this blocks an admin from minting a key that acts as
+            -- someone outside their tenant. Unbound keys stay machine credentials.
+            local user_uuid
+            if body.user_uuid ~= nil and body.user_uuid ~= "" then
+                if type(body.user_uuid) ~= "string" then
+                    return { json = { error = "user_uuid must be a string" }, status = 400 }
+                end
+                local membership = NamespaceMemberQueries.findByUserAndNamespace(body.user_uuid, self.namespace.id)
+                if not membership then
+                    return {
+                        json = { error = "user_uuid must be a member of this namespace" },
+                        status = 400
+                    }
+                end
+                user_uuid = body.user_uuid
+            end
+
             -- The acting user's DB id, for the audit trail. The JWT carries
             -- the uuid; resolve it, tolerating a missing row (created_by is a
             -- soft reference).
@@ -138,6 +160,7 @@ return function(app)
                 scopes = cjson.encode(scopes),
                 created_by = created_by,
                 expires_at = body.expires_at,
+                user_uuid = user_uuid,
             })
 
             return {
@@ -150,6 +173,7 @@ return function(app)
                         key_prefix = row.key_prefix,
                         scopes = scopes,
                         expires_at = body.expires_at,
+                        user_uuid = user_uuid,
                     },
                     meta = {
                         note = "Store this key now — it cannot be retrieved again."
