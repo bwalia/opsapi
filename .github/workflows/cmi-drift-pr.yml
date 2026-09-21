@@ -100,9 +100,13 @@ jobs:
         id: pod
         run: |
           set -euo pipefail
-          POD="$(kubectl -n "$SOURCE_ENV" get pod -l app=opsapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+          # The opsapi image is deployed by the diytaxreturn-lapis Helm chart, so
+          # its pods are labelled app=diytaxreturn-lapis — NOT app=opsapi. Match
+          # both (set-based selector) so this keeps working whichever label the
+          # workload carries.
+          POD="$(kubectl -n "$SOURCE_ENV" get pod -l 'app in (diytaxreturn-lapis,opsapi)' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
           if [ -z "$POD" ]; then
-            echo "::error::No opsapi pod found in namespace $SOURCE_ENV (label app=opsapi)"
+            echo "::error::No opsapi pod found in namespace $SOURCE_ENV (label app in diytaxreturn-lapis,opsapi)"
             exit 1
           fi
           echo "pod=$POD" >> "$GITHUB_OUTPUT"
