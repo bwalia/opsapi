@@ -231,10 +231,32 @@ export const sprintService = {
    * Get sprint statistics
    */
   async getSprintStats(uuid: string): Promise<SprintStatsResponse> {
-    const response = await apiClient.get<ApiDataResponse<SprintStatsResponse>>(
-      `/api/v2/kanban/sprints/${uuid}/stats`
-    );
-    return response.data.data;
+    // There is no dedicated /stats endpoint (it 404'd, breaking the sprint board
+    // and burndown pages). Derive the stats the pages actually read from the
+    // working /summary endpoint (status breakdown + progress + days). Fields the
+    // pages don't consume (hours, burndown arrays) default; burndown is fetched
+    // separately via getBurndown().
+    const s = await this.getSprintSummary(uuid);
+    const num = (v: unknown) => Number(v) || 0;
+    const breakdown = Array.isArray(s.status_breakdown) ? s.status_breakdown : [];
+    const byStatus = (status: string) => breakdown.find((b) => b.status === status);
+    const total_tasks = breakdown.reduce((n, b) => n + num(b.count), 0);
+    const total_points = breakdown.reduce((n, b) => n + num(b.points), 0);
+    const completed_points = num(byStatus('completed')?.points);
+    return {
+      total_tasks,
+      completed_tasks: num(byStatus('completed')?.count),
+      in_progress_tasks: num(byStatus('in_progress')?.count),
+      total_points,
+      completed_points,
+      remaining_points: Math.max(0, total_points - completed_points),
+      total_hours_logged: 0,
+      days_remaining: num(s.days?.remaining_days),
+      completion_rate: num(s.progress),
+      velocity: num((s.sprint as { velocity?: number } | undefined)?.velocity),
+      burndown_ideal: [],
+      burndown_actual: [],
+    };
   },
 
   /**
