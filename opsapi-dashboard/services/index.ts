@@ -56,11 +56,6 @@ export {
   formatPercentage,
   formatNumber,
   getTrendIndicator,
-  getHealthScoreColor,
-  getHealthScoreLabel,
-  formatActivityAction,
-  getDateRange,
-  calculateAverageCycleTime,
   getWorkloadLevel,
 } from './analytics.service';
 export { menuService } from './menu.service';
