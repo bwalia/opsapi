@@ -355,17 +355,14 @@ const KanbanBoard = memo(function KanbanBoard({
   // Handle drag start
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
+      if (!canEdit) return; // read-only board: ignore drags
       const { active } = event;
-      console.log('[DnD] Drag started:', active.id);
       const task = taskMap.get(String(active.id));
       if (task) {
-        console.log('[DnD] Found task:', task.title);
         setActiveTask(task);
-      } else {
-        console.log('[DnD] Task not found in taskMap');
       }
     },
-    [taskMap]
+    [taskMap, canEdit]
   );
 
   // Handle drag over (for visual feedback during drag)
@@ -400,26 +397,19 @@ const KanbanBoard = memo(function KanbanBoard({
   // Handle drag end
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
-      const { active, over } = event;
-      console.log('[DnD] Drag ended:', { activeId: active.id, overId: over?.id });
       setActiveTask(null);
       setActiveColumnId(null);
+      if (!canEdit) return; // read-only board: never persist a move
 
-      if (!over) {
-        console.log('[DnD] No drop target');
-        return;
-      }
+      const { active, over } = event;
+      if (!over) return;
 
       const activeId = String(active.id);
       const overId = String(over.id);
 
       // Find the source column
       const sourceColumn = findColumnByTaskId(activeId);
-      if (!sourceColumn) {
-        console.log('[DnD] Source column not found');
-        return;
-      }
-      console.log('[DnD] Source column:', sourceColumn.name);
+      if (!sourceColumn) return;
 
       // Determine target column
       let targetColumn: (KanbanColumnType & { tasks: KanbanTask[] }) | undefined;
@@ -442,18 +432,12 @@ const KanbanBoard = memo(function KanbanBoard({
         }
       }
 
-      if (!targetColumn) {
-        console.log('[DnD] Target column not found');
-        return;
-      }
-      console.log('[DnD] Target column:', targetColumn.name, 'at index:', targetIndex);
+      if (!targetColumn) return;
 
       // Only call API if column changed or position changed
       const isSameColumn = sourceColumn.uuid === targetColumn.uuid;
 
       if (!isSameColumn) {
-        // Task moved to different column
-        console.log('[DnD] Moving task to different column:', targetColumn.id);
         await onMoveTask?.(activeId, targetColumn.id, targetIndex);
       } else {
         // Task moved within same column
@@ -461,18 +445,13 @@ const KanbanBoard = memo(function KanbanBoard({
         if (task) {
           const sortedTasks = [...sourceColumn.tasks].sort((a, b) => a.position - b.position);
           const currentIndex = sortedTasks.findIndex((t) => t.uuid === activeId);
-
-          // Only update if position actually changed
           if (currentIndex !== targetIndex) {
-            console.log('[DnD] Moving task within column from', currentIndex, 'to', targetIndex);
             await onMoveTask?.(activeId, targetColumn.id, targetIndex);
-          } else {
-            console.log('[DnD] Position unchanged, skipping update');
           }
         }
       }
     },
-    [findColumnByTaskId, findColumnById, onMoveTask, taskMap]
+    [findColumnByTaskId, findColumnById, onMoveTask, taskMap, canEdit]
   );
 
   // Handle add column
@@ -504,8 +483,10 @@ const KanbanBoard = memo(function KanbanBoard({
           <EmptyState canEdit={canEdit} onAddColumn={() => handleAddColumn({ name: 'To Do' })} />
         ) : (
           <DndContext
-            // Read-only board: no sensors → tasks can't be dragged.
-            sensors={canEdit ? sensors : []}
+            // The sensors array must keep a constant length across renders
+            // (dnd-kit registers them in effects), so we always pass the same
+            // sensors and instead gate dragging inside the handlers on canEdit.
+            sensors={sensors}
             collisionDetection={closestCorners}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}

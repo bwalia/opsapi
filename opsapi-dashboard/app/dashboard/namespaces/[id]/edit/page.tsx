@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   SlidersHorizontal,
+  Compass,
 } from 'lucide-react';
 import { Button, Card } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -28,6 +29,7 @@ interface AdminFields {
   plan: NamespacePlan;
   max_users: number;
   max_stores: number;
+  default_landing_path: string;
 }
 
 export default function EditNamespacePage() {
@@ -40,7 +42,7 @@ export default function EditNamespacePage() {
   const [namespace, setNamespace] = useState<Namespace | null>(null);
   const [values, setValues] = useState<NamespaceFieldValues>(EMPTY);
   const [initial, setInitial] = useState<NamespaceFieldValues>(EMPTY);
-  const [admin, setAdmin] = useState<AdminFields>({ status: 'active', plan: 'free', max_users: 0, max_stores: 0 });
+  const [admin, setAdmin] = useState<AdminFields>({ status: 'active', plan: 'free', max_users: 0, max_stores: 0, default_landing_path: '' });
   const [initialAdmin, setInitialAdmin] = useState<AdminFields>(admin);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ export default function EditNamespacePage() {
         plan: ns.plan,
         max_users: ns.max_users ?? 0,
         max_stores: ns.max_stores ?? 0,
+        default_landing_path: (ns.settings?.default_landing_path as string) || '',
       };
       setValues(v); setInitial(v);
       setAdmin(a); setInitialAdmin(a);
@@ -102,6 +105,7 @@ export default function EditNamespacePage() {
         plan: admin.plan,
         max_users: Number(admin.max_users) || 0,
         max_stores: Number(admin.max_stores) || 0,
+        default_landing_path: admin.default_landing_path.trim(),
       });
       setNamespace(updated);
       setInitial(values); setInitialAdmin(admin);
@@ -151,8 +155,16 @@ export default function EditNamespacePage() {
   const numberCls =
     'w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500';
 
+  const statusTone: Record<NamespaceStatus, string> = {
+    active: 'bg-green-100 text-green-700',
+    pending: 'bg-yellow-100 text-yellow-700',
+    suspended: 'bg-orange-100 text-orange-700',
+    archived: 'bg-secondary-200 text-secondary-600',
+  };
+  const created = namespace.created_at ? new Date(namespace.created_at).toLocaleDateString() : '—';
+
   return (
-    <div className="max-w-4xl">
+    <div className="mx-auto w-full max-w-6xl">
       <div className="flex items-center gap-2 mb-2">
         <button
           onClick={() => router.push(detailHref)}
@@ -166,73 +178,151 @@ export default function EditNamespacePage() {
 
       <PageHeader
         title={`Edit ${namespace.name}`}
-        description="Update this namespace's profile, branding, plan and limits."
+        description="Update this namespace's profile, branding, plan, routing and limits."
         icon={<Settings className="h-5 w-5" />}
       />
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-6">
-        <NamespaceFormFields values={values} onChange={set} slug={namespace.slug} disabled={isSaving} />
+      <form onSubmit={handleSubmit} className="mt-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+          {/* Main column */}
+          <div className="xl:col-span-2 space-y-6">
+            <NamespaceFormFields values={values} onChange={set} slug={namespace.slug} disabled={isSaving} />
 
-        {/* Admin-only: plan, status, limits */}
-        <Card className="p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center">
-              <SlidersHorizontal className="w-5 h-5 text-primary-600" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-secondary-900">Plan &amp; Limits</h2>
-              <p className="text-sm text-secondary-500">Administrator-only controls</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-1.5">Status</label>
-              <select
-                value={admin.status}
-                onChange={(e) => setAdmin((p) => ({ ...p, status: e.target.value as NamespaceStatus }))}
-                className={selectCls}
-                disabled={isSaving}
-              >
-                {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-1.5">Plan</label>
-              <select
-                value={admin.plan}
-                onChange={(e) => setAdmin((p) => ({ ...p, plan: e.target.value as NamespacePlan }))}
-                className={selectCls}
-                disabled={isSaving}
-              >
-                {PLANS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-1.5">Max Users</label>
+            {/* Routing — where members land after login */}
+            <Card className="p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center">
+                  <Compass className="w-5 h-5 text-primary-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-secondary-900">Routing</h2>
+                  <p className="text-sm text-secondary-500">Where members go after signing in</p>
+                </div>
+              </div>
+              <label className="block text-sm font-medium text-secondary-700 mb-1.5">
+                Default landing page after login
+              </label>
               <input
-                type="number" min={0}
-                value={admin.max_users}
-                onChange={(e) => setAdmin((p) => ({ ...p, max_users: Number(e.target.value) }))}
+                type="text"
+                value={admin.default_landing_path}
+                onChange={(e) => setAdmin((p) => ({ ...p, default_landing_path: e.target.value }))}
+                placeholder="/dashboard"
                 className={numberCls}
                 disabled={isSaving}
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-1.5">Max Stores</label>
-              <input
-                type="number" min={0}
-                value={admin.max_stores}
-                onChange={(e) => setAdmin((p) => ({ ...p, max_stores: Number(e.target.value) }))}
-                className={numberCls}
-                disabled={isSaving}
-              />
-            </div>
+              <p className="mt-1.5 text-xs text-secondary-500">
+                Applies to everyone in this namespace. A specific{' '}
+                <Link href="/dashboard/namespace/roles" className="text-primary-600 hover:underline">
+                  role landing page
+                </Link>{' '}
+                overrides this. Leave blank for the default dashboard.
+              </p>
+            </Card>
+
+            {/* Admin-only: plan, status, limits */}
+            <Card className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center">
+                  <SlidersHorizontal className="w-5 h-5 text-primary-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-secondary-900">Plan &amp; Limits</h2>
+                  <p className="text-sm text-secondary-500">Administrator-only controls</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-secondary-700 mb-1.5">Status</label>
+                  <select
+                    value={admin.status}
+                    onChange={(e) => setAdmin((p) => ({ ...p, status: e.target.value as NamespaceStatus }))}
+                    className={selectCls}
+                    disabled={isSaving}
+                  >
+                    {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-700 mb-1.5">Plan</label>
+                  <select
+                    value={admin.plan}
+                    onChange={(e) => setAdmin((p) => ({ ...p, plan: e.target.value as NamespacePlan }))}
+                    className={selectCls}
+                    disabled={isSaving}
+                  >
+                    {PLANS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-700 mb-1.5">Max Users</label>
+                  <input
+                    type="number" min={0}
+                    value={admin.max_users}
+                    onChange={(e) => setAdmin((p) => ({ ...p, max_users: Number(e.target.value) }))}
+                    className={numberCls}
+                    disabled={isSaving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-700 mb-1.5">Max Stores</label>
+                  <input
+                    type="number" min={0}
+                    value={admin.max_stores}
+                    onChange={(e) => setAdmin((p) => ({ ...p, max_stores: Number(e.target.value) }))}
+                    className={numberCls}
+                    disabled={isSaving}
+                  />
+                </div>
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          {/* Aside — overview (fills the width, gives the admin at-a-glance context) */}
+          <aside className="space-y-6 xl:sticky xl:top-6">
+            <Card className="p-6">
+              <h3 className="text-sm font-semibold text-secondary-900 mb-4">Overview</h3>
+              <dl className="space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-secondary-500">Status</dt>
+                  <dd>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusTone[admin.status]}`}>
+                      {admin.status}
+                    </span>
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-secondary-500">Plan</dt>
+                  <dd className="capitalize font-medium text-secondary-800">{admin.plan}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-secondary-500">Members</dt>
+                  <dd className="font-medium text-secondary-800 tabular-nums">{namespace.member_count ?? 0}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-secondary-500">Slug</dt>
+                  <dd className="font-mono text-xs text-secondary-700">@{namespace.slug}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-secondary-500">Created</dt>
+                  <dd className="text-secondary-700 tabular-nums">{created}</dd>
+                </div>
+              </dl>
+            </Card>
+
+            <Card className="p-6 bg-secondary-50/60">
+              <h3 className="text-sm font-semibold text-secondary-900 mb-2">Tip</h3>
+              <p className="text-xs leading-relaxed text-secondary-600">
+                A namespace is a self-contained tenant. Set its <span className="font-medium">routing</span> so
+                staff land on the right home, tune <span className="font-medium">plan &amp; limits</span> for
+                billing, and add <span className="font-medium">branding</span> for a white-label look.
+              </p>
+            </Card>
+          </aside>
+        </div>
 
         {/* Sticky action bar */}
-        <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-surface/90 backdrop-blur border-t border-secondary-200 z-20 flex items-center justify-between gap-3 rounded-b-lg">
+        <div className="sticky bottom-0 mt-6 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-surface/90 backdrop-blur border-t border-secondary-200 z-20 flex items-center justify-between gap-3">
           <p className="text-sm text-secondary-500">
             {dirty ? 'You have unsaved changes.' : 'All changes saved.'}
           </p>

@@ -92,6 +92,12 @@ function JWTHelper.generateToken(user, options)
         if options.is_namespace_owner ~= nil then
             userinfo.namespace.is_owner = options.is_namespace_owner
         end
+
+        -- Add the role's post-login landing path if provided (data-driven
+        -- redirect; the client falls back to /dashboard when absent).
+        if options.namespace_landing_path and options.namespace_landing_path ~= "" then
+            userinfo.namespace.landing_path = options.namespace_landing_path
+        end
     end
 
     -- Build JWT payload
@@ -135,12 +141,48 @@ function JWTHelper.generateNamespaceToken(user, namespace, membership, options)
         namespace_role = "member"
     end
 
+    -- Resolve this role's landing path once here (single chokepoint), so every
+    -- caller — login, OAuth, app-login, refresh, switch/create namespace — issues
+    -- a token carrying the post-login redirect without any per-call-site change.
+    local namespace_landing_path
+    do
+        local db = require("lapis.db")
+        -- 1) The role's own landing path (most specific).
+        local ok, rows = pcall(db.query,
+            "SELECT landing_path FROM namespace_roles WHERE namespace_id = ? AND role_name = ? LIMIT 1",
+            namespace.id, namespace_role)
+        if ok and rows and rows[1] then
+            local lp = rows[1].landing_path
+            if lp and lp ~= ngx.null and lp ~= "" then
+                namespace_landing_path = lp
+            end
+        end
+        -- 2) Fall back to the namespace's default landing (settings.default_landing_path),
+        --    so an admin can set one place for the whole tenant.
+        if not namespace_landing_path then
+            local ok2, ns_rows = pcall(db.query,
+                "SELECT settings FROM namespaces WHERE id = ? LIMIT 1", namespace.id)
+            if ok2 and ns_rows and ns_rows[1] then
+                local s = ns_rows[1].settings
+                if type(s) == "string" and s ~= "" then
+                    local okp, parsed = pcall(cjson.decode, s)
+                    if okp then s = parsed end
+                end
+                if type(s) == "table" and type(s.default_landing_path) == "string"
+                    and s.default_landing_path ~= "" then
+                    namespace_landing_path = s.default_landing_path
+                end
+            end
+        end
+    end
+
     return JWTHelper.generateToken(user, {
         roles = options.user_roles or user.roles,
         namespace = namespace,
         namespace_role = namespace_role,
         namespace_permissions = options.namespace_permissions,
         is_namespace_owner = membership.is_owner,
+        namespace_landing_path = namespace_landing_path,
         expiration = options.expiration
     })
 end
@@ -293,6 +335,17 @@ function JWTHelper.refreshToken(token, expiration)
                     end
                     if type(roles) == "table" and #roles > 0 then
                         options.namespace_role = roles[1].role_name
+                        -- Carry the role's post-login landing path through refresh too.
+                        local ns_id = options.namespace and options.namespace.id
+                        if ns_id and options.namespace_role then
+                            local ok_lp, lp = pcall(db.query,
+                                "SELECT landing_path FROM namespace_roles WHERE namespace_id = ? AND role_name = ? LIMIT 1",
+                                ns_id, options.namespace_role)
+                            if ok_lp and lp and lp[1] and lp[1].landing_path
+                                and lp[1].landing_path ~= ngx.null and lp[1].landing_path ~= "" then
+                                options.namespace_landing_path = lp[1].landing_path
+                            end
+                        end
                     end
                 end
             else

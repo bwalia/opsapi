@@ -407,6 +407,21 @@ end
 -- @param namespace_id number Namespace ID for chat channel
 -- @return table|nil Assignment result
 function KanbanTaskQueries.assignUser(task_id, user_uuid, assigned_by, namespace_id)
+    -- Tenant boundary: you may only assign a task to an employee of the same
+    -- namespace, never an arbitrary user uuid. The UI already lists only tenant
+    -- members, but the API must enforce it too (defence in depth).
+    if namespace_id then
+        local member = db.query([[
+            SELECT 1 FROM namespace_members nm
+            JOIN users u ON u.id = nm.user_id
+            WHERE u.uuid = ? AND nm.namespace_id = ?
+            LIMIT 1
+        ]], user_uuid, namespace_id)
+        if not member or #member == 0 then
+            return nil, "User is not a member of this namespace"
+        end
+    end
+
     -- Check if already assigned
     local existing = db.query([[
         SELECT id FROM kanban_task_assignees

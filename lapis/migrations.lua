@@ -1295,6 +1295,8 @@ local _migrations = {
     -- [29] sweeps the bogus DEFAULT 0 off every namespace_id FK column (customers,
     -- kanban_projects, …) so tenant-less inserts fail loudly instead of writing 0.
     ['761_drop_namespace_id_defaults'] = namespace_system_migrations[29],
+    -- Per-role post-login landing path (data-driven redirect, no hardcoding).
+    ['762_add_landing_path_to_namespace_roles'] = namespace_system_migrations[30],
     ['250_create_kanban_time_entries_table'] = conditional_array(ProjectConfig.FEATURES.KANBAN,
         kanban_enhancement_migrations, 1),
     ['251_add_kanban_time_entries_indexes'] = conditional_array(ProjectConfig.FEATURES.KANBAN,

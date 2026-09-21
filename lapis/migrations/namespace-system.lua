@@ -741,4 +741,39 @@ return {
             end)
         end
     end,
+
+    -- [30] Per-role landing path: where a user with this role lands after login.
+    -- NULL = fall back to the app default (/dashboard). Makes post-login routing
+    -- data-driven per namespace/role instead of hardcoded in the dashboard.
+    -- Also backfills existing tenants: field-service role landings (so behaviour
+    -- is preserved) and a per-namespace 'developer' role.
+    [30] = function()
+        if not column_exists("namespace_roles", "landing_path") then
+            schema.add_column("namespace_roles", "landing_path", types.varchar({ null = true }))
+        end
+        pcall(function()
+            db.query([[UPDATE namespace_roles SET landing_path = '/dashboard/field-service'
+                WHERE role_name IN ('service_manager','telecaller')
+                  AND (landing_path IS NULL OR landing_path = '')]])
+            db.query([[UPDATE namespace_roles SET landing_path = '/dashboard/field-service/my-work'
+                WHERE role_name = 'engineer' AND (landing_path IS NULL OR landing_path = '')]])
+        end)
+        -- Seed a 'developer' role for existing namespaces that don't have one.
+        pcall(function()
+            local nss = db.query("SELECT id FROM namespaces")
+            for _, ns in ipairs(nss or {}) do
+                local existing = db.query(
+                    "SELECT 1 FROM namespace_roles WHERE namespace_id = ? AND role_name = 'developer' LIMIT 1", ns.id)
+                if not existing or #existing == 0 then
+                    db.query([[
+                        INSERT INTO namespace_roles
+                            (uuid, namespace_id, role_name, display_name, description,
+                             permissions, is_system, is_default, priority, created_at, updated_at)
+                        VALUES (gen_random_uuid()::text, ?, 'developer', 'Developer',
+                             'Works on assigned project tasks', '{}', false, false, 20, NOW(), NOW())
+                    ]], ns.id)
+                end
+            end
+        end)
+    end,
 }

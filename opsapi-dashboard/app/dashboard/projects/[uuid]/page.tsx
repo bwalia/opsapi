@@ -24,7 +24,9 @@ import {
 } from '@/components/kanban';
 import { useKanbanStore } from '@/store/kanban.store';
 import { useKanbanSocket } from '@/hooks';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import { kanbanService } from '@/services/kanban.service';
+import { namespaceService } from '@/services/namespace.service';
 import type {
   KanbanTask,
   KanbanColumn,
@@ -33,6 +35,7 @@ import type {
   UpdateKanbanTaskDto,
   CreateKanbanBoardDto,
   KanbanBoard as KanbanBoardType,
+  KanbanProjectMember,
 } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -194,11 +197,60 @@ export default function ProjectDetailPage() {
   const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
 
   // Editing is role-driven: owner/admin/member can edit; viewer/guest are
-  // read-only (mirrors the backend's isEditor gate). Until the project loads we
-  // default to read-only so edit controls never flash for a viewer.
+  // read-only (mirrors the backend's isEditor gate). Namespace authority also
+  // grants editing — a namespace owner, platform admin, or a `projects.manage`
+  // holder can manage any project in their tenant even without a kanban
+  // membership row (matches the backend nsPrivileged bridge), which is why the
+  // "Add task" controls no longer disappear for owners/managers.
+  const { isNamespaceOwner, isAdmin: isPlatformAdmin, canManage } = usePermissions();
   const projectRole = currentProject?.current_user_role;
   const canEdit =
-    projectRole === 'owner' || projectRole === 'admin' || projectRole === 'member';
+    projectRole === 'owner' ||
+    projectRole === 'admin' ||
+    projectRole === 'member' ||
+    isNamespaceOwner ||
+    isPlatformAdmin ||
+    canManage('projects');
+
+  // The assignee picker lists the tenant's EMPLOYEES (namespace members), not
+  // just this project's members, so a manager can assign work to any developer.
+  // The backend enforces the namespace boundary on assignment.
+  const [assignableMembers, setAssignableMembers] = useState<KanbanProjectMember[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    namespaceService
+      .getMembers({ perPage: 200, status: 'active' })
+      .then((res) => {
+        if (cancelled) return;
+        const mapped: KanbanProjectMember[] = (res.data || [])
+          .filter((m) => m.user)
+          .map((m) => ({
+            id: m.id,
+            uuid: m.uuid,
+            project_id: 0,
+            user_uuid: m.user!.uuid,
+            role: 'member',
+            joined_at: m.joined_at ?? '',
+            is_starred: false,
+            notification_preference: 'all',
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+            user: {
+              uuid: m.user!.uuid,
+              first_name: m.user!.first_name,
+              last_name: m.user!.last_name,
+              email: m.user!.email,
+            },
+          }));
+        setAssignableMembers(mapped);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignableMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load project data
   useEffect(() => {
@@ -609,7 +661,7 @@ export default function ProjectDetailPage() {
           onClose={clearSelectedTask}
           task={selectedTask}
           canEdit={canEdit}
-          members={members}
+          members={assignableMembers}
           labels={labels}
           isLoading={selectedTaskLoading}
           onUpdate={handleUpdateTask}
@@ -649,7 +701,7 @@ export default function ProjectDetailPage() {
           onSubmit={handleCreateTaskSubmit}
           columnId={createTaskColumnId || (boardData?.columns?.[0]?.id ?? 0)}
           columns={boardData?.columns}
-          members={members}
+          members={assignableMembers}
           labels={labels}
           isLoading={isSubmittingTask}
         />

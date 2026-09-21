@@ -308,6 +308,7 @@ function RoleModal({
     role_name: role?.role_name || '',
     display_name: role?.display_name || '',
     description: role?.description || '',
+    landing_path: role?.landing_path || '',
     is_default: role?.is_default || false,
     priority: role?.priority || 0,
   });
@@ -414,6 +415,24 @@ function RoleModal({
                 rows={2}
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-secondary-700 mb-1.5">
+                Landing page after login
+              </label>
+              <input
+                type="text"
+                value={formData.landing_path}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, landing_path: e.target.value }))
+                }
+                placeholder="/dashboard"
+                className="w-full px-3 py-2 border border-secondary-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+              />
+              <p className="mt-1 text-xs text-secondary-500">
+                Where users with this role land after signing in. Leave blank for the default dashboard.
+              </p>
             </div>
 
             <div className="flex items-center gap-4">

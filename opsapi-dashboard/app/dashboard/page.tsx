@@ -33,34 +33,23 @@ const fetchDashboardData = async () => {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { canRead, canUpdate, isLoading: permsLoading } = usePermissions();
-  const { allMenu, isHydrated: menuHydrated, isLoading: menuLoading } = useMenu();
+  const { isLoading: permsLoading, landingPath } = usePermissions();
+  const { isHydrated: menuHydrated, isLoading: menuLoading } = useMenu();
 
-  // Engineers can see visits but can't dispatch them — send them straight to
-  // the simplified "My Work" home instead of this manager dashboard.
-  const isEngineer = canRead('fs_visits') && !canUpdate('fs_visits');
-
-  // The default dashboard body is e-commerce (orders/stores/revenue). For a
-  // field-service tenant that's meaningless, so land managers/owners on the
-  // Service Jobs board instead. The backend menu is project-filtered, so the
-  // presence of a field-service item is the tenant's own signal — no client-side
-  // project guessing.
-  // ponytail: redirects any tenant whose menu includes field service; add a
-  // per-namespace "home path" setting if a mixed tenant ever needs the e-commerce home.
+  // Post-login landing is DATA-DRIVEN: each namespace role carries a
+  // `landing_path` (configured per tenant when the role is created/edited), so a
+  // field-service / hospital / e-commerce / any namespace routes its own roles
+  // with zero hardcoding here. No landing_path (or it points at this page) =>
+  // the user stays on the default dashboard.
   const menuReady = menuHydrated && !menuLoading;
-  const isFieldService = useMemo(
-    () => allMenu.some((m) => typeof m.path === 'string' && m.path.startsWith('/dashboard/field-service')),
-    [allMenu]
-  );
+  const shouldRedirect = !!landingPath && landingPath !== '/dashboard';
 
   useEffect(() => {
     if (permsLoading || !menuReady) return;
-    if (isEngineer) {
-      router.replace('/dashboard/field-service/my-work');
-    } else if (isFieldService) {
-      router.replace('/dashboard/field-service');
+    if (shouldRedirect && landingPath) {
+      router.replace(landingPath);
     }
-  }, [permsLoading, menuReady, isEngineer, isFieldService, router]);
+  }, [permsLoading, menuReady, shouldRedirect, landingPath, router]);
 
   // Single data fetch for all dashboard data using custom hook
   const { data, isLoading, refetch } = useDataFetch<{
@@ -128,7 +117,7 @@ export default function DashboardPage() {
   // Memoize refresh handler to prevent inline function recreation
   // Redirecting field-service users away — don't flash the e-commerce dashboard
   // while we wait for the menu to tell us the tenant's shape.
-  const redirecting = permsLoading || !menuReady || isEngineer || isFieldService;
+  const redirecting = permsLoading || !menuReady || shouldRedirect;
 
   const handleRefresh = useCallback(() => {
     refetch();
