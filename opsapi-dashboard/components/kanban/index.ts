@@ -6,6 +6,8 @@ export { default as TaskDetailModal } from './TaskDetailModal';
 export { default as ProjectCard } from './ProjectCard';
 export { default as CreateProjectModal } from './CreateProjectModal';
 export { default as CreateTaskModal } from './CreateTaskModal';
+export { default as CreateBoardModal } from './CreateBoardModal';
+export { default as LabelManagerModal } from './LabelManagerModal';
 
 // Re-export types
 export type { KanbanTaskCardProps } from './KanbanTaskCard';

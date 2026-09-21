@@ -1383,6 +1383,8 @@ export interface CreateKanbanBoardDto {
   is_default?: boolean;
   settings?: Record<string, unknown>;
   wip_limit?: number;
+  /** Seed the new board with the default columns (Backlog…Done). */
+  create_default_columns?: boolean;
 }
 
 export interface UpdateKanbanBoardDto extends Partial<CreateKanbanBoardDto> {
