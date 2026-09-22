@@ -348,11 +348,19 @@ return function(app)
             column_id = board.columns[1].id
         end
 
+        -- Tenant gate: an epic_id must belong to this task's own project (and
+        -- therefore tenant). Without it the generic write path could pin a task
+        -- to another tenant's epic.
+        local epic_id = KanbanEpicQueries.normaliseEpicId(data.epic_id)
+        if epic_id and not KanbanEpicQueries.belongsToProject(epic_id, board.project_id) then
+            return api_response(400, nil, "Epic does not belong to this project")
+        end
+
         local task = KanbanTaskQueries.create({
             board_id = board.id,
             column_id = column_id,
             parent_task_id = data.parent_task_id,
-            epic_id = KanbanEpicQueries.normaliseEpicId(data.epic_id),
+            epic_id = epic_id,
             title = data.title,
             description = data.description,
             status = data.status or "open",
@@ -467,6 +475,10 @@ return function(app)
         -- kanban_tasks_epic_fk (the DEFAULT 0 trap migration [41] repaired).
         if data.epic_id ~= nil then
             local epic_id = KanbanEpicQueries.normaliseEpicId(data.epic_id)
+            -- Tenant gate: only an epic in this task's own project may be attached.
+            if epic_id and not KanbanEpicQueries.belongsToProject(epic_id, board.project_id) then
+                return api_response(400, nil, "Epic does not belong to this project")
+            end
             update_params.epic_id = epic_id or db.raw("NULL")
         end
 

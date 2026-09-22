@@ -46,17 +46,43 @@ function KanbanEpicQueries.normaliseEpicId(value)
     return tonumber(value) or nil
 end
 
+--- Does this epic live in the given project (and therefore its tenant)?
+-- The tenant gate for the GENERIC task write path: POST/PUT task set epic_id
+-- straight from the body and cannot reach assignTasks' scoping, so without
+-- this a task could be pinned to another tenant's epic (ids are sequential,
+-- so guessable). Since a project is namespace-scoped, a project match implies
+-- a namespace match. nil (detach) is always allowed.
+-- @param epic_id number|nil Epic ID (already normalised)
+-- @param project_id number Project the task belongs to
+-- @return boolean
+function KanbanEpicQueries.belongsToProject(epic_id, project_id)
+    if epic_id == nil then
+        return true
+    end
+    local rows = db.query([[
+        SELECT 1 FROM kanban_epics
+        WHERE id = ? AND project_id = ? AND deleted_at IS NULL
+    ]], epic_id, project_id)
+    return rows ~= nil and #rows > 0
+end
+
 -- Rollup aggregate shared by getByProject / show. Counts only live,
--- unarchived tasks.
+-- unarchived tasks, and only tasks in the SAME tenant as the epic they point
+-- at (p.namespace_id = ep.namespace_id) -- so a task that somehow carries a
+-- cross-tenant epic_id can never inflate another tenant's rollup.
 local ROLLUP_SELECT = [[
-    SELECT epic_id,
+    SELECT t.epic_id,
            COUNT(*) AS task_count,
-           COUNT(*) FILTER (WHERE status = 'completed') AS completed_task_count,
-           COALESCE(SUM(story_points), 0) AS total_points,
-           COALESCE(SUM(story_points) FILTER (WHERE status = 'completed'), 0) AS completed_points
-    FROM kanban_tasks
-    WHERE epic_id IS NOT NULL AND deleted_at IS NULL AND archived_at IS NULL
-    GROUP BY epic_id
+           COUNT(*) FILTER (WHERE t.status = 'completed') AS completed_task_count,
+           COALESCE(SUM(t.story_points), 0) AS total_points,
+           COALESCE(SUM(t.story_points) FILTER (WHERE t.status = 'completed'), 0) AS completed_points
+    FROM kanban_tasks t
+    INNER JOIN kanban_epics ep ON ep.id = t.epic_id
+    INNER JOIN kanban_boards b ON b.id = t.board_id
+    INNER JOIN kanban_projects p ON p.id = b.project_id
+    WHERE t.epic_id IS NOT NULL AND t.deleted_at IS NULL AND t.archived_at IS NULL
+      AND p.namespace_id = ep.namespace_id
+    GROUP BY t.epic_id
 ]]
 
 --- Coerce the aggregate columns on a row to numbers (pgmoon returns strings
@@ -301,11 +327,14 @@ end
 -- Task-Epic Operations
 --------------------------------------------------------------------------------
 
---- Get the tasks in an epic
--- @param epic_id number Epic ID
+--- Get the tasks in an epic, scoped to the epic's tenant.
+-- Takes the resolved epic row (not a bare id): a task pinned to this epic id
+-- from another namespace must never surface in this epic's task list or count,
+-- so both queries join through to the project and match p.namespace_id.
+-- @param epic table Epic row (needs id + namespace_id)
 -- @param params table { page, perPage }
 -- @return table { data, total }
-function KanbanEpicQueries.getTasks(epic_id, params)
+function KanbanEpicQueries.getTasks(epic, params)
     params = params or {}
     local page = params.page or 1
     local perPage = params.perPage or 50
@@ -318,17 +347,23 @@ function KanbanEpicQueries.getTasks(epic_id, params)
                b.name AS board_name,
                b.uuid AS board_uuid
         FROM kanban_tasks t
+        INNER JOIN kanban_boards b ON b.id = t.board_id
+        INNER JOIN kanban_projects p ON p.id = b.project_id
         LEFT JOIN kanban_columns c ON c.id = t.column_id
-        LEFT JOIN kanban_boards b ON b.id = t.board_id
-        WHERE t.epic_id = ? AND t.deleted_at IS NULL AND t.archived_at IS NULL
+        WHERE t.epic_id = ? AND p.namespace_id = ?
+          AND t.deleted_at IS NULL AND t.archived_at IS NULL
         ORDER BY t.priority DESC, t.position ASC
         LIMIT ? OFFSET ?
-    ]], epic_id, perPage, offset) or {}
+    ]], epic.id, epic.namespace_id, perPage, offset) or {}
 
     local count_result = db.query([[
-        SELECT COUNT(*) AS total FROM kanban_tasks
-        WHERE epic_id = ? AND deleted_at IS NULL AND archived_at IS NULL
-    ]], epic_id)
+        SELECT COUNT(*) AS total
+        FROM kanban_tasks t
+        INNER JOIN kanban_boards b ON b.id = t.board_id
+        INNER JOIN kanban_projects p ON p.id = b.project_id
+        WHERE t.epic_id = ? AND p.namespace_id = ?
+          AND t.deleted_at IS NULL AND t.archived_at IS NULL
+    ]], epic.id, epic.namespace_id)
     local total = count_result and count_result[1] and count_result[1].total or 0
 
     return {

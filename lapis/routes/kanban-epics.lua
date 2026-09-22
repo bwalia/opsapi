@@ -284,7 +284,7 @@ return function(app)
                 perPage = tonumber(self.params.perPage) or tonumber(self.params.per_page) or 50
             }
 
-            local result = KanbanEpicQueries.getTasks(epic.id, params)
+            local result = KanbanEpicQueries.getTasks(epic, params)
 
             return {
                 status = 200,
