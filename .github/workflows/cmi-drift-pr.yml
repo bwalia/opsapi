@@ -117,14 +117,32 @@ jobs:
           set -euo pipefail
           POD="${{ steps.pod.outputs.pod }}"
           rm -rf export-out && mkdir -p export-out
-          # Ensure the pod has a writable dir; /tmp/cmi-export is world-
-          # writable on the openresty image.
-          kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c 'rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export'
-          kubectl -n "$SOURCE_ENV" exec "$POD" -- \
+          # `kubectl exec/cp` to the int node's kubelet intermittently returns
+          # "502 Bad Gateway" (proxy error dialing …:10250) — a transient runner→
+          # node hiccup, not a real failure. Retry each call so one blip doesn't
+          # fail the whole run. All three commands are idempotent (rm+mkdir setup,
+          # a read-only export overwriting /tmp, and a cp), so retrying is safe.
+          retry() {
+            local n=0 max=5
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge "$max" ]; then echo "::error::command failed after $max attempts: $*"; return 1; fi
+              echo "attempt $n failed (likely a transient kubelet 502); retrying in $((n*10))s…"
+              sleep $((n*10))
+            done
+          }
+          # Pre-create the exporter's subdirs (_global + the namespace slug) and
+          # make them world-writable. The exporter creates these via os.execute
+          # ("mkdir -p") from inside lapis-exec, which is unreliable in the pod's
+          # runtime and left /tmp/cmi-export/_global missing → "Failed to write …
+          # No such file or directory". Creating them here guarantees the writes
+          # land regardless of the export process's user/context.
+          retry kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c "rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export/_global '/tmp/cmi-export/${NAMESPACE_SLUG}' && chmod -R 777 /tmp/cmi-export"
+          retry kubectl -n "$SOURCE_ENV" exec "$POD" -- \
             lapis exec "require('scripts.config-cli').export('/tmp/cmi-export', '${NAMESPACE_SLUG}')"
           # cp -r requires the source to exist; the export step above
           # errors out if it didn't create anything, so this is safe.
-          kubectl -n "$SOURCE_ENV" cp "$POD:/tmp/cmi-export/." export-out/
+          retry kubectl -n "$SOURCE_ENV" cp "$POD:/tmp/cmi-export/." export-out/
 
       - name: Overlay export onto checked-in config/
         run: |
@@ -185,6 +203,24 @@ jobs:
           git commit -m "$MSG"
           git push origin "$BRANCH" --force-with-lease
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure gh CLI is available
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh already installed: $(gh --version | head -1)"
+            exit 0
+          fi
+          # The self-hosted runner has no gh CLI, which broke the PR step once the
+          # export started succeeding. Fetch the standalone binary (curl + tar only,
+          # no sudo/apt) and add it to PATH for the next step.
+          GH_VER=2.63.2
+          TARBALL="gh_${GH_VER}_linux_amd64"
+          curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VER}/${TARBALL}.tar.gz" -o /tmp/gh.tgz
+          tar -xzf /tmp/gh.tgz -C /tmp
+          echo "/tmp/${TARBALL}/bin" >> "$GITHUB_PATH"
+          "/tmp/${TARBALL}/bin/gh" --version | head -1
 
       - name: Open (or update) PR
         if: steps.diff.outputs.changed == 'true'
