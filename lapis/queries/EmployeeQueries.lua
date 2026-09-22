@@ -158,7 +158,6 @@ local function generate_temp_password()
     return table.concat(out)
 end
 
-local TEAM_ROLES = { engineer = true, service_manager = true, telecaller = true }
 
 --- One-step "add team member": provision a login + workspace membership + role
 --- (+ an engineer profile) so a non-technical admin never touches the
@@ -173,7 +172,9 @@ function EmployeeQueries.createTeamMember(namespace_id, actor_uuid, data)
     local role_name = nilify(data.role_name)
     if not first then return nil, "First name is required" end
     if not email then return nil, "Email is required" end
-    if not role_name or not TEAM_ROLES[role_name] then return nil, "Pick a role (engineer, service_manager or telecaller)" end
+    if not role_name then return nil, "Pick a role" end
+    -- Any role that exists in this workspace is allowed (validated just below) —
+    -- the modal offers the namespace's own roles, not a fixed field-service set.
 
     if db.query("SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1", email)[1] then
         return nil, "Someone with this email already has a login"
@@ -205,7 +206,9 @@ function EmployeeQueries.createTeamMember(namespace_id, actor_uuid, data)
     end
 
     -- Engineer profile is optional detail; failing it must not undo the login.
-    local is_engineer = to_bool(data.is_engineer, role_name == "engineer")
+    -- is_engineer is an explicit opt-in (a field-service concept), not inferred
+    -- from the role name.
+    local is_engineer = to_bool(data.is_engineer, false)
     local employee
     if is_engineer or nilify(data.job_title) or nilify(data.skills) or nilify(data.hourly_cost_rate) then
         employee = EmployeeQueries.createEmployee(namespace_id, actor_uuid, {

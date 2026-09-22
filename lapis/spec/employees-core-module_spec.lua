@@ -63,6 +63,17 @@ check("employees migration is registered gated on CORE",
     reg:find("employees_core_migrations", 1, true) ~= nil
         and reg:find("ProjectConfig.FEATURES.CORE, employees_core_migrations", 1, true) ~= nil)
 
+print("\nadd-team-member is generic (workspace's own roles, no hardcoded set):")
+local eq = read("lapis/queries/EmployeeQueries.lua")
+check("createTeamMember no longer hardcodes a field-service role set (TEAM_ROLES)",
+    eq:find("TEAM_ROLES", 1, true) == nil)
+check("is_engineer is an explicit opt-in (not inferred from role == engineer)",
+    eq:find('role_name == "engineer"', 1, true) == nil)
+local tm = read("opsapi-dashboard/components/employees/TeamMemberModal.tsx")
+check("the modal loads the workspace's roles dynamically (no hardcoded role set)",
+    tm:find("getRoles", 1, true) ~= nil
+        and tm:find("telecaller", 1, true) == nil)
+
 print("")
 if failures > 0 then
     print(failures .. " failure(s)")
