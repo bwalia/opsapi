@@ -452,4 +452,33 @@ function Global.sanitizeOrderBy(order_by, order_dir, valid_fields, default_field
     return order_by, order_dir:upper()
 end
 
+--- Clamp a client-supplied page number to a safe positive integer.
+-- `?page=0`, `?page=-1` and non-numeric values would otherwise flow into
+-- `offset = (page-1)*perPage` and produce a negative Postgres OFFSET (→ 500).
+-- @param value any Raw page value from the query string
+-- @return number Page >= 1
+function Global.pageParam(value)
+    local n = math.floor(tonumber(value) or 1)
+    if n < 1 then return 1 end
+    return n
+end
+
+--- Clamp a client-supplied perPage to [1, max]. Guards two 500s: `?perPage=0`
+-- makes `math.ceil(total / perPage)` divide by zero → Inf → cjson refuses to
+-- serialise; `?perPage=-1` becomes a negative Postgres LIMIT.
+-- @param value any Raw perPage value from the query string
+-- @param default number|nil Fallback when absent/invalid (default 20)
+-- @param max number|nil Upper bound (default 200)
+-- @return number perPage in [1, max]
+function Global.perPageParam(value, default, max)
+    default = default or 20
+    max = max or 200
+    local n = tonumber(value)
+    if not n then return default end
+    n = math.floor(n)
+    if n < 1 then return 1 end
+    if n > max then return max end
+    return n
+end
+
 return Global

@@ -28,6 +28,7 @@ local KanbanTaskQueries = require "queries.KanbanTaskQueries"
 local KanbanNotificationQueries = require "queries.KanbanNotificationQueries"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+local Global = require("helper.global")
 
 -- Emit a kanban notification as a best-effort side effect: a failure must never
 -- break the mutation that triggered it, so the call is pcall-wrapped + logged.
@@ -168,8 +169,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20),
             status = self.params.status,
             search = self.params.search or self.params.q
         }
@@ -407,8 +408,8 @@ return function(app)
             end
 
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 50
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 50)
             }
 
             local result = KanbanProjectQueries.getMembers(project.id, params)
@@ -578,8 +579,8 @@ return function(app)
             local user = self.current_user
 
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 20
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 20)
             }
 
             local result = KanbanTaskQueries.getByAssignee(user.uuid, self.namespace.id, params)
@@ -607,8 +608,8 @@ return function(app)
     app:get("/api/v2/kanban/namespace/projects", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("projects", "manage", function(self)
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 20,
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 20),
                 status = self.params.status,
                 search = self.params.search or self.params.q
             }

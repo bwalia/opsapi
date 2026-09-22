@@ -315,8 +315,18 @@ server.registerTool(
     },
   },
   async ({ task_uuid, pr_url, minutes, note }) => {
+    const steps: string[] = [];
     try {
-      const steps: string[] = [];
+      // Status/PR first (these need editor rights): doing them before logging
+      // time means a permission failure can't leave an orphaned time entry that
+      // a retry would then double-log.
+      const body: Record<string, unknown> = { status: "completed" };
+      if (pr_url) {
+        body.metadata = await mergeMetadata(task_uuid, { pr_url });
+      }
+      await api("PUT", `/api/v2/kanban/tasks/${task_uuid}`, body);
+      steps.push("marked completed");
+      if (pr_url) steps.push("attached PR");
       if (minutes) {
         await api("POST", `/api/v2/kanban/tasks/${task_uuid}/time-entries`, {
           duration_minutes: minutes,
@@ -325,16 +335,11 @@ server.registerTool(
         });
         steps.push(`logged ${minutes}m`);
       }
-      const body: Record<string, unknown> = { status: "completed" };
-      if (pr_url) {
-        body.metadata = await mergeMetadata(task_uuid, { pr_url });
-        steps.push(`attached PR`);
-      }
-      await api("PUT", `/api/v2/kanban/tasks/${task_uuid}`, body);
-      steps.push("marked completed");
       return ok(`Task ${task_uuid}: ${steps.join(", ")}.`);
     } catch (e) {
-      return fail(String(e instanceof Error ? e.message : e));
+      // Name what already succeeded so the agent doesn't blindly re-run it.
+      const done = steps.length ? ` (already done: ${steps.join(", ")})` : "";
+      return fail(`${String(e instanceof Error ? e.message : e)}${done}`);
     }
   }
 );

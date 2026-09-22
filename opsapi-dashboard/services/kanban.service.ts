@@ -342,8 +342,12 @@ export const kanbanService = {
       updated_at: rawData.updated_at,
     };
 
-    // Columns are already in the correct format with tasks embedded
-    const columns = Array.isArray(rawData.columns) ? rawData.columns : [];
+    // Columns come with tasks embedded; guarantee every column has a tasks
+    // array so the board's col.tasks.length / .map never throw on a column the
+    // API returned without one.
+    const columns = (Array.isArray(rawData.columns) ? rawData.columns : []).map(
+      (c: KanbanColumn) => (Array.isArray(c?.tasks) ? c : { ...c, tasks: [] }),
+    );
 
     return {
       board,

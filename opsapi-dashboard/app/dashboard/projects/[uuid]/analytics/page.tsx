@@ -234,8 +234,8 @@ export default function ProjectAnalyticsPage() {
     [cycle]
   );
 
-  const totalHours = stats ? Math.round((n(stats.time.total_minutes) / 60) * 10) / 10 : 0;
-  const billableHours = stats ? Math.round((n(stats.time.billable_minutes) / 60) * 10) / 10 : 0;
+  const totalHours = stats ? Math.round((n(stats.time?.total_minutes) / 60) * 10) / 10 : 0;
+  const billableHours = stats ? Math.round((n(stats.time?.billable_minutes) / 60) * 10) / 10 : 0;
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5">
@@ -281,39 +281,39 @@ export default function ProjectAnalyticsPage() {
             <StatCard
               icon={<ListChecks size={18} />}
               label="Total tasks"
-              value={n(stats?.tasks.total_tasks)}
-              sub={`${n(stats?.boards.board_count)} boards · ${n(stats?.members.member_count)} members`}
+              value={n(stats?.tasks?.total_tasks)}
+              sub={`${n(stats?.boards?.board_count)} boards · ${n(stats?.members?.member_count)} members`}
             />
             <StatCard
               icon={<CheckCircle2 size={18} />}
               label="Completed"
-              value={n(stats?.tasks.completed_tasks)}
+              value={n(stats?.tasks?.completed_tasks)}
               sub={`${formatPercentage(n(stats?.progress_percentage))} progress`}
               tone="success"
             />
             <StatCard
               icon={<Timer size={18} />}
               label="In progress"
-              value={n(stats?.tasks.in_progress_tasks)}
-              sub={`${n(stats?.tasks.review_tasks)} in review`}
+              value={n(stats?.tasks?.in_progress_tasks)}
+              sub={`${n(stats?.tasks?.review_tasks)} in review`}
             />
             <StatCard
               icon={<AlertTriangle size={18} />}
               label="Overdue"
-              value={n(stats?.tasks.overdue_tasks)}
-              sub={`${n(stats?.tasks.due_today_tasks)} due today`}
-              tone={n(stats?.tasks.overdue_tasks) > 0 ? 'danger' : 'default'}
+              value={n(stats?.tasks?.overdue_tasks)}
+              sub={`${n(stats?.tasks?.due_today_tasks)} due today`}
+              tone={n(stats?.tasks?.overdue_tasks) > 0 ? 'danger' : 'default'}
             />
             <StatCard
               icon={<Ban size={18} />}
               label="Blocked"
-              value={n(stats?.tasks.blocked_tasks)}
-              tone={n(stats?.tasks.blocked_tasks) > 0 ? 'warning' : 'default'}
+              value={n(stats?.tasks?.blocked_tasks)}
+              tone={n(stats?.tasks?.blocked_tasks) > 0 ? 'warning' : 'default'}
             />
             <StatCard
               icon={<Target size={18} />}
               label="Story points"
-              value={`${n(stats?.tasks.completed_points)}/${n(stats?.tasks.total_points)}`}
+              value={`${n(stats?.tasks?.completed_points)}/${n(stats?.tasks?.total_points)}`}
               sub="completed / total"
             />
             <StatCard
@@ -325,8 +325,8 @@ export default function ProjectAnalyticsPage() {
             <StatCard
               icon={<Users size={18} />}
               label="Sprints"
-              value={n(stats?.sprints.active_sprints)}
-              sub={`${n(stats?.sprints.completed_sprints)} completed`}
+              value={n(stats?.sprints?.active_sprints)}
+              sub={`${n(stats?.sprints?.completed_sprints)} completed`}
             />
           </div>
 

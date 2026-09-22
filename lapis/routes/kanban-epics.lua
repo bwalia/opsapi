@@ -27,6 +27,7 @@ local KanbanEpicQueries = require "queries.KanbanEpicQueries"
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+local Global = require("helper.global")
 
 return function(app)
     ----------------- Helper Functions --------------------
@@ -135,8 +136,8 @@ return function(app)
             end
 
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or tonumber(self.params.per_page) or 20,
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage or self.params.per_page, 20),
                 status = self.params.status
             }
 
@@ -280,8 +281,8 @@ return function(app)
             end
 
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or tonumber(self.params.per_page) or 50
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage or self.params.per_page, 50)
             }
 
             local result = KanbanEpicQueries.getTasks(epic, params)

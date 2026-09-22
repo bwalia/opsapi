@@ -30,6 +30,7 @@ local cJson = require("cjson")
 local KanbanSprintQueries = require "queries.KanbanSprintQueries"
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local db = require("lapis.db")
+local Global = require("helper.global")
 
 return function(app)
     ----------------- Helper Functions --------------------
@@ -95,8 +96,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20),
             status = self.params.status,
             board_id = self.params.board_id and tonumber(self.params.board_id)
         }
@@ -349,8 +350,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 50
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 50)
         }
 
         local result = KanbanSprintQueries.getTasks(sprint.id, params)
@@ -394,7 +395,18 @@ return function(app)
             return api_response(400, nil, "task_ids array is required")
         end
 
-        local count = KanbanSprintQueries.addTasks(sprint.id, data.task_ids)
+        -- Coerce to numeric ids: these hit an integer column, so a non-numeric
+        -- element ("abc") would 500 on the cast. Drop non-numerics.
+        local task_ids = {}
+        for _, v in ipairs(data.task_ids) do
+            local n = tonumber(v)
+            if n then task_ids[#task_ids + 1] = n end
+        end
+        if #task_ids == 0 then
+            return api_response(400, nil, "task_ids must contain numeric ids")
+        end
+
+        local count = KanbanSprintQueries.addTasks(sprint.id, task_ids)
 
         return api_response(200, {
             message = "Tasks added to sprint",
@@ -427,7 +439,17 @@ return function(app)
             return api_response(400, nil, "task_ids array is required")
         end
 
-        local count = KanbanSprintQueries.removeTasks(sprint.id, data.task_ids)
+        -- Coerce to numeric ids (integer column → non-numeric would 500).
+        local task_ids = {}
+        for _, v in ipairs(data.task_ids) do
+            local n = tonumber(v)
+            if n then task_ids[#task_ids + 1] = n end
+        end
+        if #task_ids == 0 then
+            return api_response(400, nil, "task_ids must contain numeric ids")
+        end
+
+        local count = KanbanSprintQueries.removeTasks(sprint.id, task_ids)
 
         return api_response(200, {
             message = "Tasks removed from sprint",
@@ -512,8 +534,8 @@ return function(app)
             return api_response(403, nil, "Access denied")
         end
 
-        local page = tonumber(self.params.page) or 1
-        local per_page = tonumber(self.params.per_page) or 50
+        local page = Global.pageParam(self.params.page)
+        local per_page = Global.perPageParam(self.params.per_page, 50)
 
         local count_result = db.query([[
             SELECT COUNT(*) as total FROM kanban_tasks
