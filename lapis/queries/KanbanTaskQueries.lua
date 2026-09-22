@@ -205,7 +205,7 @@ function KanbanTaskQueries.getByAssignee(user_uuid, namespace_id, params)
         INNER JOIN kanban_boards b ON b.id = t.board_id
         INNER JOIN kanban_projects p ON p.id = b.project_id
         LEFT JOIN kanban_columns c ON c.id = t.column_id
-        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL
+        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL AND e.namespace_id = p.namespace_id
         WHERE ta.user_uuid = ?
           AND p.namespace_id = ?
           AND t.archived_at IS NULL
@@ -269,7 +269,7 @@ function KanbanTaskQueries.show(uuid)
         LEFT JOIN kanban_columns c ON c.id = t.column_id
         INNER JOIN kanban_boards b ON b.id = t.board_id
         INNER JOIN kanban_projects p ON p.id = b.project_id
-        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL
+        LEFT JOIN kanban_epics e ON e.id = t.epic_id AND e.deleted_at IS NULL AND e.namespace_id = p.namespace_id
         LEFT JOIN users u ON u.uuid = t.reporter_user_uuid
         WHERE t.uuid = ?
     ]]
