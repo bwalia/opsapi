@@ -279,8 +279,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 50,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 50),
             column_id = self.params.column_id and tonumber(self.params.column_id),
             status = self.params.status,
             priority = self.params.priority,
@@ -329,9 +329,10 @@ return function(app)
 
         local data = parse_json_body()
 
-        local valid, validation_err = validate_required(data, { "title" })
-        if not valid then
-            return api_response(400, nil, validation_err)
+        -- type(...) ~= "string" also rejects a repeated form key (title=a&title=b),
+        -- which arrives as a table and would 500 when handed to the DB.
+        if type(data.title) ~= "string" or data.title == "" then
+            return api_response(400, nil, "title is required")
         end
 
         -- Validate priority if provided
@@ -566,14 +567,18 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.column_id then
-            return api_response(400, nil, "column_id is required")
+        -- Coerce to numbers: these hit integer columns, so a non-numeric
+        -- column_id/position (e.g. "abc") would 500 on the SQL cast otherwise.
+        local column_id = tonumber(data.column_id)
+        if not column_id then
+            return api_response(400, nil, "column_id is required and must be numeric")
         end
+        local position = data.position ~= nil and tonumber(data.position) or nil
 
         local moved, move_err = KanbanTaskQueries.moveToColumn(
             self.params.uuid,
-            data.column_id,
-            data.position,
+            column_id,
+            position,
             user.uuid
         )
 
@@ -581,7 +586,7 @@ return function(app)
             return api_response(400, nil, move_err or "Failed to move task")
         end
 
-        broadcast_board(board, "task:moved", self.params.uuid, user.uuid, { column_id = data.column_id })
+        broadcast_board(board, "task:moved", self.params.uuid, user.uuid, { column_id = column_id })
 
         return api_response(200, moved)
     end)
@@ -633,7 +638,8 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.user_uuid then
+        -- type check rejects a repeated form key (arrives as a table → SQL 500).
+        if type(data.user_uuid) ~= "string" or data.user_uuid == "" then
             return api_response(400, nil, "user_uuid is required")
         end
 
@@ -733,11 +739,12 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.label_id then
-            return api_response(400, nil, "label_id is required")
+        local label_id = tonumber(data.label_id)
+        if not label_id then
+            return api_response(400, nil, "label_id is required and must be numeric")
         end
 
-        local link, add_err = KanbanTaskQueries.addLabel(task.id, data.label_id)
+        local link, add_err = KanbanTaskQueries.addLabel(task.id, label_id)
 
         if not link then
             return api_response(400, nil, add_err or "Failed to add label")
@@ -790,8 +797,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20)
         }
 
         local result = KanbanTaskQueries.getComments(task.id, params)
@@ -832,7 +839,8 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.content or data.content == "" then
+        -- type check rejects a repeated form key (arrives as a table → SQL 500).
+        if type(data.content) ~= "string" or data.content == "" then
             return api_response(400, nil, "content is required")
         end
 
@@ -873,7 +881,8 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.content or data.content == "" then
+        -- type check rejects a repeated form key (arrives as a table → SQL 500).
+        if type(data.content) ~= "string" or data.content == "" then
             return api_response(400, nil, "content is required")
         end
 
@@ -927,6 +936,9 @@ return function(app)
 
         -- Allow owner or project admin to delete
         local board = KanbanBoardQueries.getById(comment_data.board_id)
+        if not board then
+            return api_response(404, nil, "Task not found")
+        end
         if comment_data.user_uuid ~= user.uuid and not KanbanProjectQueries.isAdmin(board.project_id, user.uuid) then
             return api_response(403, nil, "Permission denied")
         end
@@ -1029,7 +1041,8 @@ return function(app)
 
         local data = parse_json_body()
 
-        if not data.content or data.content == "" then
+        -- type check rejects a repeated form key (arrives as a table → SQL 500).
+        if type(data.content) ~= "string" or data.content == "" then
             return api_response(400, nil, "content is required")
         end
 
@@ -1113,8 +1126,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20)
         }
 
         local result = KanbanTaskQueries.getActivities(task.id, params)
@@ -1219,6 +1232,9 @@ return function(app)
 
         -- Allow uploader or project admin
         local board = KanbanBoardQueries.getById(attachment_data.board_id)
+        if not board then
+            return api_response(404, nil, "Task not found")
+        end
         if attachment_data.uploaded_by ~= user.uuid and not KanbanProjectQueries.isAdmin(board.project_id, user.uuid) then
             return api_response(403, nil, "Permission denied")
         end

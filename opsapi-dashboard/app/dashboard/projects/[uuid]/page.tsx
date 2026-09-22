@@ -187,9 +187,12 @@ export default function ProjectDetailPage() {
   // Seeded from ?epic=<id> so "View tasks on board" on the epics page lands
   // here already filtered.
   const epicParam = searchParams.get('epic');
-  const [epicFilter, setEpicFilter] = useState<number | null>(
-    epicParam ? parseInt(epicParam, 10) : null
-  );
+  const [epicFilter, setEpicFilter] = useState<number | null>(() => {
+    // A non-numeric ?epic (stale/hand-edited link) would become NaN and, since
+    // NaN !== every epic_id, silently empty the board — treat it as no filter.
+    const n = epicParam ? parseInt(epicParam, 10) : NaN;
+    return Number.isNaN(n) ? null : n;
+  });
 
   // Editing is role-driven: owner/admin/member can edit; viewer/guest are
   // read-only (mirrors the backend's isEditor gate). Namespace authority also

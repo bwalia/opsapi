@@ -347,7 +347,7 @@ interface VelocityChartProps {
 const VelocityChart = React.memo(function VelocityChart({ velocityData }: VelocityChartProps) {
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
 
-  if (!velocityData || velocityData.sprints.length === 0) {
+  if (!velocityData?.sprints || velocityData.sprints.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-secondary-400">
         <TrendingUp size={32} className="mb-2" />
@@ -1008,7 +1008,7 @@ export default function SprintBurndownPage() {
             </Card>
 
             {/* Sprint history table */}
-            {velocityData && velocityData.sprints.length > 0 && (
+            {velocityData?.sprints && velocityData.sprints.length > 0 && (
               <Card>
                 <h2 className="text-base font-bold text-secondary-900 mb-4 flex items-center gap-2">
                   <Calendar size={18} className="text-secondary-500" />

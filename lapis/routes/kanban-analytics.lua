@@ -28,6 +28,7 @@ local cJson = require("cjson")
 local KanbanAnalyticsQueries = require "queries.KanbanAnalyticsQueries"
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local db = require("lapis.db")
+local Global = require("helper.global")
 
 return function(app)
     ----------------- Helper Functions --------------------
@@ -224,8 +225,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 50,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 50),
             user_uuid = self.params.user_uuid,
             action = self.params.action,
             since = self.params.since

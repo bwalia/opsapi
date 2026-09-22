@@ -24,7 +24,7 @@ import RichTextEditor from '@/components/academy/RichTextEditor';
 import type {
   KanbanTask, KanbanProjectMember, KanbanActivity, KanbanTaskStatus, KanbanTaskPriority,
 } from '@/types';
-import { cn } from '@/lib/utils';
+import { cn, extractApiError } from '@/lib/utils';
 
 const STATUSES: KanbanTaskStatus[] = ['open', 'in_progress', 'blocked', 'review', 'completed', 'cancelled'];
 const PRIORITIES: KanbanTaskPriority[] = ['critical', 'high', 'medium', 'low', 'none'];
@@ -111,12 +111,27 @@ export default function TaskDetailPage() {
   const [assignableMembers, setAssignableMembers] = useState<KanbanProjectMember[]>([]);
   const [activity, setActivity] = useState<KanbanActivity[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The last taskId we finished a load attempt for — lets us tell "still
+  // loading / navigating" (show spinner) from "loaded and genuinely missing"
+  // (show Not found), instead of flashing Not found on every open.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
 
   const canEdit =
     projectRole === 'owner' || projectRole === 'admin' || projectRole === 'member' ||
     isNamespaceOwner || isPlatformAdmin || canManage('projects');
 
-  const refresh = useCallback(() => { if (taskId) void loadTask(taskId); }, [taskId, loadTask]);
+  const refresh = useCallback(() => {
+    if (taskId) void Promise.resolve(loadTask(taskId)).finally(() => setLoadedId(taskId));
+  }, [taskId, loadTask]);
+
+  // Run a mutating action, refresh on success, and always surface a failure
+  // (the direct kanbanService calls below would otherwise reject silently).
+  const runAction = useCallback(
+    (fn: () => Promise<unknown>, errMsg: string) => async () => {
+      try { await fn(); refresh(); } catch (e) { toast.error(extractApiError(e, errMsg)); }
+    },
+    [refresh],
+  );
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -150,7 +165,9 @@ export default function TaskDetailPage() {
     try { await updateTask(task.uuid, data); } catch { toast.error('Failed to update task'); }
   }, [task, updateTask]);
 
-  if (selectedTaskLoading && !task) {
+  // Spinner while this task is still resolving (loading, or the store hasn't
+  // loaded THIS id yet) — avoids the "Task not found" flash on open/navigate.
+  if (!task && (selectedTaskLoading || loadedId !== taskId)) {
     return <div className="h-[60vh] flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary-500" /></div>;
   }
   if (!task) {
@@ -270,18 +287,18 @@ export default function TaskDetailPage() {
                     <span className="text-sm font-medium text-secondary-800">{cl.name}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-secondary-500 tabular-nums">{cl.completed_item_count}/{cl.item_count}</span>
-                      {canEdit && <button onClick={async () => { await kanbanService.deleteChecklist(cl.uuid); refresh(); }} className="text-secondary-400 hover:text-error-500" aria-label="Delete checklist"><Trash2 size={13} /></button>}
+                      {canEdit && <button onClick={runAction(() => kanbanService.deleteChecklist(cl.uuid), 'Could not delete the checklist')} className="text-secondary-400 hover:text-error-500" aria-label="Delete checklist"><Trash2 size={13} /></button>}
                     </div>
                   </div>
                   <ul className="space-y-1">
                     {(cl.items ?? []).map((it) => (
                       <li key={it.uuid} className="group flex items-center gap-2 text-sm">
-                        <button disabled={!canEdit} onClick={async () => { await kanbanService.toggleChecklistItem(it.uuid); refresh(); }}
+                        <button disabled={!canEdit} onClick={runAction(() => kanbanService.toggleChecklistItem(it.uuid), 'Could not update the item')}
                           className={cn('w-4 h-4 rounded border flex items-center justify-center shrink-0', it.is_completed ? 'bg-primary-500 border-primary-500 text-white' : 'border-secondary-300')}>
                           {it.is_completed && <Check size={11} />}
                         </button>
                         <span className={cn('flex-1', it.is_completed && 'line-through text-secondary-400')}>{it.content}</span>
-                        {canEdit && <button onClick={async () => { await kanbanService.deleteChecklistItem(it.uuid); refresh(); }} className="opacity-0 group-hover:opacity-100 text-secondary-400 hover:text-error-500"><X size={13} /></button>}
+                        {canEdit && <button onClick={runAction(() => kanbanService.deleteChecklistItem(it.uuid), 'Could not delete the item')} className="opacity-0 group-hover:opacity-100 text-secondary-400 hover:text-error-500"><X size={13} /></button>}
                       </li>
                     ))}
                   </ul>
@@ -308,7 +325,7 @@ export default function TaskDetailPage() {
                   <a href={a.file_url} target="_blank" rel="noreferrer" className="flex-1 truncate text-primary-600 hover:underline inline-flex items-center gap-1">
                     {a.file_name} <ExternalLink size={11} />
                   </a>
-                  {canEdit && <button onClick={async () => { await kanbanService.deleteAttachment(a.uuid); refresh(); }} className="opacity-0 group-hover:opacity-100 text-secondary-400 hover:text-error-500"><X size={14} /></button>}
+                  {canEdit && <button onClick={runAction(() => kanbanService.deleteAttachment(a.uuid), 'Could not delete the attachment')} className="opacity-0 group-hover:opacity-100 text-secondary-400 hover:text-error-500"><X size={14} /></button>}
                 </li>
               ))}
               {(task.attachments ?? []).length === 0 && <li className="text-sm text-secondary-400">No attachments.</li>}
@@ -329,7 +346,7 @@ export default function TaskDetailPage() {
                       <span className="font-medium text-secondary-800">{c.user?.first_name} {c.user?.last_name}</span>
                       <span className="text-xs text-secondary-400">{dateTime(c.created_at)}{c.is_edited ? ' · edited' : ''}</span>
                       {canEdit && (
-                        <button onClick={async () => { await kanbanService.deleteComment(c.uuid); refresh(); }} className="ml-auto text-secondary-400 hover:text-error-500" aria-label="Delete comment"><Trash2 size={13} /></button>
+                        <button onClick={runAction(() => kanbanService.deleteComment(c.uuid), 'Could not delete the comment')} className="ml-auto text-secondary-400 hover:text-error-500" aria-label="Delete comment"><Trash2 size={13} /></button>
                       )}
                     </div>
                     <div className="mt-1 text-sm text-secondary-700 rich-content">
@@ -548,7 +565,7 @@ function AddInput({ placeholder, onAdd, small }: { placeholder: string; onAdd: (
   const submit = async () => {
     if (!v.trim() || busy) return;
     setBusy(true);
-    try { await onAdd(v.trim()); setV(''); } finally { setBusy(false); }
+    try { await onAdd(v.trim()); setV(''); } catch (e) { toast.error(extractApiError(e, 'Could not add that')); } finally { setBusy(false); }
   };
   return (
     <div className="flex items-center gap-2">

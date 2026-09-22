@@ -1286,9 +1286,8 @@ export default function SprintBoardPage() {
   }, [currentSprintUuid, loadSprintTasks, loadBacklogTasks]);
 
   const handleTaskClick = useCallback((task: KanbanTask) => {
-    // Could open a task detail modal - for now just navigate or show detail
-    toast.success(`Task: ${task.title}`);
-  }, []);
+    router.push(`/dashboard/projects/${projectUuid}/tasks/${task.uuid}`);
+  }, [router, projectUuid]);
 
   // ============================================
   // Drag & Drop Handlers

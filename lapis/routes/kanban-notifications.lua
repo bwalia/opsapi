@@ -22,6 +22,7 @@ local cJson = require("cjson")
 local KanbanNotificationQueries = require "queries.KanbanNotificationQueries"
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local db = require("lapis.db")
+local Global = require("helper.global")
 
 return function(app)
     ----------------- Helper Functions --------------------
@@ -78,8 +79,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20),
             unread_only = self.params.unread_only == "true",
             type = self.params.type,
             project_id = self.params.project_id and tonumber(self.params.project_id)

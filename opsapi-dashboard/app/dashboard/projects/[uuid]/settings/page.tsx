@@ -36,6 +36,7 @@ import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/Modal';
 import { useKanbanStore } from '@/store/kanban.store';
+import { useAuthStore } from '@/store/auth.store';
 import { kanbanService } from '@/services/kanban.service';
 import usersService from '@/services/users.service';
 import { customersService } from '@/services/customers.service';
@@ -963,12 +964,9 @@ export default function ProjectSettingsPage() {
   // Form data
   const [formData, setFormData] = useState<UpdateKanbanProjectDto>({});
 
-  // Get current user from auth store (assuming it exists)
-  const currentUserUuid = useMemo(() => {
-    // This would typically come from auth store
-    // For now, check if current user is owner based on project data
-    return project?.owner_user_uuid || '';
-  }, [project]);
+  // The real signed-in user (was derived from project.owner_user_uuid, which
+  // made "(you)" and the self-edit guard resolve to the owner for everyone).
+  const currentUserUuid = useAuthStore((s) => s.user?.uuid) || '';
 
   const isOwner = useMemo(() => {
     return project?.current_user_role === 'owner' || project?.owner_user_uuid === currentUserUuid;

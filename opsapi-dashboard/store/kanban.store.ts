@@ -18,6 +18,8 @@ import type {
   CreateKanbanBoardDto,
 } from '@/types';
 import { kanbanService } from '@/services/kanban.service';
+import { toast } from 'react-hot-toast';
+import { extractApiError } from '@/lib/utils';
 
 // ============================================
 // State Types
@@ -519,6 +521,7 @@ export const useKanbanStore = create<KanbanStore>()(
           return task;
         } catch (error) {
           console.error('Failed to create task:', error);
+          toast.error(extractApiError(error, 'Could not create the task'));
           set({ isCreatingTask: false });
           return null;
         }
@@ -544,6 +547,7 @@ export const useKanbanStore = create<KanbanStore>()(
           return task;
         } catch (error) {
           console.error('Failed to update task:', error);
+          toast.error(extractApiError(error, 'Could not save your changes'));
           return null;
         }
       },
@@ -571,6 +575,7 @@ export const useKanbanStore = create<KanbanStore>()(
           return true;
         } catch (error) {
           console.error('Failed to delete task:', error);
+          toast.error(extractApiError(error, 'Could not delete the task'));
           return false;
         }
       },
@@ -581,6 +586,7 @@ export const useKanbanStore = create<KanbanStore>()(
           return true;
         } catch (error) {
           console.error('Failed to move task:', error);
+          toast.error(extractApiError(error, 'Could not move the task'));
           // Revert optimistic update
           await get().refreshBoardData();
           return false;
@@ -665,6 +671,7 @@ export const useKanbanStore = create<KanbanStore>()(
           await get().refreshBoardData();
         } catch (error) {
           console.error('Failed to add assignee:', error);
+          toast.error(extractApiError(error, 'Could not assign this person'));
         }
       },
 
@@ -679,6 +686,7 @@ export const useKanbanStore = create<KanbanStore>()(
           await get().refreshBoardData();
         } catch (error) {
           console.error('Failed to remove assignee:', error);
+          toast.error(extractApiError(error, 'Could not remove the assignee'));
         }
       },
 
@@ -707,6 +715,7 @@ export const useKanbanStore = create<KanbanStore>()(
           }
         } catch (error) {
           console.error('Failed to add label:', error);
+          toast.error(extractApiError(error, 'Could not add the label'));
         }
       },
 
@@ -720,6 +729,7 @@ export const useKanbanStore = create<KanbanStore>()(
           }
         } catch (error) {
           console.error('Failed to remove label:', error);
+          toast.error(extractApiError(error, 'Could not remove the label'));
         }
       },
 

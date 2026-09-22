@@ -644,6 +644,20 @@ end
 -- @param invited_by string UUID of user who invited
 -- @return table|nil Created member
 function KanbanProjectQueries.addMember(project_id, user_uuid, role, invited_by)
+    -- The user must belong to the project's namespace first, else they become a
+    -- dead-end member: assignUser rejects non-tenant users, so they can never be
+    -- given a task and never show in the assignee picker.
+    local in_ns = db.query([[
+        SELECT nm.id FROM namespace_members nm
+        JOIN users u ON u.id = nm.user_id
+        JOIN kanban_projects p ON p.namespace_id = nm.namespace_id
+        WHERE u.uuid = ? AND p.id = ?
+        LIMIT 1
+    ]], user_uuid, project_id)
+    if not in_ns or #in_ns == 0 then
+        return nil, "User must be a member of this workspace first"
+    end
+
     -- Check if already a member
     local existing = db.query([[
         SELECT id FROM kanban_project_members

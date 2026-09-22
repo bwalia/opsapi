@@ -28,6 +28,7 @@ local KanbanTimeTrackingQueries = require "queries.KanbanTimeTrackingQueries"
 local KanbanTaskQueries = require "queries.KanbanTaskQueries"
 local KanbanProjectQueries = require "queries.KanbanProjectQueries"
 local db = require("lapis.db")
+local Global = require("helper.global")
 
 return function(app)
     ----------------- Helper Functions --------------------
@@ -327,8 +328,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20)
         }
 
         local result = KanbanTimeTrackingQueries.getByTask(task.id, params)
@@ -401,7 +402,9 @@ return function(app)
             started_at = data.started_at or db.raw("NOW()"),
             ended_at = data.ended_at,
             duration_minutes = data.duration_minutes,
-            is_billable = data.is_billable ~= false,
+            -- ~= "false" too: form/MCP bodies deliver the boolean as the string
+            -- "false", which would otherwise be truthy and always bill.
+            is_billable = data.is_billable ~= false and data.is_billable ~= "false",
             hourly_rate = data.hourly_rate
         })
 
@@ -432,6 +435,16 @@ return function(app)
 
         local data = parse_request_body()
 
+        -- Mirror the create route (which validates + pcall-wraps): an out-of-range
+        -- duration corrupts billing / 500s on the integer cast, and a malformed
+        -- timestamp 500s on the EXTRACT cast inside update().
+        if data.duration_minutes ~= nil then
+            local mins = tonumber(data.duration_minutes)
+            if not mins or mins ~= mins or mins <= 0 or mins > 24 * 60 then
+                return api_response(400, nil, "duration_minutes must be between 0 and 1440")
+            end
+        end
+
         local update_params = {}
         local allowed_fields = {
             "description", "started_at", "ended_at", "duration_minutes",
@@ -448,12 +461,17 @@ return function(app)
             return api_response(400, nil, "No valid fields to update")
         end
 
-        local updated, update_err = KanbanTimeTrackingQueries.update(
+        local ok, updated, update_err = pcall(
+            KanbanTimeTrackingQueries.update,
             self.params.uuid,
             update_params,
             user.uuid
         )
 
+        if not ok then
+            ngx.log(ngx.ERR, "[TimeTracking] update failed: ", tostring(updated))
+            return api_response(400, nil, "Could not update time entry — check started_at/ended_at and duration")
+        end
         if not updated then
             return api_response(400, nil, update_err or "Failed to update time entry")
         end
@@ -557,8 +575,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 50,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 50),
             start_date = self.params.start_date,
             end_date = self.params.end_date,
             project_id = self.params.project_id and tonumber(self.params.project_id),
@@ -600,8 +618,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 50,
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 50),
             start_date = self.params.start_date,
             end_date = self.params.end_date,
             user_uuid = self.params.user_uuid,

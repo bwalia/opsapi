@@ -496,6 +496,32 @@ function KanbanTaskQueries.assignUser(task_id, user_uuid, assigned_by, namespace
         return nil, "Failed to create assignment"
     end
 
+    -- Assigning a task grants project membership (product decision): the
+    -- assignee's agent acts on the task via MCP, which requires project
+    -- membership (isMember/isEditor) -- otherwise list_my_tasks shows the task
+    -- but get_task/log_time/add_comment all 403. Namespace membership was
+    -- verified above, so this only ever adds a same-tenant user. Best-effort:
+    -- a failure here must not undo the assignment that already succeeded, and
+    -- an existing member's role is never downgraded.
+    pcall(function()
+        local pm = db.query([[
+            SELECT id, left_at FROM kanban_project_members
+            WHERE project_id = ? AND user_uuid = ?
+            ORDER BY id DESC LIMIT 1
+        ]], project.id, user_uuid)
+        if not pm or #pm == 0 then
+            db.query([[
+                INSERT INTO kanban_project_members
+                    (uuid, project_id, user_uuid, role, invited_by, joined_at, created_at, updated_at)
+                VALUES (?, ?, ?, 'member', ?, NOW(), NOW(), NOW())
+            ]], Global.generateUUID(), project.id, user_uuid, assigned_by)
+            ngx.log(ngx.INFO, "[Kanban] Assignment granted project membership: ", user_uuid, " -> project ", project.id)
+        elseif pm[1].left_at then
+            db.query("UPDATE kanban_project_members SET left_at = NULL, updated_at = NOW() WHERE id = ?", pm[1].id)
+            ngx.log(ngx.INFO, "[Kanban] Assignment reactivated project membership: ", user_uuid, " -> project ", project.id)
+        end
+    end)
+
     -- Use the PROJECT's chat channel instead of creating task-specific channels
     -- This keeps all task discussions in the project channel (avoids channel proliferation)
     local chat_channel_uuid = project.chat_channel_uuid
