@@ -355,6 +355,9 @@ local field_service_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SE
 local field_service_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-menu-items") or {}
 local field_service_assets_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets") or {}
 local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-assets-menu") or {}
+-- Employees is a CORE module (generic staff directory): the table/module/menu/grants
+-- install for every deployment, including those without field service.
+local employees_core_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.employees") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
 local field_service_parts_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts") or {}
@@ -2436,6 +2439,13 @@ local _migrations = {
     ['865_register_fs_assets_modules'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 2),
     ['866_grant_fs_assets_permissions'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 3),
     ['867_enable_fs_assets_menu'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_assets_menu_migrations, 4),
+    -- Employees → core module. `zzemp*` keys sort after every numeric migration
+    -- (so they re-path the field-service menu item after it is seeded) and before
+    -- the zzw/zzx/zzz finalizers. Idempotent + CORE-gated (runs for everyone).
+    ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
+    ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
+    ['zzemp3_employees_core_grants'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 3),
+    ['zzemp4_employees_core_menu_enable'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 4),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),
     ['869_fs_create_service_requests'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 2),

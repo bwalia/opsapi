@@ -250,4 +250,37 @@ function EmployeeQueries.deleteEmployee(namespace_id, uuid)
     return true
 end
 
+--- List active workspace members for the "add employee / add team member" picker.
+-- Core-safe: unlike ConfigQueries.listEngineers this does NOT touch fs_visits
+-- (which may not exist outside a field-service deployment). Returns each member's
+-- uuid, email, name and workspace role.
+-- @param namespace_id number Tenant
+-- @param params table { search }
+-- @return table[] members
+function EmployeeQueries.listMembers(namespace_id, params)
+    params = params or {}
+    local where = { "nm.namespace_id = ?", "nm.status = 'active'" }
+    local values = { namespace_id }
+    if nilify(params.search) then
+        local term = "%" .. tostring(params.search) .. "%"
+        table.insert(where, "(u.first_name ILIKE ? OR u.last_name ILIKE ? OR u.email ILIKE ?)")
+        for _ = 1, 3 do table.insert(values, term) end
+    end
+    local rows = db.query([[
+        SELECT u.uuid, u.email, ]] .. Common.user_name_sql("u") .. [[ AS name,
+            CASE WHEN nm.is_owner THEN 'Owner' ELSE (
+                SELECT nr.display_name FROM namespace_user_roles nur
+                JOIN namespace_roles nr ON nr.id = nur.namespace_role_id
+                WHERE nur.namespace_member_id = nm.id
+                ORDER BY nr.priority DESC LIMIT 1
+            ) END AS role
+        FROM namespace_members nm
+        JOIN users u ON u.id = nm.user_id
+        WHERE ]] .. table.concat(where, " AND ") .. [[
+        ORDER BY name ASC
+        LIMIT 200
+    ]], table.unpack(values))
+    return arr(rows or {})
+end
+
 return EmployeeQueries

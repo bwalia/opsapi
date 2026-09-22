@@ -27,7 +27,6 @@ const NAV = [
   { href: '/dashboard/field-service/assets', label: 'Assets', match: (p: string) => p.startsWith('/dashboard/field-service/assets') },
   { href: '/dashboard/field-service/contracts', label: 'Contracts', match: (p: string) => p.startsWith('/dashboard/field-service/contracts') },
   { href: '/dashboard/field-service/parts', label: 'Parts', match: (p: string) => p.startsWith('/dashboard/field-service/parts') },
-  { href: '/dashboard/field-service/employees', label: 'Employees', match: (p: string) => p.startsWith('/dashboard/field-service/employees') },
   { href: '/dashboard/field-service/job-types', label: 'Job Types', match: (p: string) => p.startsWith('/dashboard/field-service/job-types') },
   { href: '/dashboard/field-service/reports', label: 'Reports', match: (p: string) => p.startsWith('/dashboard/field-service/reports') },
   { href: '/dashboard/field-service/simpro', label: 'Simpro Sync', match: (p: string) => p.startsWith('/dashboard/field-service/simpro') },

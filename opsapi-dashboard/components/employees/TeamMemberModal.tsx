@@ -11,8 +11,8 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle2, Copy } from 'lucide-react';
 import { Modal, Button, Input, Select } from '@/components/ui';
-import { fieldService } from '@/services/field-service.service';
-import { apiError, optional } from './shared';
+import { employeeService } from '@/services/employees.service';
+import { apiError, optional } from '@/components/field-service/shared';
 
 const ROLE_OPTIONS = [
   { value: 'engineer', label: 'Engineer — does the on-site repairs' },
@@ -73,7 +73,7 @@ function TeamMemberForm({ onClose, onCreated }: { onClose: () => void; onCreated
     }
     setSaving(true);
     try {
-      const res = await fieldService.createTeamMember({
+      const res = await employeeService.createTeamMember({
         first_name: form.first_name.trim(),
         last_name: optional(form.last_name),
         email: form.email.trim(),
