@@ -1171,6 +1171,13 @@ export interface KanbanTask {
   updated_at: string;
   archived_at?: string;
   deleted_at?: string;
+  // Join columns returned by getTask (KanbanTaskQueries.show)
+  board_uuid?: string;
+  board_name?: string;
+  column_name?: string;
+  column_uuid?: string;
+  project_uuid?: string;
+  project_name?: string;
   // Populated fields
   assignees?: KanbanTaskAssignee[];
   labels?: KanbanLabel[];
@@ -1516,6 +1523,8 @@ export interface UpdateKanbanLabelDto extends Partial<CreateKanbanLabelDto> {}
 export interface CreateKanbanCommentDto {
   content: string;
   parent_comment_id?: number;
+  /** UUIDs of members @mentioned in the comment — each gets a mention notification. */
+  mentioned_uuids?: string[];
 }
 
 export interface UpdateKanbanCommentDto {
