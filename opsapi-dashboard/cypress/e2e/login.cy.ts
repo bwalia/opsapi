@@ -30,7 +30,7 @@ describe('Login Page - UI Tests', () => {
 
     it('should have correct input placeholders', () => {
       cy.getByTestId('login-username-input')
-        .should('have.attr', 'placeholder', 'Enter your username');
+        .should('have.attr', 'placeholder', 'you@company.com');
       cy.getByTestId('login-password-input')
         .should('have.attr', 'placeholder', 'Enter your password');
     });
