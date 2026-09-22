@@ -2,23 +2,20 @@
 
 /**
  * Add team member — one step for a non-technical admin. Creates the login, adds
- * them to the workspace with a role, and (for engineers) an engineer profile.
- * On success it shows a temporary password to hand over; they also get a welcome
- * email. No user/member/role internals to understand.
+ * them to the workspace with one of the workspace's own roles, and (optionally)
+ * a staff/engineer profile. On success it shows a temporary password to hand
+ * over; they also get a welcome email. Generic (not field-service-specific): the
+ * roles come from this workspace, and the engineer fields are an explicit opt-in.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle2, Copy } from 'lucide-react';
 import { Modal, Button, Input, Select } from '@/components/ui';
-import { fieldService } from '@/services/field-service.service';
-import { apiError, optional } from './shared';
-
-const ROLE_OPTIONS = [
-  { value: 'engineer', label: 'Engineer — does the on-site repairs' },
-  { value: 'service_manager', label: 'Service Manager — assigns jobs, quotes & invoices' },
-  { value: 'telecaller', label: 'Telecaller — logs customer complaints' },
-];
+import { employeeService } from '@/services/employees.service';
+import { namespaceService } from '@/services/namespace.service';
+import { apiError, optional, CheckboxField } from '@/components/field-service/shared';
+import type { NamespaceRole } from '@/types';
 
 interface Props {
   isOpen: boolean;
@@ -44,7 +41,7 @@ const EMPTY = {
   first_name: '',
   last_name: '',
   email: '',
-  role_name: 'engineer',
+  role_name: '',
   phone: '',
   job_title: '',
   skills: '',
@@ -54,9 +51,37 @@ const EMPTY = {
 
 function TeamMemberForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState(EMPTY);
+  const [roles, setRoles] = useState<NamespaceRole[]>([]);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
+  const [isEngineer, setIsEngineer] = useState(false);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<{ name: string; email: string; temp_password: string } | null>(null);
-  const isEngineer = form.role_name === 'engineer';
+
+  // The role choices are this workspace's own roles (never a hardcoded set).
+  // Owner is excluded — you don't onboard someone straight to workspace owner.
+  useEffect(() => {
+    let cancelled = false;
+    namespaceService
+      .getRoles()
+      .then((all) => {
+        if (cancelled) return;
+        const assignable = all.filter((r) => r.role_name !== 'owner');
+        setRoles(assignable);
+        setForm((f) => (f.role_name ? f : { ...f, role_name: assignable[0]?.role_name ?? '' }));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setRolesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const roleOptions = useMemo(
+    () => roles.map((r) => ({ value: r.role_name, label: r.display_name || r.role_name })),
+    [roles]
+  );
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -71,19 +96,24 @@ function TeamMemberForm({ onClose, onCreated }: { onClose: () => void; onCreated
       toast.error('Enter their email');
       return;
     }
+    if (!form.role_name) {
+      toast.error('Pick a role');
+      return;
+    }
     setSaving(true);
     try {
-      const res = await fieldService.createTeamMember({
+      const res = await employeeService.createTeamMember({
         first_name: form.first_name.trim(),
         last_name: optional(form.last_name),
         email: form.email.trim(),
         role_name: form.role_name,
         phone: optional(form.phone),
-        job_title: isEngineer ? optional(form.job_title) : undefined,
+        job_title: optional(form.job_title),
+        is_engineer: isEngineer,
+        // Engineer-only detail; sent only when they're flagged as a field engineer.
         skills: isEngineer ? optional(form.skills) : undefined,
         fgas_certificate_no: isEngineer ? optional(form.fgas_certificate_no) : undefined,
         hourly_cost_rate: isEngineer ? optional(form.hourly_cost_rate) : undefined,
-        is_engineer: isEngineer,
         login_url: typeof window !== 'undefined' ? `${window.location.origin}/login` : undefined,
       });
       setDone({ name: res.name || form.first_name.trim(), email: res.email, temp_password: res.temp_password });
@@ -151,20 +181,33 @@ function TeamMemberForm({ onClose, onCreated }: { onClose: () => void; onCreated
         onChange={set('email')}
         placeholder="Where they'll sign in and get their welcome"
       />
-      <Select label="Role" value={form.role_name} onChange={set('role_name')}>
-        {ROLE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
+      <Select label="Role" value={form.role_name} onChange={set('role_name')} disabled={roleOptions.length === 0}>
+        {roleOptions.length === 0 ? (
+          <option value="">{rolesLoaded ? 'No roles available' : 'Loading roles…'}</option>
+        ) : (
+          roleOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))
+        )}
       </Select>
-      <Input label="Phone" value={form.phone} onChange={set('phone')} placeholder="Optional" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Input label="Phone" value={form.phone} onChange={set('phone')} placeholder="Optional" />
+        <Input label="Job title" value={form.job_title} onChange={set('job_title')} placeholder="Optional" />
+      </div>
+
+      <CheckboxField
+        label="Field engineer"
+        hint="Can be assigned to site visits (adds an engineer profile)"
+        checked={isEngineer}
+        onChange={setIsEngineer}
+      />
 
       {isEngineer && (
         <div className="rounded-xl border border-secondary-200 p-3 space-y-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-secondary-400">Engineer details (optional)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Job title" value={form.job_title} onChange={set('job_title')} placeholder="e.g. Senior Engineer" />
             <Input label="F-Gas certificate no." value={form.fgas_certificate_no} onChange={set('fgas_certificate_no')} />
             <Input
               label="Hourly cost rate"

@@ -418,6 +418,10 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "settings", name = "Settings", description = "Namespace settings", category = "Core", is_system = true },
         { machine_name = "reports", name = "Reports", description = "Analytics and reports", category = "Core", allowed_actions = {"access"} },
         { machine_name = "templates", name = "Templates", description = "Reusable {{slot}} templates for CMS pages and domain sync formats", category = "Content" },
+        -- Employees is a core module: a generic staff directory (team members, their
+        -- workspace logins, roles and skills) any namespace can use. It is NOT
+        -- field-service-specific; field service simply builds engineer profiles on top.
+        { machine_name = "employees", name = "Employees", description = "Staff directory: team members, their workspace logins, roles and skills", category = "Team" },
     },
 
     -- Ecommerce modules
@@ -513,7 +517,6 @@ ProjectConfig.PROJECT_MODULES = {
         { machine_name = "fs_jobs", name = "Service Jobs", description = "Field service jobs, phases, parts and invoicing", category = "Field Service" },
         { machine_name = "fs_visits", name = "Site Visits", description = "Engineer site visits: scheduling, check-in/out, work reports", category = "Field Service" },
         { machine_name = "fs_job_types", name = "Job Types", description = "Job types and their phase templates", category = "Field Service" },
-        { machine_name = "employees", name = "Employees", description = "Staff directory and engineer profiles", category = "Field Service" },
         { machine_name = "fs_service_requests", name = "Service Requests", description = "Customer complaints and service requests (the intake queue)", category = "Field Service" },
         { machine_name = "fs_parts", name = "Parts", description = "Parts / products catalog for field service", category = "Field Service" },
         { machine_name = "fs_assets", name = "Customer Assets", description = "Equipment installed at customer sites: register, condition surveys and test history", category = "Field Service" },

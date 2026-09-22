@@ -360,6 +360,10 @@ safe_load_routes("routes.groups")
 safe_load_routes("routes.roles")
 safe_load_routes("routes.permissions")
 safe_load_routes("routes.module")
+-- Employees (staff directory) is a CORE module: a generic staff directory any
+-- namespace can use, RBAC-gated on the "employees" module. It also mounts the
+-- legacy /api/v2/field-service/employees* aliases for the field-service UI.
+safe_load_routes("routes.employees")
 -- Namespace template library ({{slot}} templates for CMS pages + domain sync).
 -- Always on (core): namespace-scoped, RBAC-gated on the "templates" module.
 safe_load_routes("routes.render-templates")
@@ -592,7 +596,7 @@ load_if("invoicing", "routes.document-templates")
 load_if("field_service", "routes.field-service-config")
 load_if("field_service", "routes.field-service-jobs")
 load_if("field_service", "routes.field-service-visits")
-load_if("field_service", "routes.field-service-employees")
+-- Employees moved to core (routes.employees), loaded above.
 load_if("field_service", "routes.field-service-requests")
 load_if("field_service", "routes.field-service-parts")
 load_if("field_service", "routes.field-service-sites")

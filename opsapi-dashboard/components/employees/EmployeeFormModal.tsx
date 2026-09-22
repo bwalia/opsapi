@@ -3,8 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Modal, Button, Input, SearchableSelect } from '@/components/ui';
-import { fieldService, type FsEmployee, type FsEngineer } from '@/services/field-service.service';
-import { apiError, optional, CheckboxField } from './shared';
+import { employeeService, type FsEmployee, type EmployeeCandidate } from '@/services/employees.service';
+import { apiError, optional, CheckboxField } from '@/components/field-service/shared';
 
 interface EmployeeFormModalProps {
   isOpen: boolean;
@@ -57,14 +57,14 @@ export function EmployeeFormModal(props: EmployeeFormModalProps) {
 
 function EmployeeForm({ employee, onClose, onSaved }: EmployeeFormModalProps) {
   const [form, setForm] = useState<EmployeeForm>(() => formFromEmployee(employee));
-  const [members, setMembers] = useState<FsEngineer[]>([]);
+  const [members, setMembers] = useState<EmployeeCandidate[]>([]);
   const [saving, setSaving] = useState(false);
   const isEdit = !!employee;
 
   useEffect(() => {
     // Only needed when linking a new employee to an existing member.
     if (isEdit) return;
-    fieldService.getEngineers().then(setMembers).catch(() => setMembers([]));
+    employeeService.getCandidates().then(setMembers).catch(() => setMembers([]));
   }, [isEdit]);
 
   const memberOptions = useMemo(
@@ -96,8 +96,8 @@ function EmployeeForm({ employee, onClose, onSaved }: EmployeeFormModalProps) {
     }
     try {
       const saved = employee
-        ? await fieldService.updateEmployee(employee.uuid, payload)
-        : await fieldService.createEmployee(payload);
+        ? await employeeService.updateEmployee(employee.uuid, payload)
+        : await employeeService.createEmployee(payload);
       toast.success(employee ? 'Employee updated' : 'Employee added');
       onSaved(saved);
       onClose();
