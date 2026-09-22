@@ -145,7 +145,11 @@ export default function LoginPanel() {
       </form>
 
       <div className="mt-6 text-center text-sm">
-        <a href="/forgot-password" className="font-medium text-primary-500 hover:text-primary-600">
+        <a
+          href="/forgot-password"
+          data-testid="login-forgot-password-link"
+          className="font-medium text-primary-500 hover:text-primary-600"
+        >
           Forgot your password?
         </a>
       </div>

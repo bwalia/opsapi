@@ -117,9 +117,13 @@ jobs:
           set -euo pipefail
           POD="${{ steps.pod.outputs.pod }}"
           rm -rf export-out && mkdir -p export-out
-          # Ensure the pod has a writable dir; /tmp/cmi-export is world-
-          # writable on the openresty image.
-          kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c 'rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export'
+          # Pre-create the exporter's subdirs (_global + the namespace slug) and
+          # make them world-writable. The exporter creates these via os.execute
+          # ("mkdir -p") from inside lapis-exec, which is unreliable in the pod's
+          # runtime and left /tmp/cmi-export/_global missing → "Failed to write …
+          # No such file or directory". Creating them here guarantees the writes
+          # land regardless of the export process's user/context.
+          kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c "rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export/_global '/tmp/cmi-export/${NAMESPACE_SLUG}' && chmod -R 777 /tmp/cmi-export"
           kubectl -n "$SOURCE_ENV" exec "$POD" -- \
             lapis exec "require('scripts.config-cli').export('/tmp/cmi-export', '${NAMESPACE_SLUG}')"
           # cp -r requires the source to exist; the export step above

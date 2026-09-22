@@ -14,9 +14,10 @@ describe('Login Page - UI Tests', () => {
 
   describe('Page Load and UI Elements', () => {
     it('should display the login page with all required elements', () => {
-      // Check page title/heading
+      // Check page title/heading (the subtitle is brand-aware:
+      // "Sign in to your <brand> workspace").
       cy.contains('h1', 'Welcome back').should('be.visible');
-      cy.contains('Sign in to your account to continue').should('be.visible');
+      cy.contains(/Sign in to your .*workspace/i).should('be.visible');
 
       // Check form elements
       cy.getByTestId('login-form').should('be.visible');
