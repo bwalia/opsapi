@@ -2,11 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { User, Bell, Shield, Palette, Key, Save, Camera, ArrowRight, Settings } from 'lucide-react';
-import { Button, Input, Card } from '@/components/ui';
+import { useRouter } from 'next/navigation';
+import { User, Bell, Shield, Palette, Key, Save, Camera, ArrowRight, Settings, Trash2, AlertTriangle } from 'lucide-react';
+import { Button, Input, Card, Modal } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuthStore } from '@/store/auth.store';
 import { usersService } from '@/services';
+import { authService, authErrorMessage } from '@/services/auth.service';
 import { getInitials } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -27,9 +29,14 @@ interface PasswordFormData {
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { user, setUser } = useAuthStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
   const [isSaving, setIsSaving] = useState(false);
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [profileData, setProfileData] = useState<ProfileFormData>({
     first_name: '',
@@ -81,28 +88,49 @@ export default function SettingsPage() {
   };
 
   const handlePasswordChange = async () => {
+    if (!passwordData.current_password) {
+      toast.error('Enter your current password');
+      return;
+    }
+    if (passwordData.new_password.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
     if (passwordData.new_password !== passwordData.confirm_password) {
       toast.error('New passwords do not match');
       return;
     }
 
-    if (passwordData.new_password.length < 8) {
-      toast.error('Password must be at least 8 characters');
-      return;
-    }
-
     setIsSaving(true);
     try {
-      toast.success('Password changed successfully');
-      setPasswordData({
-        current_password: '',
-        new_password: '',
-        confirm_password: '',
-      });
+      await authService.changePassword(passwordData.current_password, passwordData.new_password);
+      setPasswordData({ current_password: '', new_password: '', confirm_password: '' });
+      // The backend revokes every session on a password change, so sign out and
+      // send the user back to sign in with their new password.
+      toast.success('Password changed. Please sign in again.');
+      await authService.logout();
+      router.replace('/login');
     } catch (error) {
-      toast.error('Failed to change password');
+      toast.error(authErrorMessage(error, 'Failed to change password'));
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) {
+      toast.error('Enter your password to confirm');
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await authService.deleteAccount(deletePassword);
+      toast.success('Your account has been deactivated.');
+      await authService.logout();
+      router.replace('/login');
+    } catch (error) {
+      toast.error(authErrorMessage(error, 'Failed to delete account'));
+      setIsDeleting(false);
     }
   };
 
@@ -377,6 +405,27 @@ export default function SettingsPage() {
                     Update Password
                   </Button>
                 </div>
+
+                {/* Danger zone — delete (deactivate) account */}
+                <div className="mt-2 rounded-lg border border-error-200 bg-error-50/40 p-5">
+                  <h3 className="text-sm font-semibold text-error-700 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    Delete account
+                  </h3>
+                  <p className="text-sm text-error-600/90 mt-1 max-w-lg">
+                    Deactivate your account and sign out everywhere. You&apos;ll lose access to this
+                    workspace. Contact support if you need your data permanently removed.
+                  </p>
+                  <div className="flex justify-start pt-4">
+                    <Button
+                      variant="danger"
+                      onClick={() => { setDeletePassword(''); setShowDeleteModal(true); }}
+                      leftIcon={<Trash2 className="w-4 h-4" />}
+                    >
+                      Delete my account
+                    </Button>
+                  </div>
+                </div>
               </div>
             </Card>
           )}
@@ -414,6 +463,45 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Delete-account confirmation (requires password) */}
+      <Modal
+        isOpen={showDeleteModal}
+        onClose={() => !isDeleting && setShowDeleteModal(false)}
+        title="Delete your account?"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg border border-error-200 bg-error-50 p-3">
+            <AlertTriangle className="w-5 h-5 text-error-600 shrink-0 mt-0.5" />
+            <p className="text-sm text-error-700">
+              This deactivates your account and signs you out on every device. This can&apos;t be undone
+              from here — contact support to restore access or permanently delete your data.
+            </p>
+          </div>
+          <Input
+            label="Confirm your password"
+            type="password"
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+            placeholder="Enter your current password"
+            autoComplete="current-password"
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleDeleteAccount}
+              isLoading={isDeleting}
+              leftIcon={<Trash2 className="w-4 h-4" />}
+            >
+              Delete account
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

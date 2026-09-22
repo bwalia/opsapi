@@ -24,6 +24,22 @@ function decodeJWTPayload(token: string): Record<string, unknown> | null {
 }
 
 /**
+ * Pull a human message out of an axios error from the auth endpoints, which
+ * return two shapes: a plain `{ error: "..." }` (403s) and the catalog envelope
+ * `{ error: { message, context } }` (400/500). Falls back to a supplied default.
+ */
+export function authErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+  const apiError = e?.response?.data?.error;
+  if (typeof apiError === 'string' && apiError) return apiError;
+  if (apiError && typeof apiError === 'object') {
+    const msg = (apiError as { message?: string }).message;
+    if (msg) return msg;
+  }
+  return fallback;
+}
+
+/**
  * Authentication Service
  * Handles all authentication-related API calls and token management
  */
@@ -223,6 +239,62 @@ export const authService = {
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Request a password-reset link. Backend is anti-enumeration: always resolves
+   * to the same generic message whether or not the email exists.
+   */
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    // Tell the API which frontend to send the reset link back to. OpsAPI is a
+    // shared multi-frontend API, so the link must point at wherever this flow
+    // was triggered — the backend validates this origin before using it.
+    const redirect_url = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const response = await apiClient.post<{ message: string }>(
+      '/auth/forgot-password',
+      JSON.stringify({ email, redirect_url }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Consume a reset token and set a new password. Token comes from the email link
+   * (/reset-password?token=...). On success the backend revokes all sessions.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(
+      '/auth/reset-password',
+      JSON.stringify({ token, new_password: newPassword }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Change the signed-in user's password. Requires the current password.
+   * The backend revokes every session on success, so the caller should sign out.
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(
+      '/auth/change-password',
+      JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Deactivate (soft-delete) the signed-in user's own account. Requires the
+   * current password. Revokes all sessions; the caller should sign out after.
+   */
+  async deleteAccount(password: string): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(
+      '/auth/delete-account',
+      JSON.stringify({ password }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
   },
 
   // ============================================
