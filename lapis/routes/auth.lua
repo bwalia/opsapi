@@ -31,6 +31,11 @@ local OTP_LIMIT      = { rate = 5,   window = 60,  prefix = "auth:2fa" }       -
 local FORGOT_LIMIT = { rate = 5,   window = 3600, prefix = "auth:forgot" }
 local RESET_LIMIT  = { rate = 10,  window = 60,   prefix = "auth:reset"  }
 
+-- Authenticated self-service account ops (change password / delete account).
+-- Already gated behind a valid JWT, so this only guards against an attacker
+-- with a stolen token brute-forcing the current password to confirm identity.
+local PWCHANGE_LIMIT = { rate = 10, window = 60, prefix = "auth:pwchange" } -- 10/min per IP
+
 -- Frontend domains allowed to receive a reset link. The ``redirect_url``
 -- parameter on /auth/forgot-password is validated against this list
 -- before being interpolated into the email — anything else is silently
@@ -432,10 +437,11 @@ return function(app)
     app:post("/auth/forgot-password", RateLimit.wrap(FORGOT_LIMIT, function(self)
         local body = parse_json_body()
         local email = body.email or self.params.email
-        -- ``redirect_url`` was previously honoured via an "echo back"
-        -- policy. We now always use the namespace primary so admins
-        -- control reset destinations from the UI without code changes;
-        -- any redirect_url supplied by the client is silently ignored.
+        -- OpsAPI is an API consumed by many frontends, so the reset link must
+        -- return to whichever frontend triggered the request — NOT a single
+        -- hardcoded/admin-pinned URL. We echo the caller's origin, but only after
+        -- validating it (see is_trusted below) so an attacker can never inject a
+        -- phishing domain into a real reset email.
 
         -- Basic shape validation. Beyond this we deliberately give
         -- back the same 200-OK response regardless of what the email
@@ -476,54 +482,83 @@ return function(app)
         -- ────────────────────────────────────────────────────────────
         -- Resolve which frontend origin to use in the email link.
         --
-        -- Pick the origin to use in the email link.
+        -- Priority: the origin the reset was TRIGGERED FROM, if we trust it.
+        -- This makes OpsAPI work as a shared API behind any number of frontends
+        -- with no hardcoded ports/URLs — the link comes back to the caller.
         --
-        -- Policy: **primary always wins.** The first entry in the
-        -- namespace allow-list (``namespaces.allowed_redirect_origins[1]``)
-        -- is the canonical destination for reset emails. Admins set it
-        -- via the admin UI — no code changes, no env-var updates, no
-        -- restart needed. Caller-supplied ``redirect_url`` is ignored;
-        -- destination is admin-controlled, not caller-controlled.
-        --
-        -- Fallback chain (only reached if the prior level is empty):
-        --   1. Namespace primary — first row of the namespace's
-        --      ``allowed_redirect_origins`` array.
-        --   2. Env-var primary — legacy ``FRONTEND_URL`` /
-        --      ``PASSWORD_RESET_ALLOWED_ORIGINS``. Inert once migration
-        --      489 has bootstrapped the namespace column.
-        --   3. ``default_reset_origin()`` — last-resort dev default
-        --      pointing at localhost. Only reachable when the namespace
-        --      column AND env vars are empty.
+        -- Trust (is_trusted) — an origin only lands in an email if it is one of:
+        --   • non-prod: any localhost / 127.0.0.1 origin (dev, any port),
+        --   • the namespace's registered ``allowed_redirect_origins`` (admin UI),
+        --   • the env allow-list (``PASSWORD_RESET_ALLOWED_ORIGINS`` / ``FRONTEND_URL``).
+        -- Anything else (an attacker-supplied phishing domain) is refused and we
+        -- fall back to the namespace primary → env → dev default.
         -- ────────────────────────────────────────────────────────────
         local function canonicalise(url)
             if type(url) ~= "string" or url == "" then return nil end
             return url:match("^(https?://[^/]+)") or url
         end
 
-        local origin
+        -- Exact localhost/loopback origin match (host or host:port, nothing
+        -- after) — so ``http://localhost.evil.com`` is NOT treated as local.
+        local function is_local_origin(o)
+            return o and (
+                o:match("^https?://localhost$") or o:match("^https?://localhost:%d+$") or
+                o:match("^https?://127%.0%.0%.1$") or o:match("^https?://127%.0%.0%.1:%d+$")
+            ) and true or false
+        end
+
         local user_ns = NamespaceQueries.getUserDefaultNamespace(user.id)
+        local ns_origins = {}
         if user_ns and user_ns.id then
-            local ns_origins = NamespaceQueries.getAllowedRedirectOrigins(user_ns.id)
-            for _, o in ipairs(ns_origins or {}) do
+            ns_origins = NamespaceQueries.getAllowedRedirectOrigins(user_ns.id) or {}
+        end
+
+        local function is_trusted(o)
+            if not o then return false end
+            local env = (os.getenv("OPSAPI_DEPLOY_ENV") or os.getenv("LAPIS_ENVIRONMENT") or ""):lower()
+            local is_prod = env == "production" or env == "prod"
+            if not is_prod and is_local_origin(o) then return true end
+            for _, allowed in ipairs(ns_origins) do
+                if canonicalise(allowed) == o then return true end
+            end
+            for legacy, _ in pairs(get_allowed_reset_origins()) do
+                if canonicalise(legacy) == o then return true end
+            end
+            return false
+        end
+
+        -- The frontend the reset was triggered from. Explicit body value wins
+        -- (frontends can send window.location.origin); otherwise the browser's
+        -- Origin header, then Referer. All are validated by is_trusted.
+        local caller_origin = canonicalise(body.redirect_url or body.frontend_url
+            or ngx.var.http_origin or ngx.var.http_referer)
+
+        local origin
+        if is_trusted(caller_origin) then
+            origin = caller_origin
+        end
+
+        -- Fallbacks when the caller origin is missing or untrusted:
+        --   1. Namespace primary — first ``allowed_redirect_origins`` entry.
+        --   2. Env allow-list (``FRONTEND_URL`` / ``PASSWORD_RESET_ALLOWED_ORIGINS``).
+        --   3. ``default_reset_origin()`` — last-resort dev default.
+        if not origin then
+            for _, o in ipairs(ns_origins) do
                 local canon = canonicalise(o)
                 if canon then origin = canon; break end
             end
         end
-
         if not origin then
             for legacy_origin, _ in pairs(get_allowed_reset_origins()) do
                 origin = canonicalise(legacy_origin)
                 if origin then break end
             end
         end
-
         if not origin then
             origin = default_reset_origin()
             ngx.log(ngx.WARN,
-                "[forgot-password] no allow-list configured for namespace; ",
-                "using env default. user_id=", user.id,
-                " namespace_id=", user_ns and user_ns.id or "nil",
-                " origin=", origin)
+                "[forgot-password] no trusted origin for reset link; using env default. user_id=",
+                user.id, " namespace_id=", user_ns and user_ns.id or "nil", " origin=", origin)
         end
 
         local ip = ngx.var.remote_addr
@@ -667,6 +702,107 @@ return function(app)
             json = {
                 message = "Your password has been reset. Please sign in.",
             },
+        }
+    end))
+
+    -- ────────────────────────────────────────────────────────────────
+    -- Authenticated self-service account management.
+    --
+    -- These live in CORE auth (always loaded) rather than routes/tax-settings.lua
+    -- (gated on the tax_copilot module) so every deployment gets them regardless
+    -- of PROJECT_CODE. They require a valid JWT — NOT in app.lua's public
+    -- allow-list — so the global before_filter populates self.current_user first.
+    -- ────────────────────────────────────────────────────────────────
+
+    -- Change own password. Verifies the current password, rotates it, then
+    -- revokes ALL refresh tokens (every session, including this one) — a
+    -- password change should end any session an attacker might hold. The client
+    -- is told to sign in again.
+    app:post("/auth/change-password", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
+        local user = self.current_user
+        if not user or not user.uuid then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        local body = parse_json_body()
+        local current_password = body.current_password
+        local new_password = body.new_password or body.password
+
+        if type(current_password) ~= "string" or current_password == "" then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "current_password", reason = "required" },
+            })
+        end
+        if type(new_password) ~= "string" or #new_password < 8 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "new_password", reason = "too_short", min_length = 8 },
+            })
+        end
+        if #new_password > 256 then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "new_password", reason = "too_long", max_length = 256 },
+            })
+        end
+
+        local rows = db.select("id, password FROM users WHERE uuid = ? LIMIT 1", user.uuid)
+        local record = rows and rows[1]
+        if not record then
+            return { status = 404, json = { error = "User not found" } }
+        end
+        if not Global.matchPassword(current_password, record.password) then
+            return { status = 403, json = { error = "Current password is incorrect" } }
+        end
+
+        local hashed = Global.hashPassword(new_password)
+        local ok, err = pcall(UserQueries.update, user.uuid, { password = hashed })
+        if not ok then
+            ngx.log(ngx.ERR, "[change-password] update failed for uuid=", user.uuid,
+                " err=", tostring(err))
+            return Errors.response(self, "SYSTEM_500")
+        end
+
+        pcall(RefreshToken.revokeAllForUser, record.id)
+        pcall(AuthCookies.clear, self)
+
+        return {
+            status = 200,
+            json = { message = "Password changed successfully. Please sign in again." },
+        }
+    end))
+
+    -- Deactivate own account (soft delete: active=false). Requires password
+    -- confirmation, then revokes all sessions. Permanent deletion stays an
+    -- admin/support action (UserQueries.destroy) — matching the tax-settings copy.
+    app:post("/auth/delete-account", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
+        local user = self.current_user
+        if not user or not user.uuid then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+
+        local body = parse_json_body()
+        local password = body.password or body.current_password
+        if type(password) ~= "string" or password == "" then
+            return Errors.response(self, "VALIDATION_400", {
+                context = { field = "password", reason = "required" },
+            })
+        end
+
+        local rows = db.select("id, password FROM users WHERE uuid = ? LIMIT 1", user.uuid)
+        local record = rows and rows[1]
+        if not record then
+            return { status = 404, json = { error = "User not found" } }
+        end
+        if not Global.matchPassword(password, record.password) then
+            return { status = 403, json = { error = "Password is incorrect" } }
+        end
+
+        db.query("UPDATE users SET active = false, updated_at = NOW() WHERE uuid = ?", user.uuid)
+        pcall(RefreshToken.revokeAllForUser, record.id)
+        pcall(AuthCookies.clear, self)
+
+        return {
+            status = 200,
+            json = { message = "Your account has been deactivated. Contact support to permanently delete your data." },
         }
     end))
 
