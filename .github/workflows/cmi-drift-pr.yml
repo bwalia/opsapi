@@ -190,6 +190,24 @@ jobs:
           git push origin "$BRANCH" --force-with-lease
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure gh CLI is available
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh already installed: $(gh --version | head -1)"
+            exit 0
+          fi
+          # The self-hosted runner has no gh CLI, which broke the PR step once the
+          # export started succeeding. Fetch the standalone binary (curl + tar only,
+          # no sudo/apt) and add it to PATH for the next step.
+          GH_VER=2.63.2
+          TARBALL="gh_${GH_VER}_linux_amd64"
+          curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VER}/${TARBALL}.tar.gz" -o /tmp/gh.tgz
+          tar -xzf /tmp/gh.tgz -C /tmp
+          echo "/tmp/${TARBALL}/bin" >> "$GITHUB_PATH"
+          "/tmp/${TARBALL}/bin/gh" --version | head -1
+
       - name: Open (or update) PR
         if: steps.diff.outputs.changed == 'true'
         env:
