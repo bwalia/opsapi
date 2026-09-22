@@ -847,9 +847,19 @@ return function(app)
             return api_response(500, nil, "Failed to add comment")
         end
 
+        -- @mentions: the frontend sends a JSON-string array of mentioned user
+        -- UUIDs (form-encoded, so it arrives as a string). Decode + notify each
+        -- (the helper skips the commenter and sends a higher-priority "mention").
+        local mentioned = data.mentioned_uuids
+        if type(mentioned) == "string" and mentioned ~= "" then
+            local ok_dec, decoded = pcall(cJson.decode, mentioned)
+            mentioned = ok_dec and decoded or nil
+        end
+        if type(mentioned) ~= "table" then mentioned = {} end
+
         -- Notify the task's assignees + reporter (self is skipped in the helper).
         task.project_id = board.project_id
-        notify_safe("notifyTaskCommented", task, comment, user.uuid, get_namespace_id(), {})
+        notify_safe("notifyTaskCommented", task, comment, user.uuid, get_namespace_id(), mentioned)
 
         return api_response(201, comment)
     end)

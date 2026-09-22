@@ -969,6 +969,18 @@ function KanbanTaskQueries.getActivities(task_id, params)
 
     local activities = db.query(sql, task_id, perPage, offset)
 
+    -- Nest the actor under `.user` so the frontend shows WHO did it (matches the
+    -- KanbanActivity contract + the comments transform); flat columns stay too.
+    for _, a in ipairs(activities or {}) do
+        a.user = {
+            uuid = a.user_uuid,
+            first_name = a.first_name,
+            last_name = a.last_name,
+            email = a.email,
+            username = a.username,
+        }
+    end
+
     local count_sql = [[
         SELECT COUNT(*) as total FROM kanban_task_activities WHERE task_id = ?
     ]]
