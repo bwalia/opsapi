@@ -117,18 +117,32 @@ jobs:
           set -euo pipefail
           POD="${{ steps.pod.outputs.pod }}"
           rm -rf export-out && mkdir -p export-out
+          # `kubectl exec/cp` to the int node's kubelet intermittently returns
+          # "502 Bad Gateway" (proxy error dialing …:10250) — a transient runner→
+          # node hiccup, not a real failure. Retry each call so one blip doesn't
+          # fail the whole run. All three commands are idempotent (rm+mkdir setup,
+          # a read-only export overwriting /tmp, and a cp), so retrying is safe.
+          retry() {
+            local n=0 max=5
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge "$max" ]; then echo "::error::command failed after $max attempts: $*"; return 1; fi
+              echo "attempt $n failed (likely a transient kubelet 502); retrying in $((n*10))s…"
+              sleep $((n*10))
+            done
+          }
           # Pre-create the exporter's subdirs (_global + the namespace slug) and
           # make them world-writable. The exporter creates these via os.execute
           # ("mkdir -p") from inside lapis-exec, which is unreliable in the pod's
           # runtime and left /tmp/cmi-export/_global missing → "Failed to write …
           # No such file or directory". Creating them here guarantees the writes
           # land regardless of the export process's user/context.
-          kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c "rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export/_global '/tmp/cmi-export/${NAMESPACE_SLUG}' && chmod -R 777 /tmp/cmi-export"
-          kubectl -n "$SOURCE_ENV" exec "$POD" -- \
+          retry kubectl -n "$SOURCE_ENV" exec "$POD" -- sh -c "rm -rf /tmp/cmi-export && mkdir -p /tmp/cmi-export/_global '/tmp/cmi-export/${NAMESPACE_SLUG}' && chmod -R 777 /tmp/cmi-export"
+          retry kubectl -n "$SOURCE_ENV" exec "$POD" -- \
             lapis exec "require('scripts.config-cli').export('/tmp/cmi-export', '${NAMESPACE_SLUG}')"
           # cp -r requires the source to exist; the export step above
           # errors out if it didn't create anything, so this is safe.
-          kubectl -n "$SOURCE_ENV" cp "$POD:/tmp/cmi-export/." export-out/
+          retry kubectl -n "$SOURCE_ENV" cp "$POD:/tmp/cmi-export/." export-out/
 
       - name: Overlay export onto checked-in config/
         run: |
