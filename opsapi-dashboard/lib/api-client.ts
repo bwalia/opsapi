@@ -1,5 +1,14 @@
 import axios, { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { hmrcFraudHeaders } from './hmrc-fraud';
+import { cacheGet, readGet, enqueue, clearAll as clearOfflineData } from './offline/db';
+
+// Custom axios config flag: marks a request as an outbox replay so the offline
+// interceptor doesn't re-queue it (see lib/offline/sync.ts).
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    _replay?: boolean;
+  }
+}
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4010';
 
@@ -92,6 +101,54 @@ export function clearAllAuthStorage(): void {
   localStorage.removeItem(NAMESPACE_KEY);
   localStorage.removeItem(ZUSTAND_MENU_KEY);
   localStorage.removeItem(ZUSTAND_NAMESPACE_KEY);
+
+  // Drop all offline-cached data + queued writes so nothing leaks across logins.
+  void clearOfflineData();
+}
+
+/** Full request URI (incl. baseURL + params) — the offline cache key. */
+function uriOf(config: InternalAxiosRequestConfig): string {
+  try {
+    return apiClient.getUri(config);
+  } catch {
+    return config.url || '';
+  }
+}
+
+/**
+ * Build a plausible entity from a queued write's own payload so screens that
+ * immediately use the "created" record (e.g. `saved.uuid`) keep working offline.
+ * Carries a temp id + `_offlinePending: true`; the real record replaces it on
+ * the next refetch after sync. (Per-module reconciliation is Phase 2.)
+ */
+function optimisticEntity(config: InternalAxiosRequestConfig): Record<string, unknown> {
+  const tempId = `offline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  let fields: Record<string, unknown> = {};
+  try {
+    const ct = String((config.headers as Record<string, unknown>)?.['Content-Type'] ?? '');
+    if (typeof config.data === 'string') {
+      if (ct.includes('application/json')) fields = JSON.parse(config.data);
+      else if (ct.includes('x-www-form-urlencoded'))
+        fields = Object.fromEntries(new URLSearchParams(config.data));
+    } else if (config.data && typeof config.data === 'object') {
+      fields = config.data as Record<string, unknown>;
+    }
+  } catch {
+    /* unparseable body — return just the temp identity */
+  }
+  return { ...fields, uuid: tempId, id: tempId, _offlinePending: true };
+}
+
+/** Headers to persist with a queued write so its replay hits the right tenant. */
+function outboxHeaders(config: InternalAxiosRequestConfig): Record<string, string> {
+  const out: Record<string, string> = {};
+  const h = config.headers as Record<string, unknown> | undefined;
+  if (h) {
+    if (h['X-Namespace-Id']) out['X-Namespace-Id'] = String(h['X-Namespace-Id']);
+    const ct = h['Content-Type'] ?? h['content-type'];
+    if (ct) out['Content-Type'] = String(ct);
+  }
+  return out;
 }
 
 /**
@@ -138,8 +195,61 @@ apiClient.interceptors.request.use(
  * Response interceptor for error handling
  */
 apiClient.interceptors.response.use(
-  (response) => response,
-  (error: AxiosError) => {
+  (response) => {
+    // Cache successful GETs so the same view is readable offline later.
+    if (typeof window !== 'undefined' && (response.config.method || '').toLowerCase() === 'get') {
+      void cacheGet(uriOf(response.config), response.data);
+    }
+    return response;
+  },
+  async (error: AxiosError) => {
+    const config = error.config as InternalAxiosRequestConfig | undefined;
+
+    // Offline / server unreachable (no HTTP response at all): serve reads from
+    // the tenant-scoped cache, and queue writes to replay on reconnect. Skipped
+    // for replay requests (let them reject so sync.ts can decide). The 401 path
+    // below only runs when there IS a response, so it's unaffected.
+    if (typeof window !== 'undefined' && config && !error.response && !config._replay) {
+      const method = (config.method || 'get').toLowerCase();
+
+      if (method === 'get') {
+        const cached = await readGet(uriOf(config));
+        if (cached) {
+          return {
+            data: cached.data,
+            status: 200,
+            statusText: 'OK (offline cache)',
+            headers: { 'x-offline-cache': 'true' },
+            config,
+            request: error.request,
+          };
+        }
+      } else if (method === 'post' || method === 'put' || method === 'patch' || method === 'delete') {
+        const queued = await enqueue({
+          method,
+          url: config.url || '',
+          params: config.params,
+          data: config.data,
+          headers: outboxHeaders(config),
+        });
+        if (queued) {
+          window.dispatchEvent(new Event('offline:outbox-changed'));
+          const body =
+            method === 'delete'
+              ? { success: true, _offlinePending: true }
+              : optimisticEntity(config);
+          return {
+            data: body,
+            status: 202,
+            statusText: 'Queued (offline)',
+            headers: { 'x-offline-queued': 'true' },
+            config,
+            request: error.request,
+          };
+        }
+      }
+    }
+
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
         // Clear ALL auth storage to prevent state mismatch

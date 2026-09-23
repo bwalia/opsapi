@@ -1,7 +1,11 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
+import PWAInstallPrompt from '@/components/pwa/PWAInstallPrompt';
+import ServiceWorkerRegister from '@/components/pwa/ServiceWorkerRegister';
+import OfflineProvider from '@/components/offline/OfflineProvider';
+import OfflineIndicator from '@/components/offline/OfflineIndicator';
 import './globals.css';
 
 // Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height,
@@ -24,8 +28,19 @@ export const metadata: Metadata = {
   icons: {
     icon: [{ url: '/opsapi-logo.svg', type: 'image/svg+xml' }],
     shortcut: '/opsapi-logo.svg',
-    apple: '/opsapi-logo.svg',
+    // iOS home-screen icon must be a non-transparent PNG.
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180' }],
   },
+  // iOS standalone (installed) behaviour.
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'OpsAPI',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#c20035',
 };
 
 export default function RootLayout({
@@ -43,6 +58,8 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
+        <OfflineProvider />
+        <OfflineIndicator />
         <ThemeProvider>{children}</ThemeProvider>
         <Toaster
           position="top-right"
@@ -74,6 +91,8 @@ export default function RootLayout({
             },
           }}
         />
+        <PWAInstallPrompt />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
