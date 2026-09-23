@@ -48,6 +48,12 @@ const nextConfig: NextConfig = {
   // Enable standalone output for Docker deployment
   output: "standalone",
 
+  // Type-checking and linting are their OWN CI step (npm run type-check / lint),
+  // run in parallel with the image build. Skipping them inside `next build`
+  // removes ~3 min of `tsc` from every Docker build without losing the gate.
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+
   // Disable image optimization for simpler Docker setup (can be enabled with proper loader)
   images: {
     unoptimized: true,
