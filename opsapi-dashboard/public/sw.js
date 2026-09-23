@@ -66,7 +66,12 @@ self.addEventListener('fetch', (event) => {
           return fresh;
         } catch {
           const cache = await caches.open(CACHE);
-          return (await cache.match(request)) || (await cache.match(OFFLINE_URL));
+          // ignoreSearch: a route's document shell is query-independent (query-
+          // driven content loads client-side), so `/x?tab=1` can reuse `/x`.
+          return (
+            (await cache.match(request, { ignoreSearch: true })) ||
+            (await cache.match(OFFLINE_URL))
+          );
         }
       })()
     );
