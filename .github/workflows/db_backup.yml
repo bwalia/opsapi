@@ -4,17 +4,19 @@ name: Daily PostgreSQL Backup
 #
 # The database is managed by the Zalando postgres-operator (cluster `diy-tax-db`)
 # and lives INSIDE the k3s cluster on ClusterIP-only services — unreachable from
-# GitHub-hosted runners. So this runs on the in-cluster self-hosted `acc` runner
-# and reads credentials from the operator's own secret
+# GitHub-hosted runners. This runs on the self-hosted `acc` runner, which can
+# reach the kube-apiserver (kubectl works) but is NOT on the cluster pod/service
+# network, so the ClusterIP is not directly routable from it. The dump therefore
+# goes through a `kubectl port-forward` tunnel (see the Dump step). Credentials
+# come from the operator's own secret
 # (`postgres.diy-tax-db.credentials.postgresql.acid.zalan.do`, keys
-# username/password) — which is named consistently in every namespace that has
-# the DB. The DB host is resolved from the `diy-tax-db` Service ClusterIP, so no
-# cluster-DNS dependency.
+# username/password) — named consistently in every namespace that has the DB.
 #
-# Scheduled runs back up `acc`. `prod` has no `diy-tax-db` cluster deployed yet,
-# so it is gated behind the INCLUDE_PROD flag below — flip it to "true" once a
-# prod database exists and prod joins the daily schedule automatically (no other
-# changes needed). prod can still be run manually anytime via "Run workflow".
+# Scheduled runs back up both `acc` and `prod` (INCLUDE_PROD below). Both are
+# namespaces in the same k3s cluster, each with its own `diy-tax-db` Zalando
+# cluster and the same credentials-secret name, so a single kubeconfig
+# (KUBE_CONFIG_DATA_K3S) reaches both. Either env can also be run on demand via
+# "Run workflow".
 
 on:
   schedule:
@@ -36,9 +38,9 @@ on:
         required: false
 
 env:
-  # Flip to "true" once a Postgres DB exists in the `prod` namespace; prod then
-  # joins the daily backup automatically. Left "false" for now (no prod DB yet).
-  INCLUDE_PROD: "false"
+  # prod has a `diy-tax-db` Postgres (holds the `opsapi` DB), so prod is in the
+  # daily schedule. Set to "false" to drop prod from scheduled runs.
+  INCLUDE_PROD: "true"
   ZALANDO_SECRET: "postgres.diy-tax-db.credentials.postgresql.acid.zalan.do"
   PG_SERVICE: "diy-tax-db"
 
@@ -91,7 +93,7 @@ jobs:
           echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
           echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
 
-      - name: Resolve DB host + credentials (Zalando operator secret)
+      - name: Resolve master pod (Zalando operator)
         run: |
           set -euo pipefail
           NS="$TARGET_ENV"
@@ -101,10 +103,17 @@ jobs:
             exit 1
           fi
 
-          # DB host = ClusterIP of the operator's Service (no DNS dependency).
-          PGHOST="$(kubectl -n "$NS" get svc "$PG_SERVICE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
-          if [ -z "$PGHOST" ]; then
-            echo "::error::Service '$PG_SERVICE' not found in namespace '$NS' — no Postgres deployed there?"
+          # The operator's master Service is selector-less (its Endpoints are
+          # managed by the operator), so it can't be port-forwarded, and the
+          # ClusterIP isn't routable from this off-cluster runner. So the dump
+          # runs INSIDE the master pod (below) — found via the Zalando spilo
+          # labels, which follow failover. Its pg_dump matches the server
+          # version, so no pg client is needed on the runner.
+          POD="$(kubectl -n "$NS" get pod \
+            -l "application=spilo,cluster-name=$PG_SERVICE,spilo-role=master" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+          if [ -z "$POD" ]; then
+            echo "::error::No master pod for '$PG_SERVICE' in namespace '$NS' — no Postgres deployed there?"
             exit 1
           fi
 
@@ -113,42 +122,41 @@ jobs:
             exit 1
           fi
           PGUSER="$(kubectl -n "$NS" get secret "$ZALANDO_SECRET" -o jsonpath='{.data.username}' | base64 -d)"
-          PGPASSWORD="$(kubectl -n "$NS" get secret "$ZALANDO_SECRET" -o jsonpath='{.data.password}' | base64 -d)"
 
-          # Mask the password in logs, then export for later steps.
-          echo "::add-mask::$PGPASSWORD"
           {
-            echo "PGHOST=$PGHOST"
-            echo "PGPORT=5432"
+            echo "DB_POD=$POD"
             echo "PGUSER=$PGUSER"
-            echo "PGPASSWORD=$PGPASSWORD"
           } >> "$GITHUB_ENV"
-          echo "Resolved $NS Postgres at $PGHOST:5432 (db: $PGDATABASE, user: $PGUSER)"
-
-      - name: Install PostgreSQL client (>= server version 15)
-        run: |
-          set -euo pipefail
-          if command -v pg_dump >/dev/null 2>&1 && pg_dump --version | grep -qE ' 1[5-9]| [2-9][0-9]'; then
-            echo "pg_dump $(pg_dump --version) already available."
-            exit 0
-          fi
-          sudo apt-get update
-          sudo apt-get install -y curl ca-certificates lsb-release gnupg
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-16
+          echo "Master pod for $NS: $POD (db: $PGDATABASE, user: $PGUSER)"
 
       - name: Dump database
         run: |
           set -euo pipefail
           TS="$(date -u +'%Y-%m-%d_%H-%M-%S')"
           BACKUP_FILE="opsapi_${TARGET_ENV}_${TS}.dump"
-          # -Fc = custom format (compressed, restorable with pg_restore).
-          pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -Fc -f "$BACKUP_FILE"
+
+          # Dump inside the master pod (server-version pg_dump), custom format
+          # (-Fc: compressed, restorable with pg_restore), streamed to the runner
+          # over the exec channel. Retry transient kubelet 502s (flaky on this
+          # cluster); a real pg_dump error is printed and fails the step.
+          ok=""
+          for attempt in 1 2 3 4 5; do
+            if kubectl -n "$TARGET_ENV" exec "$DB_POD" -c postgres -- \
+                 pg_dump -U "$PGUSER" -d "$PGDATABASE" -Fc > "$BACKUP_FILE" 2>/tmp/dumperr.log; then
+              ok=1; break
+            fi
+            if grep -q '502 Bad Gateway' /tmp/dumperr.log; then
+              echo "exec attempt $attempt hit a transient 502, retrying..."; sleep 5; continue
+            fi
+            break
+          done
+          if [ -z "$ok" ]; then echo "::error::pg_dump failed"; cat /tmp/dumperr.log; exit 1; fi
+
+          # Custom-format dumps start with the "PGDMP" magic; guard against a
+          # truncated/empty file being uploaded as a "backup".
+          if [ "$(head -c 5 "$BACKUP_FILE")" != "PGDMP" ] || [ "$(wc -c < "$BACKUP_FILE")" -lt 1024 ]; then
+            echo "::error::Dump looks invalid/empty ($(wc -c < "$BACKUP_FILE") bytes)."; exit 1
+          fi
           ls -lh "$BACKUP_FILE"
           echo "BACKUP_FILE=$BACKUP_FILE" >> "$GITHUB_ENV"
 
