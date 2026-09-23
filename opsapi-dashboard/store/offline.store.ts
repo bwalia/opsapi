@@ -13,7 +13,10 @@ interface OfflineState {
 }
 
 export const useOfflineStore = create<OfflineState>((set) => ({
-  online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+  // Optimistic: navigator.onLine is unreliable (often stuck false), so we start
+  // online and let real request outcomes correct it (see api-client). This
+  // avoids a sticky "offline" banner when the app is actually reachable.
+  online: true,
   pending: 0,
   syncing: false,
   lastSyncedAt: null,

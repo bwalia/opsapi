@@ -13,14 +13,17 @@ export default function OfflineProvider() {
   const setOnline = useOfflineStore((s) => s.setOnline);
 
   useEffect(() => {
-    setOnline(navigator.onLine);
+    // Don't seed from navigator.onLine (unreliable/sticky) — the store starts
+    // online and api-client corrects it from real request outcomes.
     void refreshPending();
-    if (navigator.onLine) void replayOutbox();
+    void replayOutbox();
 
     const onOnline = () => {
       setOnline(true);
       void replayOutbox();
     };
+    // The native 'offline' event is a fast hint; a successful request will flip
+    // it back to online if it was wrong.
     const onOffline = () => setOnline(false);
     const onOutboxChanged = () => void refreshPending();
 
