@@ -54,32 +54,24 @@ const ColumnHeader = memo(function ColumnHeader({
   const isOverWipLimit = column.wip_limit && taskCount > column.wip_limit;
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-secondary-50 rounded-t-lg border-b border-secondary-200">
+    <div className="flex items-center justify-between px-3 py-2.5 border-b border-secondary-200/70">
       <div className="flex items-center gap-2 min-w-0">
-        {/* Column Color Indicator */}
-        {column.color && (
-          <div
-            className="w-3 h-3 rounded-full flex-shrink-0"
-            style={{ backgroundColor: column.color }}
-          />
-        )}
-
         {/* Column Name */}
-        <h3 className="font-semibold text-secondary-700 text-sm truncate">
+        <h3 className="font-semibold text-secondary-700 text-[13px] uppercase tracking-wide truncate">
           {column.name}
         </h3>
 
         {/* Task Count */}
         <span
           className={cn(
-            'flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full',
+            'flex-shrink-0 inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-semibold rounded-full tabular-nums',
             isOverWipLimit
               ? 'bg-red-100 text-red-700'
               : 'bg-secondary-200 text-secondary-600'
           )}
         >
           {taskCount}
-          {column.wip_limit && `/${column.wip_limit}`}
+          {column.wip_limit ? `/${column.wip_limit}` : ''}
         </span>
 
         {/* WIP Limit Warning */}
@@ -202,7 +194,7 @@ const KanbanColumn = memo(function KanbanColumn({
   return (
     <div
       className={cn(
-        'flex flex-col bg-secondary-100 rounded-lg shrink-0',
+        'flex flex-col bg-secondary-50 border border-secondary-200 rounded-xl shadow-sm shrink-0 overflow-hidden',
         'w-[85vw] max-w-[22rem] snap-center',
         'md:w-72 md:min-w-72 md:max-w-none',
         'max-h-full transition-all duration-200',
@@ -213,6 +205,11 @@ const KanbanColumn = memo(function KanbanColumn({
         className
       )}
     >
+      {/* Column colour accent */}
+      <div
+        className="h-1 w-full shrink-0"
+        style={{ backgroundColor: column.color || 'var(--color-secondary-300, #cbd5e1)' }}
+      />
       {/* Column Header */}
       <ColumnHeader
         column={column}

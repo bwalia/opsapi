@@ -12,6 +12,7 @@ import {
   Tag,
   BarChart3,
   Layers,
+  MoreHorizontal,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Button from '@/components/ui/Button';
@@ -183,6 +184,7 @@ export default function ProjectDetailPage() {
   const [isCreateBoardModalOpen, setIsCreateBoardModalOpen] = useState(false);
   const [isCreatingBoard, setIsCreatingBoard] = useState(false);
   const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   // Seeded from ?epic=<id> so "View tasks on board" on the epics page lands
   // here already filtered.
@@ -440,29 +442,30 @@ export default function ProjectDetailPage() {
   return (
     <div className="h-full flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-secondary-200 bg-surface">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-2 px-3 md:px-6 py-3 md:py-4 border-b border-secondary-200 bg-surface">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => router.push('/dashboard/projects')}
+              aria-label="Back to projects"
             >
               <ArrowLeft size={18} />
             </Button>
 
-            <div>
-              <h1 className="text-xl font-bold text-secondary-900">
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-xl font-bold text-secondary-900 truncate">
                 {currentProject?.name || 'Loading...'}
               </h1>
               {currentProject?.description && (
-                <p className="text-sm text-secondary-500 line-clamp-1">
+                <p className="hidden sm:block text-sm text-secondary-500 line-clamp-1">
                   {currentProject.description}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
             {/* Board Selector */}
             {!boardsLoading && boards.length > 0 && (
               <BoardSelector
@@ -474,38 +477,75 @@ export default function ProjectDetailPage() {
               />
             )}
 
-            {/* Members */}
-            <Button variant="ghost" size="sm">
-              <Users size={18} className="mr-2" />
-              {currentProject?.member_count || 0}
-            </Button>
+            {/* Desktop (lg+): full action row */}
+            <div className="hidden lg:flex items-center gap-1">
+              <Button variant="ghost" size="sm" title="Members">
+                <Users size={18} className="mr-1.5" />
+                {currentProject?.member_count || 0}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setIsLabelManagerOpen(true)}>
+                <Tag size={18} className="mr-1.5" />
+                Labels
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/sprints`)}>
+                <LayoutGrid size={18} className="mr-1.5" />
+                Scrum
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/epics`)}>
+                <Layers size={18} className="mr-1.5" />
+                Epics
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/analytics`)}>
+                <BarChart3 size={18} className="mr-1.5" />
+                Analytics
+              </Button>
+            </div>
 
-            {/* Labels */}
-            <Button variant="ghost" size="sm" onClick={() => setIsLabelManagerOpen(true)}>
-              <Tag size={18} className="mr-1" />
-              Labels
-            </Button>
+            {/* Mobile/tablet (<lg): overflow menu for the secondary actions */}
+            <div className="relative lg:hidden">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowMoreMenu((v) => !v)}
+                aria-label="More actions"
+                aria-expanded={showMoreMenu}
+              >
+                <MoreHorizontal size={18} />
+              </Button>
+              {showMoreMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+                  <div className="absolute right-0 mt-1 w-56 bg-surface rounded-lg shadow-lg border border-secondary-200 py-1 z-20">
+                    <div className="flex items-center gap-2 px-3 py-2 text-sm text-secondary-500">
+                      <Users size={16} />
+                      {currentProject?.member_count || 0} member{(currentProject?.member_count || 0) === 1 ? '' : 's'}
+                    </div>
+                    <hr className="my-1 border-secondary-100" />
+                    {[
+                      { icon: Tag, label: 'Labels', onClick: () => setIsLabelManagerOpen(true) },
+                      { icon: LayoutGrid, label: 'Scrum board', onClick: () => router.push(`/dashboard/projects/${projectUuid}/sprints`) },
+                      { icon: Layers, label: 'Epics', onClick: () => router.push(`/dashboard/projects/${projectUuid}/epics`) },
+                      { icon: BarChart3, label: 'Analytics', onClick: () => router.push(`/dashboard/projects/${projectUuid}/analytics`) },
+                    ].map(({ icon: Icon, label, onClick }) => (
+                      <button
+                        key={label}
+                        onClick={() => {
+                          setShowMoreMenu(false);
+                          onClick();
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary-700 hover:bg-secondary-50"
+                      >
+                        <Icon size={16} />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
 
-            {/* Scrum Board */}
-            <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/sprints`)}>
-              <LayoutGrid size={18} className="mr-1" />
-              Scrum
-            </Button>
-
-            {/* Epics */}
-            <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/epics`)}>
-              <Layers size={18} className="mr-1" />
-              Epics
-            </Button>
-
-            {/* Analytics */}
-            <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/projects/${projectUuid}/analytics`)}>
-              <BarChart3 size={18} className="mr-1" />
-              Analytics
-            </Button>
-
-            {/* Settings */}
-            <Button variant="ghost" size="sm" onClick={handleSettings}>
+            {/* Settings — always visible */}
+            <Button variant="ghost" size="sm" onClick={handleSettings} aria-label="Project settings">
               <Settings size={18} />
             </Button>
           </div>
