@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Plus_Jakarta_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import PWAInstallPrompt from '@/components/pwa/PWAInstallPrompt';
@@ -9,15 +9,17 @@ import OfflineProvider from '@/components/offline/OfflineProvider';
 import OfflineIndicator from '@/components/offline/OfflineIndicator';
 import './globals.css';
 
-// Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height,
-// so it reads clearer/bigger than Inter at the same size. Loaded via next/font
-// (self-hosted, zero layout shift). Exposed as --font-jakarta; globals.css maps
-// it into --font-sans with a system fallback stack.
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ['latin'],
+// Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height.
+// SELF-HOSTED via next/font/local (not next/font/google): the Turbopack
+// production build fetches Google fonts at build time, which fails on the CI
+// runner with no egress to fonts.gstatic.com ("Can't resolve
+// @vercel/turbopack-next/internal/font/google/font"). The variable woff2 covers
+// weights 200–800, so the same --font-jakarta token still drives 400–800.
+const jakarta = localFont({
+  src: './fonts/plus-jakarta-sans-latin-wght-normal.woff2',
   display: 'swap',
   variable: '--font-jakarta',
-  weight: ['400', '500', '600', '700', '800'],
+  weight: '200 800',
 });
 
 export const metadata: Metadata = {
