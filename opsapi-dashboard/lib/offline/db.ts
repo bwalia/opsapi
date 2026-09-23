@@ -29,6 +29,11 @@ export interface OutboxItem {
   data?: unknown; // already-serialised request body (string or object)
   headers?: Record<string, string>;
   createdAt: number;
+  // 'pending' (default) items are replayed on reconnect; 'failed' items were
+  // rejected by the server and wait for the user to retry or discard them.
+  status?: 'pending' | 'failed';
+  error?: string;
+  attempts?: number;
 }
 
 interface OfflineDB extends DBSchema {
@@ -104,8 +109,55 @@ export async function queuedItems(): Promise<OutboxItem[]> {
   }
 }
 
+/** Items still awaiting sync (not server-rejected). */
+export async function pendingItems(): Promise<OutboxItem[]> {
+  return (await queuedItems()).filter((i) => i.status !== 'failed');
+}
+
+/** Items the server rejected — waiting for the user to retry or discard. */
+export async function failedItems(): Promise<OutboxItem[]> {
+  return (await queuedItems()).filter((i) => i.status === 'failed');
+}
+
 export async function pendingCount(): Promise<number> {
-  return (await queuedItems()).length;
+  return (await pendingItems()).length;
+}
+
+export async function failedCount(): Promise<number> {
+  return (await failedItems()).length;
+}
+
+/** Mark a queued write as server-rejected (kept for the user to act on). */
+export async function markOutboxFailed(id: number, error: string): Promise<void> {
+  const d = db();
+  if (!d) return;
+  try {
+    const database = await d;
+    const item = await database.get('outbox', id);
+    if (!item) return;
+    item.status = 'failed';
+    item.error = error;
+    item.attempts = (item.attempts ?? 0) + 1;
+    await database.put('outbox', item);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Put a failed item back in the pending queue so it replays again. */
+export async function retryOutbox(id: number): Promise<void> {
+  const d = db();
+  if (!d) return;
+  try {
+    const database = await d;
+    const item = await database.get('outbox', id);
+    if (!item) return;
+    item.status = 'pending';
+    item.error = undefined;
+    await database.put('outbox', item);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function deleteOutbox(id: number): Promise<void> {
