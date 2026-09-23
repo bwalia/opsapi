@@ -167,12 +167,53 @@ jobs:
             chmod +x mc && sudo mv mc /usr/local/bin/
           fi
 
-      - name: Upload backup to MinIO
+      - name: Upload backup to in-cluster MinIO
+        env:
+          BUCKET: db-backups
         run: |
           set -euo pipefail
-          mc alias set myminio "${{ secrets.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY }}"
-          mc cp "$BACKUP_FILE" "myminio/${{ secrets.MINIO_BUCKET }}/postgres/${TARGET_ENV}/$BACKUP_FILE"
-          echo "Uploaded to ${{ secrets.MINIO_BUCKET }}/postgres/${TARGET_ENV}/$BACKUP_FILE"
+          NS="$TARGET_ENV"
+
+          # Upload to the namespace's OWN in-cluster MinIO (acc -> acc's MinIO,
+          # prod -> prod's), over a port-forward tunnel. The S3 API is plain HTTP
+          # on :9000 inside the cluster, so there's no external endpoint and no TLS
+          # cert to mismatch. Root creds are read from the MinIO pod's own env, so
+          # this works whether they're set inline or from a k8s secret.
+          MPOD="$(kubectl -n "$NS" get pod -l app=diytaxreturn-minio \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+          if [ -z "$MPOD" ]; then
+            echo "::error::No diytaxreturn-minio pod in namespace '$NS'."; exit 1
+          fi
+
+          # Read both creds in one exec; retry transient kubelet 502s.
+          creds=""
+          for attempt in 1 2 3 4 5; do
+            if creds="$(kubectl -n "$NS" exec "$MPOD" -- \
+                 sh -c 'printf "%s\n%s\n" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"' 2>/tmp/mcreds.err)"; then
+              break
+            fi
+            if grep -q '502 Bad Gateway' /tmp/mcreds.err; then
+              echo "creds exec attempt $attempt hit a transient 502, retrying..."; sleep 5; creds=""; continue
+            fi
+            cat /tmp/mcreds.err; exit 1
+          done
+          MC_USER="$(printf '%s\n' "$creds" | sed -n '1p')"
+          MC_PASS="$(printf '%s\n' "$creds" | sed -n '2p')"
+          [ -n "$MC_USER" ] && [ -n "$MC_PASS" ] || { echo "::error::Could not read MinIO creds."; exit 1; }
+          echo "::add-mask::$MC_PASS"
+
+          kubectl -n "$NS" port-forward "svc/diytaxreturn-minio" 9000:9000 >/tmp/mpf.log 2>&1 &
+          MPF_PID=$!
+          trap 'kill "$MPF_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null && { exec 3>&-; break; }
+            sleep 1
+          done
+
+          mc alias set backup "http://127.0.0.1:9000" "$MC_USER" "$MC_PASS"
+          mc mb --ignore-existing "backup/$BUCKET"
+          mc cp "$BACKUP_FILE" "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE"
+          echo "Uploaded to $BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE (in-cluster $NS MinIO)"
 
       - name: Cleanup
         if: always()
