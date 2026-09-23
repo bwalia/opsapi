@@ -110,15 +110,11 @@ const BurndownChart = React.memo(function BurndownChart({
   // Check for scope changes
   const hasScopeChanges = burndownData.some((d) => d.added_points > 0 || d.removed_points > 0);
 
-  // Grid lines
-  const yGridLines = useMemo(() => {
-    const lines: number[] = [];
-    const step = Math.ceil(yMax / 5);
-    for (let i = 0; i <= yMax; i += step) {
-      lines.push(i);
-    }
-    return lines;
-  }, [yMax]);
+  // Grid lines. Computed inline (not useMemo): this runs after early returns
+  // above, so a hook here would violate the Rules of Hooks — and it's a trivial
+  // loop, so memoisation buys nothing.
+  const yStep = Math.max(1, Math.ceil(yMax / 5));
+  const yGridLines = Array.from({ length: Math.floor(yMax / yStep) + 1 }, (_, i) => i * yStep);
 
   const xGridLines = useMemo(() => {
     const lines: number[] = [];
@@ -374,15 +370,11 @@ const VelocityChart = React.memo(function VelocityChart({ velocityData }: Veloci
 
   const avgVelocity = velocityData.average_velocity;
 
-  // Grid lines
-  const yGridLines = useMemo(() => {
-    const lines: number[] = [];
-    const step = Math.ceil(yMax / 5);
-    for (let i = 0; i <= yMax; i += step) {
-      lines.push(i);
-    }
-    return lines;
-  }, [yMax]);
+  // Grid lines. Computed inline (not useMemo): this runs after early returns
+  // above, so a hook here would violate the Rules of Hooks — and it's a trivial
+  // loop, so memoisation buys nothing.
+  const yStep = Math.max(1, Math.ceil(yMax / 5));
+  const yGridLines = Array.from({ length: Math.floor(yMax / yStep) + 1 }, (_, i) => i * yStep);
 
   return (
     <div className="relative">
