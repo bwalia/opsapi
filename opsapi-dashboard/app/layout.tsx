@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import PWAInstallPrompt from '@/components/pwa/PWAInstallPrompt';
 import ServiceWorkerRegister from '@/components/pwa/ServiceWorkerRegister';
+import RouteCacheWarmer from '@/components/pwa/RouteCacheWarmer';
 import OfflineProvider from '@/components/offline/OfflineProvider';
 import OfflineIndicator from '@/components/offline/OfflineIndicator';
 import './globals.css';
@@ -93,6 +94,7 @@ export default function RootLayout({
         />
         <PWAInstallPrompt />
         <ServiceWorkerRegister />
+        <RouteCacheWarmer />
       </body>
     </html>
   );
