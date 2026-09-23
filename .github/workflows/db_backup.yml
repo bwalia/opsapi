@@ -4,12 +4,13 @@ name: Daily PostgreSQL Backup
 #
 # The database is managed by the Zalando postgres-operator (cluster `diy-tax-db`)
 # and lives INSIDE the k3s cluster on ClusterIP-only services — unreachable from
-# GitHub-hosted runners. So this runs on the in-cluster self-hosted `acc` runner
-# and reads credentials from the operator's own secret
+# GitHub-hosted runners. This runs on the self-hosted `acc` runner, which can
+# reach the kube-apiserver (kubectl works) but is NOT on the cluster pod/service
+# network, so the ClusterIP is not directly routable from it. The dump therefore
+# goes through a `kubectl port-forward` tunnel (see the Dump step). Credentials
+# come from the operator's own secret
 # (`postgres.diy-tax-db.credentials.postgresql.acid.zalan.do`, keys
-# username/password) — which is named consistently in every namespace that has
-# the DB. The DB host is resolved from the `diy-tax-db` Service ClusterIP, so no
-# cluster-DNS dependency.
+# username/password) — named consistently in every namespace that has the DB.
 #
 # Scheduled runs back up `acc`. `prod` has no `diy-tax-db` cluster deployed yet,
 # so it is gated behind the INCLUDE_PROD flag below — flip it to "true" once a
@@ -147,8 +148,22 @@ jobs:
           set -euo pipefail
           TS="$(date -u +'%Y-%m-%d_%H-%M-%S')"
           BACKUP_FILE="opsapi_${TARGET_ENV}_${TS}.dump"
+
+          # The Postgres Service is ClusterIP-only, and this runner is NOT on the
+          # cluster pod/service network — so it cannot reach $PGHOST directly (the
+          # ClusterIP blackholes → connect timeout). Tunnel through the
+          # kube-apiserver instead (the same path kubectl already uses) and dump
+          # over 127.0.0.1.
+          kubectl -n "$TARGET_ENV" port-forward "svc/$PG_SERVICE" 5432:5432 >/tmp/pf.log 2>&1 &
+          PF_PID=$!
+          trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null && { exec 3>&-; break; }
+            sleep 1
+          done
+
           # -Fc = custom format (compressed, restorable with pg_restore).
-          pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -Fc -f "$BACKUP_FILE"
+          pg_dump -h 127.0.0.1 -p 5432 -U "$PGUSER" -d "$PGDATABASE" -Fc -f "$BACKUP_FILE"
           ls -lh "$BACKUP_FILE"
           echo "BACKUP_FILE=$BACKUP_FILE" >> "$GITHUB_ENV"
 
