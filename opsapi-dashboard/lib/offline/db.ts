@@ -118,6 +118,86 @@ export async function deleteOutbox(id: number): Promise<void> {
   }
 }
 
+// ---- Optimistic cache reconciliation (Phase 2) ---------------------------
+// When a write happens offline, patch already-cached list/detail GETs so the
+// change is visible even after navigating away and back (re-reading from cache),
+// not just in the view that made it. Best-effort and generic across modules:
+// a create prepends, an update merges by id, a delete removes. The real records
+// replace these on the next successful online refetch.
+
+function pathnameOf(uri: string): string {
+  try {
+    return new URL(uri).pathname;
+  } catch {
+    try {
+      return new URL(uri, 'http://_').pathname;
+    } catch {
+      return uri.split('?')[0];
+    }
+  }
+}
+
+function matchesId(item: unknown, id?: string): boolean {
+  if (id == null) return false;
+  const it = item as { uuid?: unknown; id?: unknown };
+  return String(it?.uuid ?? it?.id ?? '') === String(id);
+}
+
+export interface Reconcile {
+  op: 'create' | 'update' | 'delete';
+  collectionPath: string; // e.g. /api/v2/employees
+  id?: string; // for update/delete
+  entity?: Record<string, unknown>;
+}
+
+export async function reconcileCache(r: Reconcile): Promise<void> {
+  const scope = currentScope();
+  const d = db();
+  if (!scope || !d) return;
+  try {
+    const database = await d;
+    const all = (await database.getAll('responses')).filter((x) => x.scope === scope);
+    for (const rec of all) {
+      const uri = rec.key.split('|GET|')[1] || '';
+      const path = pathnameOf(uri);
+      const body = rec.data as { data?: unknown } | unknown[];
+      const list = Array.isArray(body)
+        ? body
+        : Array.isArray((body as { data?: unknown })?.data)
+          ? ((body as { data?: unknown }).data as unknown[])
+          : null;
+
+      // Collection list at exactly this path.
+      if (path === r.collectionPath && list) {
+        let next = list;
+        if (r.op === 'create' && r.entity) next = [r.entity, ...list];
+        else if (r.op === 'update' && r.entity)
+          next = list.map((it) => (matchesId(it, r.id) ? { ...(it as object), ...r.entity } : it));
+        else if (r.op === 'delete') next = list.filter((it) => !matchesId(it, r.id));
+
+        rec.data = Array.isArray(body) ? next : { ...(body as object), data: next };
+        await database.put('responses', rec);
+        continue;
+      }
+
+      // Detail GET at /collection/{id}.
+      if (r.id && path === `${r.collectionPath}/${r.id}`) {
+        if (r.op === 'delete') {
+          await database.delete('responses', rec.key);
+        } else if (r.op === 'update' && r.entity) {
+          const wrapped = (body as { data?: unknown })?.data !== undefined;
+          const current = (wrapped ? (body as { data?: unknown }).data : body) as object;
+          const merged = { ...current, ...r.entity };
+          rec.data = wrapped ? { ...(body as object), data: merged } : merged;
+          await database.put('responses', rec);
+        }
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Wipe all offline data (call on logout). */
 export async function clearAll(): Promise<void> {
   const d = db();

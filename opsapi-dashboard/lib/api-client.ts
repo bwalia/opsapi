@@ -1,6 +1,23 @@
 import axios, { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { hmrcFraudHeaders } from './hmrc-fraud';
-import { cacheGet, readGet, enqueue, clearAll as clearOfflineData } from './offline/db';
+import {
+  cacheGet,
+  readGet,
+  enqueue,
+  clearAll as clearOfflineData,
+  reconcileCache,
+  type Reconcile,
+} from './offline/db';
+import { useOfflineStore } from '@/store/offline.store';
+
+/** Drive the online/offline state from real backend reachability (reliable,
+ *  unlike navigator.onLine): a successful request => online, a network failure
+ *  => offline. Self-heals a stuck banner as soon as any request succeeds. */
+function markReachable(reachable: boolean): void {
+  if (typeof window === 'undefined') return;
+  const store = useOfflineStore.getState();
+  if (store.online !== reachable) store.setOnline(reachable);
+}
 
 // Custom axios config flag: marks a request as an outbox replay so the offline
 // interceptor doesn't re-queue it (see lib/offline/sync.ts).
@@ -121,8 +138,9 @@ function uriOf(config: InternalAxiosRequestConfig): string {
  * Carries a temp id + `_offlinePending: true`; the real record replaces it on
  * the next refetch after sync. (Per-module reconciliation is Phase 2.)
  */
-function optimisticEntity(config: InternalAxiosRequestConfig): Record<string, unknown> {
-  const tempId = `offline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+function optimisticEntity(config: InternalAxiosRequestConfig, id?: string): Record<string, unknown> {
+  // Updates keep their real id (from the URL); creates get a temp one.
+  const idVal = id ?? `offline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   let fields: Record<string, unknown> = {};
   try {
     const ct = String((config.headers as Record<string, unknown>)?.['Content-Type'] ?? '');
@@ -136,7 +154,7 @@ function optimisticEntity(config: InternalAxiosRequestConfig): Record<string, un
   } catch {
     /* unparseable body — return just the temp identity */
   }
-  return { ...fields, uuid: tempId, id: tempId, _offlinePending: true };
+  return { ...fields, uuid: idVal, id: idVal, _offlinePending: true };
 }
 
 /** Headers to persist with a queued write so its replay hits the right tenant. */
@@ -196,6 +214,7 @@ apiClient.interceptors.request.use(
  */
 apiClient.interceptors.response.use(
   (response) => {
+    markReachable(true); // a real response means the backend is reachable
     // Cache successful GETs so the same view is readable offline later.
     if (typeof window !== 'undefined' && (response.config.method || '').toLowerCase() === 'get') {
       void cacheGet(uriOf(response.config), response.data);
@@ -204,12 +223,17 @@ apiClient.interceptors.response.use(
   },
   async (error: AxiosError) => {
     const config = error.config as InternalAxiosRequestConfig | undefined;
+    // A network error (no response) means unreachable — but a cancelled request
+    // (component unmount, aborted) is not "offline", so exclude it.
+    const isNetworkError = !error.response && error.code !== 'ERR_CANCELED';
+    if (error.response) markReachable(true);
 
-    // Offline / server unreachable (no HTTP response at all): serve reads from
-    // the tenant-scoped cache, and queue writes to replay on reconnect. Skipped
-    // for replay requests (let them reject so sync.ts can decide). The 401 path
-    // below only runs when there IS a response, so it's unaffected.
-    if (typeof window !== 'undefined' && config && !error.response && !config._replay) {
+    // Offline / server unreachable: serve reads from the tenant-scoped cache, and
+    // queue writes to replay on reconnect. Skipped for replay requests (let them
+    // reject so sync.ts can decide). The 401 path below only runs when there IS a
+    // response, so it's unaffected.
+    if (typeof window !== 'undefined' && config && isNetworkError && !config._replay) {
+      markReachable(false);
       const method = (config.method || 'get').toLowerCase();
 
       if (method === 'get') {
@@ -234,10 +258,32 @@ apiClient.interceptors.response.use(
         });
         if (queued) {
           window.dispatchEvent(new Event('offline:outbox-changed'));
-          const body =
-            method === 'delete'
-              ? { success: true, _offlinePending: true }
-              : optimisticEntity(config);
+
+          // Optimistically patch cached lists/detail so the change survives a
+          // re-read from cache, and hand the caller a usable entity.
+          const rawUrl = (config.url || '').split('?')[0].replace(/\/$/, '');
+          let desc: Reconcile | null = null;
+          let body: unknown;
+
+          if (method === 'post') {
+            const entity = optimisticEntity(config);
+            desc = { op: 'create', collectionPath: rawUrl, entity };
+            body = entity;
+          } else {
+            const idx = rawUrl.lastIndexOf('/');
+            const collectionPath = idx > 0 ? rawUrl.slice(0, idx) : rawUrl;
+            const id = idx > 0 ? rawUrl.slice(idx + 1) : undefined;
+            if (method === 'delete') {
+              desc = id ? { op: 'delete', collectionPath, id } : null;
+              body = { success: true, _offlinePending: true };
+            } else {
+              const entity = optimisticEntity(config, id);
+              desc = id ? { op: 'update', collectionPath, id, entity } : null;
+              body = entity;
+            }
+          }
+          if (desc) void reconcileCache(desc);
+
           return {
             data: body,
             status: 202,
