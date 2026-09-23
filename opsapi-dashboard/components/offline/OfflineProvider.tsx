@@ -13,6 +13,10 @@ export default function OfflineProvider() {
   const setOnline = useOfflineStore((s) => s.setOnline);
 
   useEffect(() => {
+    // Ask the browser not to evict our offline cache/queue under storage
+    // pressure. Installed PWAs are usually granted this automatically.
+    navigator.storage?.persist?.().catch(() => undefined);
+
     // Don't seed from navigator.onLine (unreliable/sticky) — the store starts
     // online and api-client corrects it from real request outcomes.
     void refreshPending();
