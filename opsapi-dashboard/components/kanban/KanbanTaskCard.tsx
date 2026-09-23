@@ -307,8 +307,8 @@ export const BaseTaskCard = forwardRef<HTMLDivElement, KanbanTaskCardProps & {
       onKeyDown={handleKeyDown}
       style={combinedStyle}
       className={cn(
-        'relative bg-surface rounded-lg border shadow-sm p-3 cursor-pointer transition-all duration-200',
-        'hover:shadow-md hover:border-primary-200',
+        'relative bg-surface rounded-xl border border-secondary-200 shadow-sm p-3 cursor-pointer transition-all duration-200',
+        'hover:shadow-md hover:border-primary-200 hover:-translate-y-0.5',
         'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
         isDragging && 'shadow-lg opacity-40 scale-[0.98] border-primary-300',
         isOverlay && 'shadow-2xl rotate-2 scale-105 border-primary-400 ring-2 ring-primary-200',

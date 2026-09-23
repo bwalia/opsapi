@@ -193,7 +193,7 @@ const AddColumn = memo(function AddColumn({ onAdd, isLoading }: AddColumnProps) 
   }
 
   return (
-    <div className="flex-shrink-0 w-[85vw] max-w-[22rem] md:w-72 md:min-w-72 md:max-w-none snap-center bg-secondary-100 rounded-lg p-3">
+    <div className="flex-shrink-0 w-[85vw] max-w-[22rem] md:w-72 md:min-w-72 md:max-w-none snap-center bg-secondary-50 border border-secondary-200 rounded-xl p-3">
       <form onSubmit={handleSubmit}>
         <input
           type="text"
@@ -502,7 +502,7 @@ const KanbanBoard = memo(function KanbanBoard({
   );
 
   return (
-    <div className={cn('flex flex-col h-full bg-secondary-50', className)}>
+    <div className={cn('flex flex-col h-full bg-secondary-100', className)}>
       {/* Board Header */}
       <BoardHeader
         boardName={board.name}
