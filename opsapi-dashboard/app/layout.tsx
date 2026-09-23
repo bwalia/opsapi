@@ -4,6 +4,8 @@ import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import PWAInstallPrompt from '@/components/pwa/PWAInstallPrompt';
 import ServiceWorkerRegister from '@/components/pwa/ServiceWorkerRegister';
+import OfflineProvider from '@/components/offline/OfflineProvider';
+import OfflineIndicator from '@/components/offline/OfflineIndicator';
 import './globals.css';
 
 // Plus Jakarta Sans — a modern, geometric-humanist sans with a large x-height,
@@ -56,6 +58,8 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
+        <OfflineProvider />
+        <OfflineIndicator />
         <ThemeProvider>{children}</ThemeProvider>
         <Toaster
           position="top-right"
