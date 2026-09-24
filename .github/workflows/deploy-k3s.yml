@@ -603,6 +603,16 @@ jobs:
           fi
           echo "Deploying release '${RELEASE_NAME}' to namespace '${TARGET_ENV}' with image tag '${TAG}'"
 
+          # Guard: refuse to roll a tag that isn't in the registry. Images are
+          # tagged <version>-<runNumber> (e.g. 1.0.147-389); a bare version like
+          # "1.0.146" does NOT exist, so deploying it ImagePullBackOffs the pod
+          # and 503s the whole API (this happened on int). Fail fast instead.
+          IMAGE_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${TAG}"
+          if ! docker manifest inspect "$IMAGE_REF" >/dev/null 2>&1; then
+            echo "::error::Image '$IMAGE_REF' not found in the registry — refusing to deploy a non-existent tag (it would ImagePullBackOff and take the API down). Pass the FULL tag including its -<runNumber> suffix (e.g. ${TAG%-*}-<run>), or omit the IMAGE_TAG input to use this run's freshly-built image."
+            exit 1
+          fi
+
           # Only override projectCode when a value is explicitly passed on
           # dispatch; otherwise the values file (tax_copilot) decides.
           PROJECT_CODE_ARG=""
