@@ -218,3 +218,33 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f "$BACKUP_FILE" || true
+
+      # Report this env's backup result to Beacon / SysOps 24/7, which fans it out
+      # to the org's notification channels: a green tick on success, a red alert on
+      # failure. Runs on always() so both outcomes are reported (and each matrix
+      # leg reports its own env). Uses plain curl — no jq — so it works on this
+      # self-hosted runner regardless of what's installed, and never fails the
+      # backup: a notification error is logged and ignored. Set the repo secret
+      # BEACON_NOTIFY_URL to the ingest URL from the repo's GitHub Actions monitor
+      # in Beacon (enable "notify on success" on that monitor for the green tick).
+      - name: Notify Beacon (backup result)
+        if: always()
+        env:
+          BEACON_URL: ${{ secrets.BEACON_NOTIFY_URL }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -u
+          if [ -z "${BEACON_URL:-}" ]; then
+            echo "BEACON_NOTIFY_URL not set — skipping Beacon notification."
+            exit 0
+          fi
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Every value below is controlled, so a printf'd JSON body is safe.
+          payload=$(printf '{"status":"%s","repository":"%s","workflow":"PostgreSQL Backup — %s","run_id":"%s","run_number":"%s","branch":"%s","actor":"%s","event":"%s","run_url":"%s"}' \
+            "$JOB_STATUS" "$GITHUB_REPOSITORY" "$TARGET_ENV" "$GITHUB_RUN_ID" "$GITHUB_RUN_NUMBER" \
+            "${GITHUB_REF_NAME:-}" "${GITHUB_ACTOR:-}" "${GITHUB_EVENT_NAME:-}" "$RUN_URL")
+          if curl -sS -m 15 -X POST "$BEACON_URL" -H 'Content-Type: application/json' -d "$payload"; then
+            echo "Reported '$JOB_STATUS' backup result for '$TARGET_ENV' to Beacon."
+          else
+            echo "Beacon notification failed (ignored)."
+          fi
