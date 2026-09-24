@@ -7,12 +7,17 @@ replicaCount > 1 (two pods both see migration N un-applied and both try it).
 Moving it here decouples migration from pod startup so the app tier can scale
 to multiple replicas safely.
 
+The migrate script is INLINED here (not read from the -cm- ConfigMap): a
+pre-upgrade hook runs BEFORE the updated ConfigMap is applied, so it would see
+the OLD ConfigMap without this deploy's migrate.sh. Inlining keeps the Job
+self-contained. NOTE: this is the same logic as `migrate.sh` in configmaps.yaml
+(used only by the dev/no-ESO in-pod fallback) — keep the two in sync.
+
 pre-upgrade (NOT pre-install): the `{{ .Release.Name }}-secrets` Secret is
 created by the ExternalSecret (ESO) in the main phase, so it does not exist yet
 during pre-install hooks. On a brand-new install run migrate once manually (or
-let the first `helm upgrade` do it); every subsequent deploy runs this hook
-automatically. Helm blocks the upgrade until this Job succeeds — a failed
-migration stops the rollout instead of shipping bad pods.
+let the first `helm upgrade` do it). Helm blocks the upgrade until this Job
+succeeds — a failed migration stops the rollout instead of shipping bad pods.
 */}}
 {{- if .Values.externalSecret.enabled }}
 apiVersion: batch/v1
@@ -58,12 +63,56 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
-            - cp /tmp/configmap/migrate.sh /usr/local/bin/migrate.sh && chmod +x /usr/local/bin/migrate.sh && /bin/sh /usr/local/bin/migrate.sh
+            - |
+              set -eo pipefail
+              set -x
+
+              # lapis migrate/exec read the DB config from /app/config.lua, so
+              # stage it from the mounted secret first (same as the pod does).
+              cp /tmp/secrets/config.lua /app/config.lua
+
+              echo "[migrate] PROJECT_CODE=${PROJECT_CODE:-<unset>} POSTGRES_DB=${POSTGRES_DB:-<from config>}"
+
+              # Reconcile the migration ledger against the live schema BEFORE
+              # migrating. If lapis_migrations records a migration as applied but
+              # the relation it created is gone (restore drift, a migration once
+              # run against the wrong DB, a manual drop), Lapis would SKIP it and
+              # a later FK-dependent migration would die with `relation "X" does
+              # not exist` (acc, 2026-05-14, 22h outage). reconcile() un-records
+              # such phantom entries so `lapis migrate` re-applies them. Non-fatal.
+              echo "[migrate] Reconciling migration ledger against live schema..."
+              if ! lapis exec "require('scripts.reconcile-migrations').reconcile()"; then
+                echo "[migrate] Reconcile step errored (non-fatal) — proceeding to migrate." >&2
+              fi
+
+              echo "[migrate] Running migrations..."
+              MIGRATE_RETRIES=5
+              MIGRATE_DELAY=6
+              attempt=1
+              while [ $attempt -le $MIGRATE_RETRIES ]; do
+                if lapis migrate; then
+                  break
+                fi
+                echo "[migrate] Migration attempt $attempt/$MIGRATE_RETRIES failed. Retrying in ${MIGRATE_DELAY}s..."
+                attempt=$((attempt + 1))
+                sleep $MIGRATE_DELAY
+              done
+              if [ $attempt -gt $MIGRATE_RETRIES ]; then
+                echo "[migrate] Migrations failed after $MIGRATE_RETRIES attempts. Aborting." >&2
+                exit 1
+              fi
+              echo "==========================="
+
+              echo "[migrate] Running namespace setup (supports multi-project codes)..."
+              if ! lapis exec "require('scripts.setup-namespace').runMulti({})"; then
+                echo "[migrate] Namespace setup failed — check above for which project code failed." >&2
+                exit 1
+              fi
+              echo "[migrate] Namespace setup complete."
+              echo "==========================="
           volumeMounts:
-            - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
-              mountPath: /tmp/configmap
             - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
               mountPath: /tmp/secrets
           envFrom:
@@ -110,9 +159,6 @@ spec:
               value: {{ .Values.passwordResetAllowedOrigins | quote }}
             {{- end }}
       volumes:
-        - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
-          configMap:
-            name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
         - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
           secret:
             secretName: "{{ .Release.Name }}-secrets"
