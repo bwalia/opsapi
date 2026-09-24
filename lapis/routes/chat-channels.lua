@@ -3,7 +3,7 @@ local ChatChannelQueries = require "queries.ChatChannelQueries"
 local ChatChannelMemberQueries = require "queries.ChatChannelMemberQueries"
 local ChatMessageQueries = require "queries.ChatMessageQueries"
 local Global = require "helper.global"
-local db = require("lapis.db")
+local ChatNamespace = require "helper.chat-namespace"
 
 return function(app)
     ----------------- Chat Channel Routes --------------------
@@ -45,22 +45,9 @@ return function(app)
         }
     end
 
-    -- Get namespace_id from header or default to system namespace
-    local function get_namespace_id()
-        local namespace_id = ngx.var.http_x_namespace_id
-
-        if namespace_id and namespace_id ~= "" then
-            return tonumber(namespace_id)
-        end
-
-        -- Fallback: Get default "system" namespace
-        local result = db.query("SELECT id FROM namespaces WHERE slug = 'system' LIMIT 1")
-        if result and #result > 0 then
-            return result[1].id
-        end
-
-        return nil
-    end
+    -- Resolve the caller's current namespace to its numeric id (uuid/slug/id
+    -- aware — the dashboard sends the namespace uuid). See helper.chat-namespace.
+    local get_namespace_id = ChatNamespace.resolve
 
     -- GET /api/chat/channels - List user's channels
     app:get("/api/chat/channels", function(self)
@@ -74,7 +61,8 @@ return function(app)
             perPage = tonumber(self.params.perPage) or 20
         }
 
-        local result = ChatChannelQueries.getByUser(user.uuid, params)
+        -- Namespace gate: only channels of the caller's current namespace.
+        local result = ChatChannelQueries.getByUser(user.uuid, params, get_namespace_id())
 
         return {
             status = 200,

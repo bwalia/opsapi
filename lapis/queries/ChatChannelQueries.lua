@@ -36,11 +36,17 @@ function ChatChannelQueries.getByBusiness(uuid_business_id, params)
 end
 
 -- Get all channels for a user (channels they are a member of)
--- For DM channels, includes the other participant's info
-function ChatChannelQueries.getByUser(user_uuid, params)
+-- For DM channels, includes the other participant's info.
+-- namespace_id (optional) scopes the list to a single tenant — the namespace
+-- gate. When nil, no tenant filter is applied (safe default for callers that
+-- can't resolve a namespace).
+function ChatChannelQueries.getByUser(user_uuid, params, namespace_id)
     local page = params.page or 1
     local perPage = params.perPage or 20
     local offset = (page - 1) * perPage
+
+    -- Interpolated because it's a validated number (tonumber), never user text.
+    local ns_filter = namespace_id and (" AND c.namespace_id = " .. tonumber(namespace_id)) or ""
 
     local sql = [[
         SELECT c.*,
@@ -69,7 +75,7 @@ function ChatChannelQueries.getByUser(user_uuid, params)
             AND c.type = 'direct'
         LEFT JOIN users other_user ON other_user.uuid = other_member.user_uuid
         LEFT JOIN chat_user_presence other_presence ON other_presence.user_uuid = other_member.user_uuid
-        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false
+        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false]] .. ns_filter .. [[
         ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
         LIMIT ? OFFSET ?
     ]]
@@ -80,7 +86,7 @@ function ChatChannelQueries.getByUser(user_uuid, params)
         SELECT COUNT(*) as total
         FROM chat_channels c
         INNER JOIN chat_channel_members cm ON cm.channel_uuid = c.uuid
-        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false
+        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false]] .. ns_filter .. [[
     ]]
     local count_result = db.query(count_sql, user_uuid)
     local total = count_result and count_result[1] and count_result[1].total or 0

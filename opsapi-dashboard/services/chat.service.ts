@@ -2,24 +2,35 @@ import apiClient, { buildQueryString } from '@/lib/api-client';
 
 /**
  * Chat API client — Slack-like messaging, backed by the Lua `chat-*` routes
- * (`/api/chat/*`). The backend is a full system (channels, DMs, threads,
- * reactions, mentions, presence, files); this MVP covers channels + messages +
- * membership. Real-time is polling for now (no WS endpoint wired yet).
+ * (`/api/chat/*`). Covers channels, direct messages, members, message list +
+ * send, user search and presence. Everything is namespace-gated server-side
+ * (channels are filtered to the current namespace; user search is scoped to
+ * namespace members) via the `X-Namespace-Id` header the api-client injects.
+ * Real-time is polling for now (no WS endpoint wired yet).
  */
+
+export type ChannelType = 'public' | 'private' | 'direct' | 'business';
 
 export interface ChatChannel {
   uuid: string;
   name: string;
   description?: string | null;
   topic?: string | null;
-  channel_type?: string; // 'public' | 'private' | 'direct' | 'business'
+  type?: ChannelType;
+  channel_type?: string; // legacy alias some responses use
   is_private?: boolean;
+  member_role?: string | null; // caller's role in this channel (admin|moderator|member)
   member_count?: number;
   unread_count?: number;
   last_message_at?: string | null;
   created_at?: string;
-  // Present on direct channels — the other participant's display name.
-  peer_name?: string | null;
+  // Present on direct channels — the other participant (relative to caller).
+  other_user_uuid?: string | null;
+  other_user_first_name?: string | null;
+  other_user_last_name?: string | null;
+  other_user_email?: string | null;
+  other_user_username?: string | null;
+  other_user_status?: PresenceStatus | null;
 }
 
 export interface ChatMessage {
@@ -44,12 +55,28 @@ export interface ChatMessage {
   _pending?: boolean;
 }
 
-export interface ChatMentionableUser {
-  uuid: string;
+export interface ChatMember {
+  user_uuid: string;
+  role?: string;
+  joined_at?: string;
+  is_muted?: boolean;
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
   username?: string | null;
+}
+
+export type PresenceStatus = 'online' | 'away' | 'dnd' | 'offline';
+
+export interface ChatUser {
+  uuid: string;
+  username?: string | null;
+  display_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  status?: PresenceStatus;
+  is_chat_active?: boolean;
 }
 
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
@@ -65,10 +92,47 @@ function toList<T>(res: { data: unknown }): T[] {
   return Array.isArray((body as { data?: T[] })?.data) ? ((body as { data?: T[] }).data as T[]) : [];
 }
 
+function fullName(p: {
+  first_name?: string | null;
+  last_name?: string | null;
+}): string {
+  return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+}
+
 /** Best-effort display name for a message sender. */
-export function senderName(m: Pick<ChatMessage, 'first_name' | 'last_name' | 'sender_username' | 'email'>): string {
-  const full = `${m.first_name || ''} ${m.last_name || ''}`.trim();
-  return full || m.sender_username || m.email || 'Unknown';
+export function senderName(
+  m: Pick<ChatMessage, 'first_name' | 'last_name' | 'sender_username' | 'email'>
+): string {
+  return fullName(m) || m.sender_username || m.email || 'Unknown';
+}
+
+/** Best-effort display name for a channel member or searchable user. */
+export function personName(p: {
+  first_name?: string | null;
+  last_name?: string | null;
+  display_name?: string | null;
+  username?: string | null;
+  email?: string | null;
+}): string {
+  return p.display_name || fullName(p) || p.username || p.email || 'Unknown';
+}
+
+/** Is this a 1:1 direct-message channel? */
+export function isDirect(c: ChatChannel): boolean {
+  return (c.type || c.channel_type) === 'direct';
+}
+
+/** What to show as the channel's title — the peer's name for a DM. */
+export function channelTitle(c: ChatChannel): string {
+  if (isDirect(c)) {
+    return (
+      fullName({ first_name: c.other_user_first_name, last_name: c.other_user_last_name }) ||
+      c.other_user_username ||
+      c.other_user_email ||
+      'Direct message'
+    );
+  }
+  return c.name || 'channel';
 }
 
 export const chatService = {
@@ -76,16 +140,24 @@ export const chatService = {
     return toList<ChatChannel>(await apiClient.get('/api/chat/channels'));
   },
 
-  async getDefaults(): Promise<ChatChannel[]> {
-    return toList<ChatChannel>(await apiClient.get('/api/chat/channels/defaults'));
+  /** Seed the default channels for this workspace (best-effort; needs a business). */
+  async createDefaults(): Promise<ChatChannel[]> {
+    const res = await apiClient.post('/api/chat/channels/defaults', {}, JSON_BODY);
+    const body = res.data as { channels?: ChatChannel[] };
+    return body?.channels ?? [];
+  },
+
+  async getChannel(uuid: string): Promise<ChatChannel> {
+    return unwrap<ChatChannel>(await apiClient.get(`/api/chat/channels/${uuid}`));
   },
 
   async createChannel(data: {
     name: string;
     description?: string;
-    channel_type?: string;
-    is_private?: boolean;
+    type?: ChannelType;
+    members?: string[];
   }): Promise<ChatChannel> {
+    // Backend keys on `type` (public|private|direct) — NOT channel_type/is_private.
     return unwrap<ChatChannel>(await apiClient.post('/api/chat/channels', data, JSON_BODY));
   },
 
@@ -97,8 +169,22 @@ export const chatService = {
     await apiClient.post(`/api/chat/channels/${uuid}/read`, {}, JSON_BODY);
   },
 
-  // Messages are returned oldest-or-newest first depending on the query; the UI
-  // sorts by created_at, so order here doesn't matter.
+  async listMembers(channelUuid: string): Promise<ChatMember[]> {
+    return toList<ChatMember>(await apiClient.get(`/api/chat/channels/${channelUuid}/members`));
+  },
+
+  async addMembers(channelUuid: string, userUuids: string[], role = 'member'): Promise<void> {
+    await apiClient.post(
+      `/api/chat/channels/${channelUuid}/members`,
+      { user_uuids: userUuids, role },
+      JSON_BODY
+    );
+  },
+
+  async removeMember(channelUuid: string, userUuid: string): Promise<void> {
+    await apiClient.delete(`/api/chat/channels/${channelUuid}/members/${userUuid}`);
+  },
+
   async listMessages(channelUuid: string, params: Record<string, unknown> = {}): Promise<ChatMessage[]> {
     return toList<ChatMessage>(
       await apiClient.get(`/api/chat/channels/${channelUuid}/messages${buildQueryString(params)}`)
@@ -115,15 +201,22 @@ export const chatService = {
     );
   },
 
-  async searchUsers(q: string): Promise<ChatMentionableUser[]> {
-    if (!q.trim()) return [];
-    return toList<ChatMentionableUser>(await apiClient.get(`/api/chat/users/search${buildQueryString({ q })}`));
+  /** Search users in the current namespace (min 2 chars). */
+  async searchUsers(q: string): Promise<ChatUser[]> {
+    if (q.trim().length < 2) return [];
+    return toList<ChatUser>(await apiClient.get(`/api/chat/users/search${buildQueryString({ q })}`));
   },
 
+  /** Open (or reuse) a direct-message channel with another user. */
   async createDirect(userUuid: string): Promise<ChatChannel> {
-    return unwrap<ChatChannel>(
-      await apiClient.post('/api/chat/channels/direct', { user_uuid: userUuid }, JSON_BODY)
-    );
+    const res = await apiClient.post('/api/chat/channels/direct', { user_uuid: userUuid }, JSON_BODY);
+    const body = res.data as { channel?: ChatChannel };
+    return (body?.channel ?? unwrap<ChatChannel>(res)) as ChatChannel;
+  },
+
+  /** Advertise the caller's presence (best-effort). */
+  async setPresence(status: PresenceStatus): Promise<void> {
+    await apiClient.put('/api/chat/presence', { status }, JSON_BODY);
   },
 };
 

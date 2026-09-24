@@ -1,6 +1,6 @@
-local cjson = require("cjson.safe")
 local db = require("lapis.db")
 local Global = require "helper.global"
+local ChatNamespace = require "helper.chat-namespace"
 
 return function(app)
     ----------------- Chat Mentions Routes --------------------
@@ -485,51 +485,16 @@ return function(app)
 
         local search_pattern = "%" .. search .. "%"
 
-        -- Debug: Log the current user's namespaces
-        local debug_ns_sql = [[
-            SELECT nm.namespace_id, n.name as namespace_name, n.slug
-            FROM namespace_members nm
-            INNER JOIN users u ON u.id = nm.user_id
-            INNER JOIN namespaces n ON n.id = nm.namespace_id
-            WHERE u.uuid = ? AND nm.status = 'active'
-        ]]
-        local user_namespaces = db.query(debug_ns_sql, user.uuid)
-        ngx.log(ngx.NOTICE, "[Chat Search] User ", user.uuid, " namespaces: ", cjson.encode(user_namespaces or {}))
-
-        -- Debug: Count total users matching search (without namespace filter)
-        local debug_count_sql = [[
-            SELECT COUNT(*) as total FROM users u
-            WHERE u.uuid != ?
-              AND (
-                  LOWER(COALESCE(u.username, '')) LIKE LOWER(?)
-                  OR LOWER(COALESCE(u.first_name, '')) LIKE LOWER(?)
-                  OR LOWER(COALESCE(u.last_name, '')) LIKE LOWER(?)
-                  OR LOWER(COALESCE(u.email, '')) LIKE LOWER(?)
-              )
-        ]]
-        local total_matching = db.query(debug_count_sql, user.uuid, search_pattern, search_pattern, search_pattern, search_pattern)
-        ngx.log(ngx.NOTICE, "[Chat Search] Total users matching '", search, "' (without namespace filter): ", total_matching and total_matching[1] and total_matching[1].total or 0)
-
-        -- Debug: Check how many users are in namespace_members at all
-        local debug_nm_sql = [[
-            SELECT COUNT(DISTINCT nm.user_id) as users_in_namespaces,
-                   COUNT(DISTINCT u.id) as total_users
-            FROM users u
-            LEFT JOIN namespace_members nm ON nm.user_id = u.id AND nm.status = 'active'
-            WHERE u.uuid != ?
-        ]]
-        local nm_stats = db.query(debug_nm_sql, user.uuid)
-        if nm_stats and nm_stats[1] then
-            ngx.log(ngx.NOTICE, "[Chat Search] Users in namespaces: ", nm_stats[1].users_in_namespaces, ", Total users: ", nm_stats[1].total_users)
-        end
-
-        -- For chat search, we show ALL users regardless of namespace
-        -- This is appropriate for a Slack-clone where users within the same deployment
-        -- should be able to message each other. If multi-tenancy isolation is needed,
-        -- it should be enforced at the deployment/database level, not within chat search.
-        --
-        -- Note: If you need namespace-based user isolation, you would filter by
-        -- user.uuid_business_id or implement a different tenant isolation strategy.
+        -- Namespace gate: only surface users who are active members of the
+        -- caller's current namespace, so DM/add-member search can't reach
+        -- another tenant's people. When the namespace can't be resolved we fall
+        -- back to no tenant filter (safe default). ns_id is a validated number
+        -- (from ChatNamespace.resolve), so interpolating it is injection-safe.
+        local ns_id = ChatNamespace.resolve()
+        local ns_join = ns_id
+            and ("INNER JOIN namespace_members nm ON nm.user_id = u.id " ..
+                 "AND nm.status = 'active' AND nm.namespace_id = " .. tonumber(ns_id) .. " ")
+            or ""
 
         local sql = [[
             SELECT DISTINCT
@@ -552,6 +517,7 @@ return function(app)
                 END as presence_order
             FROM users u
             LEFT JOIN chat_user_presence up ON up.user_uuid = u.uuid
+            ]] .. ns_join .. [[
             WHERE u.uuid != ?
               AND (
                   LOWER(COALESCE(u.username, '')) LIKE LOWER(?)

@@ -1,22 +1,50 @@
 'use client';
 
-// Chat — Slack-style messaging over the Lua `/api/chat/*` backend.
-// MVP scope: channels (+ create), message list, composer, polling refresh.
-// Follow-ups: DMs, threads, reactions, mentions, presence, files, WebSocket.
+// Chat — a modern, Slack/Discord-style workspace messenger over the Lua
+// `/api/chat/*` backend. Three panes: channels + DMs rail · conversation ·
+// members. Namespace-gated end to end (the api-client sends X-Namespace-Id and
+// the backend scopes channels + user search to the current tenant), so the rail
+// reloads when the active namespace changes.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Hash, Lock, Send, Plus, MessageSquare, Loader2, RefreshCw } from 'lucide-react';
+import {
+  Hash,
+  Lock,
+  Send,
+  Plus,
+  MessageSquare,
+  MessagesSquare,
+  Loader2,
+  RefreshCw,
+  Users,
+  UserPlus,
+  X,
+  Search,
+  ChevronLeft,
+  Trash2,
+  Shield,
+} from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
-import { Modal, Button, Input } from '@/components/ui';
+import { Modal, Button } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
+import { useNamespace } from '@/contexts/NamespaceContext';
 import {
   chatService,
   senderName,
+  personName,
+  channelTitle,
+  isDirect,
   type ChatChannel,
   type ChatMessage,
+  type ChatMember,
+  type ChatUser,
+  type PresenceStatus,
 } from '@/services/chat.service';
 
 const POLL_MS = 4000;
+const GROUP_WINDOW_MS = 5 * 60 * 1000; // group consecutive messages within 5 min
+
+// ---------- small helpers ----------
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -33,89 +61,441 @@ function dayLabel(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const today = new Date();
-  const same = d.toDateString() === today.toDateString();
-  return same ? 'Today' : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  const yst = new Date();
+  yst.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yst.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function ChannelIcon({ channel }: { channel: ChatChannel }) {
-  const priv = channel.is_private || channel.channel_type === 'private';
-  const Icon = priv ? Lock : Hash;
-  return <Icon className="h-4 w-4 shrink-0 text-secondary-400" aria-hidden="true" />;
+// Fixed, vivid avatar colours read well on both light and dark surfaces.
+const AVATAR_COLORS = [
+  'bg-rose-500',
+  'bg-orange-500',
+  'bg-amber-500',
+  'bg-emerald-500',
+  'bg-teal-500',
+  'bg-sky-500',
+  'bg-indigo-500',
+  'bg-violet-500',
+  'bg-fuchsia-500',
+];
+function avatarColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
+
+const PRESENCE: Record<PresenceStatus, { dot: string; label: string }> = {
+  online: { dot: 'bg-emerald-500', label: 'Online' },
+  away: { dot: 'bg-amber-500', label: 'Away' },
+  dnd: { dot: 'bg-rose-500', label: 'Do not disturb' },
+  offline: { dot: 'bg-secondary-300', label: 'Offline' },
+};
+
+function Avatar({
+  name,
+  status,
+  size = 'md',
+  seed,
+}: {
+  name: string;
+  status?: PresenceStatus | null;
+  size?: 'sm' | 'md' | 'lg';
+  seed?: string;
+}) {
+  const dim = size === 'lg' ? 'h-10 w-10 text-sm' : size === 'sm' ? 'h-7 w-7 text-[10px]' : 'h-9 w-9 text-xs';
+  const dotDim = size === 'lg' ? 'h-3 w-3' : 'h-2.5 w-2.5';
+  const p = status ? PRESENCE[status] : null;
+  return (
+    <span className="relative inline-flex shrink-0">
+      <span
+        className={`inline-flex items-center justify-center rounded-full font-semibold text-white ${dim} ${avatarColor(
+          seed || name
+        )}`}
+        aria-hidden="true"
+      >
+        {initials(name)}
+      </span>
+      {p && (
+        <span
+          className={`absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-surface ${dotDim} ${p.dot}`}
+          title={p.label}
+        />
+      )}
+    </span>
+  );
+}
+
+function ChannelGlyph({ channel, className = '' }: { channel: ChatChannel; className?: string }) {
+  const priv = channel.is_private || channel.type === 'private';
+  const Icon = priv ? Lock : Hash;
+  return <Icon className={`h-4 w-4 shrink-0 ${className}`} aria-hidden="true" />;
+}
+
+// ---------- user picker (search + select), reused by 3 modals ----------
+
+function UserPicker({
+  mode,
+  selected = [],
+  onToggle,
+  onPick,
+  excludeUuids = [],
+  autoFocus,
+}: {
+  mode: 'single' | 'multi';
+  selected?: ChatUser[];
+  onToggle?: (u: ChatUser) => void;
+  onPick?: (u: ChatUser) => void;
+  excludeUuids?: string[];
+  autoFocus?: boolean;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<ChatUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const selectedUuids = useMemo(() => new Set(selected.map((u) => u.uuid)), [selected]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const id = setTimeout(async () => {
+      try {
+        const users = await chatService.searchUsers(q);
+        setResults(users.filter((u) => !excludeUuids.includes(u.uuid)));
+      } catch {
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  return (
+    <div className="space-y-3">
+      {mode === 'multi' && selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((u) => (
+            <span
+              key={u.uuid}
+              className="inline-flex items-center gap-1 rounded-full bg-primary-100 py-1 pl-1 pr-2 text-xs font-medium text-primary-800"
+            >
+              <Avatar name={personName(u)} size="sm" seed={u.uuid} />
+              {personName(u)}
+              <button
+                type="button"
+                onClick={() => onToggle?.(u)}
+                className="rounded-full p-0.5 hover:bg-primary-200"
+                aria-label={`Remove ${personName(u)}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary-400" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoFocus={autoFocus}
+          placeholder="Search people by name or email…"
+          className="w-full rounded-lg border border-secondary-300 bg-surface py-2.5 pl-9 pr-3 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+        />
+      </div>
+
+      <div className="max-h-64 overflow-y-auto rounded-lg border border-secondary-100">
+        {loading ? (
+          <div className="flex justify-center py-6 text-secondary-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+          </div>
+        ) : query.trim().length < 2 ? (
+          <p className="px-3 py-6 text-center text-xs text-secondary-400">
+            Type at least 2 characters to search your workspace.
+          </p>
+        ) : results.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-secondary-400">No people found.</p>
+        ) : (
+          results.map((u) => {
+            const picked = selectedUuids.has(u.uuid);
+            return (
+              <button
+                key={u.uuid}
+                type="button"
+                onClick={() => (mode === 'single' ? onPick?.(u) : onToggle?.(u))}
+                className={`flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-secondary-50 ${
+                  picked ? 'bg-primary-50' : ''
+                }`}
+              >
+                <Avatar name={personName(u)} status={u.status} size="sm" seed={u.uuid} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-secondary-900">
+                    {personName(u)}
+                  </span>
+                  {u.email && <span className="block truncate text-xs text-secondary-400">{u.email}</span>}
+                </span>
+                {mode === 'multi' && (
+                  <span
+                    className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                      picked ? 'border-primary-500 bg-primary-500 text-white' : 'border-secondary-300'
+                    }`}
+                  >
+                    {picked && <span className="text-[11px] leading-none">✓</span>}
+                  </span>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- members panel ----------
+
+function MembersList({
+  members,
+  loading,
+  myUuid,
+  canManage,
+  onRemove,
+  onAdd,
+}: {
+  members: ChatMember[];
+  loading: boolean;
+  myUuid?: string;
+  canManage: boolean;
+  onRemove: (m: ChatMember) => void;
+  onAdd: () => void;
+}) {
+  const roleBadge = (role?: string) => {
+    if (role === 'admin') return { label: 'Admin', cls: 'bg-primary-100 text-primary-700' };
+    if (role === 'moderator') return { label: 'Mod', cls: 'bg-amber-100 text-amber-700' };
+    return null;
+  };
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between px-4 py-3">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-secondary-800">
+          <Users className="h-4 w-4" /> Members
+          <span className="text-secondary-400">· {members.length}</span>
+        </h3>
+        {canManage && (
+          <button
+            type="button"
+            onClick={onAdd}
+            className="rounded-md p-1 text-secondary-500 hover:bg-secondary-100 hover:text-secondary-700"
+            title="Add members"
+            aria-label="Add members"
+          >
+            <UserPlus className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {loading ? (
+          <div className="flex justify-center py-6 text-secondary-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+          </div>
+        ) : members.length === 0 ? (
+          <p className="px-2 py-4 text-xs text-secondary-400">No members yet.</p>
+        ) : (
+          members.map((m) => {
+            const name = personName(m);
+            const badge = roleBadge(m.role);
+            const isMe = !!myUuid && m.user_uuid === myUuid;
+            return (
+              <div
+                key={m.user_uuid}
+                className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-secondary-50"
+              >
+                <Avatar name={name} size="sm" seed={m.user_uuid} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-secondary-800">
+                      {name}
+                      {isMe && <span className="ml-1 text-xs font-normal text-secondary-400">(you)</span>}
+                    </span>
+                    {badge && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}
+                      >
+                        {m.role === 'admin' && <Shield className="h-2.5 w-2.5" />}
+                        {badge.label}
+                      </span>
+                    )}
+                  </span>
+                  {m.email && <span className="block truncate text-xs text-secondary-400">{m.email}</span>}
+                </span>
+                {canManage && !isMe && (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(m)}
+                    className="rounded-md p-1 text-secondary-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                    title={`Remove ${name}`}
+                    aria-label={`Remove ${name}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- main page ----------
 
 export default function ChatPage() {
   const user = useAuthStore((s) => s.user);
   const myUuid = (user as { uuid?: string } | null)?.uuid;
+  const { currentNamespace } = useNamespace();
+  const nsKey = currentNamespace?.uuid || '';
 
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [activeUuid, setActiveUuid] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [members, setMembers] = useState<ChatMember[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState('');
+  const [filter, setFilter] = useState('');
+  const [showMembers, setShowMembers] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [dmOpen, setDmOpen] = useState(false);
+  const [membersModalOpen, setMembersModalOpen] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
   const activeChannel = useMemo(
     () => channels.find((c) => c.uuid === activeUuid),
     [channels, activeUuid]
   );
+  const canManage = !!activeChannel && !isDirect(activeChannel) &&
+    (activeChannel.member_role === 'admin' || activeChannel.member_role === 'moderator');
 
-  // Load channels once.
-  const loadChannels = useCallback(async () => {
+  const { groupChannels, dms } = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    const match = (c: ChatChannel) => !f || channelTitle(c).toLowerCase().includes(f);
+    return {
+      groupChannels: channels.filter((c) => !isDirect(c) && match(c)),
+      dms: channels.filter((c) => isDirect(c) && match(c)),
+    };
+  }, [channels, filter]);
+
+  // Load channels for the current namespace; reset when the namespace changes.
+  const loadChannels = useCallback(async (preserveActive: string) => {
     setLoadingChannels(true);
     try {
       let list = await chatService.listChannels();
-      if (list.length === 0) list = await chatService.getDefaults();
+      if (list.length === 0) {
+        try {
+          await chatService.createDefaults();
+          list = await chatService.listChannels();
+        } catch {
+          /* no business / not allowed — fine, just show empty */
+        }
+      }
       setChannels(list);
-      setActiveUuid((prev) => prev || list[0]?.uuid || '');
+      setActiveUuid((prev) => {
+        const keep = preserveActive || prev;
+        return list.some((c) => c.uuid === keep) ? keep : list[0]?.uuid || '';
+      });
     } catch {
       toast.error('Failed to load channels');
+      setChannels([]);
+      setActiveUuid('');
     } finally {
       setLoadingChannels(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadChannels();
-  }, [loadChannels]);
+    setActiveUuid('');
+    void loadChannels('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nsKey]);
 
-  // Load messages for the active channel + poll.
-  const loadMessages = useCallback(
-    async (uuid: string, showSpinner = false) => {
-      if (!uuid) return;
-      if (showSpinner) setLoadingMessages(true);
-      try {
-        const msgs = await chatService.listMessages(uuid, { limit: 50 });
-        msgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-        setMessages(msgs);
-      } catch {
-        // Silent on poll; only surface on the initial load.
-        if (showSpinner) toast.error('Failed to load messages');
-      } finally {
-        if (showSpinner) setLoadingMessages(false);
-      }
-    },
-    []
-  );
+  // Presence heartbeat (best-effort).
+  useEffect(() => {
+    void chatService.setPresence('online').catch(() => undefined);
+    const id = setInterval(() => chatService.setPresence('online').catch(() => undefined), 60_000);
+    return () => {
+      clearInterval(id);
+      void chatService.setPresence('offline').catch(() => undefined);
+    };
+  }, []);
+
+  // Messages for the active channel + poll.
+  const loadMessages = useCallback(async (uuid: string, showSpinner = false) => {
+    if (!uuid) return;
+    if (showSpinner) setLoadingMessages(true);
+    try {
+      const msgs = await chatService.listMessages(uuid, { limit: 50 });
+      msgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      setMessages(msgs);
+    } catch {
+      if (showSpinner) toast.error('Failed to load messages');
+    } finally {
+      if (showSpinner) setLoadingMessages(false);
+    }
+  }, []);
+
+  const loadMembers = useCallback(async (uuid: string) => {
+    if (!uuid) return;
+    setLoadingMembers(true);
+    try {
+      setMembers(await chatService.listMembers(uuid));
+    } catch {
+      setMembers([]);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!activeUuid) {
       setMessages([]);
+      setMembers([]);
       return;
     }
     void loadMessages(activeUuid, true);
+    void loadMembers(activeUuid);
     void chatService.markRead(activeUuid).catch(() => undefined);
     const id = setInterval(() => loadMessages(activeUuid, false), POLL_MS);
     return () => clearInterval(id);
-  }, [activeUuid, loadMessages]);
+  }, [activeUuid, loadMessages, loadMembers]);
 
   // Auto-scroll to newest.
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  // Auto-grow composer.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [draft]);
 
   const send = useCallback(async () => {
     const content = draft.trim();
@@ -151,92 +531,233 @@ export default function ChatPage() {
     }
   };
 
+  const removeMember = useCallback(
+    async (m: ChatMember) => {
+      if (!activeUuid) return;
+      if (!confirm(`Remove ${personName(m)} from this channel?`)) return;
+      try {
+        await chatService.removeMember(activeUuid, m.user_uuid);
+        setMembers((list) => list.filter((x) => x.user_uuid !== m.user_uuid));
+        toast.success('Member removed');
+      } catch {
+        toast.error('Failed to remove member');
+      }
+    },
+    [activeUuid]
+  );
+
+  const openDirect = useCallback(
+    async (u: ChatUser) => {
+      try {
+        const channel = await chatService.createDirect(u.uuid);
+        setDmOpen(false);
+        // Ensure it's in the rail, then open it.
+        setChannels((list) => (list.some((c) => c.uuid === channel.uuid) ? list : [channel, ...list]));
+        setActiveUuid(channel.uuid);
+        // Re-sync so the peer info/ordering is authoritative.
+        void loadChannels(channel.uuid);
+      } catch {
+        toast.error('Failed to open direct message');
+      }
+    },
+    [loadChannels]
+  );
+
+  const headerTitle = activeChannel ? channelTitle(activeChannel) : '';
+  const memberCount = members.length || activeChannel?.member_count || 0;
+
   return (
     <ProtectedPage module="chat" title="Chat">
-      <div className="flex h-full min-h-[560px] overflow-hidden rounded-xl border border-secondary-200 bg-surface">
-        {/* Channel sidebar */}
-        <aside className="flex w-60 shrink-0 flex-col border-r border-secondary-200 bg-secondary-50">
-          <div className="flex items-center justify-between px-3 py-3">
-            <h2 className="text-sm font-semibold text-secondary-800">Channels</h2>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="rounded-md p-1 text-secondary-500 hover:bg-secondary-200 hover:text-secondary-700"
-              title="New channel"
-              aria-label="New channel"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+      <div className="flex h-[calc(100dvh-9rem)] min-h-[520px] overflow-hidden rounded-xl border border-secondary-200 bg-surface shadow-sm">
+        {/* ---------- Left rail: channels + DMs ---------- */}
+        <aside
+          className={`w-full flex-col border-r border-secondary-200 bg-secondary-50 md:w-64 md:flex ${
+            activeUuid ? 'hidden' : 'flex'
+          }`}
+        >
+          <div className="border-b border-secondary-200/70 px-3 py-3">
+            <div className="mb-2 flex items-center gap-2">
+              <MessagesSquare className="h-5 w-5 text-primary-600" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-secondary-900">Messages</p>
+                <p className="truncate text-[11px] text-secondary-400">
+                  {currentNamespace?.name || 'Workspace'}
+                </p>
+              </div>
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-secondary-400" />
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Jump to…"
+                className="w-full rounded-md border border-secondary-200 bg-surface py-1.5 pl-8 pr-2 text-sm text-secondary-800 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-3">
+
+          <div className="flex-1 overflow-y-auto px-2 py-3">
             {loadingChannels ? (
               <div className="flex justify-center py-6 text-secondary-400">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
-            ) : channels.length === 0 ? (
-              <p className="px-2 py-4 text-xs text-secondary-400">No channels yet.</p>
             ) : (
-              channels.map((c) => {
-                const active = c.uuid === activeUuid;
-                const unread = c.unread_count || 0;
-                return (
+              <>
+                {/* Channels */}
+                <div className="mb-1 flex items-center justify-between px-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-secondary-400">
+                    Channels
+                  </span>
                   <button
-                    key={c.uuid}
                     type="button"
-                    onClick={() => setActiveUuid(c.uuid)}
-                    className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
-                      active
-                        ? 'bg-primary-100 font-medium text-primary-800'
-                        : 'text-secondary-700 hover:bg-secondary-200'
-                    }`}
+                    onClick={() => setCreateOpen(true)}
+                    className="rounded p-0.5 text-secondary-400 hover:bg-secondary-200 hover:text-secondary-700"
+                    title="Create channel"
+                    aria-label="Create channel"
                   >
-                    <ChannelIcon channel={c} />
-                    <span className="min-w-0 flex-1 truncate">{c.name || c.peer_name || 'channel'}</span>
-                    {unread > 0 && !active && (
-                      <span className="rounded-full bg-primary-500 px-1.5 text-[10px] font-semibold text-white">
-                        {unread}
-                      </span>
-                    )}
+                    <Plus className="h-4 w-4" />
                   </button>
-                );
-              })
+                </div>
+                {groupChannels.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-secondary-400">No channels.</p>
+                ) : (
+                  groupChannels.map((c) => (
+                    <RailItem
+                      key={c.uuid}
+                      active={c.uuid === activeUuid}
+                      unread={c.unread_count || 0}
+                      onClick={() => setActiveUuid(c.uuid)}
+                    >
+                      <ChannelGlyph
+                        channel={c}
+                        className={c.uuid === activeUuid ? 'text-primary-700' : 'text-secondary-400'}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{channelTitle(c)}</span>
+                    </RailItem>
+                  ))
+                )}
+
+                {/* Direct messages */}
+                <div className="mb-1 mt-4 flex items-center justify-between px-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-secondary-400">
+                    Direct Messages
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDmOpen(true)}
+                    className="rounded p-0.5 text-secondary-400 hover:bg-secondary-200 hover:text-secondary-700"
+                    title="New message"
+                    aria-label="New direct message"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+                {dms.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-secondary-400">No direct messages.</p>
+                ) : (
+                  dms.map((c) => (
+                    <RailItem
+                      key={c.uuid}
+                      active={c.uuid === activeUuid}
+                      unread={c.unread_count || 0}
+                      onClick={() => setActiveUuid(c.uuid)}
+                    >
+                      <Avatar
+                        name={channelTitle(c)}
+                        status={c.other_user_status || 'offline'}
+                        size="sm"
+                        seed={c.other_user_uuid || c.uuid}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{channelTitle(c)}</span>
+                    </RailItem>
+                  ))
+                )}
+              </>
             )}
           </div>
         </aside>
 
-        {/* Message pane */}
-        <section className="flex min-w-0 flex-1 flex-col">
+        {/* ---------- Center: conversation ---------- */}
+        <section className={`min-w-0 flex-1 flex-col ${activeUuid ? 'flex' : 'hidden md:flex'}`}>
           {activeChannel ? (
             <>
-              <header className="flex items-center gap-2 border-b border-secondary-200 px-4 py-3">
-                <ChannelIcon channel={activeChannel} />
-                <h1 className="truncate text-sm font-semibold text-secondary-900">
-                  {activeChannel.name || activeChannel.peer_name}
-                </h1>
-                {activeChannel.topic && (
-                  <span className="truncate text-xs text-secondary-400">— {activeChannel.topic}</span>
-                )}
+              <header className="flex items-center gap-2 border-b border-secondary-200 px-3 py-2.5 sm:px-4">
                 <button
                   type="button"
-                  onClick={() => loadMessages(activeUuid, true)}
-                  className="ml-auto rounded-md p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
-                  title="Refresh"
-                  aria-label="Refresh messages"
+                  onClick={() => setActiveUuid('')}
+                  className="rounded-md p-1 text-secondary-500 hover:bg-secondary-100 md:hidden"
+                  aria-label="Back to conversations"
                 >
-                  <RefreshCw className={`h-4 w-4 ${loadingMessages ? 'animate-spin' : ''}`} />
+                  <ChevronLeft className="h-5 w-5" />
                 </button>
+                {isDirect(activeChannel) ? (
+                  <Avatar
+                    name={headerTitle}
+                    status={activeChannel.other_user_status || 'offline'}
+                    size="sm"
+                    seed={activeChannel.other_user_uuid || activeChannel.uuid}
+                  />
+                ) : (
+                  <ChannelGlyph channel={activeChannel} className="text-secondary-500" />
+                )}
+                <div className="min-w-0">
+                  <h1 className="truncate text-sm font-bold text-secondary-900">{headerTitle}</h1>
+                  {activeChannel.description && !isDirect(activeChannel) && (
+                    <p className="truncate text-xs text-secondary-400">{activeChannel.description}</p>
+                  )}
+                </div>
+
+                <div className="ml-auto flex items-center gap-1">
+                  {!isDirect(activeChannel) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // On large screens toggle the side panel; on small, a modal.
+                        if (window.matchMedia('(min-width: 1024px)').matches) setShowMembers((v) => !v);
+                        else setMembersModalOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-secondary-600 hover:bg-secondary-100"
+                      title="Members"
+                    >
+                      <Users className="h-4 w-4" />
+                      {memberCount}
+                    </button>
+                  )}
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() => setAddOpen(true)}
+                      className="hidden items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 sm:flex"
+                      title="Add people"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Add
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => loadMessages(activeUuid, true)}
+                    className="rounded-md p-1.5 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
+                    title="Refresh"
+                    aria-label="Refresh messages"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loadingMessages ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
               </header>
 
               {/* Messages */}
-              <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4">
+              <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
                 {loadingMessages && messages.length === 0 ? (
-                  <div className="flex justify-center py-10 text-secondary-400">
+                  <div className="flex h-full items-center justify-center text-secondary-400">
                     <Loader2 className="h-5 w-5 animate-spin" />
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center text-secondary-400">
-                    <MessageSquare className="mb-2 h-8 w-8" />
-                    <p className="text-sm">No messages yet — say hello 👋</p>
+                  <div className="flex h-full flex-col items-center justify-center text-center text-secondary-400">
+                    <MessageSquare className="mb-2 h-9 w-9" />
+                    <p className="text-sm font-medium text-secondary-500">This is the start of the conversation</p>
+                    <p className="text-xs">Say hello 👋</p>
                   </div>
                 ) : (
                   messages.map((m, i) => {
@@ -244,32 +765,50 @@ export default function ChatPage() {
                     const mine = !!myUuid && m.user_uuid === myUuid;
                     const prev = messages[i - 1];
                     const newDay = !prev || dayLabel(prev.created_at) !== dayLabel(m.created_at);
+                    const grouped =
+                      !newDay &&
+                      !!prev &&
+                      prev.user_uuid === m.user_uuid &&
+                      new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
                     return (
                       <React.Fragment key={m.uuid}>
                         {newDay && (
                           <div className="my-3 flex items-center gap-3">
                             <div className="h-px flex-1 bg-secondary-100" />
-                            <span className="text-[11px] font-medium text-secondary-400">
+                            <span className="rounded-full bg-secondary-100 px-2.5 py-0.5 text-[11px] font-medium text-secondary-500">
                               {dayLabel(m.created_at)}
                             </span>
                             <div className="h-px flex-1 bg-secondary-100" />
                           </div>
                         )}
-                        <div className={`flex gap-3 py-1 ${m._pending ? 'opacity-60' : ''}`}>
-                          <div
-                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-                              mine ? 'bg-primary-100 text-primary-700' : 'bg-secondary-200 text-secondary-600'
-                            }`}
-                          >
-                            {initials(name)}
+                        <div
+                          className={`group flex gap-3 rounded-lg px-2 hover:bg-secondary-50 ${
+                            grouped ? 'py-0.5' : 'mt-1 py-1'
+                          } ${m._pending ? 'opacity-60' : ''}`}
+                        >
+                          <div className="w-9 shrink-0">
+                            {grouped ? (
+                              <span className="mt-1 hidden text-right text-[10px] text-secondary-300 group-hover:block">
+                                {timeLabel(m.created_at)}
+                              </span>
+                            ) : (
+                              <Avatar name={name} seed={m.user_uuid} />
+                            )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-baseline gap-2">
-                              <span className="text-sm font-semibold text-secondary-900">{name}</span>
-                              <span className="text-[11px] text-secondary-400">{timeLabel(m.created_at)}</span>
-                              {m.is_edited && <span className="text-[11px] text-secondary-300">(edited)</span>}
-                            </div>
-                            <p className="whitespace-pre-wrap break-words text-sm text-secondary-700">
+                            {!grouped && (
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-sm font-semibold text-secondary-900">{name}</span>
+                                {mine && (
+                                  <span className="rounded bg-primary-50 px-1 text-[10px] font-medium text-primary-600">
+                                    you
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-secondary-400">{timeLabel(m.created_at)}</span>
+                                {m.is_edited && <span className="text-[11px] text-secondary-300">(edited)</span>}
+                              </div>
+                            )}
+                            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-700">
                               {m.content}
                             </p>
                           </div>
@@ -281,34 +820,59 @@ export default function ChatPage() {
               </div>
 
               {/* Composer */}
-              <div className="border-t border-secondary-200 p-3">
-                <div className="flex items-end gap-2">
+              <div className="border-t border-secondary-200 px-3 py-3 sm:px-5">
+                <div className="flex items-end gap-2 rounded-xl border border-secondary-300 bg-surface px-3 py-2 focus-within:border-transparent focus-within:ring-2 focus-within:ring-primary-500">
                   <textarea
+                    ref={composerRef}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={onKeyDown}
                     rows={1}
-                    placeholder={`Message ${activeChannel.name ? '#' + activeChannel.name : activeChannel.peer_name || ''}`}
-                    className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-lg border border-secondary-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder={`Message ${isDirect(activeChannel) ? headerTitle : '#' + headerTitle}`}
+                    className="max-h-40 min-h-[1.5rem] flex-1 resize-none bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none"
                   />
-                  <Button onClick={send} isLoading={sending} disabled={!draft.trim()} className="min-h-[2.5rem]">
+                  <Button
+                    onClick={send}
+                    isLoading={sending}
+                    disabled={!draft.trim()}
+                    size="sm"
+                    className="px-2.5!"
+                    aria-label="Send message"
+                  >
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
                 <p className="mt-1 px-1 text-[11px] text-secondary-400">
-                  Enter to send · Shift+Enter for a new line
+                  <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift</kbd>+
+                  <kbd className="font-sans">Enter</kbd> for a new line
                 </p>
               </div>
             </>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center text-secondary-400">
-              <MessageSquare className="mb-2 h-10 w-10" />
-              <p className="text-sm">Select a channel to start chatting</p>
+            <div className="flex h-full flex-col items-center justify-center text-center text-secondary-400">
+              <MessagesSquare className="mb-3 h-12 w-12" />
+              <p className="text-sm font-medium text-secondary-500">Select a conversation</p>
+              <p className="text-xs">Pick a channel or start a direct message</p>
             </div>
           )}
         </section>
+
+        {/* ---------- Right: members panel (lg+) ---------- */}
+        {activeChannel && !isDirect(activeChannel) && showMembers && (
+          <aside className="hidden w-64 shrink-0 border-l border-secondary-200 bg-secondary-50 lg:block">
+            <MembersList
+              members={members}
+              loading={loadingMembers}
+              myUuid={myUuid}
+              canManage={canManage}
+              onRemove={removeMember}
+              onAdd={() => setAddOpen(true)}
+            />
+          </aside>
+        )}
       </div>
 
+      {/* ---------- Modals ---------- */}
       <CreateChannelModal
         isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -316,11 +880,79 @@ export default function ChatPage() {
           setChannels((list) => [c, ...list]);
           setActiveUuid(c.uuid);
           setCreateOpen(false);
+          void loadChannels(c.uuid);
         }}
       />
+
+      {activeChannel && (
+        <AddMembersModal
+          isOpen={addOpen}
+          channel={activeChannel}
+          existing={members.map((m) => m.user_uuid)}
+          onClose={() => setAddOpen(false)}
+          onAdded={() => {
+            setAddOpen(false);
+            void loadMembers(activeUuid);
+          }}
+        />
+      )}
+
+      <StartDirectModal isOpen={dmOpen} onClose={() => setDmOpen(false)} onPick={openDirect} />
+
+      {/* Members on small screens */}
+      <Modal isOpen={membersModalOpen} onClose={() => setMembersModalOpen(false)} title="Members" size="sm">
+        <div className="-mx-2 max-h-[60vh]">
+          <MembersList
+            members={members}
+            loading={loadingMembers}
+            myUuid={myUuid}
+            canManage={canManage}
+            onRemove={removeMember}
+            onAdd={() => {
+              setMembersModalOpen(false);
+              setAddOpen(true);
+            }}
+          />
+        </div>
+      </Modal>
     </ProtectedPage>
   );
 }
+
+// ---------- rail item ----------
+
+function RailItem({
+  active,
+  unread,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  unread: number;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
+        active
+          ? 'bg-primary-100 font-semibold text-primary-800'
+          : `text-secondary-700 hover:bg-secondary-200/70 ${unread > 0 ? 'font-semibold text-secondary-900' : ''}`
+      }`}
+    >
+      {children}
+      {unread > 0 && !active && (
+        <span className="rounded-full bg-primary-500 px-1.5 text-[10px] font-semibold leading-5 text-white">
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ---------- modals ----------
 
 function CreateChannelModal({
   isOpen,
@@ -332,24 +964,35 @@ function CreateChannelModal({
   onCreated: (c: ChatChannel) => void;
 }) {
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [selected, setSelected] = useState<ChatUser[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const reset = () => {
+    setName('');
+    setDescription('');
+    setIsPrivate(false);
+    setSelected([]);
+  };
+
+  const toggle = (u: ChatUser) =>
+    setSelected((s) => (s.some((x) => x.uuid === u.uuid) ? s.filter((x) => x.uuid !== u.uuid) : [...s, u]));
+
+  const submit = async () => {
     const clean = name.trim().replace(/\s+/g, '-').toLowerCase();
     if (!clean) return;
     setSaving(true);
     try {
       const channel = await chatService.createChannel({
         name: clean,
-        channel_type: isPrivate ? 'private' : 'public',
-        is_private: isPrivate,
+        description: description.trim() || undefined,
+        type: isPrivate ? 'private' : 'public',
+        members: selected.map((u) => u.uuid),
       });
       toast.success('Channel created');
       onCreated(channel);
-      setName('');
-      setIsPrivate(false);
+      reset();
     } catch {
       toast.error('Failed to create channel');
     } finally {
@@ -358,33 +1001,155 @@ function CreateChannelModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create a channel" size="sm">
-      <form onSubmit={submit} className="space-y-4">
-        <Input
-          label="Channel name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. general"
-          autoFocus
-        />
-        <label className="flex items-center gap-2 text-sm text-secondary-700">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Create a channel"
+      description="Channels are where your team communicates. Best around a topic — #marketing or #project-x."
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} isLoading={saving} disabled={!name.trim()}>
+            Create channel
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-secondary-700">Name</label>
+          <div className="flex items-center rounded-lg border border-secondary-300 bg-surface px-3 focus-within:border-transparent focus-within:ring-2 focus-within:ring-primary-500">
+            <Hash className="h-4 w-4 text-secondary-400" />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. marketing"
+              autoFocus
+              className="w-full bg-transparent px-2 py-2.5 text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-secondary-700">
+            Description <span className="font-normal text-secondary-400">(optional)</span>
+          </label>
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What's this channel about?"
+            className="w-full rounded-lg border border-secondary-300 bg-surface px-3 py-2.5 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        </div>
+
+        <label className="flex items-start gap-3 rounded-lg border border-secondary-200 p-3">
           <input
             type="checkbox"
             checked={isPrivate}
             onChange={(e) => setIsPrivate(e.target.checked)}
-            className="h-4 w-4 rounded border-secondary-300"
+            className="mt-0.5 h-4 w-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
           />
-          Private channel (invite only)
+          <span>
+            <span className="flex items-center gap-1.5 text-sm font-medium text-secondary-800">
+              <Lock className="h-3.5 w-3.5" /> Make private
+            </span>
+            <span className="text-xs text-secondary-500">
+              Only invited members can see and join this channel.
+            </span>
+          </span>
         </label>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-secondary-700">
+            Add people <span className="font-normal text-secondary-400">(optional)</span>
+          </label>
+          <UserPicker mode="multi" selected={selected} onToggle={toggle} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function AddMembersModal({
+  isOpen,
+  channel,
+  existing,
+  onClose,
+  onAdded,
+}: {
+  isOpen: boolean;
+  channel: ChatChannel;
+  existing: string[];
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [selected, setSelected] = useState<ChatUser[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) setSelected([]);
+  }, [isOpen]);
+
+  const toggle = (u: ChatUser) =>
+    setSelected((s) => (s.some((x) => x.uuid === u.uuid) ? s.filter((x) => x.uuid !== u.uuid) : [...s, u]));
+
+  const submit = async () => {
+    if (selected.length === 0) return;
+    setSaving(true);
+    try {
+      await chatService.addMembers(channel.uuid, selected.map((u) => u.uuid));
+      toast.success(`Added ${selected.length} ${selected.length === 1 ? 'person' : 'people'}`);
+      onAdded();
+    } catch {
+      toast.error('Failed to add members');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Add people to #${channelTitle(channel)}`}
+      size="md"
+      footer={
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" isLoading={saving} disabled={!name.trim()}>
-            Create
+          <Button onClick={submit} isLoading={saving} disabled={selected.length === 0}>
+            Add {selected.length > 0 ? `(${selected.length})` : ''}
           </Button>
         </div>
-      </form>
+      }
+    >
+      <UserPicker mode="multi" selected={selected} onToggle={toggle} excludeUuids={existing} autoFocus />
+    </Modal>
+  );
+}
+
+function StartDirectModal({
+  isOpen,
+  onClose,
+  onPick,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onPick: (u: ChatUser) => void;
+}) {
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="New direct message"
+      description="Search for someone in your workspace to start a private 1:1 chat."
+      size="md"
+    >
+      <UserPicker mode="single" onPick={onPick} autoFocus />
     </Modal>
   );
 }
