@@ -125,7 +125,11 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ steps.meta.outputs.API_URL }}
-            NEXT_PUBLIC_BUILD_VERSION=${{ steps.meta.outputs.APP_VERSION }}
+            # The dashboard's OWN build tag (version + dashboard deploy run number,
+            # e.g. 1.0.147-68) — NOT the repo's shared git tag, which advances on
+            # backend builds too and made the footer look stale. IMAGE_TAG is
+            # dashboard-specific, so the footer now reflects this exact build.
+            NEXT_PUBLIC_BUILD_VERSION=${{ steps.meta.outputs.IMAGE_TAG }}
             NEXT_PUBLIC_BUILD_SHA=${{ steps.meta.outputs.BUILD_SHA }}
             NEXT_PUBLIC_BUILD_TIME=${{ steps.meta.outputs.BUILD_TIME }}
           tags: |

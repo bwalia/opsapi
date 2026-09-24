@@ -136,10 +136,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
             onToggleCollapse={handleSidebarToggleCollapse}
           />
 
-          {/* Main content wrapper */}
+          {/* Main content wrapper — a full-height flex column so the footer
+              sticks to the bottom of the viewport on short pages and sits after
+              the content on long ones. */}
           <div
             className={cn(
-              'transition-all duration-300',
+              'flex min-h-screen flex-col transition-all duration-300',
               // Desktop: adjust margin based on sidebar state
               isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64',
               // Mobile: no margin (sidebar overlays)
@@ -149,8 +151,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
             {/* Header */}
             <Header onMenuClick={handleSidebarOpen} />
 
-            {/* Main content */}
-            <main id="main-content" className="p-4 sm:p-6">{children}</main>
+            {/* Main content — grows to fill, pushing the footer down */}
+            <main id="main-content" className="flex-1 p-4 sm:p-6">{children}</main>
 
             {/* Build/version stamp — so it's obvious which build is live */}
             <BuildFooter />
