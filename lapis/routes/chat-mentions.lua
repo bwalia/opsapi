@@ -6,9 +6,14 @@ return function(app)
     ----------------- Chat Mentions Routes --------------------
 
     -- Helper function to get current user from headers
-    local function get_current_user()
-        local user_uuid = ngx.var.http_x_user_id
-        local user_business_id = ngx.var.http_x_business_id
+    -- Derive the caller from the JWT the global before_filter already validated
+    -- (self.current_user), NOT a client-supplied X-User-Id header. The header
+    -- form trusted any value (letting a caller impersonate any user) AND, since
+    -- the JWT-based dashboard never sends X-User-Id, it 401'd every chat request
+    -- — which the api-client turns into a logout the instant you open chat.
+    local function get_current_user(self)
+        local user = self and self.current_user
+        local user_uuid = user and (user.uuid or user.sub)
 
         if not user_uuid or user_uuid == "" then
             return nil, "Unauthorized"
@@ -16,13 +21,13 @@ return function(app)
 
         return {
             uuid = user_uuid,
-            uuid_business_id = user_business_id
+            uuid_business_id = ngx.var.http_x_business_id
         }
     end
 
     -- GET /api/chat/mentions - Get all mentions for current user
     app:get("/api/chat/mentions", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -133,7 +138,7 @@ return function(app)
 
     -- GET /api/chat/mentions/unread/count - Get unread mentions count
     app:get("/api/chat/mentions/unread/count", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -160,7 +165,7 @@ return function(app)
 
     -- GET /api/chat/channels/:channel_uuid/mentions - Get mentions in a specific channel
     app:get("/api/chat/channels/:channel_uuid/mentions", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -206,7 +211,7 @@ return function(app)
 
     -- POST /api/chat/mentions/:uuid/read - Mark a mention as read
     app:post("/api/chat/mentions/:uuid/read", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -235,7 +240,7 @@ return function(app)
 
     -- POST /api/chat/mentions/read-all - Mark all mentions as read
     app:post("/api/chat/mentions/read-all", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -257,7 +262,7 @@ return function(app)
 
     -- POST /api/chat/channels/:channel_uuid/mentions/read-all - Mark all mentions in a channel as read
     app:post("/api/chat/channels/:channel_uuid/mentions/read-all", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -285,7 +290,7 @@ return function(app)
 
     -- GET /api/chat/users/mentionable - Get users that can be mentioned (for autocomplete)
     app:get("/api/chat/users/mentionable", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -462,7 +467,7 @@ return function(app)
     -- Used for Direct Message user search
     -- Filters by namespace membership (users in the same namespace as the current user)
     app:get("/api/chat/users/search", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end

@@ -24,9 +24,14 @@ return function(app)
     end
 
     -- Get current user from headers
-    local function get_current_user()
-        local user_uuid = ngx.var.http_x_user_id
-        local user_business_id = ngx.var.http_x_business_id
+    -- Derive the caller from the JWT the global before_filter already validated
+    -- (self.current_user), NOT a client-supplied X-User-Id header. The header
+    -- form trusted any value (letting a caller impersonate any user) AND, since
+    -- the JWT-based dashboard never sends X-User-Id, it 401'd every chat request
+    -- — which the api-client turns into a logout the instant you open chat.
+    local function get_current_user(self)
+        local user = self and self.current_user
+        local user_uuid = user and (user.uuid or user.sub)
 
         if not user_uuid or user_uuid == "" then
             return nil, "Unauthorized"
@@ -34,13 +39,13 @@ return function(app)
 
         return {
             uuid = user_uuid,
-            uuid_business_id = user_business_id
+            uuid_business_id = ngx.var.http_x_business_id
         }
     end
 
     -- POST /api/chat/messages/:message_uuid/reactions - Add reaction to message
     app:post("/api/chat/messages/:message_uuid/reactions", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -92,7 +97,7 @@ return function(app)
 
     -- DELETE /api/chat/messages/:message_uuid/reactions/:emoji - Remove reaction
     app:delete("/api/chat/messages/:message_uuid/reactions/:emoji", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -127,7 +132,7 @@ return function(app)
 
     -- POST /api/chat/messages/:message_uuid/reactions/toggle - Toggle reaction
     app:post("/api/chat/messages/:message_uuid/reactions/toggle", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -172,7 +177,7 @@ return function(app)
 
     -- GET /api/chat/messages/:message_uuid/reactions - Get all reactions for a message
     app:get("/api/chat/messages/:message_uuid/reactions", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -207,7 +212,7 @@ return function(app)
 
     -- GET /api/chat/messages/:message_uuid/reactions/:emoji/users - Get users who reacted with specific emoji
     app:get("/api/chat/messages/:message_uuid/reactions/:emoji/users", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -244,7 +249,7 @@ return function(app)
 
     -- GET /api/chat/channels/:channel_uuid/reactions/popular - Get most used emojis in channel
     app:get("/api/chat/channels/:channel_uuid/reactions/popular", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end

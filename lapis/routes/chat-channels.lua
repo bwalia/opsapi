@@ -26,9 +26,14 @@ return function(app)
     end
 
     -- Get current user from headers
-    local function get_current_user()
-        local user_uuid = ngx.var.http_x_user_id
-        local user_business_id = ngx.var.http_x_business_id
+    -- Derive the caller from the JWT the global before_filter already validated
+    -- (self.current_user), NOT a client-supplied X-User-Id header. The header
+    -- form trusted any value (letting a caller impersonate any user) AND, since
+    -- the JWT-based dashboard never sends X-User-Id, it 401'd every chat request
+    -- — which the api-client turns into a logout the instant you open chat.
+    local function get_current_user(self)
+        local user = self and self.current_user
+        local user_uuid = user and (user.uuid or user.sub)
 
         if not user_uuid or user_uuid == "" then
             return nil, "Unauthorized"
@@ -36,7 +41,7 @@ return function(app)
 
         return {
             uuid = user_uuid,
-            uuid_business_id = user_business_id
+            uuid_business_id = ngx.var.http_x_business_id
         }
     end
 
@@ -59,7 +64,7 @@ return function(app)
 
     -- GET /api/chat/channels - List user's channels
     app:get("/api/chat/channels", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -84,7 +89,7 @@ return function(app)
 
     -- GET /api/chat/channels/business - List all business channels
     app:get("/api/chat/channels/business", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -113,7 +118,7 @@ return function(app)
 
     -- POST /api/chat/channels - Create a new channel
     app:post("/api/chat/channels", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -174,7 +179,7 @@ return function(app)
 
     -- GET /api/chat/channels/:uuid - Get channel details
     app:get("/api/chat/channels/:uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -201,7 +206,7 @@ return function(app)
 
     -- PUT /api/chat/channels/:uuid - Update channel
     app:put("/api/chat/channels/:uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -238,7 +243,7 @@ return function(app)
 
     -- DELETE /api/chat/channels/:uuid - Archive channel
     app:delete("/api/chat/channels/:uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -264,7 +269,7 @@ return function(app)
 
     -- GET /api/chat/channels/:uuid/members - Get channel members
     app:get("/api/chat/channels/:uuid/members", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -296,7 +301,7 @@ return function(app)
 
     -- POST /api/chat/channels/:uuid/members - Add members to channel
     app:post("/api/chat/channels/:uuid/members", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -341,7 +346,7 @@ return function(app)
 
     -- DELETE /api/chat/channels/:uuid/members/:user_uuid - Remove member from channel
     app:delete("/api/chat/channels/:uuid/members/:user_uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -368,7 +373,7 @@ return function(app)
 
     -- PUT /api/chat/channels/:uuid/members/:user_uuid/role - Update member role
     app:put("/api/chat/channels/:uuid/members/:user_uuid/role", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -406,7 +411,7 @@ return function(app)
 
     -- PUT /api/chat/channels/:uuid/settings - Update channel settings for current user
     app:put("/api/chat/channels/:uuid/settings", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -438,7 +443,7 @@ return function(app)
 
     -- POST /api/chat/channels/:uuid/read - Mark channel as read
     app:post("/api/chat/channels/:uuid/read", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -473,7 +478,7 @@ return function(app)
 
     -- POST /api/chat/channels/:uuid/join - Join a public channel
     app:post("/api/chat/channels/:uuid/join", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -510,7 +515,7 @@ return function(app)
 
     -- POST /api/chat/channels/:uuid/leave - Leave a channel
     app:post("/api/chat/channels/:uuid/leave", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -531,7 +536,7 @@ return function(app)
 
     -- GET /api/chat/channels/search - Search channels
     app:get("/api/chat/channels/search", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -560,7 +565,7 @@ return function(app)
 
     -- POST /api/chat/channels/direct - Create or get direct message channel
     app:post("/api/chat/channels/direct", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -616,7 +621,7 @@ return function(app)
 
     -- POST /api/chat/channels/defaults - Create default channels for business
     app:post("/api/chat/channels/defaults", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
