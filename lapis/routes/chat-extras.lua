@@ -30,9 +30,14 @@ return function(app)
     end
 
     -- Get current user from headers
-    local function get_current_user()
-        local user_uuid = ngx.var.http_x_user_id
-        local user_business_id = ngx.var.http_x_business_id
+    -- Derive the caller from the JWT the global before_filter already validated
+    -- (self.current_user), NOT a client-supplied X-User-Id header. The header
+    -- form trusted any value (letting a caller impersonate any user) AND, since
+    -- the JWT-based dashboard never sends X-User-Id, it 401'd every chat request
+    -- — which the api-client turns into a logout the instant you open chat.
+    local function get_current_user(self)
+        local user = self and self.current_user
+        local user_uuid = user and (user.uuid or user.sub)
 
         if not user_uuid or user_uuid == "" then
             return nil, "Unauthorized"
@@ -40,7 +45,7 @@ return function(app)
 
         return {
             uuid = user_uuid,
-            uuid_business_id = user_business_id
+            uuid_business_id = ngx.var.http_x_business_id
         }
     end
 
@@ -48,7 +53,7 @@ return function(app)
 
     -- POST /api/chat/bookmarks - Add bookmark
     app:post("/api/chat/bookmarks", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -70,7 +75,7 @@ return function(app)
 
     -- GET /api/chat/bookmarks - Get user's bookmarks
     app:get("/api/chat/bookmarks", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -93,7 +98,7 @@ return function(app)
 
     -- DELETE /api/chat/bookmarks/:message_uuid - Remove bookmark
     app:delete("/api/chat/bookmarks/:message_uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -111,7 +116,7 @@ return function(app)
 
     -- PUT /api/chat/drafts/:channel_uuid - Save draft
     app:put("/api/chat/drafts/:channel_uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -134,7 +139,7 @@ return function(app)
 
     -- GET /api/chat/drafts/:channel_uuid - Get draft for channel
     app:get("/api/chat/drafts/:channel_uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -150,7 +155,7 @@ return function(app)
 
     -- GET /api/chat/drafts - Get all drafts
     app:get("/api/chat/drafts", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -162,7 +167,7 @@ return function(app)
 
     -- DELETE /api/chat/drafts/:channel_uuid - Delete draft
     app:delete("/api/chat/drafts/:channel_uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -176,7 +181,7 @@ return function(app)
 
     -- GET /api/chat/mentions - Get user's mentions
     app:get("/api/chat/mentions", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -204,7 +209,7 @@ return function(app)
 
     -- POST /api/chat/mentions/:uuid/read - Mark mention as read
     app:post("/api/chat/mentions/:uuid/read", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -220,7 +225,7 @@ return function(app)
 
     -- POST /api/chat/mentions/read-all - Mark all mentions as read
     app:post("/api/chat/mentions/read-all", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -234,7 +239,7 @@ return function(app)
 
     -- PUT /api/chat/presence - Update presence
     app:put("/api/chat/presence", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -257,7 +262,7 @@ return function(app)
 
     -- GET /api/chat/presence - Get current user's presence
     app:get("/api/chat/presence", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -269,7 +274,7 @@ return function(app)
 
     -- GET /api/chat/channels/:uuid/presence - Get online users in channel
     app:get("/api/chat/channels/:uuid/presence", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -281,7 +286,7 @@ return function(app)
 
     -- DELETE /api/chat/presence/custom-status - Clear custom status
     app:delete("/api/chat/presence/custom-status", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -295,7 +300,7 @@ return function(app)
 
     -- POST /api/chat/channels/:uuid/invites - Send invitation
     app:post("/api/chat/channels/:uuid/invites", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -336,7 +341,7 @@ return function(app)
 
     -- GET /api/chat/invites - Get pending invitations for current user
     app:get("/api/chat/invites", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -348,7 +353,7 @@ return function(app)
 
     -- POST /api/chat/invites/:uuid/accept - Accept invitation
     app:post("/api/chat/invites/:uuid/accept", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -367,7 +372,7 @@ return function(app)
 
     -- POST /api/chat/invites/:uuid/decline - Decline invitation
     app:post("/api/chat/invites/:uuid/decline", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -385,7 +390,7 @@ return function(app)
 
     -- GET /api/chat/channels/:uuid/files - Get files in channel
     app:get("/api/chat/channels/:uuid/files", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -416,7 +421,7 @@ return function(app)
 
     -- GET /api/chat/channels/:uuid/files/images - Get images in channel
     app:get("/api/chat/channels/:uuid/files/images", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -439,7 +444,7 @@ return function(app)
 
     -- POST /api/chat/files - Create file attachment record (before upload)
     app:post("/api/chat/files", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
@@ -473,7 +478,7 @@ return function(app)
 
     -- DELETE /api/chat/files/:uuid - Delete file attachment
     app:delete("/api/chat/files/:uuid", function(self)
-        local user, err = get_current_user()
+        local user, err = get_current_user(self)
         if not user then
             return { status = 401, json = { error = err } }
         end
