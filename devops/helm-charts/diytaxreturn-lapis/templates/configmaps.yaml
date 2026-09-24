@@ -4,11 +4,14 @@ metadata:
   name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
 #   namespace: {{ .Values.targetNS }}
 data:
+    # PER-POD nginx bootstrap (postStart). Runs on EVERY pod start, so it must
+    # stay idempotent and cheap and do NO cluster-wide work. Database migrations
+    # + namespace seeding moved OUT of here into the one-shot `migrate.sh` run by
+    # the pre-upgrade Helm hook Job (migrate-job.yaml) — otherwise every replica
+    # would migrate concurrently, which races once replicaCount > 1 (HA Phase 0).
     bootstrap-nginx.sh: |
         #!/bin/bash
         # Fail fast on any error so readiness probe keeps failing until bootstrap succeeds.
-        # pipefail: catch failures piped through tee/etc. nounset disabled (-x instead) —
-        # some upstream images reference optional vars we do not want to mask.
         set -eo pipefail
         set -x
 
@@ -22,24 +25,50 @@ data:
           echo "[bootstrap] Patched nginx resolver with K8s DNS: ${KUBE_DNS}"
         fi
 
-        echo "[bootstrap] PROJECT_CODE=${PROJECT_CODE:-<unset>}"
+        echo "[bootstrap] PROJECT_CODE=${PROJECT_CODE:-<unset>} (migrations run in the pre-upgrade hook Job, not here)"
+{{- if not .Values.externalSecret.enabled }}
 
-        # Reconcile the migration ledger against the live schema BEFORE
-        # migrating. If lapis_migrations records a migration as applied
-        # but the relation it created is gone (DB restore drift, a
-        # migration once run against the wrong DB, a manual drop), Lapis
-        # would otherwise SKIP it and a later FK-dependent migration
-        # would die with `relation "X" does not exist` — crash-looping
-        # the pod (acc, 2026-05-14, 22h outage). reconcile() un-records
-        # such phantom entries so `lapis migrate` below re-applies them.
-        # Non-fatal: a failure here just leaves us where we were before.
-        echo "[bootstrap] Reconciling migration ledger against live schema..."
+        # DEV FALLBACK: with no ExternalSecret there is no `{{ .Release.Name }}-secrets`
+        # for a pre-upgrade hook Job to mount, so no migrate Job runs. Migrate
+        # in-pod here instead. Safe because these envs are single-replica; do NOT
+        # rely on this once you scale replicaCount > 1 (enable externalSecret).
+        cp /tmp/configmap/migrate.sh /usr/local/bin/migrate.sh
+        chmod +x /usr/local/bin/migrate.sh
+        /bin/sh /usr/local/bin/migrate.sh
+{{- end }}
+
+        mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
+        chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
+        cp /app/api-docs/swagger.json /tmp/swagger.json
+
+    # ONE-SHOT migrate + seed, run by the pre-upgrade/pre-install Helm hook Job
+    # (migrate-job.yaml) exactly ONCE per deploy, BEFORE the new pods roll. This
+    # is what makes replicaCount > 1 safe: no per-pod migration races.
+    migrate.sh: |
+        #!/bin/bash
+        set -eo pipefail
+        set -x
+
+        # lapis migrate / exec read the DB config from /app/config.lua, so stage
+        # it from the mounted secret first (same as the pod does).
+        cp /tmp/secrets/config.lua /app/config.lua
+
+        echo "[migrate] PROJECT_CODE=${PROJECT_CODE:-<unset>} POSTGRES_DB=${POSTGRES_DB:-<from config>}"
+
+        # Reconcile the migration ledger against the live schema BEFORE migrating.
+        # If lapis_migrations records a migration as applied but the relation it
+        # created is gone (DB restore drift, a migration once run against the
+        # wrong DB, a manual drop), Lapis would otherwise SKIP it and a later
+        # FK-dependent migration would die with `relation "X" does not exist`
+        # (acc, 2026-05-14, 22h outage). reconcile() un-records such phantom
+        # entries so `lapis migrate` re-applies them. Non-fatal.
+        echo "[migrate] Reconciling migration ledger against live schema..."
         if ! lapis exec "require('scripts.reconcile-migrations').reconcile()"; then
-          echo "[bootstrap] Reconcile step errored (non-fatal) — proceeding to migrate." >&2
+          echo "[migrate] Reconcile step errored (non-fatal) — proceeding to migrate." >&2
         fi
 
-        echo "[bootstrap] Running migrations..."
-        # Retry migrations up to 5 times — Postgres may not be fully ready at postStart time.
+        echo "[migrate] Running migrations..."
+        # Retry — Postgres may still be coming up when the hook fires.
         MIGRATE_RETRIES=5
         MIGRATE_DELAY=6
         attempt=1
@@ -47,30 +76,26 @@ data:
           if lapis migrate; then
             break
           fi
-          echo "[bootstrap] Migration attempt $attempt/$MIGRATE_RETRIES failed. Retrying in ${MIGRATE_DELAY}s..."
+          echo "[migrate] Migration attempt $attempt/$MIGRATE_RETRIES failed. Retrying in ${MIGRATE_DELAY}s..."
           attempt=$((attempt + 1))
           sleep $MIGRATE_DELAY
         done
         if [ $attempt -gt $MIGRATE_RETRIES ]; then
-          echo "[bootstrap] Migrations failed after $MIGRATE_RETRIES attempts. Aborting bootstrap." >&2
+          echo "[migrate] Migrations failed after $MIGRATE_RETRIES attempts. Aborting." >&2
           exit 1
         fi
         echo "==========================="
 
-        echo "[bootstrap] Running namespace setup (supports multi-project codes)..."
-        # runMulti() validates every project code, isolates per-code failures with pcall,
-        # and re-raises on partial failure so this script exits non-zero and the pod
-        # readiness probe keeps failing until an operator intervenes.
+        echo "[migrate] Running namespace setup (supports multi-project codes)..."
+        # runMulti() validates every project code, isolates per-code failures with
+        # pcall, and re-raises on partial failure so this Job exits non-zero and the
+        # deploy stops until an operator intervenes.
         if ! lapis exec "require('scripts.setup-namespace').runMulti({})"; then
-          echo "[bootstrap] Namespace setup failed — check above for which project code failed." >&2
+          echo "[migrate] Namespace setup failed — check above for which project code failed." >&2
           exit 1
         fi
-        echo "[bootstrap] Namespace setup complete."
+        echo "[migrate] Namespace setup complete."
         echo "==========================="
-
-        mkdir -p /tmp/ && chown nobody /tmp/ && touch /tmp/swagger.json
-        chown nobody /tmp/swagger.json && chmod 755 /tmp/swagger.json
-        cp /app/api-docs/swagger.json /tmp/swagger.json
 
 ---
 apiVersion: v1

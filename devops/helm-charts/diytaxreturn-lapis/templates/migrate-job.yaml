@@ -1,0 +1,122 @@
+{{- /*
+HA Phase 0 — one-shot DB migrate + namespace seed.
+
+Runs ONCE per deploy, as a pre-upgrade Helm hook, BEFORE the new pods roll.
+Migrations used to run in every pod's postStart; that races the moment
+replicaCount > 1 (two pods both see migration N un-applied and both try it).
+Moving it here decouples migration from pod startup so the app tier can scale
+to multiple replicas safely.
+
+pre-upgrade (NOT pre-install): the `{{ .Release.Name }}-secrets` Secret is
+created by the ExternalSecret (ESO) in the main phase, so it does not exist yet
+during pre-install hooks. On a brand-new install run migrate once manually (or
+let the first `helm upgrade` do it); every subsequent deploy runs this hook
+automatically. Helm blocks the upgrade until this Job succeeds — a failed
+migration stops the rollout instead of shipping bad pods.
+*/}}
+{{- if .Values.externalSecret.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  labels:
+    app: {{ .Release.Name }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+        job: migrate
+    spec:
+      restartPolicy: Never
+      # Same placement rules as the app: migrate must reach the same Postgres.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - lubuntu001
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - cp /tmp/configmap/migrate.sh /usr/local/bin/migrate.sh && chmod +x /usr/local/bin/migrate.sh && /bin/sh /usr/local/bin/migrate.sh
+          volumeMounts:
+            - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
+              mountPath: /tmp/configmap
+            - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
+              mountPath: /tmp/secrets
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-secrets
+          env:
+            # ── Mirror of the DB / project / seed env from deployment.yaml that
+            # migration + namespace-setup need. Runtime-only vars (CORS_*,
+            # MINIO_*, OTP_SUPPRESS, mail banner) are intentionally omitted.
+            # KEEP IN SYNC with deployment.yaml. ────────────────────────────────
+            # config.lua only defines the "production" block, so lapis must run
+            # in that environment or it picks an empty "development" config and
+            # has no DB.
+            - name: LAPIS_ENVIRONMENT
+              value: "production"
+            - name: POSTGRES_SSL
+              value: {{ .Values.postgresSsl | default "true" | quote }}
+            {{- if and .Values.database .Values.database.name }}
+            # DB isolation: migrate THIS release's own database, not the shared
+            # `opsapi` default baked into config.lua.
+            - name: POSTGRES_DB
+              value: {{ .Values.database.name | quote }}
+            {{- end }}
+            - name: PROJECT_CODE
+              value: {{ .Values.projectCode | default "all" | quote }}
+            {{- if and .Values.setup .Values.setup.adminEmail }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.setup.adminEmail | quote }}
+            {{- end }}
+            {{- if and .Values.setup .Values.setup.adminPassword }}
+            - name: ADMIN_PASSWORD
+              value: {{ .Values.setup.adminPassword | quote }}
+            {{- end }}
+            {{- if and .Values.setup .Values.setup.namespaceSlug }}
+            - name: NAMESPACE_SLUG
+              value: {{ .Values.setup.namespaceSlug | quote }}
+            {{- end }}
+            {{- if .Values.frontendUrl }}
+            - name: FRONTEND_URL
+              value: {{ .Values.frontendUrl | quote }}
+            {{- end }}
+            {{- if .Values.passwordResetAllowedOrigins }}
+            - name: PASSWORD_RESET_ALLOWED_ORIGINS
+              value: {{ .Values.passwordResetAllowedOrigins | quote }}
+            {{- end }}
+      volumes:
+        - name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}-vol
+          configMap:
+            name: {{ .Release.Name }}-cm-{{ .Release.Namespace }}
+        - name: {{ .Release.Name }}-vol-{{ .Release.Namespace }}
+          secret:
+            secretName: "{{ .Release.Name }}-secrets"
+            items:
+              - key: LAPIS_CONFIG_LUA_FILE
+                path: config.lua
+{{- end }}
