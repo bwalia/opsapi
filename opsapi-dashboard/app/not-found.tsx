@@ -2,57 +2,52 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Home, ArrowLeft, Search, HelpCircle } from 'lucide-react';
+import { Home, ArrowLeft, Compass, LifeBuoy } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-secondary-50 via-white to-primary-50 p-4">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-primary-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary-500/5 rounded-full blur-3xl" />
-        {/* Grid Pattern */}
+    <div className="relative min-h-dvh flex items-center justify-center overflow-hidden bg-gradient-to-br from-secondary-100 via-secondary-50 to-primary-100/50 p-4 dark:from-secondary-950 dark:via-secondary-900 dark:to-secondary-900">
+      {/* Depth: brand glows + subtle grid (stronger than before so it isn't washed out) */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-primary-500/15 blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 h-96 w-96 rounded-full bg-primary-400/10 blur-3xl" />
         <div
-          className="absolute inset-0 opacity-[0.015]"
+          className="absolute inset-0 opacity-[0.04] dark:opacity-[0.06]"
           style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`
+            backgroundImage:
+              "url(\"data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 .5H39.5V40' fill='none' stroke='%23999' stroke-width='0.5'/%3E%3C/svg%3E\")",
           }}
         />
       </div>
 
-      <div className="relative z-10 max-w-lg w-full text-center">
-        {/* 404 Illustration */}
+      <div className="relative z-10 w-full max-w-lg text-center">
+        {/* 404 — bold, high-contrast gradient */}
         <div className="mb-8">
           <div className="relative inline-block">
-            {/* Large 404 Text */}
-            <h1 className="text-[180px] sm:text-[220px] font-black text-transparent bg-clip-text bg-gradient-to-br from-primary-200 via-primary-300 to-primary-400 leading-none select-none">
+            <h1 className="select-none bg-gradient-to-br from-primary-500 via-primary-600 to-primary-700 bg-clip-text text-[150px] font-black leading-none text-transparent drop-shadow-sm sm:text-[200px]">
               404
             </h1>
-            {/* Floating Icon */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white shadow-xl flex items-center justify-center border border-secondary-100">
-                <Search className="w-10 h-10 sm:w-12 sm:h-12 text-primary-500" />
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-surface shadow-xl ring-1 ring-secondary-900/10 sm:h-24 sm:w-24">
+                <Compass className="h-10 w-10 text-primary-600 sm:h-12 sm:w-12" />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-secondary-100 p-8 sm:p-10">
-          <h2 className="text-2xl sm:text-3xl font-bold text-secondary-900 mb-3">
-            Page Not Found
-          </h2>
-          <p className="text-secondary-600 mb-8 leading-relaxed">
-            The page you&apos;re looking for doesn&apos;t exist or has been moved.
-            Please check the URL or navigate back to a known page.
+        {/* Solid, well-separated card */}
+        <div className="rounded-2xl border border-secondary-200 bg-surface p-8 shadow-2xl ring-1 ring-secondary-900/5 sm:p-10 dark:border-secondary-800">
+          <h2 className="mb-3 text-2xl font-bold text-secondary-900 sm:text-3xl">Page not found</h2>
+          <p className="mb-8 leading-relaxed text-secondary-600">
+            The page you&apos;re looking for doesn&apos;t exist or has moved. Check the URL, or head
+            back to a page you know.
           </p>
 
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link href="/dashboard">
+          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Link href="/dashboard" className="w-full sm:w-auto">
               <Button size="lg" className="w-full sm:w-auto">
-                <Home className="w-5 h-5 mr-2" />
+                <Home className="mr-2 h-5 w-5" />
                 Go to Dashboard
               </Button>
             </Link>
@@ -62,29 +57,27 @@ export default function NotFound() {
               className="w-full sm:w-auto"
               onClick={() => window.history.back()}
             >
-              <ArrowLeft className="w-5 h-5 mr-2" />
+              <ArrowLeft className="mr-2 h-5 w-5" />
               Go Back
             </Button>
           </div>
 
-          {/* Help Link */}
-          <div className="mt-8 pt-6 border-t border-secondary-100">
+          <div className="mt-8 border-t border-secondary-100 pt-6 dark:border-secondary-800">
             <p className="text-sm text-secondary-500">
               Need help?{' '}
               <Link
                 href="/dashboard/settings"
-                className="text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+                className="inline-flex items-center gap-1 font-medium text-primary-600 hover:text-primary-700"
               >
-                <HelpCircle className="w-4 h-4" />
+                <LifeBuoy className="h-4 w-4" />
                 Contact Support
               </Link>
             </p>
           </div>
         </div>
 
-        {/* Footer */}
-        <p className="mt-6 text-sm text-secondary-400">
-          Error Code: 404 | Page Not Found
+        <p className="mt-6 text-xs font-medium uppercase tracking-wide text-secondary-400">
+          Error 404 · Page not found
         </p>
       </div>
     </div>

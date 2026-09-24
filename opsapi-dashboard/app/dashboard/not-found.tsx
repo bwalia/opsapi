@@ -18,8 +18,8 @@ export default function DashboardNotFound() {
       <div className="max-w-2xl w-full text-center">
         {/* Icon and Title */}
         <div className="mb-8">
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-2xl bg-gradient-to-br from-primary-100 to-primary-200 mb-6">
-            <FileQuestion className="w-12 h-12 text-primary-600" />
+          <div className="inline-flex items-center justify-center w-24 h-24 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-lg shadow-primary-500/25 mb-6">
+            <FileQuestion className="w-12 h-12 text-white" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold text-secondary-900 mb-3">
             Page Not Found
