@@ -77,6 +77,10 @@ export interface ChatUser {
   email?: string | null;
   status?: PresenceStatus;
   is_chat_active?: boolean;
+  // Can this person actually be pulled into chat here? (RBAC + tenancy —
+  // active member of this namespace with a chat-module grant.) false ⇒ the UI
+  // blocks selecting them and prompts to grant Chat access.
+  has_chat_access?: boolean;
 }
 
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;

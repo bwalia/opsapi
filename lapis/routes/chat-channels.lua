@@ -4,6 +4,7 @@ local ChatChannelMemberQueries = require "queries.ChatChannelMemberQueries"
 local ChatMessageQueries = require "queries.ChatMessageQueries"
 local Global = require "helper.global"
 local ChatNamespace = require "helper.chat-namespace"
+local ChatAccess = require "helper.chat-access"
 
 return function(app)
     ----------------- Chat Channel Routes --------------------
@@ -127,6 +128,27 @@ return function(app)
         local namespace_id = get_namespace_id()
         if not namespace_id then
             return { status = 400, json = { error = "Namespace context required. Please provide X-Namespace-Id header or ensure system namespace exists." } }
+        end
+
+        -- RBAC + tenancy gate for any initial members: validate BEFORE creating
+        -- the channel so we never leave an orphan behind on rejection.
+        if data.members and type(data.members) == "table" then
+            local denied = {}
+            for _, member_uuid in ipairs(data.members) do
+                if member_uuid ~= user.uuid and not ChatAccess.user_has_chat(member_uuid, namespace_id) then
+                    table.insert(denied, member_uuid)
+                end
+            end
+            if #denied > 0 then
+                return {
+                    status = 403,
+                    json = {
+                        error = "no_chat_access",
+                        message = "Some people can't be added — they don't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first.",
+                        denied_user_uuids = denied
+                    }
+                }
+            end
         end
 
         -- Create channel
@@ -305,6 +327,31 @@ return function(app)
 
         if not data.user_uuids or type(data.user_uuids) ~= "table" or #data.user_uuids == 0 then
             return { status = 400, json = { error = "user_uuids array is required" } }
+        end
+
+        -- RBAC + tenancy gate: every target must be able to use chat in THIS
+        -- channel's namespace (active member of it + a chat-module grant). This
+        -- blocks both no-permission users and cross-tenant users. Reject the
+        -- whole request if any fail, so the caller can fix the selection.
+        local channel = ChatChannelQueries.show(channel_uuid)
+        if not channel then
+            return { status = 404, json = { error = "Channel not found" } }
+        end
+        local denied = {}
+        for _, target_uuid in ipairs(data.user_uuids) do
+            if not ChatAccess.user_has_chat(target_uuid, channel.namespace_id) then
+                table.insert(denied, target_uuid)
+            end
+        end
+        if #denied > 0 then
+            return {
+                status = 403,
+                json = {
+                    error = "no_chat_access",
+                    message = "Some people can't be added — they don't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first.",
+                    denied_user_uuids = denied
+                }
+            }
         end
 
         local role = data.role or "member"
@@ -568,7 +615,8 @@ return function(app)
             return { status = 400, json = { error = "Cannot create direct channel with yourself" } }
         end
 
-        -- Check if direct channel already exists
+        -- Check if direct channel already exists (existing history is never
+        -- blocked — the access gate only applies to opening a NEW conversation).
         local existing = ChatChannelQueries.getDirectChannel(user.uuid, data.user_uuid)
         if existing then
             return {
@@ -581,6 +629,18 @@ return function(app)
         local namespace_id = get_namespace_id()
         if not namespace_id then
             return { status = 400, json = { error = "Namespace context required" } }
+        end
+
+        -- RBAC + tenancy gate: only start a DM with someone who can use chat in
+        -- this workspace (active member here + a chat-module grant).
+        if not ChatAccess.user_has_chat(data.user_uuid, namespace_id) then
+            return {
+                status = 403,
+                json = {
+                    error = "no_chat_access",
+                    message = "This person can't be messaged — they don't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first."
+                }
+            }
         end
 
         -- Create new direct channel

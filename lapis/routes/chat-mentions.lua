@@ -1,6 +1,7 @@
 local db = require("lapis.db")
 local Global = require "helper.global"
 local ChatNamespace = require "helper.chat-namespace"
+local ChatAccess = require "helper.chat-access"
 
 return function(app)
     ----------------- Chat Mentions Routes --------------------
@@ -555,6 +556,12 @@ return function(app)
                     display_name = u.email
                 end
 
+                -- Whether this person can actually be pulled into chat here
+                -- (RBAC + tenancy). The UI greys out and blocks those without it
+                -- and prompts the admin to grant Chat access. When we couldn't
+                -- resolve a namespace (ns_id nil), access is unknown → allow.
+                local has_chat_access = ns_id == nil or ChatAccess.user_has_chat(u.uuid, ns_id)
+
                 table.insert(result, {
                     uuid = u.uuid,
                     username = u.username,
@@ -563,7 +570,8 @@ return function(app)
                     last_name = u.last_name,
                     email = u.email,
                     status = u.presence_status,
-                    is_chat_active = u.is_chat_active
+                    is_chat_active = u.is_chat_active,
+                    has_chat_access = has_chat_access
                 })
             end
         end

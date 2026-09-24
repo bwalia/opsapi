@@ -44,6 +44,15 @@ import {
 const POLL_MS = 4000;
 const GROUP_WINDOW_MS = 5 * 60 * 1000; // group consecutive messages within 5 min
 
+const NO_CHAT_ACCESS_MSG =
+  "This person doesn't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first.";
+
+/** Prefer a backend-supplied message (e.g. the RBAC 403) over a generic one. */
+function errMessage(e: unknown, fallback: string): string {
+  const m = (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
+  return m?.message || fallback;
+}
+
 // ---------- small helpers ----------
 
 function initials(name: string): string {
@@ -227,30 +236,47 @@ function UserPicker({
         ) : (
           results.map((u) => {
             const picked = selectedUuids.has(u.uuid);
+            const noAccess = u.has_chat_access === false;
+            const onRowClick = () => {
+              if (noAccess) {
+                toast.error(NO_CHAT_ACCESS_MSG);
+                return;
+              }
+              return mode === 'single' ? onPick?.(u) : onToggle?.(u);
+            };
             return (
               <button
                 key={u.uuid}
                 type="button"
-                onClick={() => (mode === 'single' ? onPick?.(u) : onToggle?.(u))}
+                onClick={onRowClick}
+                aria-disabled={noAccess}
+                title={noAccess ? NO_CHAT_ACCESS_MSG : undefined}
                 className={`flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-secondary-50 ${
                   picked ? 'bg-primary-50' : ''
-                }`}
+                } ${noAccess ? 'opacity-70' : ''}`}
               >
-                <Avatar name={personName(u)} status={u.status} size="sm" seed={u.uuid} />
+                <Avatar name={personName(u)} status={noAccess ? undefined : u.status} size="sm" seed={u.uuid} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-secondary-900">
                     {personName(u)}
                   </span>
                   {u.email && <span className="block truncate text-xs text-secondary-400">{u.email}</span>}
                 </span>
-                {mode === 'multi' && (
-                  <span
-                    className={`flex h-5 w-5 items-center justify-center rounded-md border ${
-                      picked ? 'border-primary-500 bg-primary-500 text-white' : 'border-secondary-300'
-                    }`}
-                  >
-                    {picked && <span className="text-[11px] leading-none">✓</span>}
+                {noAccess ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary-100 px-2 py-0.5 text-[10px] font-semibold text-secondary-500">
+                    <Lock className="h-3 w-3" />
+                    No access
                   </span>
+                ) : (
+                  mode === 'multi' && (
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                        picked ? 'border-primary-500 bg-primary-500 text-white' : 'border-secondary-300'
+                      }`}
+                    >
+                      {picked && <span className="text-[11px] leading-none">✓</span>}
+                    </span>
+                  )
                 )}
               </button>
             );
@@ -556,8 +582,8 @@ export default function ChatPage() {
         setActiveUuid(channel.uuid);
         // Re-sync so the peer info/ordering is authoritative.
         void loadChannels(channel.uuid);
-      } catch {
-        toast.error('Failed to open direct message');
+      } catch (e) {
+        toast.error(errMessage(e, 'Failed to open direct message'));
       }
     },
     [loadChannels]
@@ -993,8 +1019,8 @@ function CreateChannelModal({
       toast.success('Channel created');
       onCreated(channel);
       reset();
-    } catch {
-      toast.error('Failed to create channel');
+    } catch (e) {
+      toast.error(errMessage(e, 'Failed to create channel'));
     } finally {
       setSaving(false);
     }
@@ -1103,8 +1129,8 @@ function AddMembersModal({
       await chatService.addMembers(channel.uuid, selected.map((u) => u.uuid));
       toast.success(`Added ${selected.length} ${selected.length === 1 ? 'person' : 'people'}`);
       onAdded();
-    } catch {
-      toast.error('Failed to add members');
+    } catch (e) {
+      toast.error(errMessage(e, 'Failed to add members'));
     } finally {
       setSaving(false);
     }
