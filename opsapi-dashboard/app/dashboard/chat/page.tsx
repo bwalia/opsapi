@@ -233,7 +233,7 @@ function UserPicker({
           onChange={(e) => setQuery(e.target.value)}
           autoFocus={autoFocus}
           placeholder="Search people by name or email…"
-          className="w-full rounded-lg border border-secondary-300 bg-surface py-2.5 pl-9 pr-3 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="w-full rounded-lg border border-secondary-300 bg-surface py-2.5 pl-9 pr-3 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-primary-500"
         />
       </div>
 
@@ -653,7 +653,7 @@ export default function ChatPage() {
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Jump to…"
-                className="w-full rounded-md border border-secondary-200 bg-surface py-1.5 pl-8 pr-2 text-sm text-secondary-800 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full rounded-md border border-secondary-200 bg-surface py-1.5 pl-8 pr-2 text-sm text-secondary-800 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-primary-500"
               />
             </div>
           </div>
@@ -821,62 +821,71 @@ export default function ChatPage() {
                     <p className="text-xs">Say hello 👋</p>
                   </div>
                 ) : (
-                  messages.map((m, i) => {
-                    const name = senderName(m);
-                    const mine = !!myUuid && m.user_uuid === myUuid;
-                    const prev = messages[i - 1];
-                    const newDay = !prev || dayLabel(prev.created_at) !== dayLabel(m.created_at);
-                    const grouped =
-                      !newDay &&
-                      !!prev &&
-                      prev.user_uuid === m.user_uuid &&
-                      new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
-                    return (
-                      <React.Fragment key={m.uuid}>
-                        {newDay && (
-                          <div className="my-3 flex items-center gap-3">
-                            <div className="h-px flex-1 bg-secondary-100" />
-                            <span className="rounded-full bg-secondary-100 px-2.5 py-0.5 text-[11px] font-medium text-secondary-500">
-                              {dayLabel(m.created_at)}
-                            </span>
-                            <div className="h-px flex-1 bg-secondary-100" />
-                          </div>
-                        )}
-                        <div
-                          className={`group flex gap-3 rounded-lg px-2 hover:bg-secondary-50 ${
-                            grouped ? 'py-0.5' : 'mt-1 py-1'
-                          } ${m._pending ? 'opacity-60' : ''}`}
-                        >
-                          <div className="w-9 shrink-0">
-                            {grouped ? (
-                              <span className="mt-1 hidden text-right text-[10px] text-secondary-300 group-hover:block">
-                                {timeLabel(m.created_at)}
+                  // Bottom-anchored: a short conversation sits at the bottom and
+                  // grows upward; the newest message is always last.
+                  <div className="flex min-h-full flex-col justify-end">
+                    {messages.map((m, i) => {
+                      const name = senderName(m);
+                      const mine = !!myUuid && m.user_uuid === myUuid;
+                      const prev = messages[i - 1];
+                      const newDay = !prev || dayLabel(prev.created_at) !== dayLabel(m.created_at);
+                      const grouped =
+                        !newDay &&
+                        !!prev &&
+                        prev.user_uuid === m.user_uuid &&
+                        new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
+                      return (
+                        <React.Fragment key={m.uuid}>
+                          {newDay && (
+                            <div className="my-3 flex items-center gap-3">
+                              <div className="h-px flex-1 bg-secondary-100" />
+                              <span className="rounded-full bg-secondary-100 px-2.5 py-0.5 text-[11px] font-medium text-secondary-500">
+                                {dayLabel(m.created_at)}
                               </span>
-                            ) : (
-                              <Avatar name={name} seed={m.user_uuid} />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            {!grouped && (
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-sm font-semibold text-secondary-900">{name}</span>
-                                {mine && (
-                                  <span className="rounded bg-primary-50 px-1 text-[10px] font-medium text-primary-600">
-                                    you
-                                  </span>
-                                )}
-                                <span className="text-[11px] text-secondary-400">{timeLabel(m.created_at)}</span>
-                                {m.is_edited && <span className="text-[11px] text-secondary-300">(edited)</span>}
+                              <div className="h-px flex-1 bg-secondary-100" />
+                            </div>
+                          )}
+                          <div
+                            className={`flex ${mine ? 'justify-end' : 'justify-start'} ${
+                              grouped ? 'mt-0.5' : 'mt-3'
+                            }`}
+                          >
+                            {/* Avatar gutter — only for other people, only on the group's first line */}
+                            {!mine && (
+                              <div className="mr-2 w-8 shrink-0 self-end">
+                                {!grouped && <Avatar name={name} seed={m.user_uuid} size="sm" />}
                               </div>
                             )}
-                            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-700">
-                              {m.content}
-                            </p>
+                            <div
+                              className={`flex max-w-[78%] flex-col sm:max-w-[70%] ${
+                                mine ? 'items-end' : 'items-start'
+                              }`}
+                            >
+                              {!grouped && !mine && (
+                                <span className="mb-1 ml-1 text-xs font-semibold text-secondary-700">{name}</span>
+                              )}
+                              <div
+                                className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm ${
+                                  mine
+                                    ? 'rounded-br-md bg-primary-600 text-white'
+                                    : 'rounded-bl-md bg-secondary-100 text-secondary-900'
+                                } ${m._pending ? 'opacity-70' : ''}`}
+                              >
+                                <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                              </div>
+                              <span
+                                className={`mt-0.5 text-[10px] text-secondary-400 ${mine ? 'mr-1' : 'ml-1'}`}
+                              >
+                                {timeLabel(m.created_at)}
+                                {m.is_edited && ' · edited'}
+                                {m._pending && ' · sending…'}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      </React.Fragment>
-                    );
-                  })
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
@@ -890,7 +899,7 @@ export default function ChatPage() {
                     onKeyDown={onKeyDown}
                     rows={1}
                     placeholder={`Message ${isDirect(activeChannel) ? headerTitle : '#' + headerTitle}`}
-                    className="max-h-40 min-h-[1.5rem] flex-1 resize-none bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none"
+                    className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none focus-visible:outline-none"
                   />
                   <Button
                     onClick={send}
@@ -1099,7 +1108,7 @@ function CreateChannelModal({
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. marketing"
               autoFocus
-              className="w-full bg-transparent px-2 py-2.5 text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none"
+              className="w-full bg-transparent px-2 py-2.5 text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none focus-visible:outline-none"
             />
           </div>
         </div>
@@ -1112,7 +1121,7 @@ function CreateChannelModal({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What's this channel about?"
-            className="w-full rounded-lg border border-secondary-300 bg-surface px-3 py-2.5 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full rounded-lg border border-secondary-300 bg-surface px-3 py-2.5 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-transparent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
 
