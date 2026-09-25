@@ -30,6 +30,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { useChatSocket, type ChatWsNewMessage } from '@/hooks/useChatSocket';
+import type { ConnectionStatus } from '@/hooks/useWebSocket';
 import {
   chatService,
   senderName,
@@ -154,6 +155,32 @@ function ChannelGlyph({ channel, className = '' }: { channel: ChatChannel; class
   const priv = channel.is_private || channel.type === 'private';
   const Icon = priv ? Lock : Hash;
   return <Icon className={`h-4 w-4 shrink-0 ${className}`} aria-hidden="true" />;
+}
+
+// Live real-time status: green = socket connected, amber pulse = (re)connecting,
+// grey = no socket (delivery falls back to polling — not an error).
+function ConnBadge({ status }: { status: ConnectionStatus }) {
+  const map: Record<ConnectionStatus, { dot: string; label: string; title: string; pulse: boolean }> = {
+    connected: { dot: 'bg-emerald-500', label: 'Live', title: 'Real-time connected', pulse: false },
+    connecting: { dot: 'bg-amber-500', label: 'Connecting', title: 'Connecting…', pulse: true },
+    reconnecting: { dot: 'bg-amber-500', label: 'Connecting', title: 'Reconnecting…', pulse: true },
+    disconnected: {
+      dot: 'bg-secondary-300',
+      label: 'Offline',
+      title: 'Real-time unavailable — messages still sync by polling',
+      pulse: false,
+    },
+  };
+  const s = map[status] ?? map.disconnected;
+  return (
+    <span
+      className="hidden items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium text-secondary-500 sm:inline-flex"
+      title={s.title}
+    >
+      <span className={`h-2 w-2 rounded-full ${s.dot} ${s.pulse ? 'animate-pulse' : ''}`} aria-hidden="true" />
+      {s.label}
+    </span>
+  );
 }
 
 // ---------- user picker (search + select), reused by 3 modals ----------
@@ -707,7 +734,7 @@ export default function ChatPage() {
   // Real-time delivery over the WebSocket hub. A message to any conversation you
   // belong to arrives here: append it if that channel is open, else refresh the
   // rail (unread + surface a new DM) and toast when it's from someone else.
-  const { isConnected: wsConnected } = useChatSocket(
+  const { isConnected: wsConnected, status: wsStatus } = useChatSocket(
     useCallback(
       (data: ChatWsNewMessage) => {
         // You can belong to channels in several namespaces; the rail only shows
@@ -888,6 +915,7 @@ export default function ChatPage() {
                 </div>
 
                 <div className="ml-auto flex items-center gap-1">
+                  <ConnBadge status={wsStatus} />
                   {!isDirect(activeChannel) && (
                     <button
                       type="button"
