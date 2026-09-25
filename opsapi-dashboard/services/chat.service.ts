@@ -128,6 +128,12 @@ export interface AgentTurn {
   actions?: AgentAction[];
 }
 
+export interface AgentConversation {
+  run_uuid?: string;
+  status: 'idle' | 'running' | 'done' | 'error';
+  turns: AgentTurn[];
+}
+
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 function unwrap<T>(res: { data: unknown }): T {
@@ -326,23 +332,26 @@ export const chatService = {
   },
 
   /**
-   * Ask the AI agent. Sends the whole conversation so far; the backend runs a
-   * tool-calling loop (create customer / add team member / log timesheet / …)
-   * scoped to the user's namespace + RBAC, and returns the agent's reply plus
-   * the actions it took. Long-running (local model) — allow a generous timeout.
+   * AI assistant. The conversation lives server-side and each turn runs in the
+   * background (survives reloads / page changes / closed tabs); completion is
+   * pushed as the "agent:done" WebSocket event, with polling as a fallback.
    */
-  async askAgent(
-    messages: AgentTurn[]
-  ): Promise<{ reply: string; actions: AgentAction[] }> {
-    const res = await apiClient.post(
-      '/api/chat/agent',
-      // Actions ride along so the server can give the model the data earlier
-      // tools returned (e.g. a task uuid from a previous "list my tasks").
-      { messages: messages.map((m) => ({ role: m.role, content: m.content, actions: m.actions })) },
-      { ...JSON_BODY, timeout: 180000 }
-    );
-    const body = res.data as { reply?: string; actions?: AgentAction[] };
-    return { reply: body?.reply ?? '', actions: body?.actions ?? [] };
+  async getAgentConversation(): Promise<AgentConversation> {
+    const res = await apiClient.get('/api/chat/agent/conversation');
+    const b = res.data as Partial<AgentConversation>;
+    return { run_uuid: b?.run_uuid, status: b?.status ?? 'idle', turns: b?.turns ?? [] };
+  },
+
+  /** Start a turn. Resolves as soon as the run is queued (202). */
+  async sendAgentMessage(message: string): Promise<AgentConversation> {
+    const res = await apiClient.post('/api/chat/agent', { message }, JSON_BODY);
+    const b = res.data as Partial<AgentConversation>;
+    return { run_uuid: b?.run_uuid, status: b?.status ?? 'running', turns: b?.turns ?? [] };
+  },
+
+  /** "New chat" — archive the current conversation. */
+  async resetAgentConversation(): Promise<void> {
+    await apiClient.delete('/api/chat/agent/conversation');
   },
 };
 

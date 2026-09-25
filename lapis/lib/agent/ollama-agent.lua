@@ -120,6 +120,20 @@ local function call_ollama(messages, tools)
     return data.message
 end
 
+-- Does a reply claim it performed a write ("Done — created …", "has been added")?
+-- ponytail: keyword heuristic; a false positive only costs one extra model call.
+local CLAIM_PATTERNS = {
+    "^%s*done", "has been %a+ed", "have been %a+ed", "successfully", "i've created", "i have created",
+    "i've added", "i've logged", "i've sent", "i've invited", "i've updated", "is now created",
+}
+function Agent.claims_action(text)
+    local t = (text or ""):lower()
+    for _, p in ipairs(CLAIM_PATTERNS) do
+        if t:find(p) then return true end
+    end
+    return false
+end
+
 --- Run the agent loop.
 -- @param opts.system   string  system prompt
 -- @param opts.messages table   prior conversation [{role="user"|"assistant", content=...}]
@@ -138,6 +152,7 @@ function Agent.run(opts)
     end
 
     local actions = {}
+    local nudged = false
 
     for _ = 1, MAX_ITERATIONS do
         local msg, err = call_ollama(messages, opts.tools)
@@ -150,7 +165,29 @@ function Agent.run(opts)
 
         local tool_calls = msg.tool_calls
         if not tool_calls or #tool_calls == 0 then
-            return { reply = msg.content or "", actions = actions }
+            local reply = msg.content or ""
+            -- Hallucination guard: the model sometimes answers "Done — created X"
+            -- without calling any tool (seen live: fake customer + fake INV-0004).
+            -- Push back once so it actually calls the tool; if it still claims
+            -- success with nothing executed, say so honestly instead.
+            if #actions == 0 and Agent.claims_action(reply) then
+                if not nudged then
+                    nudged = true
+                    messages[#messages + 1] = {
+                        role = "system",
+                        content = "You did NOT call any tool in this turn, so nothing was created or changed. "
+                            .. "If the user asked you to do something, call the appropriate tool now "
+                            .. "(or ask_user for a missing detail). Do not claim it is done.",
+                    }
+                    goto continue
+                end
+                return {
+                    reply = "I wasn't able to complete that — no records were created or changed. "
+                        .. "Please try again, and include any details (name, email, amount) in one message.",
+                    actions = actions,
+                }
+            end
+            return { reply = reply, actions = actions }
         end
 
         -- Execute each requested tool, appending its result as a tool message.
@@ -186,6 +223,7 @@ function Agent.run(opts)
                 content = cjson.encode(payload) or "{}",
             }
         end
+        ::continue::
     end
 
     return {

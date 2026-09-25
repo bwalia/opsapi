@@ -1,21 +1,21 @@
 'use client';
 
 /**
- * AgentPane — the "Chat with AI Assistant" conversation. Unlike channels/DMs the
- * agent is not a persisted conversation: the whole turn history lives in local
- * state and is sent on each request, and the backend runs a tool-calling loop
- * (create customer / add team member / log timesheet / …) scoped to the user's
- * namespace + RBAC. The agent asks for missing details instead of guessing.
+ * AgentPane — the "Chat with AI Assistant" conversation. The conversation lives
+ * on the server and each turn runs there in the BACKGROUND (routes/chat-agent.lua),
+ * so reloading, changing page or closing the tab never loses or stops a task.
+ * This pane just shows the server's conversation: it re-fetches on the
+ * "agent:done" WebSocket event (via ChatNotifier), with a slow poll as fallback.
+ * The app-wide ChatNotifier does the "Assistant finished" notification.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Loader2, Check, AlertCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import toast from 'react-hot-toast';
 import { chatService, type AgentTurn } from '@/services/chat.service';
-import { useChatRealtime } from '@/store/chat-realtime.store';
-import { notify } from '@/lib/notify';
+import { onChatEvent } from '@/store/chat-realtime.store';
 
 // Render the agent's reply as markdown (lists, bold, tables, links, code) with
 // styling that sits on the neutral assistant bubble.
@@ -64,57 +64,55 @@ const SUGGESTIONS = [
   'Invite sam@example.com to this workspace',
 ];
 
-// Per-workspace conversation, kept for the browser session so switching pages
-// doesn't lose it. Best-effort — storage can be unavailable.
-const storageKey = (ns?: string) => `opsapi:agent-chat:${ns || 'default'}`;
-
-function saveTurns(ns: string | undefined, turns: AgentTurn[]) {
-  try {
-    sessionStorage.setItem(storageKey(ns), JSON.stringify(turns.slice(-40)));
-  } catch {
-    /* storage unavailable — fine */
-  }
-}
-
-function loadTurns(ns?: string): AgentTurn[] {
-  try {
-    const raw = sessionStorage.getItem(storageKey(ns));
-    return raw ? (JSON.parse(raw) as AgentTurn[]) : [];
-  } catch {
-    return [];
-  }
-}
+const POLL_MS = 6000; // fallback while a run is in progress and the socket is down
 
 export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: string; namespaceKey?: string }) {
-  const [turns, setTurns] = useState<AgentTurn[]>(() =>
-    typeof window === 'undefined' ? [] : loadTurns(namespaceKey)
-  );
-  const router = useRouter();
+  const [turns, setTurns] = useState<AgentTurn[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const conv = await chatService.getAgentConversation();
+      setTurns(conv.turns);
+      setThinking(conv.status === 'running');
+    } catch {
+      /* keep what we have; the next event/poll retries */
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  // Load the server conversation (also picks up a run still in progress from
+  // before a reload / from another tab).
+  useEffect(() => {
+    void refresh();
+  }, [refresh, namespaceKey]);
+
+  // Run finished → re-fetch. Poll slowly as a fallback while one is running.
+  useEffect(() => onChatEvent((e) => e.type === 'agent' && void refresh()), [refresh]);
+  useEffect(() => {
+    if (!thinking) return;
+    const id = setInterval(() => void refresh(), POLL_MS);
+    return () => clearInterval(id);
+  }, [thinking, refresh]);
 
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, thinking]);
 
-  useEffect(() => saveTurns(namespaceKey, turns), [turns, namespaceKey]);
-
-  // The request outlives this pane if you navigate away mid-task; the reply is
-  // then saved straight to storage and you get an "Assistant finished" notice.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const newChat = () => {
+  const newChat = async () => {
     if (thinking) return;
-    setTurns([]);
+    try {
+      await chatService.resetAgentConversation();
+      setTurns([]);
+    } catch {
+      toast.error('Could not start a new chat');
+    }
     composerRef.current?.focus();
   };
 
@@ -122,42 +120,25 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
     async (text: string) => {
       const content = text.trim();
       if (!content || thinking) return;
-      const history = [...turns, { role: 'user', content } as AgentTurn];
-      setTurns(history);
+      setTurns((t) => [...t, { role: 'user', content }]);
       setDraft('');
       setThinking(true);
-      let reply: AgentTurn;
       try {
-        const res = await chatService.askAgent(history);
-        reply = { role: 'assistant', content: res.reply, actions: res.actions };
-      } catch {
-        reply = { role: 'assistant', content: "Sorry — I couldn't reach the assistant. Please try again." };
-      }
-      try {
-        if (mountedRef.current) setTurns((t) => [...t, reply]);
-        else saveTurns(namespaceKey, [...history, reply]);
-        const away =
-          !mountedRef.current ||
-          document.visibilityState === 'hidden' ||
-          useChatRealtime.getState().activeChannel !== '__agent__';
-        if (away) {
-          void notify({
-            title: 'Assistant finished',
-            body: reply.content.replace(/[*_`#>|]/g, '').slice(0, 140),
-            url: '/dashboard/chat?c=__agent__',
-            tag: 'chat-agent',
-            onClick: () => {
-              useChatRealtime.setState({ openRequest: '__agent__' });
-              router.push('/dashboard/chat');
-            },
-          });
-        }
+        // Returns immediately; the run continues on the server regardless of
+        // what happens to this page.
+        const conv = await chatService.sendAgentMessage(content);
+        if (conv.turns.length) setTurns(conv.turns);
+      } catch (e) {
+        const status = (e as { response?: { status?: number } })?.response?.status;
+        toast.error(
+          status === 409 ? 'The assistant is still working on your last request.' : "Couldn't reach the assistant."
+        );
+        void refresh();
       } finally {
-        setThinking(false);
         composerRef.current?.focus();
       }
     },
-    [turns, thinking, namespaceKey, router]
+    [thinking, refresh]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -202,7 +183,11 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
       </header>
 
       <div ref={listRef} className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
-        {turns.length === 0 ? (
+        {!loaded ? (
+          <div className="flex h-full items-center justify-center text-secondary-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : turns.length === 0 ? (
           <div className="mx-auto max-w-md py-6 text-center">
             <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-100 text-primary-600">
               <Sparkles className="h-6 w-6" />
@@ -273,7 +258,13 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
               <AgentAvatar size="sm" />
             </div>
             <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md bg-secondary-100 px-3.5 py-2.5 text-sm text-secondary-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Working on it…
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span>
+                Working on it…
+                <span className="block text-[11px] text-secondary-400">
+                  You can leave this page — I&apos;ll notify you when it&apos;s done.
+                </span>
+              </span>
             </div>
           </div>
         )}

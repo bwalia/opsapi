@@ -15,8 +15,8 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { useMenuStore } from '@/store/menu.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
-import { useChatSocket, type ChatWsNewMessage } from '@/hooks/useChatSocket';
-import { useChatRealtime, emitChatEvent } from '@/store/chat-realtime.store';
+import { useChatSocket, type ChatWsNewMessage, type ChatWsAgentDone } from '@/hooks/useChatSocket';
+import { useChatRealtime, emitChatEvent, AGENT_ID } from '@/store/chat-realtime.store';
 import { senderName } from '@/services/chat.service';
 import { notify } from '@/lib/notify';
 
@@ -60,8 +60,27 @@ export default function ChatNotifier() {
     [nsId, myUuid, openChannel]
   );
 
+  // The assistant runs in the background on the server, so this fires even if
+  // the request was started before a reload or from another page/tab.
+  const onAgentDone = useCallback(
+    (data: ChatWsAgentDone) => {
+      emitChatEvent({ type: 'agent', data });
+      const viewing =
+        useChatRealtime.getState().activeChannel === AGENT_ID && document.visibilityState === 'visible';
+      if (viewing) return;
+      void notify({
+        title: data.status === 'error' ? 'Assistant couldn’t finish' : 'Assistant finished',
+        body: (data.reply || '').replace(/[*_`#>|]/g, '').slice(0, 140),
+        url: `/dashboard/chat?c=${AGENT_ID}`,
+        tag: 'chat-agent',
+        onClick: () => openChannel(AGENT_ID),
+      });
+    },
+    [openChannel]
+  );
+
   const { status } = useChatSocket(
-    { onMessage, onReaction: (data) => emitChatEvent({ type: 'reaction', data }) },
+    { onMessage, onAgentDone, onReaction: (data) => emitChatEvent({ type: 'reaction', data }) },
     { enabled: !!myUuid && hasChat }
   );
 

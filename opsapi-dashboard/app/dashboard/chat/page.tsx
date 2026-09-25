@@ -39,7 +39,7 @@ import AgentPane from '@/components/chat/AgentPane';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { useChatRealtime, onChatEvent } from '@/store/chat-realtime.store';
+import { useChatRealtime, onChatEvent, AGENT_ID } from '@/store/chat-realtime.store';
 import { getPrefs, setPrefs, requestPermission, notificationsSupported } from '@/lib/notify';
 import type { ConnectionStatus } from '@/hooks/useWebSocket';
 import {
@@ -61,7 +61,6 @@ const POLL_MS = 4000;
 const GROUP_WINDOW_MS = 5 * 60 * 1000; // group consecutive messages within 5 min
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🙏'];
 // Sentinel "conversation" id for the AI agent (not a real channel).
-const AGENT_ID = '__agent__';
 
 const NO_CHAT_ACCESS_MSG =
   "This person doesn't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first.";
@@ -954,6 +953,7 @@ export default function ChatPage() {
   useEffect(
     () =>
       onChatEvent((e) => {
+        if (e.type === 'agent') return; // AgentPane handles its own
         const { activeUuid: open, nsId } = liveRef.current;
         // You can belong to channels in several namespaces; the rail only shows
         // the active one, so ignore events for other tenants.

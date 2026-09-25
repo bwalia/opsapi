@@ -42,9 +42,18 @@ export interface ChatWsReaction {
   reactions: ChatReaction[];
 }
 
+/** The background AI-assistant run finished (routes/chat-agent.lua). */
+export interface ChatWsAgentDone {
+  run_uuid: string;
+  namespace_id?: number;
+  status: 'done' | 'error';
+  reply?: string;
+}
+
 export interface ChatSocketHandlers {
   onMessage?: (data: ChatWsNewMessage) => void;
   onReaction?: (data: ChatWsReaction) => void;
+  onAgentDone?: (data: ChatWsAgentDone) => void;
 }
 
 /**
@@ -82,6 +91,8 @@ export function useChatSocket(
       handlersRef.current.onMessage?.(msg.data as ChatWsNewMessage);
     } else if (msg.type === 'reaction:update') {
       handlersRef.current.onReaction?.(msg.data as ChatWsReaction);
+    } else if (msg.type === 'agent:done') {
+      handlersRef.current.onAgentDone?.(msg.data as ChatWsAgentDone);
     }
   }, []);
 
