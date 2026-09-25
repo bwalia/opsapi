@@ -29,6 +29,7 @@ import { Modal, Button } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
+import { useChatSocket, type ChatWsNewMessage } from '@/hooks/useChatSocket';
 import {
   chatService,
   senderName,
@@ -491,18 +492,23 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nsKey]);
 
-  // Poll the channel/DM list so NEW conversations (e.g. a DM someone just
-  // started with you) and updated unread counts appear without a page reload.
-  // Silent — no spinner, and it never changes the active selection.
+  // Silent refresh of the channel/DM list (new conversations + unread counts).
+  // Never shows a spinner or changes the active selection.
+  const refreshChannels = useCallback(async () => {
+    try {
+      const list = await chatService.listChannels();
+      setChannels((prev) => (list.length ? list : prev));
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  // Fallback poll for when the WebSocket can't connect (e.g. an edge that
+  // doesn't upgrade sockets). With the socket live this is just a safety net.
   useEffect(() => {
-    const id = setInterval(() => {
-      chatService
-        .listChannels()
-        .then((list) => setChannels((prev) => (list.length ? list : prev)))
-        .catch(() => undefined);
-    }, 8000);
+    const id = setInterval(() => void refreshChannels(), 8000);
     return () => clearInterval(id);
-  }, [nsKey]);
+  }, [nsKey, refreshChannels]);
 
   // Presence heartbeat (best-effort).
   useEffect(() => {
@@ -635,6 +641,31 @@ export default function ChatPage() {
       }
     },
     [loadChannels, canGrant]
+  );
+
+  // Real-time delivery over the WebSocket hub. A message to any conversation you
+  // belong to arrives here: append it if that channel is open, else refresh the
+  // rail (unread + surface a new DM) and toast when it's from someone else.
+  useChatSocket(
+    useCallback(
+      (data: ChatWsNewMessage) => {
+        // You can belong to channels in several namespaces; the rail only shows
+        // the active one, so ignore events for other tenants.
+        if (data.namespace_id && currentNamespace?.id && data.namespace_id !== currentNamespace.id) {
+          return;
+        }
+        if (data.channel_uuid === activeUuid) {
+          void loadMessages(data.channel_uuid, false);
+          void chatService.markRead(data.channel_uuid).catch(() => undefined);
+        } else {
+          void refreshChannels();
+          if (data.message?.user_uuid && data.message.user_uuid !== myUuid) {
+            toast(`New message from ${senderName(data.message)}`, { icon: '💬' });
+          }
+        }
+      },
+      [activeUuid, currentNamespace?.id, myUuid, loadMessages, refreshChannels]
+    )
   );
 
   const headerTitle = activeChannel ? channelTitle(activeChannel) : '';

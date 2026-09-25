@@ -124,6 +124,15 @@ return function(app)
         -- Get full message with user info
         local full_message = ChatMessageQueries.show(message.uuid)
 
+        -- Real-time: push the message to every connected channel member so their
+        -- UI updates instantly (append / unread + toast) without polling.
+        -- Best-effort — a broadcast failure must never affect the send response.
+        pcall(function()
+            local ChatWS = require("lib.chat-ws")
+            local channel = ChatChannelQueries.show(channel_uuid)
+            ChatWS.broadcast_message(channel_uuid, channel and channel.namespace_id, full_message)
+        end)
+
         -- Send push notifications to other channel members
         pcall(function()
             -- Get channel info
