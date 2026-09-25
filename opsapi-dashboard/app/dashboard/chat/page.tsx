@@ -715,7 +715,14 @@ export default function ChatPage() {
                   </button>
                 </div>
                 {dms.length === 0 ? (
-                  <p className="px-2 py-2 text-xs text-secondary-400">No direct messages.</p>
+                  <button
+                    type="button"
+                    onClick={() => setDmOpen(true)}
+                    className="mt-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-primary-600 transition hover:bg-primary-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New message
+                  </button>
                 ) : (
                   dms.map((c) => (
                     <RailItem
@@ -891,7 +898,10 @@ export default function ChatPage() {
 
               {/* Composer */}
               <div className="border-t border-secondary-200 px-3 py-3 sm:px-5">
-                <div className="flex items-end gap-2 rounded-xl border border-secondary-300 bg-surface px-3 py-2 focus-within:border-transparent focus-within:ring-2 focus-within:ring-primary-500">
+                {/* Single border that colors on focus — no ring. The textarea's
+                    own outline is killed inline so the app-wide *:focus-visible
+                    outline can't stack a second line on top. */}
+                <div className="flex items-end gap-2 rounded-xl border border-secondary-300 bg-surface px-3 py-2 transition-colors focus-within:border-primary-500">
                   <textarea
                     ref={composerRef}
                     value={draft}
@@ -899,7 +909,8 @@ export default function ChatPage() {
                     onKeyDown={onKeyDown}
                     rows={1}
                     placeholder={`Message ${isDirect(activeChannel) ? headerTitle : '#' + headerTitle}`}
-                    className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none focus-visible:outline-none"
+                    style={{ outline: 'none', boxShadow: 'none' }}
+                    className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400"
                   />
                   <Button
                     onClick={send}
