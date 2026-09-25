@@ -28,6 +28,10 @@ import {
   Download,
   Reply,
   Sparkles,
+  Bell,
+  BellOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
 import { Modal, Button } from '@/components/ui';
@@ -35,7 +39,8 @@ import AgentPane from '@/components/chat/AgentPane';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { useChatSocket, type ChatWsNewMessage, type ChatWsReaction } from '@/hooks/useChatSocket';
+import { useChatRealtime, onChatEvent } from '@/store/chat-realtime.store';
+import { getPrefs, setPrefs, requestPermission, notificationsSupported } from '@/lib/notify';
 import type { ConnectionStatus } from '@/hooks/useWebSocket';
 import {
   chatService,
@@ -473,7 +478,7 @@ function MembersList({
           </button>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-2 pb-3">
+      <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
         {loading ? (
           <div className="flex justify-center py-6 text-secondary-400">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -524,6 +529,56 @@ function MembersList({
           })
         )}
       </div>
+    </div>
+  );
+}
+
+// Rail-header toggles: OS notifications (asks permission on first enable) and
+// the chime. Prefs live in localStorage (per browser).
+function NotifyToggles() {
+  const [prefs, setP] = useState(() =>
+    typeof window === 'undefined' ? { enabled: true, sound: true } : getPrefs()
+  );
+  const [perm, setPerm] = useState<NotificationPermission | 'unsupported'>(() =>
+    notificationsSupported() ? Notification.permission : 'unsupported'
+  );
+  const osOn = prefs.enabled && perm === 'granted';
+
+  const toggleOs = async () => {
+    if (osOn) {
+      setP(setPrefs({ enabled: false }));
+      return;
+    }
+    const p = await requestPermission();
+    setPerm(p);
+    if (p === 'granted') setP(setPrefs({ enabled: true }));
+    else if (p === 'denied') toast.error('Notifications are blocked — allow them in your browser site settings');
+  };
+
+  const btn =
+    'flex h-7 w-7 items-center justify-center rounded-md text-secondary-500 transition hover:bg-secondary-200/70 hover:text-secondary-800';
+  return (
+    <div className="ml-auto flex items-center gap-0.5">
+      {perm !== 'unsupported' && (
+        <button
+          type="button"
+          onClick={toggleOs}
+          className={btn}
+          aria-label={osOn ? 'Turn off desktop notifications' : 'Turn on desktop notifications'}
+          title={osOn ? 'Desktop notifications on' : 'Desktop notifications off'}
+        >
+          {osOn ? <Bell className="h-4 w-4 text-primary-600" /> : <BellOff className="h-4 w-4" />}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => setP(setPrefs({ sound: !prefs.sound }))}
+        className={btn}
+        aria-label={prefs.sound ? 'Mute notification sound' : 'Unmute notification sound'}
+        title={prefs.sound ? 'Sound on' : 'Sound off'}
+      >
+        {prefs.sound ? <Volume2 className="h-4 w-4 text-primary-600" /> : <VolumeX className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
@@ -607,7 +662,7 @@ export default function ChatPage() {
       setChannels(list);
       setActiveUuid((prev) => {
         const keep = preserveActive || prev;
-        return list.some((c) => c.uuid === keep) ? keep : list[0]?.uuid || '';
+        return keep === AGENT_ID || list.some((c) => c.uuid === keep) ? keep : list[0]?.uuid || '';
       });
     } catch {
       toast.error('Failed to load channels');
@@ -620,7 +675,11 @@ export default function ChatPage() {
 
   useEffect(() => {
     setActiveUuid('');
-    void loadChannels('');
+    // ?c=<channel uuid> deep link (notification click) — only on first load.
+    const c = new URLSearchParams(window.location.search).get('c') || '';
+    if (c) window.history.replaceState(null, '', window.location.pathname);
+    if (c === AGENT_ID) setActiveUuid(AGENT_ID);
+    void loadChannels(c === AGENT_ID ? '' : c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nsKey]);
 
@@ -882,44 +941,52 @@ export default function ChatPage() {
     [loadChannels, canGrant]
   );
 
-  // Real-time delivery over the WebSocket hub. A message to any conversation you
-  // belong to arrives here: append it if that channel is open, else refresh the
-  // rail (unread + surface a new DM) and toast when it's from someone else.
-  const { isConnected: wsConnected, status: wsStatus } = useChatSocket(
-    {
-      onMessage: useCallback(
-        (data: ChatWsNewMessage) => {
-          // You can belong to channels in several namespaces; the rail only shows
-          // the active one, so ignore events for other tenants.
-          if (data.namespace_id && currentNamespace?.id && data.namespace_id !== currentNamespace.id) {
-            return;
-          }
-          if (data.channel_uuid === activeUuid) {
-            void loadMessages(data.channel_uuid, false);
-            void chatService.markRead(data.channel_uuid).catch(() => undefined);
-          } else {
-            void refreshChannels();
-            if (data.message?.user_uuid && data.message.user_uuid !== myUuid) {
-              toast(`New message from ${senderName(data.message)}`, { icon: '💬' });
-            }
-          }
-        },
-        [activeUuid, currentNamespace?.id, myUuid, loadMessages, refreshChannels]
-      ),
-      onReaction: useCallback(
-        (data: ChatWsReaction) => {
-          if (data.namespace_id && currentNamespace?.id && data.namespace_id !== currentNamespace.id) {
-            return;
-          }
+  // Real-time delivery: the app-wide ChatNotifier owns the WebSocket (and does
+  // the toast/OS notification); here we just keep the open conversation and the
+  // rail in sync with its events.
+  const wsStatus = useChatRealtime((s) => s.status);
+  const wsConnected = wsStatus === 'connected';
+  const liveRef = useRef({ activeUuid, nsId: currentNamespace?.id });
+  useEffect(() => {
+    liveRef.current = { activeUuid, nsId: currentNamespace?.id };
+  }, [activeUuid, currentNamespace?.id]);
+
+  useEffect(
+    () =>
+      onChatEvent((e) => {
+        const { activeUuid: open, nsId } = liveRef.current;
+        // You can belong to channels in several namespaces; the rail only shows
+        // the active one, so ignore events for other tenants.
+        if (e.data.namespace_id && nsId && e.data.namespace_id !== nsId) return;
+        if (e.type === 'reaction') {
           setMessages((ms) =>
-            ms.map((m) => (m.uuid === data.message_uuid ? { ...m, reactions: data.reactions } : m))
+            ms.map((m) => (m.uuid === e.data.message_uuid ? { ...m, reactions: e.data.reactions } : m))
           );
-        },
-        [currentNamespace?.id]
-      ),
-    },
-    { enabled: !!myUuid && tabActive }
+        } else if (e.data.channel_uuid === open) {
+          void loadMessages(open, false);
+          void chatService.markRead(open).catch(() => undefined);
+        } else {
+          void refreshChannels();
+        }
+      }),
+    [loadMessages, refreshChannels]
   );
+
+  // Tell the notifier which conversation is open so it stays quiet for it.
+  useEffect(() => {
+    useChatRealtime.setState({ activeChannel: activeUuid });
+  }, [activeUuid]);
+  useEffect(() => () => useChatRealtime.setState({ activeChannel: '' }), []);
+
+  // Open the conversation a notification was clicked for (in-app click while
+  // already on this page; a fresh load reads ?c= in loadChannels below).
+  const openRequest = useChatRealtime((s) => s.openRequest);
+  useEffect(() => {
+    if (!openRequest) return;
+    useChatRealtime.setState({ openRequest: null });
+    if (openRequest === AGENT_ID) setActiveUuid(AGENT_ID);
+    else void loadChannels(openRequest);
+  }, [openRequest, loadChannels]);
 
   // Let the poll timers see the live socket status without re-creating them.
   useEffect(() => {
@@ -947,6 +1014,7 @@ export default function ChatPage() {
                   {currentNamespace?.name || 'Workspace'}
                 </p>
               </div>
+              <NotifyToggles />
             </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-secondary-400" />
@@ -960,7 +1028,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-2 py-3">
+          <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3">
             {/* AI Assistant — always at the top; opens the agent conversation */}
             <button
               type="button"
@@ -1065,7 +1133,7 @@ export default function ChatPage() {
         </aside>
 
         {/* ---------- Center: conversation ---------- */}
-        <section className={`min-w-0 flex-1 flex-col ${activeUuid ? 'flex' : 'hidden md:flex'}`}>
+        <section className={`min-h-0 min-w-0 flex-1 flex-col ${activeUuid ? 'flex' : 'hidden md:flex'}`}>
           {activeUuid === AGENT_ID ? (
             <AgentPane
               key={currentNamespace?.uuid || 'default'}
@@ -1141,7 +1209,7 @@ export default function ChatPage() {
               </header>
 
               {/* Messages */}
-              <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+              <div ref={listRef} className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
                 {loadingMessages && messages.length === 0 ? (
                   <div className="flex h-full items-center justify-center text-secondary-400">
                     <Loader2 className="h-5 w-5 animate-spin" />

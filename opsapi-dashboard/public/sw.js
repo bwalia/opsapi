@@ -95,3 +95,28 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// Clicking a notification (new chat message / assistant finished) focuses an
+// existing OpsAPI tab and navigates it to the conversation, or opens one.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/dashboard/chat';
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const client = all.find((c) => new URL(c.url).origin === self.location.origin);
+      if (client) {
+        await client.focus();
+        if ('navigate' in client) {
+          try {
+            await client.navigate(target);
+          } catch {
+            /* cross-origin or not controlled — focus is enough */
+          }
+        }
+        return;
+      }
+      await self.clients.openWindow(target);
+    })()
+  );
+});

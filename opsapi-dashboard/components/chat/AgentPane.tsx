@@ -10,9 +10,12 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Loader2, Check, AlertCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chatService, type AgentTurn } from '@/services/chat.service';
+import { useChatRealtime } from '@/store/chat-realtime.store';
+import { notify } from '@/lib/notify';
 
 // Render the agent's reply as markdown (lists, bold, tables, links, code) with
 // styling that sits on the neutral assistant bubble.
@@ -65,6 +68,14 @@ const SUGGESTIONS = [
 // doesn't lose it. Best-effort — storage can be unavailable.
 const storageKey = (ns?: string) => `opsapi:agent-chat:${ns || 'default'}`;
 
+function saveTurns(ns: string | undefined, turns: AgentTurn[]) {
+  try {
+    sessionStorage.setItem(storageKey(ns), JSON.stringify(turns.slice(-40)));
+  } catch {
+    /* storage unavailable — fine */
+  }
+}
+
 function loadTurns(ns?: string): AgentTurn[] {
   try {
     const raw = sessionStorage.getItem(storageKey(ns));
@@ -78,6 +89,7 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
   const [turns, setTurns] = useState<AgentTurn[]>(() =>
     typeof window === 'undefined' ? [] : loadTurns(namespaceKey)
   );
+  const router = useRouter();
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -88,13 +100,17 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, thinking]);
 
+  useEffect(() => saveTurns(namespaceKey, turns), [turns, namespaceKey]);
+
+  // The request outlives this pane if you navigate away mid-task; the reply is
+  // then saved straight to storage and you get an "Assistant finished" notice.
+  const mountedRef = useRef(true);
   useEffect(() => {
-    try {
-      sessionStorage.setItem(storageKey(namespaceKey), JSON.stringify(turns.slice(-40)));
-    } catch {
-      /* storage unavailable — fine */
-    }
-  }, [turns, namespaceKey]);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const newChat = () => {
     if (thinking) return;
@@ -110,20 +126,38 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
       setTurns(history);
       setDraft('');
       setThinking(true);
+      let reply: AgentTurn;
       try {
-        const { reply, actions } = await chatService.askAgent(history);
-        setTurns((t) => [...t, { role: 'assistant', content: reply, actions }]);
+        const res = await chatService.askAgent(history);
+        reply = { role: 'assistant', content: res.reply, actions: res.actions };
       } catch {
-        setTurns((t) => [
-          ...t,
-          { role: 'assistant', content: "Sorry — I couldn't reach the assistant. Please try again." },
-        ]);
+        reply = { role: 'assistant', content: "Sorry — I couldn't reach the assistant. Please try again." };
+      }
+      try {
+        if (mountedRef.current) setTurns((t) => [...t, reply]);
+        else saveTurns(namespaceKey, [...history, reply]);
+        const away =
+          !mountedRef.current ||
+          document.visibilityState === 'hidden' ||
+          useChatRealtime.getState().activeChannel !== '__agent__';
+        if (away) {
+          void notify({
+            title: 'Assistant finished',
+            body: reply.content.replace(/[*_`#>|]/g, '').slice(0, 140),
+            url: '/dashboard/chat?c=__agent__',
+            tag: 'chat-agent',
+            onClick: () => {
+              useChatRealtime.setState({ openRequest: '__agent__' });
+              router.push('/dashboard/chat');
+            },
+          });
+        }
       } finally {
         setThinking(false);
         composerRef.current?.focus();
       }
     },
-    [turns, thinking]
+    [turns, thinking, namespaceKey, router]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -144,7 +178,9 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
   );
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
+    // min-h-0: without it this flex child grows to fit its messages instead of
+    // letting the list scroll, pushing the composer off-screen.
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-secondary-200 px-4 py-2.5">
         <AgentAvatar />
         <div className="min-w-0">
@@ -165,7 +201,7 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
         )}
       </header>
 
-      <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+      <div ref={listRef} className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
         {turns.length === 0 ? (
           <div className="mx-auto max-w-md py-6 text-center">
             <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-100 text-primary-600">

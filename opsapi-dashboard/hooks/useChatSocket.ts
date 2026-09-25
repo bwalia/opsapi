@@ -21,6 +21,8 @@ function wsBaseFromApi(): string {
 export interface ChatWsNewMessage {
   channel_uuid: string;
   namespace_id?: number;
+  channel_name?: string | null;
+  channel_type?: string | null; // 'direct' for DMs
   message: {
     uuid: string;
     user_uuid: string;

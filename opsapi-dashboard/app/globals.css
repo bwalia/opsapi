@@ -197,6 +197,16 @@ h1, h2, h3, h4 {
   background: var(--color-secondary-400);
 }
 
+/* Scrollable but with no visible scrollbar (chat panes). Still scrolls with
+   wheel, trackpad, touch and keyboard — the bar just isn't drawn. */
+.scrollbar-hidden {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none; /* Chrome, Safari */
+}
+
 /* Focus States - enhanced for accessibility */
 *:focus-visible {
   outline: 2px solid var(--color-primary-500);

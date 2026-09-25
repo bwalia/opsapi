@@ -7,6 +7,7 @@ import Header from './Header';
 import ThemeStyles from './ThemeStyles';
 import BuildFooter from './BuildFooter';
 import GlobalSearch from './GlobalSearch';
+import ChatNotifier from '@/components/chat/ChatNotifier';
 import { GlobalTimerWidget } from '@/components/time-tracking';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
@@ -165,6 +166,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
 
         {/* ⌘K / Ctrl+K command palette — search any page/module */}
         <GlobalSearch />
+
+        {/* Chat WebSocket + new-message / assistant notifications (app-wide) */}
+        <ChatNotifier />
       </PermissionsProvider>
     </NamespaceProvider>
   );
