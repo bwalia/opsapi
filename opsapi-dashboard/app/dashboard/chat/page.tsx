@@ -27,9 +27,11 @@ import {
   FileText,
   Download,
   Reply,
+  Sparkles,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
 import { Modal, Button } from '@/components/ui';
+import AgentPane from '@/components/chat/AgentPane';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
@@ -53,6 +55,8 @@ import {
 const POLL_MS = 4000;
 const GROUP_WINDOW_MS = 5 * 60 * 1000; // group consecutive messages within 5 min
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🙏'];
+// Sentinel "conversation" id for the AI agent (not a real channel).
+const AGENT_ID = '__agent__';
 
 const NO_CHAT_ACCESS_MSG =
   "This person doesn't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first.";
@@ -717,12 +721,12 @@ export default function ChatPage() {
   useEffect(() => {
     if (!tabActive) return;
     void refreshChannels();
-    if (activeUuid) void loadMessages(activeUuid, false);
+    if (activeUuid && activeUuid !== AGENT_ID) void loadMessages(activeUuid, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabActive]);
 
   useEffect(() => {
-    if (!activeUuid) {
+    if (!activeUuid || activeUuid === AGENT_ID) {
       setMessages([]);
       setMembers([]);
       return;
@@ -957,6 +961,22 @@ export default function ChatPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-2 py-3">
+            {/* AI Assistant — always at the top; opens the agent conversation */}
+            <button
+              type="button"
+              onClick={() => setActiveUuid(AGENT_ID)}
+              className={`mb-3 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm font-medium transition ${
+                activeUuid === AGENT_ID
+                  ? 'bg-primary-100 text-primary-800'
+                  : 'text-secondary-700 hover:bg-secondary-200/70'
+              }`}
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-primary-500 to-primary-700 text-white">
+                <Sparkles className="h-3.5 w-3.5" />
+              </span>
+              AI Assistant
+            </button>
+
             {loadingChannels ? (
               <div className="flex justify-center py-6 text-secondary-400">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1046,7 +1066,9 @@ export default function ChatPage() {
 
         {/* ---------- Center: conversation ---------- */}
         <section className={`min-w-0 flex-1 flex-col ${activeUuid ? 'flex' : 'hidden md:flex'}`}>
-          {activeChannel ? (
+          {activeUuid === AGENT_ID ? (
+            <AgentPane namespaceName={currentNamespace?.name} />
+          ) : activeChannel ? (
             <>
               <header className="flex items-center gap-2 border-b border-secondary-200 px-3 py-2.5 sm:px-4">
                 <button

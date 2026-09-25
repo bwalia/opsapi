@@ -436,6 +436,7 @@ load_if("chat", "routes.chat-messages")
 load_if("chat", "routes.chat-reactions")
 load_if("chat", "routes.chat-mentions")
 load_if("chat", "routes.chat-extras")
+load_if("chat", "routes.chat-agent")
 
 -- ============================================
 -- KANBAN PROJECT MANAGEMENT

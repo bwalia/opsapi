@@ -112,6 +112,22 @@ export interface ChatUser {
   has_chat_access?: boolean;
 }
 
+// A tool the agent invoked during a turn (create_timesheet, create_customer, …).
+export interface AgentAction {
+  name: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  error?: string | null;
+}
+
+// One turn in the agent conversation (client-side only — the agent is not a
+// persisted channel; the whole history is sent on each request).
+export interface AgentTurn {
+  role: 'user' | 'assistant';
+  content: string;
+  actions?: AgentAction[];
+}
+
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 function unwrap<T>(res: { data: unknown }): T {
@@ -307,6 +323,24 @@ export const chatService = {
   async grantChatAccess(userUuids: string[]): Promise<void> {
     if (userUuids.length === 0) return;
     await apiClient.post('/api/chat/access/grant', { user_uuids: userUuids }, JSON_BODY);
+  },
+
+  /**
+   * Ask the AI agent. Sends the whole conversation so far; the backend runs a
+   * tool-calling loop (create customer / add team member / log timesheet / …)
+   * scoped to the user's namespace + RBAC, and returns the agent's reply plus
+   * the actions it took. Long-running (local model) — allow a generous timeout.
+   */
+  async askAgent(
+    messages: AgentTurn[]
+  ): Promise<{ reply: string; actions: AgentAction[] }> {
+    const res = await apiClient.post(
+      '/api/chat/agent',
+      { messages: messages.map((m) => ({ role: m.role, content: m.content })) },
+      { ...JSON_BODY, timeout: 180000 }
+    );
+    const body = res.data as { reply?: string; actions?: AgentAction[] };
+    return { reply: body?.reply ?? '', actions: body?.actions ?? [] };
   },
 };
 
