@@ -491,6 +491,19 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nsKey]);
 
+  // Poll the channel/DM list so NEW conversations (e.g. a DM someone just
+  // started with you) and updated unread counts appear without a page reload.
+  // Silent — no spinner, and it never changes the active selection.
+  useEffect(() => {
+    const id = setInterval(() => {
+      chatService
+        .listChannels()
+        .then((list) => setChannels((prev) => (list.length ? list : prev)))
+        .catch(() => undefined);
+    }, 8000);
+    return () => clearInterval(id);
+  }, [nsKey]);
+
   // Presence heartbeat (best-effort).
   useEffect(() => {
     void chatService.setPresence('online').catch(() => undefined);
