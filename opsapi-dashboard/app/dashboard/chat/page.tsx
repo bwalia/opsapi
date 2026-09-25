@@ -443,6 +443,13 @@ export default function ChatPage() {
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
+  // Optimization signals. `tabActive` (state) gates the WebSocket so it's held
+  // only while the tab is in use; the refs let the poll timers read the latest
+  // tab/socket status without being re-created every tick.
+  const [tabActive, setTabActive] = useState(true);
+  const tabActiveRef = useRef(true);
+  const wsConnectedRef = useRef(false);
+
   const activeChannel = useMemo(
     () => channels.find((c) => c.uuid === activeUuid),
     [channels, activeUuid]
@@ -503,11 +510,18 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Fallback poll for when the WebSocket can't connect (e.g. an edge that
-  // doesn't upgrade sockets). With the socket live this is just a safety net.
+  // Channel-list poll — a safety net behind the WebSocket. It backs off hard
+  // when the socket is delivering (or the tab is backgrounded) and only polls
+  // fast when the socket is down AND the tab is focused.
   useEffect(() => {
-    const id = setInterval(() => void refreshChannels(), 8000);
-    return () => clearInterval(id);
+    let timer: ReturnType<typeof setTimeout>;
+    const nextDelay = () => (!tabActiveRef.current ? 60000 : wsConnectedRef.current ? 30000 : 8000);
+    const tick = () => {
+      void refreshChannels();
+      timer = setTimeout(tick, nextDelay());
+    };
+    timer = setTimeout(tick, nextDelay());
+    return () => clearTimeout(timer);
   }, [nsKey, refreshChannels]);
 
   // Presence heartbeat (best-effort).
@@ -547,6 +561,45 @@ export default function ChatPage() {
     }
   }, []);
 
+  // Tab visibility: hold the WebSocket (and poll at full rate) only while the
+  // tab is in use. A short grace period avoids churn when you flick between
+  // tabs; sustained-hidden (45s) drops the socket + slows polling, cutting idle
+  // authenticated connections and background traffic. Returning restores both.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    const apply = (v: boolean) => {
+      tabActiveRef.current = v;
+      setTabActive(v);
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        if (hideTimer) {
+          clearTimeout(hideTimer);
+          hideTimer = null;
+        }
+        apply(true);
+      } else {
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => apply(false), 45000);
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
+  }, []);
+
+  // On refocus (or first mount), catch up immediately rather than waiting for
+  // the next poll / socket message.
+  useEffect(() => {
+    if (!tabActive) return;
+    void refreshChannels();
+    if (activeUuid) void loadMessages(activeUuid, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabActive]);
+
   useEffect(() => {
     if (!activeUuid) {
       setMessages([]);
@@ -556,8 +609,16 @@ export default function ChatPage() {
     void loadMessages(activeUuid, true);
     void loadMembers(activeUuid);
     void chatService.markRead(activeUuid).catch(() => undefined);
-    const id = setInterval(() => loadMessages(activeUuid, false), POLL_MS);
-    return () => clearInterval(id);
+    // Message poll — same adaptive backoff as the channel poll: fast only when
+    // the socket is down and the tab is focused, otherwise a slow safety net.
+    let timer: ReturnType<typeof setTimeout>;
+    const nextDelay = () => (!tabActiveRef.current ? 30000 : wsConnectedRef.current ? 25000 : POLL_MS);
+    const tick = () => {
+      void loadMessages(activeUuid, false);
+      timer = setTimeout(tick, nextDelay());
+    };
+    timer = setTimeout(tick, nextDelay());
+    return () => clearTimeout(timer);
   }, [activeUuid, loadMessages, loadMembers]);
 
   // Auto-scroll to newest.
@@ -646,7 +707,7 @@ export default function ChatPage() {
   // Real-time delivery over the WebSocket hub. A message to any conversation you
   // belong to arrives here: append it if that channel is open, else refresh the
   // rail (unread + surface a new DM) and toast when it's from someone else.
-  useChatSocket(
+  const { isConnected: wsConnected } = useChatSocket(
     useCallback(
       (data: ChatWsNewMessage) => {
         // You can belong to channels in several namespaces; the rail only shows
@@ -666,8 +727,13 @@ export default function ChatPage() {
       },
       [activeUuid, currentNamespace?.id, myUuid, loadMessages, refreshChannels]
     ),
-    { enabled: !!myUuid }
+    { enabled: !!myUuid && tabActive }
   );
+
+  // Let the poll timers see the live socket status without re-creating them.
+  useEffect(() => {
+    wsConnectedRef.current = wsConnected;
+  }, [wsConnected]);
 
   const headerTitle = activeChannel ? channelTitle(activeChannel) : '';
   const memberCount = members.length || activeChannel?.member_count || 0;
