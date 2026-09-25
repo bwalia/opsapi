@@ -1067,7 +1067,11 @@ export default function ChatPage() {
         {/* ---------- Center: conversation ---------- */}
         <section className={`min-w-0 flex-1 flex-col ${activeUuid ? 'flex' : 'hidden md:flex'}`}>
           {activeUuid === AGENT_ID ? (
-            <AgentPane namespaceName={currentNamespace?.name} />
+            <AgentPane
+              key={currentNamespace?.uuid || 'default'}
+              namespaceName={currentNamespace?.name}
+              namespaceKey={currentNamespace?.uuid}
+            />
           ) : activeChannel ? (
             <>
               <header className="flex items-center gap-2 border-b border-secondary-200 px-3 py-2.5 sm:px-4">

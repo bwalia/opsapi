@@ -17,8 +17,15 @@
 ]]
 
 local http = require("resty.http")
-local cjson = require("cjson.safe")
 local jwt = require("resty.jwt")
+
+-- Private cjson instance. Several opsapi modules call
+-- cjson.encode_empty_table_as_object(false) on the SHARED instance (global
+-- per-worker state), which would re-encode a no-argument tool call's
+-- `arguments: {}` as `[]` and make Ollama reject the request as malformed.
+-- A fresh instance keeps the agent's encoding independent of load order.
+local cjson = require("cjson.safe").new()
+cjson.encode_empty_table_as_object(true)
 
 local Agent = {}
 
@@ -82,9 +89,14 @@ local function call_ollama(messages, tools)
         headers["x-api-key"] = api_key
     end
 
+    local encoded, enc_err = cjson.encode(body)
+    if not encoded then
+        return nil, "Could not encode the Ollama request: " .. tostring(enc_err)
+    end
+
     local res, req_err = httpc:request_uri(OLLAMA_URL .. "/api/chat", {
         method = "POST",
-        body = cjson.encode(body),
+        body = encoded,
         headers = headers,
         -- ponytail: TLS verify off to match lib/llm-client; turn on with a
         -- trusted CA bundle in prod (lua_ssl_trusted_certificate is set there).
@@ -95,6 +107,9 @@ local function call_ollama(messages, tools)
         return nil, "Ollama request failed: " .. tostring(req_err)
     end
     if res.status >= 400 then
+        -- Diagnostics only on failure: what we actually sent (bounded).
+        ngx.log(ngx.ERR, "[ollama-agent] rejected request (", #encoded, " bytes) tail: ",
+            encoded:sub(-600))
         return nil, "Ollama HTTP " .. res.status .. ": " .. tostring(res.body)
     end
 

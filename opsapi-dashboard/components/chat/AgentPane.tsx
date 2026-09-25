@@ -10,19 +10,74 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Loader2, Check, AlertCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { chatService, type AgentTurn } from '@/services/chat.service';
 
+// Render the agent's reply as markdown (lists, bold, tables, links, code) with
+// styling that sits on the neutral assistant bubble.
+function MarkdownMessage({ text }: { text: string }) {
+  return (
+    <div className="space-y-1.5">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => <p className="whitespace-pre-wrap break-words">{children}</p>,
+          ul: ({ children }) => <ul className="ml-4 list-disc space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="ml-4 list-decimal space-y-0.5">{children}</ol>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary-600 underline">
+              {children}
+            </a>
+          ),
+          code: ({ children }) => (
+            <code className="rounded bg-secondary-200 px-1 py-0.5 text-[0.85em]">{children}</code>
+          ),
+          table: ({ children }) => (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-xs">{children}</table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th className="border border-secondary-300 px-1.5 py-0.5 text-left font-semibold">{children}</th>
+          ),
+          td: ({ children }) => <td className="border border-secondary-300 px-1.5 py-0.5">{children}</td>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 const WELCOME =
-  "Hi! I'm your OpsAPI assistant. Tell me what you need — I can create customers, add team members, log timesheets and more, all in your current workspace. If a detail is missing, I'll ask.";
+  "Hi! I'm your OpsAPI assistant. Tell me what you need and I'll do it in your workspace — customers, CRM leads & deals, projects & tasks, timesheets, invoices, inviting teammates and more. If a detail is missing, I'll ask.";
 
 const SUGGESTIONS = [
-  'Log 3 hours on the API integration task today',
-  'Create a customer named Acme Corp',
-  'Show my recent timesheets',
+  'Show my open tasks and log 2 hours on one of them',
+  'Create a lead for Jane Smith at Globex, jane@globex.com',
+  'Draft an invoice for Acme Corp: 10 hours consulting at £80',
+  'Invite sam@example.com to this workspace',
 ];
 
-export function AgentPane({ namespaceName }: { namespaceName?: string }) {
-  const [turns, setTurns] = useState<AgentTurn[]>([]);
+// Per-workspace conversation, kept for the browser session so switching pages
+// doesn't lose it. Best-effort — storage can be unavailable.
+const storageKey = (ns?: string) => `opsapi:agent-chat:${ns || 'default'}`;
+
+function loadTurns(ns?: string): AgentTurn[] {
+  try {
+    const raw = sessionStorage.getItem(storageKey(ns));
+    return raw ? (JSON.parse(raw) as AgentTurn[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: string; namespaceKey?: string }) {
+  const [turns, setTurns] = useState<AgentTurn[]>(() =>
+    typeof window === 'undefined' ? [] : loadTurns(namespaceKey)
+  );
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -32,6 +87,20 @@ export function AgentPane({ namespaceName }: { namespaceName?: string }) {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, thinking]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(storageKey(namespaceKey), JSON.stringify(turns.slice(-40)));
+    } catch {
+      /* storage unavailable — fine */
+    }
+  }, [turns, namespaceKey]);
+
+  const newChat = () => {
+    if (thinking) return;
+    setTurns([]);
+    composerRef.current?.focus();
+  };
 
   const send = useCallback(
     async (text: string) => {
@@ -84,6 +153,16 @@ export function AgentPane({ namespaceName }: { namespaceName?: string }) {
             Acts in {namespaceName || 'your workspace'} with your permissions
           </p>
         </div>
+        {turns.length > 0 && (
+          <button
+            type="button"
+            onClick={newChat}
+            disabled={thinking}
+            className="ml-auto rounded-md border border-secondary-200 px-2.5 py-1 text-xs font-medium text-secondary-600 transition hover:bg-secondary-100 disabled:opacity-50"
+          >
+            New chat
+          </button>
+        )}
       </header>
 
       <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
@@ -125,7 +204,11 @@ export function AgentPane({ namespaceName }: { namespaceName?: string }) {
                         : 'rounded-bl-md bg-secondary-100 text-secondary-900'
                     }`}
                   >
-                    <p className="whitespace-pre-wrap break-words">{t.content}</p>
+                    {mine ? (
+                      <p className="whitespace-pre-wrap break-words">{t.content}</p>
+                    ) : (
+                      <MarkdownMessage text={t.content} />
+                    )}
                   </div>
                   {acted.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">

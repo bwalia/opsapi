@@ -336,7 +336,9 @@ export const chatService = {
   ): Promise<{ reply: string; actions: AgentAction[] }> {
     const res = await apiClient.post(
       '/api/chat/agent',
-      { messages: messages.map((m) => ({ role: m.role, content: m.content })) },
+      // Actions ride along so the server can give the model the data earlier
+      // tools returned (e.g. a task uuid from a previous "list my tasks").
+      { messages: messages.map((m) => ({ role: m.role, content: m.content, actions: m.actions })) },
       { ...JSON_BODY, timeout: 180000 }
     );
     const body = res.data as { reply?: string; actions?: AgentAction[] };
