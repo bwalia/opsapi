@@ -18,12 +18,39 @@
 
 local http = require("resty.http")
 local cjson = require("cjson.safe")
+local jwt = require("resty.jwt")
 
 local Agent = {}
 
 local OLLAMA_URL = os.getenv("OLLAMA_URL") or "https://ollama.workstation.co.uk"
 local OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "qwen3.8:latest"
 local OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
+
+-- The gateway authenticates with a JWT in the x-api-key header. OLLAMA_API_KEY
+-- may be set to EITHER a ready-made token (header.payload.signature) OR the
+-- signing secret — in which case we mint a short-lived HS256 token from it per
+-- request. This lets operators drop just the secret in the env.
+local function resolve_api_key()
+    local key = OLLAMA_API_KEY
+    if not key or key == "" then
+        return nil
+    end
+    local _, dots = key:gsub("%.", "")
+    if dots == 2 and key:sub(1, 2) == "ey" then
+        return key -- already a JWT
+    end
+    local now = ngx.time()
+    local ok, token = pcall(function()
+        return jwt:sign(key, {
+            header = { typ = "JWT", alg = "HS256" },
+            payload = { sub = "opsapi-agent", name = "OpsAPI Agent", admin = true, iat = now, exp = now + 300 },
+        })
+    end)
+    if ok and token then
+        return token
+    end
+    return key -- fall back to sending it raw
+end
 
 -- Bounds the tool-call loop so a confused model can't spin forever. Each
 -- iteration is one model round-trip (~seconds on the local model).
@@ -50,8 +77,9 @@ local function call_ollama(messages, tools)
     end
 
     local headers = { ["Content-Type"] = "application/json" }
-    if OLLAMA_API_KEY and OLLAMA_API_KEY ~= "" then
-        headers["x-api-key"] = OLLAMA_API_KEY
+    local api_key = resolve_api_key()
+    if api_key then
+        headers["x-api-key"] = api_key
     end
 
     local res, req_err = httpc:request_uri(OLLAMA_URL .. "/api/chat", {
