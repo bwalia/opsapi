@@ -26,13 +26,14 @@ import {
   Paperclip,
   FileText,
   Download,
+  Reply,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
 import { Modal, Button } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
 import { usePermissions } from '@/contexts/PermissionsContext';
-import { useChatSocket, type ChatWsNewMessage } from '@/hooks/useChatSocket';
+import { useChatSocket, type ChatWsNewMessage, type ChatWsReaction } from '@/hooks/useChatSocket';
 import type { ConnectionStatus } from '@/hooks/useWebSocket';
 import {
   chatService,
@@ -45,11 +46,13 @@ import {
   type ChatMember,
   type ChatUser,
   type ChatAttachment,
+  type ChatReplyRef,
   type PresenceStatus,
 } from '@/services/chat.service';
 
 const POLL_MS = 4000;
 const GROUP_WINDOW_MS = 5 * 60 * 1000; // group consecutive messages within 5 min
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🙏'];
 
 const NO_CHAT_ACCESS_MSG =
   "This person doesn't have access to the Chat module in this workspace. Ask a namespace owner or admin to grant them Chat access first.";
@@ -230,6 +233,43 @@ function AttachmentView({ a, mine }: { a: ChatAttachment; mine: boolean }) {
       </span>
       <Download className="h-4 w-4 shrink-0 opacity-70" />
     </a>
+  );
+}
+
+// A short preview of a message, for the reply quote.
+function messagePreview(m: ChatMessage): string {
+  const c = (m.content || '').trim();
+  if (c) return c.length > 120 ? `${c.slice(0, 120)}…` : c;
+  if (m.attachments && m.attachments.length > 0) return '📎 Attachment';
+  return 'Message';
+}
+
+// Hover toolbar on a message: quick emoji reactions + reply.
+function MessageActions({ onReact, onReply }: { onReact: (e: string) => void; onReply: () => void }) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-full border border-secondary-200 bg-surface px-1 py-0.5 shadow-md">
+      {QUICK_EMOJIS.map((e) => (
+        <button
+          key={e}
+          type="button"
+          onClick={() => onReact(e)}
+          className="rounded-full px-1 text-sm leading-none hover:bg-secondary-100"
+          title={`React ${e}`}
+        >
+          {e}
+        </button>
+      ))}
+      <span className="mx-0.5 h-4 w-px bg-secondary-200" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={onReply}
+        className="rounded-full p-1 text-secondary-500 hover:bg-secondary-100"
+        title="Reply"
+        aria-label="Reply"
+      >
+        <Reply className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
 
@@ -518,6 +558,7 @@ export default function ChatPage() {
   const [membersModalOpen, setMembersModalOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = useState(0);
+  const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -736,11 +777,36 @@ export default function ChatPage() {
     }
   }, []);
 
+  // Toggle an emoji reaction; the response is the authoritative new set (the WS
+  // then pushes the same update to everyone else).
+  const toggleReaction = useCallback(async (messageUuid: string, emoji: string) => {
+    try {
+      const reactions = await chatService.toggleReaction(messageUuid, emoji);
+      setMessages((ms) => ms.map((m) => (m.uuid === messageUuid ? { ...m, reactions } : m)));
+    } catch {
+      toast.error('Failed to react');
+    }
+  }, []);
+
+  const startReply = useCallback((m: ChatMessage) => {
+    setReplyTo({ uuid: m.uuid, sender: senderName(m), preview: messagePreview(m) });
+    composerRef.current?.focus();
+  }, []);
+
+  const scrollToMessage = useCallback((uuid: string) => {
+    const el = document.getElementById(`msg-${uuid}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('rounded-lg', 'ring-2', 'ring-primary-300');
+    setTimeout(() => el.classList.remove('rounded-lg', 'ring-2', 'ring-primary-300'), 1200);
+  }, []);
+
   const send = useCallback(async () => {
     const content = draft.trim();
     const atts = pendingFiles;
     if ((!content && atts.length === 0) || !activeUuid || sending) return;
     setSending(true);
+    const meta = replyTo ? { reply_to: replyTo } : undefined;
     const optimistic: ChatMessage = {
       uuid: `pending-${Date.now()}`,
       user_uuid: myUuid || '',
@@ -749,23 +815,26 @@ export default function ChatPage() {
       first_name: (user as { first_name?: string } | null)?.first_name,
       last_name: (user as { last_name?: string } | null)?.last_name,
       attachments: atts.length ? atts : undefined,
+      metadata: meta,
       _pending: true,
     };
     setMessages((m) => [...m, optimistic]);
     setDraft('');
     setPendingFiles([]);
+    setReplyTo(null);
     try {
-      await chatService.sendMessage(activeUuid, content, atts);
+      await chatService.sendMessage(activeUuid, content, atts, meta);
       await loadMessages(activeUuid, false);
     } catch {
       toast.error('Failed to send');
       setMessages((m) => m.filter((x) => x.uuid !== optimistic.uuid));
       setDraft(content);
       setPendingFiles(atts);
+      setReplyTo(replyTo);
     } finally {
       setSending(false);
     }
-  }, [draft, pendingFiles, activeUuid, sending, myUuid, user, loadMessages]);
+  }, [draft, pendingFiles, replyTo, activeUuid, sending, myUuid, user, loadMessages]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -813,25 +882,38 @@ export default function ChatPage() {
   // belong to arrives here: append it if that channel is open, else refresh the
   // rail (unread + surface a new DM) and toast when it's from someone else.
   const { isConnected: wsConnected, status: wsStatus } = useChatSocket(
-    useCallback(
-      (data: ChatWsNewMessage) => {
-        // You can belong to channels in several namespaces; the rail only shows
-        // the active one, so ignore events for other tenants.
-        if (data.namespace_id && currentNamespace?.id && data.namespace_id !== currentNamespace.id) {
-          return;
-        }
-        if (data.channel_uuid === activeUuid) {
-          void loadMessages(data.channel_uuid, false);
-          void chatService.markRead(data.channel_uuid).catch(() => undefined);
-        } else {
-          void refreshChannels();
-          if (data.message?.user_uuid && data.message.user_uuid !== myUuid) {
-            toast(`New message from ${senderName(data.message)}`, { icon: '💬' });
+    {
+      onMessage: useCallback(
+        (data: ChatWsNewMessage) => {
+          // You can belong to channels in several namespaces; the rail only shows
+          // the active one, so ignore events for other tenants.
+          if (data.namespace_id && currentNamespace?.id && data.namespace_id !== currentNamespace.id) {
+            return;
           }
-        }
-      },
-      [activeUuid, currentNamespace?.id, myUuid, loadMessages, refreshChannels]
-    ),
+          if (data.channel_uuid === activeUuid) {
+            void loadMessages(data.channel_uuid, false);
+            void chatService.markRead(data.channel_uuid).catch(() => undefined);
+          } else {
+            void refreshChannels();
+            if (data.message?.user_uuid && data.message.user_uuid !== myUuid) {
+              toast(`New message from ${senderName(data.message)}`, { icon: '💬' });
+            }
+          }
+        },
+        [activeUuid, currentNamespace?.id, myUuid, loadMessages, refreshChannels]
+      ),
+      onReaction: useCallback(
+        (data: ChatWsReaction) => {
+          if (data.namespace_id && currentNamespace?.id && data.namespace_id !== currentNamespace.id) {
+            return;
+          }
+          setMessages((ms) =>
+            ms.map((m) => (m.uuid === data.message_uuid ? { ...m, reactions: data.reactions } : m))
+          );
+        },
+        [currentNamespace?.id]
+      ),
+    },
     { enabled: !!myUuid && tabActive }
   );
 
@@ -1070,6 +1152,7 @@ export default function ChatPage() {
                             </div>
                           )}
                           <div
+                            id={`msg-${m.uuid}`}
                             className={`flex ${mine ? 'justify-end' : 'justify-start'} ${
                               grouped ? 'mt-0.5' : 'mt-3'
                             }`}
@@ -1081,31 +1164,85 @@ export default function ChatPage() {
                               </div>
                             )}
                             <div
-                              className={`flex max-w-[78%] flex-col sm:max-w-[70%] ${
+                              className={`group/msg flex max-w-[78%] flex-col sm:max-w-[70%] ${
                                 mine ? 'items-end' : 'items-start'
                               }`}
                             >
                               {!grouped && !mine && (
                                 <span className="mb-1 ml-1 text-xs font-semibold text-secondary-700">{name}</span>
                               )}
-                              <div
-                                className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm ${
-                                  mine
-                                    ? 'rounded-br-md bg-primary-600 text-white'
-                                    : 'rounded-bl-md bg-secondary-100 text-secondary-900'
-                                } ${m._pending ? 'opacity-70' : ''}`}
-                              >
-                                {m.content && (
-                                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
-                                )}
-                                {m.attachments && m.attachments.length > 0 && (
-                                  <div className={`flex flex-col gap-1.5 ${m.content ? 'mt-1.5' : ''}`}>
-                                    {m.attachments.map((a, ai) => (
-                                      <AttachmentView key={ai} a={a} mine={mine} />
-                                    ))}
+                              <div className="relative">
+                                <div
+                                  className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm ${
+                                    mine
+                                      ? 'rounded-br-md bg-primary-600 text-white'
+                                      : 'rounded-bl-md bg-secondary-100 text-secondary-900'
+                                  } ${m._pending ? 'opacity-70' : ''}`}
+                                >
+                                  {m.metadata?.reply_to && (
+                                    <button
+                                      type="button"
+                                      onClick={() => scrollToMessage(m.metadata!.reply_to!.uuid)}
+                                      className={`mb-1.5 block w-full rounded-md border-l-2 px-2 py-1 text-left ${
+                                        mine
+                                          ? 'border-white/60 bg-white/10'
+                                          : 'border-primary-400 bg-secondary-200/60'
+                                      }`}
+                                    >
+                                      <span className="block text-xs font-semibold">
+                                        {m.metadata.reply_to.sender}
+                                      </span>
+                                      <span className="block truncate text-xs opacity-80">
+                                        {m.metadata.reply_to.preview}
+                                      </span>
+                                    </button>
+                                  )}
+                                  {m.content && (
+                                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                                  )}
+                                  {m.attachments && m.attachments.length > 0 && (
+                                    <div className={`flex flex-col gap-1.5 ${m.content ? 'mt-1.5' : ''}`}>
+                                      {m.attachments.map((a, ai) => (
+                                        <AttachmentView key={ai} a={a} mine={mine} />
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                {!m._pending && (
+                                  <div
+                                    className={`absolute -top-3 z-10 opacity-0 transition group-hover/msg:opacity-100 ${
+                                      mine ? 'left-1' : 'right-1'
+                                    }`}
+                                  >
+                                    <MessageActions
+                                      onReact={(e) => toggleReaction(m.uuid, e)}
+                                      onReply={() => startReply(m)}
+                                    />
                                   </div>
                                 )}
                               </div>
+                              {m.reactions && m.reactions.length > 0 && (
+                                <div className={`mt-1 flex flex-wrap gap-1 ${mine ? 'justify-end' : ''}`}>
+                                  {m.reactions.map((r) => {
+                                    const mineR = !!myUuid && !!r.user_uuids?.includes(myUuid);
+                                    return (
+                                      <button
+                                        key={r.emoji}
+                                        type="button"
+                                        onClick={() => toggleReaction(m.uuid, r.emoji)}
+                                        className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition ${
+                                          mineR
+                                            ? 'border-primary-300 bg-primary-50 text-primary-700'
+                                            : 'border-secondary-200 bg-surface text-secondary-600 hover:bg-secondary-50'
+                                        }`}
+                                      >
+                                        <span>{r.emoji}</span>
+                                        <span className="tabular-nums">{r.count}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               <span
                                 className={`mt-0.5 text-[10px] text-secondary-400 ${mine ? 'mr-1' : 'ml-1'}`}
                               >
@@ -1127,6 +1264,23 @@ export default function ChatPage() {
                 {/* Single border that colors on focus — no ring. The textarea's
                     own outline is killed inline so the app-wide *:focus-visible
                     outline can't stack a second line on top. */}
+                {replyTo && (
+                  <div className="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-primary-400 bg-secondary-50 px-3 py-2">
+                    <Reply className="mt-0.5 h-4 w-4 shrink-0 text-primary-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-secondary-700">Replying to {replyTo.sender}</p>
+                      <p className="truncate text-xs text-secondary-500">{replyTo.preview}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyTo(null)}
+                      className="rounded p-0.5 text-secondary-400 hover:bg-secondary-200"
+                      aria-label="Cancel reply"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
                 {(pendingFiles.length > 0 || uploading > 0) && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {pendingFiles.map((a, i) => (

@@ -86,17 +86,12 @@ local function push_to_user(user_uuid, frame)
     end
 end
 
---- Fan a new message out to every member of the channel who is connected.
--- Called from the sender's mutation request. Safe: only Lua tables + semaphores.
--- @param channel_uuid string
--- @param namespace_id number|nil  so the client can ignore other-tenant tabs
--- @param message table            the full message row (with sender info)
-function _M.broadcast_message(channel_uuid, namespace_id, message)
+--- Fan an event out to every connected member of a channel.
+-- Called from a mutation request. Safe: only Lua tables + semaphores, never a
+-- foreign socket. @param event_type e.g. "message:new" | "reaction:update".
+function _M.broadcast(channel_uuid, event_type, data)
     if not channel_uuid then return end
-    local frame = cjson.encode({
-        type = "message:new",
-        data = { channel_uuid = channel_uuid, namespace_id = namespace_id, message = message }
-    })
+    local frame = cjson.encode({ type = event_type, data = data })
     if not frame then return end
 
     local members = db.query(
@@ -108,6 +103,17 @@ function _M.broadcast_message(channel_uuid, namespace_id, message)
             push_to_user(m.user_uuid, frame)
         end
     end
+end
+
+--- Push a new message to a channel's connected members.
+-- @param namespace_id number|nil  so the client can ignore other-tenant tabs
+-- @param message table            the full message row (with sender info)
+function _M.broadcast_message(channel_uuid, namespace_id, message)
+    _M.broadcast(channel_uuid, "message:new", {
+        channel_uuid = channel_uuid,
+        namespace_id = namespace_id,
+        message = message,
+    })
 end
 
 -- Verify the JWT from the ?token param. Mirrors middleware/auth.lua's core.

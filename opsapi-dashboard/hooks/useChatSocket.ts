@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
 import type { WebSocketMessage } from '@/types';
+import type { ChatReaction } from '@/services/chat.service';
 
 /** Derive the ws(s):// base from the http(s) API URL, so chat real-time works
  *  wherever the API host does — no extra env needed. */
@@ -32,6 +33,18 @@ export interface ChatWsNewMessage {
   };
 }
 
+export interface ChatWsReaction {
+  channel_uuid: string;
+  namespace_id?: number;
+  message_uuid: string;
+  reactions: ChatReaction[];
+}
+
+export interface ChatSocketHandlers {
+  onMessage?: (data: ChatWsNewMessage) => void;
+  onReaction?: (data: ChatWsReaction) => void;
+}
+
 /**
  * Live chat delivery over the backend WebSocket hub (lib/chat-ws.lua).
  *
@@ -46,7 +59,7 @@ export interface ChatWsNewMessage {
  * state without reconnecting.
  */
 export function useChatSocket(
-  onNewMessage: (data: ChatWsNewMessage) => void,
+  handlers: ChatSocketHandlers,
   options: { enabled?: boolean } = {}
 ) {
   const base = wsBaseFromApi();
@@ -56,14 +69,17 @@ export function useChatSocket(
   const shouldConnect = (options.enabled ?? true) && Boolean(base);
   const url = shouldConnect ? `${base}/api/chat/ws` : 'ws://disabled';
 
-  const handlerRef = useRef(onNewMessage);
+  const handlersRef = useRef(handlers);
   useEffect(() => {
-    handlerRef.current = onNewMessage;
-  }, [onNewMessage]);
+    handlersRef.current = handlers;
+  }, [handlers]);
 
   const onMessage = useCallback((msg: WebSocketMessage) => {
-    if (msg && msg.type === 'message:new' && msg.data) {
-      handlerRef.current(msg.data as ChatWsNewMessage);
+    if (!msg || !msg.data) return;
+    if (msg.type === 'message:new') {
+      handlersRef.current.onMessage?.(msg.data as ChatWsNewMessage);
+    } else if (msg.type === 'reaction:update') {
+      handlersRef.current.onReaction?.(msg.data as ChatWsReaction);
     }
   }, []);
 

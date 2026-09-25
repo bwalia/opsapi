@@ -41,6 +41,25 @@ export interface ChatAttachment {
   thumbnail_url?: string | null;
 }
 
+export interface ChatReaction {
+  emoji: string;
+  count: number;
+  user_uuids?: string[];
+}
+
+/** A quoted message a reply points back to (self-contained so it renders even
+ *  after the original scrolls out of the loaded window). Rides in metadata. */
+export interface ChatReplyRef {
+  uuid: string;
+  sender: string;
+  preview: string;
+}
+
+export interface ChatMessageMetadata {
+  reply_to?: ChatReplyRef;
+  [k: string]: unknown;
+}
+
 export interface ChatMessage {
   uuid: string;
   channel_uuid?: string;
@@ -59,7 +78,8 @@ export interface ChatMessage {
   last_name?: string | null;
   email?: string | null;
   sender_username?: string | null;
-  reactions?: Array<{ emoji: string; count: number; users?: string[] }>;
+  reactions?: ChatReaction[];
+  metadata?: ChatMessageMetadata | null;
   // Client-only marker for an optimistically-sent message.
   _pending?: boolean;
 }
@@ -207,7 +227,8 @@ export const chatService = {
   async sendMessage(
     channelUuid: string,
     content: string,
-    attachments?: ChatAttachment[]
+    attachments?: ChatAttachment[],
+    metadata?: ChatMessageMetadata
   ): Promise<ChatMessage> {
     return unwrap<ChatMessage>(
       await apiClient.post(
@@ -216,10 +237,22 @@ export const chatService = {
           content,
           content_type: 'text',
           attachments: attachments && attachments.length ? attachments : undefined,
+          metadata: metadata && Object.keys(metadata).length ? metadata : undefined,
         },
         JSON_BODY
       )
     );
+  },
+
+  /** Add/remove an emoji reaction on a message; returns the full new set. */
+  async toggleReaction(messageUuid: string, emoji: string): Promise<ChatReaction[]> {
+    const res = await apiClient.post(
+      `/api/chat/messages/${messageUuid}/reactions/toggle`,
+      { emoji },
+      JSON_BODY
+    );
+    const body = res.data as { all_reactions?: ChatReaction[] };
+    return body?.all_reactions ?? [];
   },
 
   /**
