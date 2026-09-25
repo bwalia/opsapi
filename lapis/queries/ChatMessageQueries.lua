@@ -96,21 +96,23 @@ function ChatMessageQueries.getByChannel(channel_uuid, params)
 
     local messages = db.query(sql, table.unpack(query_params))
 
-    ngx.log(ngx.NOTICE, "[ChatMessageQueries.getByChannel] Query returned ", messages and #messages or 0, " messages")
-
-    -- Get reactions for each message
+    -- Attach reactions + decode JSON fields. Reactions are batch-loaded in one
+    -- query for the whole page (was an N+1 — one reaction query per message on
+    -- every fetch/poll).
     if messages and #messages > 0 then
-        for i, msg in ipairs(messages) do
-            msg.reactions = ChatMessageQueries.getReactions(msg.uuid)
-            -- Parse JSON fields
+        local uuids = {}
+        for _, msg in ipairs(messages) do
+            uuids[#uuids + 1] = msg.uuid
+        end
+        local reactions_by_msg = ChatMessageQueries.getReactionsForMessages(uuids)
+
+        for _, msg in ipairs(messages) do
+            msg.reactions = reactions_by_msg[msg.uuid] or {}
             if msg.mentions then
                 msg.mentions = cjson.decode(msg.mentions) or {}
             end
             if msg.attachments then
-                ngx.log(ngx.NOTICE, "[ChatMessageQueries.getByChannel] Message ", i, " raw attachments: ", msg.attachments)
-                local decoded = cjson.decode(msg.attachments)
-                msg.attachments = decoded or {}
-                ngx.log(ngx.NOTICE, "[ChatMessageQueries.getByChannel] Message ", i, " decoded attachments count: ", #msg.attachments)
+                msg.attachments = cjson.decode(msg.attachments) or {}
             end
             if msg.metadata then
                 msg.metadata = cjson.decode(msg.metadata) or {}
@@ -277,6 +279,41 @@ function ChatMessageQueries.getReactions(message_uuid)
 
     local result = db.query(sql, message_uuid)
     return result or {}
+end
+
+-- Batch version of getReactions: fetch reactions for a whole page of messages in
+-- ONE query instead of one query per message (the N+1 that would otherwise fire
+-- on every message list / poll). Returns { [message_uuid] = {reaction, ...} }.
+function ChatMessageQueries.getReactionsForMessages(uuids)
+    if not uuids or #uuids == 0 then
+        return {}
+    end
+
+    local escaped = {}
+    for _, u in ipairs(uuids) do
+        escaped[#escaped + 1] = db.escape_literal(u)
+    end
+
+    local sql = [[
+        SELECT message_uuid, emoji, COUNT(*) as count,
+               array_agg(user_uuid) as user_uuids
+        FROM chat_message_reactions
+        WHERE message_uuid IN (]] .. table.concat(escaped, ",") .. [[)
+        GROUP BY message_uuid, emoji
+        ORDER BY count DESC
+    ]]
+
+    local rows = db.query(sql)
+    local by_msg = {}
+    for _, r in ipairs(rows or {}) do
+        local list = by_msg[r.message_uuid]
+        if not list then
+            list = {}
+            by_msg[r.message_uuid] = list
+        end
+        list[#list + 1] = { emoji = r.emoji, count = r.count, user_uuids = r.user_uuids }
+    end
+    return by_msg
 end
 
 -- Pin message
