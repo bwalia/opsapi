@@ -54,10 +54,16 @@ function ChatChannelQueries.getByUser(user_uuid, params, namespace_id)
                cm.is_muted,
                cm.notification_preference,
                cm.last_read_at,
-               (SELECT COUNT(*) FROM chat_messages m
-                WHERE m.channel_uuid = c.uuid
-                AND m.is_deleted = false
-                AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')) as unread_count,
+               -- Unread count, capped at 100 so the scan is bounded no matter
+               -- how far behind the reader is (the UI shows "99+"). Uses the
+               -- partial (channel_uuid, created_at) WHERE is_deleted=false index.
+               (SELECT COUNT(*) FROM (
+                   SELECT 1 FROM chat_messages m
+                   WHERE m.channel_uuid = c.uuid
+                   AND m.is_deleted = false
+                   AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')
+                   LIMIT 100
+               ) unread_capped) as unread_count,
                -- Other user info for DM channels
                other_member.user_uuid as other_user_uuid,
                other_user.first_name as other_user_first_name,
