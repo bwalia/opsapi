@@ -28,6 +28,7 @@ import { ProtectedPage } from '@/components/permissions';
 import { Modal, Button } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
 import { useNamespace } from '@/contexts/NamespaceContext';
+import { usePermissions } from '@/contexts/PermissionsContext';
 import {
   chatService,
   senderName,
@@ -51,6 +52,18 @@ const NO_CHAT_ACCESS_MSG =
 function errMessage(e: unknown, fallback: string): string {
   const m = (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
   return m?.message || fallback;
+}
+
+/**
+ * "Grant + add in one click": before adding, grant Chat access to any selected
+ * people who don't have it yet (only an owner/admin `canGrant` reaches here;
+ * the backend re-checks). Returns how many were granted.
+ */
+async function grantSelected(users: ChatUser[], canGrant: boolean): Promise<number> {
+  if (!canGrant) return 0;
+  const need = users.filter((u) => u.has_chat_access === false).map((u) => u.uuid);
+  if (need.length > 0) await chatService.grantChatAccess(need);
+  return need.length;
 }
 
 // ---------- small helpers ----------
@@ -151,6 +164,7 @@ function UserPicker({
   onPick,
   excludeUuids = [],
   autoFocus,
+  canGrant = false,
 }: {
   mode: 'single' | 'multi';
   selected?: ChatUser[];
@@ -158,6 +172,7 @@ function UserPicker({
   onPick?: (u: ChatUser) => void;
   excludeUuids?: string[];
   autoFocus?: boolean;
+  canGrant?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ChatUser[]>([]);
@@ -237,8 +252,10 @@ function UserPicker({
           results.map((u) => {
             const picked = selectedUuids.has(u.uuid);
             const noAccess = u.has_chat_access === false;
+            const willGrant = noAccess && canGrant; // selectable; access granted on add
+            const blocked = noAccess && !canGrant; // can't select; must ask an admin
             const onRowClick = () => {
-              if (noAccess) {
+              if (blocked) {
                 toast.error(NO_CHAT_ACCESS_MSG);
                 return;
               }
@@ -249,20 +266,26 @@ function UserPicker({
                 key={u.uuid}
                 type="button"
                 onClick={onRowClick}
-                aria-disabled={noAccess}
-                title={noAccess ? NO_CHAT_ACCESS_MSG : undefined}
+                aria-disabled={blocked}
+                title={blocked ? NO_CHAT_ACCESS_MSG : willGrant ? 'Will be granted Chat access' : undefined}
                 className={`flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-secondary-50 ${
                   picked ? 'bg-primary-50' : ''
-                } ${noAccess ? 'opacity-70' : ''}`}
+                } ${blocked ? 'opacity-70' : ''}`}
               >
                 <Avatar name={personName(u)} status={noAccess ? undefined : u.status} size="sm" seed={u.uuid} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-secondary-900">
                     {personName(u)}
                   </span>
-                  {u.email && <span className="block truncate text-xs text-secondary-400">{u.email}</span>}
+                  {willGrant ? (
+                    <span className="block truncate text-xs text-amber-600">
+                      No Chat access yet — will be granted
+                    </span>
+                  ) : (
+                    u.email && <span className="block truncate text-xs text-secondary-400">{u.email}</span>
+                  )}
                 </span>
-                {noAccess ? (
+                {blocked ? (
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary-100 px-2 py-0.5 text-[10px] font-semibold text-secondary-500">
                     <Lock className="h-3 w-3" />
                     No access
@@ -270,7 +293,7 @@ function UserPicker({
                 ) : (
                   mode === 'multi' && (
                     <span
-                      className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
                         picked ? 'border-primary-500 bg-primary-500 text-white' : 'border-secondary-300'
                       }`}
                     >
@@ -388,8 +411,17 @@ function MembersList({
 export default function ChatPage() {
   const user = useAuthStore((s) => s.user);
   const myUuid = (user as { uuid?: string } | null)?.uuid;
-  const { currentNamespace } = useNamespace();
+  const { currentNamespace, isNamespaceOwner, hasPermission } = useNamespace();
+  const { isAdmin } = usePermissions();
   const nsKey = currentNamespace?.uuid || '';
+  // Can this actor grant Chat access to others? (platform admin, namespace
+  // owner, or a role that can manage namespace roles/permissions). Enables the
+  // "grant + add in one click" path; the backend re-checks either way.
+  const canGrant =
+    isAdmin ||
+    isNamespaceOwner ||
+    hasPermission('namespace', 'manage') ||
+    hasPermission('roles', 'manage');
 
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [activeUuid, setActiveUuid] = useState<string>('');
@@ -575,6 +607,9 @@ export default function ChatPage() {
   const openDirect = useCallback(
     async (u: ChatUser) => {
       try {
+        if (u.has_chat_access === false && canGrant) {
+          await chatService.grantChatAccess([u.uuid]);
+        }
         const channel = await chatService.createDirect(u.uuid);
         setDmOpen(false);
         // Ensure it's in the rail, then open it.
@@ -586,7 +621,7 @@ export default function ChatPage() {
         toast.error(errMessage(e, 'Failed to open direct message'));
       }
     },
-    [loadChannels]
+    [loadChannels, canGrant]
   );
 
   const headerTitle = activeChannel ? channelTitle(activeChannel) : '';
@@ -901,6 +936,7 @@ export default function ChatPage() {
       {/* ---------- Modals ---------- */}
       <CreateChannelModal
         isOpen={createOpen}
+        canGrant={canGrant}
         onClose={() => setCreateOpen(false)}
         onCreated={(c) => {
           setChannels((list) => [c, ...list]);
@@ -915,6 +951,7 @@ export default function ChatPage() {
           isOpen={addOpen}
           channel={activeChannel}
           existing={members.map((m) => m.user_uuid)}
+          canGrant={canGrant}
           onClose={() => setAddOpen(false)}
           onAdded={() => {
             setAddOpen(false);
@@ -923,7 +960,12 @@ export default function ChatPage() {
         />
       )}
 
-      <StartDirectModal isOpen={dmOpen} onClose={() => setDmOpen(false)} onPick={openDirect} />
+      <StartDirectModal
+        isOpen={dmOpen}
+        canGrant={canGrant}
+        onClose={() => setDmOpen(false)}
+        onPick={openDirect}
+      />
 
       {/* Members on small screens */}
       <Modal isOpen={membersModalOpen} onClose={() => setMembersModalOpen(false)} title="Members" size="sm">
@@ -982,10 +1024,12 @@ function RailItem({
 
 function CreateChannelModal({
   isOpen,
+  canGrant,
   onClose,
   onCreated,
 }: {
   isOpen: boolean;
+  canGrant: boolean;
   onClose: () => void;
   onCreated: (c: ChatChannel) => void;
 }) {
@@ -1010,6 +1054,7 @@ function CreateChannelModal({
     if (!clean) return;
     setSaving(true);
     try {
+      await grantSelected(selected, canGrant);
       const channel = await chatService.createChannel({
         name: clean,
         description: description.trim() || undefined,
@@ -1092,7 +1137,7 @@ function CreateChannelModal({
           <label className="mb-1.5 block text-sm font-medium text-secondary-700">
             Add people <span className="font-normal text-secondary-400">(optional)</span>
           </label>
-          <UserPicker mode="multi" selected={selected} onToggle={toggle} />
+          <UserPicker mode="multi" selected={selected} onToggle={toggle} canGrant={canGrant} />
         </div>
       </div>
     </Modal>
@@ -1103,12 +1148,14 @@ function AddMembersModal({
   isOpen,
   channel,
   existing,
+  canGrant,
   onClose,
   onAdded,
 }: {
   isOpen: boolean;
   channel: ChatChannel;
   existing: string[];
+  canGrant: boolean;
   onClose: () => void;
   onAdded: () => void;
 }) {
@@ -1126,8 +1173,13 @@ function AddMembersModal({
     if (selected.length === 0) return;
     setSaving(true);
     try {
+      const granted = await grantSelected(selected, canGrant);
       await chatService.addMembers(channel.uuid, selected.map((u) => u.uuid));
-      toast.success(`Added ${selected.length} ${selected.length === 1 ? 'person' : 'people'}`);
+      toast.success(
+        granted > 0
+          ? `Granted Chat access to ${granted} and added ${selected.length}`
+          : `Added ${selected.length} ${selected.length === 1 ? 'person' : 'people'}`
+      );
       onAdded();
     } catch (e) {
       toast.error(errMessage(e, 'Failed to add members'));
@@ -1153,17 +1205,26 @@ function AddMembersModal({
         </div>
       }
     >
-      <UserPicker mode="multi" selected={selected} onToggle={toggle} excludeUuids={existing} autoFocus />
+      <UserPicker
+        mode="multi"
+        selected={selected}
+        onToggle={toggle}
+        excludeUuids={existing}
+        autoFocus
+        canGrant={canGrant}
+      />
     </Modal>
   );
 }
 
 function StartDirectModal({
   isOpen,
+  canGrant,
   onClose,
   onPick,
 }: {
   isOpen: boolean;
+  canGrant: boolean;
   onClose: () => void;
   onPick: (u: ChatUser) => void;
 }) {
@@ -1175,7 +1236,7 @@ function StartDirectModal({
       description="Search for someone in your workspace to start a private 1:1 chat."
       size="md"
     >
-      <UserPicker mode="single" onPick={onPick} autoFocus />
+      <UserPicker mode="single" onPick={onPick} autoFocus canGrant={canGrant} />
     </Modal>
   );
 }

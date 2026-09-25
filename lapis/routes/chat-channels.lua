@@ -277,6 +277,45 @@ return function(app)
         }
     end)
 
+    -- POST /api/chat/access/grant - Grant Chat-module access to namespace
+    -- members (privileged actors only). Lets an owner/admin pull people who
+    -- don't yet have chat into a conversation without leaving the picker —
+    -- the "grant + add in one click" flow. Non-members (cross-tenant) fail.
+    app:post("/api/chat/access/grant", function(self)
+        local user, err = get_current_user(self)
+        if not user then
+            return { status = 401, json = { error = err } }
+        end
+
+        local namespace_id = get_namespace_id()
+        if not namespace_id then
+            return { status = 400, json = { error = "Namespace context required" } }
+        end
+
+        if not ChatAccess.can_grant(user.uuid, namespace_id, self.current_user) then
+            return {
+                status = 403,
+                json = {
+                    error = "forbidden",
+                    message = "Only a namespace owner or admin can grant Chat access."
+                }
+            }
+        end
+
+        local data = parse_json_body()
+        if not data.user_uuids or type(data.user_uuids) ~= "table" or #data.user_uuids == 0 then
+            return { status = 400, json = { error = "user_uuids array is required" } }
+        end
+
+        local granted, failed = {}, {}
+        for _, target_uuid in ipairs(data.user_uuids) do
+            local ok = ChatAccess.grant_chat(target_uuid, namespace_id)
+            table.insert(ok and granted or failed, target_uuid)
+        end
+
+        return { status = 200, json = { granted = granted, failed = failed } }
+    end)
+
     -- GET /api/chat/channels/:uuid/members - Get channel members
     app:get("/api/chat/channels/:uuid/members", function(self)
         local user, err = get_current_user(self)

@@ -222,6 +222,16 @@ export const chatService = {
   async setPresence(status: PresenceStatus): Promise<void> {
     await apiClient.put('/api/chat/presence', { status }, JSON_BODY);
   },
+
+  /**
+   * Grant the Chat module to namespace members who lack it (owner/admin only —
+   * enforced server-side). Powers the "grant + add in one click" flow. Targets
+   * must already be members of the current namespace.
+   */
+  async grantChatAccess(userUuids: string[]): Promise<void> {
+    if (userUuids.length === 0) return;
+    await apiClient.post('/api/chat/access/grant', { user_uuids: userUuids }, JSON_BODY);
+  },
 };
 
 export default chatService;
