@@ -23,6 +23,9 @@ import {
   ChevronLeft,
   Trash2,
   Shield,
+  Paperclip,
+  FileText,
+  Download,
 } from 'lucide-react';
 import { ProtectedPage } from '@/components/permissions';
 import { Modal, Button } from '@/components/ui';
@@ -41,6 +44,7 @@ import {
   type ChatMessage,
   type ChatMember,
   type ChatUser,
+  type ChatAttachment,
   type PresenceStatus,
 } from '@/services/chat.service';
 
@@ -180,6 +184,52 @@ function ConnBadge({ status }: { status: ConnectionStatus }) {
       <span className={`h-2 w-2 rounded-full ${s.dot} ${s.pulse ? 'animate-pulse' : ''}`} aria-hidden="true" />
       {s.label}
     </span>
+  );
+}
+
+function isImageAttachment(a: ChatAttachment): boolean {
+  return !!a.file_type && a.file_type.startsWith('image/');
+}
+
+function formatFileSize(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// One attachment inside a message bubble: an inline thumbnail for images,
+// otherwise a downloadable file chip. `mine` tints it to sit on the sender bubble.
+function AttachmentView({ a, mine }: { a: ChatAttachment; mine: boolean }) {
+  if (isImageAttachment(a)) {
+    return (
+      <a href={a.file_url} target="_blank" rel="noopener noreferrer" className="block">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={a.file_url}
+          alt={a.file_name}
+          loading="lazy"
+          className="max-h-56 max-w-full rounded-lg object-cover"
+        />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={a.file_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
+        mine ? 'border-white/30 hover:bg-white/10' : 'border-secondary-200 hover:bg-secondary-50'
+      }`}
+    >
+      <FileText className="h-5 w-5 shrink-0 opacity-80" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{a.file_name}</span>
+        {a.file_size ? <span className="block text-xs opacity-70">{formatFileSize(a.file_size)}</span> : null}
+      </span>
+      <Download className="h-4 w-4 shrink-0 opacity-70" />
+    </a>
   );
 }
 
@@ -466,9 +516,12 @@ export default function ChatPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [membersModalOpen, setMembersModalOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([]);
+  const [uploading, setUploading] = useState(0);
 
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Optimization signals. `tabActive` (state) gates the WebSocket so it's held
   // only while the tab is in use; the refs let the poll timers read the latest
@@ -662,9 +715,31 @@ export default function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [draft]);
 
+  // Upload picked files to MinIO and stage them as pending attachments.
+  const onPickFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    for (const file of list) {
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error(`${file.name} is larger than 25MB`);
+        continue;
+      }
+      setUploading((n) => n + 1);
+      try {
+        const att = await chatService.uploadFile(file);
+        setPendingFiles((prev) => [...prev, att]);
+      } catch {
+        toast.error(`Failed to upload ${file.name}`);
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+  }, []);
+
   const send = useCallback(async () => {
     const content = draft.trim();
-    if (!content || !activeUuid || sending) return;
+    const atts = pendingFiles;
+    if ((!content && atts.length === 0) || !activeUuid || sending) return;
     setSending(true);
     const optimistic: ChatMessage = {
       uuid: `pending-${Date.now()}`,
@@ -673,21 +748,24 @@ export default function ChatPage() {
       created_at: new Date().toISOString(),
       first_name: (user as { first_name?: string } | null)?.first_name,
       last_name: (user as { last_name?: string } | null)?.last_name,
+      attachments: atts.length ? atts : undefined,
       _pending: true,
     };
     setMessages((m) => [...m, optimistic]);
     setDraft('');
+    setPendingFiles([]);
     try {
-      await chatService.sendMessage(activeUuid, content);
+      await chatService.sendMessage(activeUuid, content, atts);
       await loadMessages(activeUuid, false);
     } catch {
       toast.error('Failed to send');
       setMessages((m) => m.filter((x) => x.uuid !== optimistic.uuid));
       setDraft(content);
+      setPendingFiles(atts);
     } finally {
       setSending(false);
     }
-  }, [draft, activeUuid, sending, myUuid, user, loadMessages]);
+  }, [draft, pendingFiles, activeUuid, sending, myUuid, user, loadMessages]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1017,7 +1095,16 @@ export default function ChatPage() {
                                     : 'rounded-bl-md bg-secondary-100 text-secondary-900'
                                 } ${m._pending ? 'opacity-70' : ''}`}
                               >
-                                <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                                {m.content && (
+                                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                                )}
+                                {m.attachments && m.attachments.length > 0 && (
+                                  <div className={`flex flex-col gap-1.5 ${m.content ? 'mt-1.5' : ''}`}>
+                                    {m.attachments.map((a, ai) => (
+                                      <AttachmentView key={ai} a={a} mine={mine} />
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                               <span
                                 className={`mt-0.5 text-[10px] text-secondary-400 ${mine ? 'mr-1' : 'ml-1'}`}
@@ -1040,7 +1127,58 @@ export default function ChatPage() {
                 {/* Single border that colors on focus — no ring. The textarea's
                     own outline is killed inline so the app-wide *:focus-visible
                     outline can't stack a second line on top. */}
-                <div className="flex items-end gap-2 rounded-xl border border-secondary-300 bg-surface px-3 py-2 transition-colors focus-within:border-primary-500">
+                {(pendingFiles.length > 0 || uploading > 0) && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {pendingFiles.map((a, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-secondary-200 bg-secondary-50 py-1 pl-1.5 pr-1 text-xs text-secondary-700"
+                      >
+                        {isImageAttachment(a) ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={a.file_url} alt="" className="h-6 w-6 rounded object-cover" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-secondary-500" />
+                        )}
+                        <span className="max-w-[140px] truncate">{a.file_name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPendingFiles((p) => p.filter((_, j) => j !== i))}
+                          className="rounded p-0.5 hover:bg-secondary-200"
+                          aria-label={`Remove ${a.file_name}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                    {uploading > 0 && (
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-secondary-200 px-2 py-1 text-xs text-secondary-500">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Uploading…
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-end gap-2 rounded-xl border border-secondary-300 bg-surface px-2 py-2 transition-colors focus-within:border-primary-500">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="shrink-0 rounded-md p-1.5 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
+                    title="Attach files"
+                    aria-label="Attach files"
+                  >
+                    <Paperclip className="h-5 w-5" />
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      void onPickFiles(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
                   <textarea
                     ref={composerRef}
                     value={draft}
@@ -1049,12 +1187,12 @@ export default function ChatPage() {
                     rows={1}
                     placeholder={`Message ${isDirect(activeChannel) ? headerTitle : '#' + headerTitle}`}
                     style={{ outline: 'none', boxShadow: 'none' }}
-                    className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-sm text-secondary-900 placeholder:text-secondary-400"
+                    className="max-h-40 min-h-6 flex-1 resize-none bg-transparent py-1 text-sm text-secondary-900 placeholder:text-secondary-400"
                   />
                   <Button
                     onClick={send}
                     isLoading={sending}
-                    disabled={!draft.trim()}
+                    disabled={(!draft.trim() && pendingFiles.length === 0) || uploading > 0}
                     size="sm"
                     className="px-2.5!"
                     aria-label="Send message"

@@ -33,6 +33,14 @@ export interface ChatChannel {
   other_user_status?: PresenceStatus | null;
 }
 
+export interface ChatAttachment {
+  file_name: string;
+  file_url: string;
+  file_type?: string | null;
+  file_size?: number | null;
+  thumbnail_url?: string | null;
+}
+
 export interface ChatMessage {
   uuid: string;
   channel_uuid?: string;
@@ -45,6 +53,7 @@ export interface ChatMessage {
   is_pinned?: boolean;
   reply_count?: number;
   parent_message_uuid?: string | null;
+  attachments?: ChatAttachment[];
   // Joined sender info (see ChatMessageQueries.getByChannel).
   first_name?: string | null;
   last_name?: string | null;
@@ -195,14 +204,48 @@ export const chatService = {
     );
   },
 
-  async sendMessage(channelUuid: string, content: string): Promise<ChatMessage> {
+  async sendMessage(
+    channelUuid: string,
+    content: string,
+    attachments?: ChatAttachment[]
+  ): Promise<ChatMessage> {
     return unwrap<ChatMessage>(
       await apiClient.post(
         `/api/chat/channels/${channelUuid}/messages`,
-        { content, content_type: 'text' },
+        {
+          content,
+          content_type: 'text',
+          attachments: attachments && attachments.length ? attachments : undefined,
+        },
         JSON_BODY
       )
     );
+  },
+
+  /**
+   * Upload a file to MinIO via the shared uploader and return an attachment
+   * reference (the binary goes to storage; messages carry file_url references,
+   * not bytes). Mirrors the kanban attachment flow.
+   */
+  async uploadFile(file: File): Promise<ChatAttachment> {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('prefix', 'chat-attachments');
+    const res = await apiClient.post('/api/v2/documents/upload', fd);
+    const body = res.data as {
+      data?: { url: string; filename?: string; content_type?: string; size?: number };
+      url?: string;
+      filename?: string;
+      content_type?: string;
+      size?: number;
+    };
+    const d = body?.data ?? body;
+    return {
+      file_name: file.name || d.filename || 'file',
+      file_url: d.url as string,
+      file_type: d.content_type || file.type || undefined,
+      file_size: d.size ?? file.size,
+    };
   },
 
   /** Search users in the current namespace (min 2 chars). */
