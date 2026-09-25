@@ -105,13 +105,25 @@ function _M.broadcast(channel_uuid, event_type, data)
     end
 end
 
+--- Push an event to one user's open connections (all their tabs), e.g.
+-- "agent:done" from the background agent run. Same enqueue-only safety as
+-- broadcast(), so it's legal from a timer.
+function _M.push_user(user_uuid, event_type, data)
+    local frame = user_uuid and cjson.encode({ type = event_type, data = data })
+    if frame then push_to_user(user_uuid, frame) end
+end
+
 --- Push a new message to a channel's connected members.
 -- @param namespace_id number|nil  so the client can ignore other-tenant tabs
 -- @param message table            the full message row (with sender info)
-function _M.broadcast_message(channel_uuid, namespace_id, message)
+-- @param channel table|nil        {name, type} so notifications can say where
+--                                 it came from ("in #general" vs a DM)
+function _M.broadcast_message(channel_uuid, namespace_id, message, channel)
     _M.broadcast(channel_uuid, "message:new", {
         channel_uuid = channel_uuid,
         namespace_id = namespace_id,
+        channel_name = channel and channel.name or nil,
+        channel_type = channel and channel.type or nil,
         message = message,
     })
 end

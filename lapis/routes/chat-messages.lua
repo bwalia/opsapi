@@ -130,7 +130,7 @@ return function(app)
         pcall(function()
             local ChatWS = require("lib.chat-ws")
             local channel = ChatChannelQueries.show(channel_uuid)
-            ChatWS.broadcast_message(channel_uuid, channel and channel.namespace_id, full_message)
+            ChatWS.broadcast_message(channel_uuid, channel and channel.namespace_id, full_message, channel)
         end)
 
         -- Send push notifications to other channel members

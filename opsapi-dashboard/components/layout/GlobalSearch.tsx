@@ -135,9 +135,9 @@ export function GlobalSearch() {
         onClick={() => setOpen(false)}
         aria-hidden="true"
       />
-      <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-secondary-200 bg-surface shadow-2xl">
-        <div className="flex items-center gap-2 border-b border-secondary-100 px-4">
-          <Search className="h-5 w-5 shrink-0 text-secondary-400" aria-hidden="true" />
+      <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-secondary-200/80 bg-surface shadow-2xl ring-1 ring-black/5">
+        <div className="flex items-center gap-3 border-b border-secondary-100 px-5">
+          <Search className="h-5 w-5 shrink-0 text-primary-500" aria-hidden="true" />
           <input
             ref={inputRef}
             value={query}
@@ -147,14 +147,17 @@ export function GlobalSearch() {
             }}
             onKeyDown={onKeyDown}
             placeholder="Search pages and modules…"
-            className="flex-1 bg-transparent py-4 text-sm text-secondary-900 placeholder:text-secondary-400 focus:outline-none focus-visible:outline-none"
+            // The palette itself signals focus; the global input focus ring would
+            // be clipped by the rounded panel (looked like a cut-off red box).
+            style={{ outline: 'none', boxShadow: 'none', border: 'none' }}
+            className="min-w-0 flex-1 bg-transparent py-4 text-base text-secondary-900 placeholder:text-secondary-400"
           />
-          <kbd className="rounded border border-secondary-200 px-1.5 py-0.5 text-[10px] font-sans text-secondary-400">
+          <kbd className="rounded-md border border-secondary-200 bg-secondary-50 px-1.5 py-0.5 text-[10px] font-sans font-medium text-secondary-500 shadow-sm">
             esc
           </kbd>
         </div>
 
-        <div ref={listRef} className="max-h-[min(60vh,24rem)] overflow-y-auto py-2">
+        <div ref={listRef} className="scrollbar-hidden max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain p-2">
           {results.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-secondary-400">
               No matches{query ? ` for “${query}”` : ''}.
@@ -170,8 +173,8 @@ export function GlobalSearch() {
                   type="button"
                   onMouseMove={() => setActive(i)}
                   onClick={() => go(it)}
-                  className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition ${
-                    activeRow ? 'bg-primary-50' : ''
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                    activeRow ? 'bg-primary-50 ring-1 ring-primary-100' : ''
                   }`}
                 >
                   <span
@@ -192,7 +195,7 @@ export function GlobalSearch() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-secondary-100 px-4 py-2 text-[11px] text-secondary-400">
+        <div className="flex items-center gap-3 border-t border-secondary-100 bg-secondary-50/60 px-5 py-2 text-[11px] text-secondary-400">
           <span>↑ ↓ navigate</span>
           <span>↵ open</span>
           <span className="ml-auto">

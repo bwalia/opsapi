@@ -2395,6 +2395,28 @@ local _migrations = {
     ['997_create_cms_post_categories'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 7),
     ['998_create_cms_webhooks'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 8),
     ['999_cms_posts_search_trgm'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 9),
+    -- Chat AI agent: server-side conversation + background runs (routes/chat-agent.lua)
+    ['2000_create_chat_agent_runs'] = conditional(ProjectConfig.FEATURES.CHAT, function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS chat_agent_runs (
+                id BIGSERIAL PRIMARY KEY,
+                uuid TEXT NOT NULL UNIQUE,
+                namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                user_uuid TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running', -- running | done | error
+                turns JSONB NOT NULL DEFAULT '[]',      -- conversation incl. the new user turn
+                reply TEXT,
+                actions JSONB,
+                archived BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_runs_user_ns
+            ON chat_agent_runs (user_uuid, namespace_id, id DESC) WHERE NOT archived
+        ]])
+    end),
     -- CMS sidebar menu item + RBAC module ("cms") + role grants + enable for namespaces
     ['839_seed_cms_menu_items'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 1),
     ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),

@@ -112,6 +112,28 @@ export interface ChatUser {
   has_chat_access?: boolean;
 }
 
+// A tool the agent invoked during a turn (create_timesheet, create_customer, …).
+export interface AgentAction {
+  name: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  error?: string | null;
+}
+
+// One turn in the agent conversation (client-side only — the agent is not a
+// persisted channel; the whole history is sent on each request).
+export interface AgentTurn {
+  role: 'user' | 'assistant';
+  content: string;
+  actions?: AgentAction[];
+}
+
+export interface AgentConversation {
+  run_uuid?: string;
+  status: 'idle' | 'running' | 'done' | 'error';
+  turns: AgentTurn[];
+}
+
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 function unwrap<T>(res: { data: unknown }): T {
@@ -307,6 +329,29 @@ export const chatService = {
   async grantChatAccess(userUuids: string[]): Promise<void> {
     if (userUuids.length === 0) return;
     await apiClient.post('/api/chat/access/grant', { user_uuids: userUuids }, JSON_BODY);
+  },
+
+  /**
+   * AI assistant. The conversation lives server-side and each turn runs in the
+   * background (survives reloads / page changes / closed tabs); completion is
+   * pushed as the "agent:done" WebSocket event, with polling as a fallback.
+   */
+  async getAgentConversation(): Promise<AgentConversation> {
+    const res = await apiClient.get('/api/chat/agent/conversation');
+    const b = res.data as Partial<AgentConversation>;
+    return { run_uuid: b?.run_uuid, status: b?.status ?? 'idle', turns: b?.turns ?? [] };
+  },
+
+  /** Start a turn. Resolves as soon as the run is queued (202). */
+  async sendAgentMessage(message: string): Promise<AgentConversation> {
+    const res = await apiClient.post('/api/chat/agent', { message }, JSON_BODY);
+    const b = res.data as Partial<AgentConversation>;
+    return { run_uuid: b?.run_uuid, status: b?.status ?? 'running', turns: b?.turns ?? [] };
+  },
+
+  /** "New chat" — archive the current conversation. */
+  async resetAgentConversation(): Promise<void> {
+    await apiClient.delete('/api/chat/agent/conversation');
   },
 };
 
