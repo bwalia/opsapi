@@ -45,9 +45,15 @@ export interface ChatWsNewMessage {
  * useWebSocket. `onNewMessage` is read through a ref so it always sees fresh
  * state without reconnecting.
  */
-export function useChatSocket(onNewMessage: (data: ChatWsNewMessage) => void) {
+export function useChatSocket(
+  onNewMessage: (data: ChatWsNewMessage) => void,
+  options: { enabled?: boolean } = {}
+) {
   const base = wsBaseFromApi();
-  const shouldConnect = Boolean(base);
+  // Only connect once we can (a WS base exists) AND the caller is ready (auth
+  // hydrated) — avoids opening a socket before the token is available, which
+  // would just fail and reconnect.
+  const shouldConnect = (options.enabled ?? true) && Boolean(base);
   const url = shouldConnect ? `${base}/api/chat/ws` : 'ws://disabled';
 
   const handlerRef = useRef(onNewMessage);

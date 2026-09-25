@@ -665,7 +665,8 @@ export default function ChatPage() {
         }
       },
       [activeUuid, currentNamespace?.id, myUuid, loadMessages, refreshChannels]
-    )
+    ),
+    { enabled: !!myUuid }
   );
 
   const headerTitle = activeChannel ? channelTitle(activeChannel) : '';
