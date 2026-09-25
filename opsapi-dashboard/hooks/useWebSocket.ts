@@ -214,7 +214,12 @@ export function useWebSocket(
 
       socketRef.current.onerror = (event) => {
         if (isMountedRef.current) {
-          console.error('[WebSocket] Error:', event);
+          // The browser's WS `error` event is intentionally opaque (a bare Event
+          // that serializes to `{}`) — the actionable detail (code/reason) comes
+          // via `onclose`. Log it quietly so a routine reconnect, or a dev
+          // StrictMode/HMR teardown of a still-connecting socket, doesn't surface
+          // as a red console error. Callers still receive it through onError.
+          console.warn('[WebSocket] connection error (will retry, or fall back to polling)');
           onError?.(event);
         }
       };

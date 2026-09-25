@@ -165,6 +165,19 @@ return function(app)
         -- Get all reactions for the message
         local reactions = ChatReactionQueries.getByMessage(message_uuid)
 
+        -- Real-time: push the updated reaction set to connected channel members
+        -- so everyone's counts move live (best-effort — never fail the toggle).
+        pcall(function()
+            local ChatWS = require("lib.chat-ws")
+            local channel = ChatChannelQueries.show(message.channel_uuid)
+            ChatWS.broadcast(message.channel_uuid, "reaction:update", {
+                channel_uuid = message.channel_uuid,
+                namespace_id = channel and channel.namespace_id,
+                message_uuid = message_uuid,
+                reactions = reactions,
+            })
+        end)
+
         return {
             status = 200,
             json = {

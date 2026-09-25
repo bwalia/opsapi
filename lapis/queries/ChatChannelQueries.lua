@@ -36,11 +36,17 @@ function ChatChannelQueries.getByBusiness(uuid_business_id, params)
 end
 
 -- Get all channels for a user (channels they are a member of)
--- For DM channels, includes the other participant's info
-function ChatChannelQueries.getByUser(user_uuid, params)
+-- For DM channels, includes the other participant's info.
+-- namespace_id (optional) scopes the list to a single tenant — the namespace
+-- gate. When nil, no tenant filter is applied (safe default for callers that
+-- can't resolve a namespace).
+function ChatChannelQueries.getByUser(user_uuid, params, namespace_id)
     local page = params.page or 1
     local perPage = params.perPage or 20
     local offset = (page - 1) * perPage
+
+    -- Interpolated because it's a validated number (tonumber), never user text.
+    local ns_filter = namespace_id and (" AND c.namespace_id = " .. tonumber(namespace_id)) or ""
 
     local sql = [[
         SELECT c.*,
@@ -48,10 +54,16 @@ function ChatChannelQueries.getByUser(user_uuid, params)
                cm.is_muted,
                cm.notification_preference,
                cm.last_read_at,
-               (SELECT COUNT(*) FROM chat_messages m
-                WHERE m.channel_uuid = c.uuid
-                AND m.is_deleted = false
-                AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')) as unread_count,
+               -- Unread count, capped at 100 so the scan is bounded no matter
+               -- how far behind the reader is (the UI shows "99+"). Uses the
+               -- partial (channel_uuid, created_at) WHERE is_deleted=false index.
+               (SELECT COUNT(*) FROM (
+                   SELECT 1 FROM chat_messages m
+                   WHERE m.channel_uuid = c.uuid
+                   AND m.is_deleted = false
+                   AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')
+                   LIMIT 100
+               ) unread_capped) as unread_count,
                -- Other user info for DM channels
                other_member.user_uuid as other_user_uuid,
                other_user.first_name as other_user_first_name,
@@ -69,7 +81,7 @@ function ChatChannelQueries.getByUser(user_uuid, params)
             AND c.type = 'direct'
         LEFT JOIN users other_user ON other_user.uuid = other_member.user_uuid
         LEFT JOIN chat_user_presence other_presence ON other_presence.user_uuid = other_member.user_uuid
-        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false
+        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false]] .. ns_filter .. [[
         ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
         LIMIT ? OFFSET ?
     ]]
@@ -80,7 +92,7 @@ function ChatChannelQueries.getByUser(user_uuid, params)
         SELECT COUNT(*) as total
         FROM chat_channels c
         INNER JOIN chat_channel_members cm ON cm.channel_uuid = c.uuid
-        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false
+        WHERE cm.user_uuid = ? AND cm.left_at IS NULL AND c.is_archived = false]] .. ns_filter .. [[
     ]]
     local count_result = db.query(count_sql, user_uuid)
     local total = count_result and count_result[1] and count_result[1].total or 0
