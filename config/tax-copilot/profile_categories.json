@@ -10,7 +10,7 @@
       "is_archived": false,
       "name": "Business receipts taxed as income of an earlier year",
       "slug": "ai-business-receipts",
-      "uuid": "c5326d75-f1f9-4d29-843f-87159f5f4c81"
+      "uuid": "a1fa6431-5858-4a02-9de4-b1c910dcbb72"
     },
     {
       "answer_scope": "year",
@@ -22,7 +22,7 @@
       "is_archived": false,
       "name": "Share schemes and employment lump sums, compensation and deductions, certain post-employment income and patent royalty payments",
       "slug": "ai-employment-lump-sums",
-      "uuid": "c8f5c0d1-456f-4e81-8350-14c7fed5c7aa"
+      "uuid": "d2e8d665-33bd-41ec-a85c-c4a79bbde619"
     },
     {
       "answer_scope": "year",
@@ -34,7 +34,7 @@
       "is_archived": false,
       "name": "Interest from gilt-edged and other UK securities, deeply discounted securities and accrued income profits",
       "slug": "ai-gilt-interest",
-      "uuid": "a69b5a6a-c790-420c-9bdd-90b923694a97"
+      "uuid": "7333a5b5-bbf7-4cb7-a3ea-548b4d0c2c1a"
     },
     {
       "answer_scope": "year",
@@ -46,7 +46,7 @@
       "is_archived": false,
       "name": "Income Tax losses and limit on Income Tax relief",
       "slug": "ai-income-tax-losses",
-      "uuid": "bbcc5131-0acb-415a-9c35-03b6ff950885"
+      "uuid": "9b0afad0-2ff9-47e6-952d-eb7a2a92da60"
     },
     {
       "answer_scope": "year",
@@ -58,7 +58,7 @@
       "is_archived": false,
       "name": "Gains from life insurance policies, capital redemption policies and life annuity contracts",
       "slug": "ai-life-insurance-gains",
-      "uuid": "e6222c2a-f74c-434d-99a2-eb1ae997f278"
+      "uuid": "3d65bee6-79fc-4114-aada-b950587d9e09"
     },
     {
       "answer_scope": "year",
@@ -70,7 +70,7 @@
       "is_archived": false,
       "name": "Married Couple’s Allowance",
       "slug": "ai-married-couples-allowance",
-      "uuid": "a8988366-7e50-4ed6-8f83-5bc45ed202d3"
+      "uuid": "9b26375c-3c4c-47ee-b9c9-baf788b682b1"
     },
     {
       "answer_scope": "year",
@@ -82,7 +82,7 @@
       "is_archived": false,
       "name": "Other tax reliefs",
       "slug": "ai-other-tax-reliefs",
-      "uuid": "1ce0bc63-7c73-40d0-b105-ef5bb995b6d2"
+      "uuid": "775af384-268c-4eae-ba22-54a89cb4c22d"
     },
     {
       "answer_scope": "year",
@@ -94,7 +94,7 @@
       "is_archived": false,
       "name": "Pension Savings Tax Charges",
       "slug": "ai-pension-savings-charges",
-      "uuid": "c68d8a9a-a6e0-4d63-883e-631edc1200b3"
+      "uuid": "21c4b113-8705-48c1-ad4a-51b571304dea"
     },
     {
       "answer_scope": "year",
@@ -106,7 +106,7 @@
       "is_archived": false,
       "name": "Stock dividends, bonus issues of securities and redeemable shares",
       "slug": "ai-stock-dividends",
-      "uuid": "fb481b0a-a253-4287-9609-00f25c97f16f"
+      "uuid": "f59dc381-9db1-4f0c-ae9b-9eb07959a831"
     },
     {
       "answer_scope": "year",
@@ -118,7 +118,7 @@
       "is_archived": false,
       "name": "Tax avoidance schemes",
       "slug": "ai-tax-avoidance-schemes",
-      "uuid": "10e2c56f-baea-41cf-9d82-fa7ea06ee260"
+      "uuid": "567a62ec-be4e-4dce-827b-84ac079ae920"
     },
     {
       "answer_scope": "entity",
@@ -129,9 +129,10 @@
       "icon": "briefcase",
       "is_active": true,
       "is_archived": false,
+      "mapping_json": "{\"onboarding\":true}",
       "name": "Business details",
       "slug": "business-details",
-      "uuid": "fd65b4ae-7fb9-471b-84bb-6a335a549edb"
+      "uuid": "8f11fd31-489f-4aae-88fa-2961d6f6554b"
     },
     {
       "answer_scope": "user",
@@ -142,7 +143,20 @@
       "is_archived": true,
       "name": "Business Profile",
       "slug": "business-profile",
-      "uuid": "c8f211a7-75ed-4d62-9882-e3bc8459f990"
+      "uuid": "a107e5f4-f836-4688-99ab-e28779b951a9"
+    },
+    {
+      "answer_scope": "entity",
+      "context": "business",
+      "description": "HMRC lets you claim up to £1,000 of trading income tax-free — but you can't also deduct expenses when you claim it, and it's ONE allowance across all your trades.",
+      "display_order": 2,
+      "entity_type": "business",
+      "icon": "sparkles",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Trading Income Allowance (up to £1,000)",
+      "slug": "business-trading-allowance",
+      "uuid": "582d2000-12ff-4184-8aab-f303552171c3"
     },
     {
       "answer_scope": "year",
@@ -154,7 +168,7 @@
       "is_archived": false,
       "name": "Any other information",
       "slug": "cg-any-other-information",
-      "uuid": "b734023a-ab5e-4a56-a27c-91826ad73aa8"
+      "uuid": "b6209b61-5649-4ca6-8bad-826fa8c69631"
     },
     {
       "answer_scope": "year",
@@ -166,7 +180,7 @@
       "is_archived": false,
       "name": "Cryptoassets",
       "slug": "cg-cryptoassets",
-      "uuid": "1df0cf0c-01a9-4333-8fb3-39f992f4dbaf"
+      "uuid": "5e076850-85b2-4491-bdb3-c11ef0c6d5e3"
     },
     {
       "answer_scope": "year",
@@ -178,7 +192,7 @@
       "is_archived": false,
       "name": "Excluded indexed securities and QAHC share repurchases and security redemptions",
       "slug": "cg-excluded-indexed-securities-and-qahc",
-      "uuid": "cff89d3f-de00-48c6-a79f-6254b6ec2080"
+      "uuid": "3d6bbb7a-43a4-4d13-8b10-bd4da712264d"
     },
     {
       "answer_scope": "year",
@@ -190,7 +204,7 @@
       "is_archived": false,
       "name": "Listed shares and securities",
       "slug": "cg-listed-shares-and-securities",
-      "uuid": "89a4d409-4686-47fc-bac3-11c220c1bdb5"
+      "uuid": "eac6b212-c91b-472f-b0fd-d2a18604a746"
     },
     {
       "answer_scope": "year",
@@ -202,7 +216,7 @@
       "is_archived": false,
       "name": "Losses and adjustments",
       "slug": "cg-losses-and-adjustments",
-      "uuid": "9f1fda4d-22cf-42f2-9525-4a8ffa335d0e"
+      "uuid": "5b0d6d85-0c1e-4e4d-9ac7-a2e60e4126be"
     },
     {
       "answer_scope": "year",
@@ -214,7 +228,7 @@
       "is_archived": false,
       "name": "Non-resident Capital Gains Tax (NRCGT) on UK property or land and indirect disposals",
       "slug": "cg-nrcgt",
-      "uuid": "a58504b7-6752-413b-8e2a-d30ff6ce79be"
+      "uuid": "19b370c8-dc05-4d3e-9eb9-c5250bc1ae46"
     },
     {
       "answer_scope": "year",
@@ -226,7 +240,7 @@
       "is_archived": false,
       "name": "Other property, assets and gains",
       "slug": "cg-other-property-assets-and-gains",
-      "uuid": "91cbe0ea-2ca8-4df8-b7ae-a487d8b51dd6"
+      "uuid": "71d92230-eea2-4dfd-806c-33c1c222355a"
     },
     {
       "answer_scope": "year",
@@ -238,7 +252,7 @@
       "is_archived": false,
       "name": "Residential property and carried interest",
       "slug": "cg-residential-property-and-carried-interest",
-      "uuid": "816c7209-6ed7-4c03-9f9a-d836b6c63f41"
+      "uuid": "6a9e1cd1-0f8f-4429-bea8-4367009f7278"
     },
     {
       "answer_scope": "year",
@@ -250,7 +264,7 @@
       "is_archived": false,
       "name": "Tax adjustments to capital gains",
       "slug": "cg-tax-adjustments",
-      "uuid": "ed432f8c-08d7-4640-8b71-37b66285851e"
+      "uuid": "d6a4682b-c157-47b5-a78c-244ccfcdcc46"
     },
     {
       "answer_scope": "year",
@@ -262,7 +276,7 @@
       "is_archived": false,
       "name": "Unlisted shares and securities",
       "slug": "cg-unlisted-shares-and-securities",
-      "uuid": "399a7f87-0d1d-4346-a4e9-36adc1a20554"
+      "uuid": "493e81c6-415d-4362-9283-136f80dd0f84"
     },
     {
       "answer_scope": "user",
@@ -273,18 +287,18 @@
       "is_archived": true,
       "name": "Compliance",
       "slug": "compliance",
-      "uuid": "4126e89e-959b-437c-88d8-8860dade4feb"
+      "uuid": "89f2f1fa-d100-46c2-9301-7b08e35cb633"
     },
     {
       "answer_scope": "user",
       "description": "CIS deductions and construction work",
       "display_order": 4,
       "icon": "hard-hat",
-      "is_active": false,
+      "is_active": true,
       "is_archived": false,
       "name": "Construction Industry Scheme (CIS)",
       "slug": "construction-industry",
-      "uuid": "7530fd34-7986-4e82-80de-b3db92a49c62"
+      "uuid": "e5c13d92-cd77-43a2-9be7-11bb56f153d3"
     },
     {
       "answer_scope": "user",
@@ -295,7 +309,7 @@
       "is_archived": true,
       "name": "Contact Details",
       "slug": "contact-details",
-      "uuid": "624322ff-6694-4eb3-8a4c-ab8584850823"
+      "uuid": "5466267f-ff1a-4fe2-b71f-97b30cdaebc3"
     },
     {
       "answer_scope": "year",
@@ -303,11 +317,11 @@
       "description": "SA100 income section: dividends and interest from UK banks and building societies. One set of answers per tax year.",
       "display_order": 100,
       "icon": "pound-sign",
-      "is_active": false,
-      "is_archived": true,
+      "is_active": true,
+      "is_archived": false,
       "name": "Dividends and interest",
       "slug": "dividends-and-interest",
-      "uuid": "3bb42918-9745-4f56-864c-dcc5e52874b3"
+      "uuid": "56c08293-c8ac-4080-be6c-c622a5853563"
     },
     {
       "answer_scope": "year",
@@ -319,7 +333,7 @@
       "is_archived": false,
       "name": "Dividends from UK companies",
       "slug": "dividends-uk-companies",
-      "uuid": "a9b8c832-1fe2-465c-a853-5cad3f27e109"
+      "uuid": "c67a460e-1a62-4e07-bff5-4a56ada37f5f"
     },
     {
       "answer_scope": "user",
@@ -330,7 +344,19 @@
       "is_archived": true,
       "name": "Education",
       "slug": "education",
-      "uuid": "5ece372a-d102-4f76-8754-7572a57c59f5"
+      "uuid": "15ebd1b0-5261-4c6b-b791-fea0f2eba20b"
+    },
+    {
+      "answer_scope": "year",
+      "context": "eis_subscriptions",
+      "description": "New shares subscribed for under the EIS or Seed EIS. You need the EIS3/EIS5 (or SEIS3) certificate before claiming.",
+      "display_order": 10,
+      "icon": "trending-up",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Enterprise Investment Scheme shares",
+      "slug": "eis-share-subscriptions",
+      "uuid": "34c4f9eb-4384-4e3d-ac01-756e34f6c52d"
     },
     {
       "answer_scope": "user",
@@ -341,7 +367,7 @@
       "is_archived": true,
       "name": "Employment",
       "slug": "employment",
-      "uuid": "e6f898d9-54bd-4139-bd0c-2730889bbf89"
+      "uuid": "76abeeca-8f80-4d5a-9d05-52eb9d29bc31"
     },
     {
       "answer_scope": "entity",
@@ -354,7 +380,7 @@
       "is_archived": false,
       "name": "Benefits",
       "slug": "employment-benefits",
-      "uuid": "5d0abb6e-4db4-4a34-a138-1fe22488b05f"
+      "uuid": "1c76ab04-2cfb-462f-be5f-c5bc148af145"
     },
     {
       "answer_scope": "entity",
@@ -366,7 +392,7 @@
       "is_archived": false,
       "name": "Close company details",
       "slug": "employment-close-company",
-      "uuid": "f7e63a5d-0922-4b68-9f78-3149d2330d33"
+      "uuid": "cf8e1b87-f3f4-4ebd-995c-4ed97fbe4b54"
     },
     {
       "answer_scope": "entity",
@@ -379,7 +405,7 @@
       "is_archived": false,
       "name": "Employment details",
       "slug": "employment-details",
-      "uuid": "4cd52978-1b1f-4e57-9b9f-56bd42df49ff"
+      "uuid": "11d74e5d-755c-4862-b9e3-98410f63eea0"
     },
     {
       "answer_scope": "entity",
@@ -392,7 +418,7 @@
       "is_archived": false,
       "name": "Expenses",
       "slug": "employment-expenses",
-      "uuid": "9d8c9ffe-e8c8-4376-8a82-bad6fc296f86"
+      "uuid": "cf7411b4-7792-4331-a8f3-c1553f8b7fd8"
     },
     {
       "answer_scope": "entity",
@@ -404,7 +430,7 @@
       "is_archived": false,
       "name": "Foreign earnings and deductions",
       "slug": "employment-foreign",
-      "uuid": "9085aba7-a36a-4ae0-af29-e6144fbf9c36"
+      "uuid": "dc643db4-db1c-4ff1-ae34-a831657a23aa"
     },
     {
       "answer_scope": "entity",
@@ -417,7 +443,7 @@
       "is_archived": false,
       "name": "Income",
       "slug": "employment-income",
-      "uuid": "03b5e9a0-de29-405b-837f-f1035ab38142"
+      "uuid": "933d9fa5-7984-4a29-92a8-87999e6b8155"
     },
     {
       "answer_scope": "entity",
@@ -429,7 +455,7 @@
       "is_archived": false,
       "name": "Additional information",
       "slug": "employment-notes",
-      "uuid": "641c8f21-e067-45ad-a32d-6abc3f4b6a45"
+      "uuid": "f8cead07-4907-4ec1-a642-fe87958615c0"
     },
     {
       "answer_scope": "user",
@@ -440,7 +466,7 @@
       "is_archived": true,
       "name": "Financial / Tax Information",
       "slug": "financial-tax",
-      "uuid": "7c1f4a9e-3c01-45e9-94dc-4eccf4dab660"
+      "uuid": "08b1a078-2278-4704-a781-bfa3296c964c"
     },
     {
       "answer_scope": "year",
@@ -452,7 +478,7 @@
       "is_archived": false,
       "name": "Dividends from foreign companies",
       "slug": "foreign-dividends-companies",
-      "uuid": "ee464308-9b1b-4ef5-8b80-95175ad62497"
+      "uuid": "f6d75ab5-34a5-4954-a359-e0da3fe08c35"
     },
     {
       "answer_scope": "year",
@@ -464,7 +490,31 @@
       "is_archived": false,
       "name": "Foreign savings interest",
       "slug": "foreign-savings-interest",
-      "uuid": "9d8b7c1a-c874-4a63-be55-400da3b980b3"
+      "uuid": "081e1620-5948-42c1-b2b3-474dedd1b031"
+    },
+    {
+      "answer_scope": "year",
+      "context": "gift_aid",
+      "description": "Donations made to charity under Gift Aid. Enter what you actually paid — HMRC works out the basic-rate relief on top.",
+      "display_order": 10,
+      "icon": "heart",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Gift Aid payments",
+      "slug": "gift-aid-payments",
+      "uuid": "07f7c2dd-2027-4c15-ba09-c30772235656"
+    },
+    {
+      "answer_scope": "year",
+      "context": "gifts_to_charity",
+      "description": "Shares, securities, land or buildings you gifted (or sold at below market value) to charity.",
+      "display_order": 10,
+      "icon": "gift",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Gifts to charity",
+      "slug": "gifts-to-charity",
+      "uuid": "8f85e5b3-743f-4ca8-bfbd-936dfd47c55d"
     },
     {
       "answer_scope": "user",
@@ -475,7 +525,7 @@
       "is_archived": false,
       "name": "Income Sources",
       "slug": "income-sources",
-      "uuid": "3b34a316-a258-43f6-9956-0dc4ccc1d58e"
+      "uuid": "ccee01d1-4d71-4ad8-9e66-19a9b0cfcfa5"
     },
     {
       "answer_scope": "year",
@@ -487,7 +537,7 @@
       "is_archived": false,
       "name": "Additional information",
       "slug": "interest-notes",
-      "uuid": "1c4250e7-672a-42eb-ae6b-478f2288b8bc"
+      "uuid": "baa43078-1ce5-4951-95ca-c0bc45f17471"
     },
     {
       "answer_scope": "year",
@@ -499,7 +549,7 @@
       "is_archived": false,
       "name": "Taxed UK interest",
       "slug": "interest-taxed-uk",
-      "uuid": "524ce265-ec4b-4beb-9fa8-05179ca76a75"
+      "uuid": "c49eadb1-192d-4a8c-8621-25d671a3a903"
     },
     {
       "answer_scope": "year",
@@ -511,18 +561,30 @@
       "is_archived": false,
       "name": "Untaxed UK interest",
       "slug": "interest-untaxed-uk",
-      "uuid": "5664745c-49df-401f-ac94-3ba4cda7ec09"
+      "uuid": "4a9695ed-0d79-4589-9d16-7868c5533d66"
     },
     {
       "answer_scope": "user",
       "description": "Investment schemes and capital gains",
       "display_order": 7,
       "icon": "trending-up",
-      "is_active": false,
+      "is_active": true,
       "is_archived": false,
       "name": "Investments",
       "slug": "investments",
-      "uuid": "1df70ee1-3867-4854-b6e6-211a4006c0c0"
+      "uuid": "5f50e702-1545-477d-9f4e-cd4e70879be4"
+    },
+    {
+      "answer_scope": "year",
+      "context": "pension",
+      "description": "Other taxable benefits and statutory pay. Statutory pay from an employer is usually already in your P60 — only enter it here if it was paid directly by HMRC.",
+      "display_order": 30,
+      "icon": "heart",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Other Benefits and Pay",
+      "slug": "other-benefits-and-pay",
+      "uuid": "fb7e4d00-b9b6-4892-bb85-24aac67e810b"
     },
     {
       "answer_scope": "year",
@@ -534,18 +596,30 @@
       "is_archived": false,
       "name": "Other dividends",
       "slug": "other-dividends",
-      "uuid": "d402af39-cbd4-4145-adbe-41455f2e5501"
+      "uuid": "38959b13-10a9-4625-898b-a009d7a4a3be"
     },
     {
       "answer_scope": "user",
       "description": "Interest and other income sources",
       "display_order": 5,
       "icon": "pound-sign",
-      "is_active": false,
+      "is_active": true,
       "is_archived": false,
       "name": "Other Income",
       "slug": "other-income",
-      "uuid": "bd4bc0e7-a9e8-4e7d-8b2b-036d6d5430ae"
+      "uuid": "1349b662-80f3-47cc-89c9-3e121f2b5928"
+    },
+    {
+      "answer_scope": "year",
+      "context": "other_pensions",
+      "description": "Every pension other than the State Pension: workplace and personal pensions, retirement annuities, and one-off triviality payments. Add one entry per payer — the figures are on the P60 or statement each provider sends you.",
+      "display_order": 10,
+      "icon": "piggy-bank",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Other UK Pension, retirement annuity or taxable triviality payment",
+      "slug": "other-uk-pension",
+      "uuid": "034783c1-1c71-47bd-b1b9-65df2a99d5af"
     },
     {
       "answer_scope": "entity",
@@ -558,43 +632,43 @@
       "is_archived": false,
       "name": "About this overseas property",
       "slug": "overseas-property-details",
-      "uuid": "d6d1d22e-9b9c-47e2-b4b9-c4acce233e6f"
+      "uuid": "c06431e1-454b-451f-81fb-ee29165e4179"
     },
     {
       "answer_scope": "year",
       "context": "pension_payments",
       "description": "Contributions to your employer's pension scheme that were taken from pay AFTER tax, so no tax relief has been given yet.",
-      "display_order": 2,
+      "display_order": 102,
       "icon": "pound-sign",
       "is_active": true,
       "is_archived": false,
       "name": "Employer schemes not deducted from gross pay",
       "slug": "pension-employer",
-      "uuid": "4e969da1-1b58-4ad2-89f9-c0d7995701c3"
+      "uuid": "03e9ea6e-9051-4e5b-9726-cd70e7365077"
     },
     {
       "answer_scope": "year",
       "context": "pension_payments",
       "description": "Payments to a qualifying overseas pension scheme, paid out of taxed income and eligible for UK tax relief.",
-      "display_order": 3,
+      "display_order": 103,
       "icon": "pound-sign",
       "is_active": true,
       "is_archived": false,
       "name": "Overseas schemes eligible for UK tax relief",
       "slug": "pension-overseas",
-      "uuid": "edec9601-43f5-4869-842e-af14be1c5c6c"
+      "uuid": "dc573cd2-883f-49a8-adfa-96231a55903e"
     },
     {
       "answer_scope": "year",
       "context": "pension_payments",
       "description": "Personal payments into registered pension schemes and retirement annuity contracts. Tick 'relief claimed by provider' where the scheme adds basic-rate tax relief for you (relief at source).",
-      "display_order": 1,
+      "display_order": 101,
       "icon": "pound-sign",
       "is_active": true,
       "is_archived": false,
       "name": "Registered pension schemes",
       "slug": "pension-registered",
-      "uuid": "57f05a71-ec1f-48b2-b071-e194a3741528"
+      "uuid": "1a7e1c4e-bc24-49e6-b446-5a255288ee66"
     },
     {
       "answer_scope": "user",
@@ -605,7 +679,7 @@
       "is_archived": false,
       "name": "Personal Details",
       "slug": "personal-information",
-      "uuid": "a2af2a18-3b8f-47e8-946b-fab4148888fb"
+      "uuid": "0daffad2-898b-41c3-81b6-830adca0f290"
     },
     {
       "answer_scope": "user",
@@ -616,7 +690,7 @@
       "is_archived": true,
       "name": "Preferences",
       "slug": "preferences",
-      "uuid": "6628e2d6-7c0f-4568-9aaf-31c67dadbfed"
+      "uuid": "82d8df78-e1b0-42d7-b371-d397f42d846a"
     },
     {
       "answer_scope": "entity",
@@ -627,9 +701,10 @@
       "icon": "home",
       "is_active": true,
       "is_archived": false,
+      "mapping_json": "{\"onboarding\":true}",
       "name": "Property details",
       "slug": "property-details",
-      "uuid": "ffb3aaf3-558f-4cce-8df1-b1f5ebea3f51"
+      "uuid": "2661bcc9-d275-4934-802a-1d89d7a25edc"
     },
     {
       "answer_scope": "user",
@@ -640,7 +715,19 @@
       "is_archived": true,
       "name": "Property / Rental Profile",
       "slug": "property-rental",
-      "uuid": "757080cb-3d80-4eda-825f-c11e63bc45bc"
+      "uuid": "60285f88-d8e7-431f-8334-9c10ab9a78e8"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental_business_year",
+      "description": "Anything you'd like HMRC to see with your return — e.g. joint-let holders' names and addresses.",
+      "display_order": 2,
+      "icon": "message-square",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Additional text note for Tax Return",
+      "slug": "rental-additional-text-note",
+      "uuid": "0e139307-155b-4efd-92f0-c4fa4e7f24b3"
     },
     {
       "answer_scope": "user",
@@ -648,22 +735,82 @@
       "description": "Details that apply to your property letting as a whole",
       "display_order": 1,
       "icon": "home",
-      "is_active": true,
-      "is_archived": false,
+      "is_active": false,
+      "is_archived": true,
       "name": "Your rental business",
       "slug": "rental-business",
-      "uuid": "e7636263-fde0-462e-805d-97e8373ddc3f"
+      "uuid": "91786b20-b926-461c-b411-6c7ea7672854"
+    },
+    {
+      "answer_scope": "user",
+      "context": "rental_business",
+      "description": "How your rental accounts are prepared — the period they cover and whether income is recorded on the cash or accruals basis.",
+      "display_order": 2,
+      "icon": "book",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Accounts",
+      "slug": "rental-business-accounts-basis",
+      "uuid": "2ae4af02-6103-44a7-9f9e-2904ab2b131a"
     },
     {
       "answer_scope": "user",
       "description": "Property rental income details",
       "display_order": 6,
       "icon": "home",
-      "is_active": false,
+      "is_active": true,
       "is_archived": false,
       "name": "Rental Income",
       "slug": "rental-income",
-      "uuid": "99f2a343-069d-42d8-8e10-e34414b4d208"
+      "uuid": "989816e0-0df2-4506-8ab8-ffc6203bd429"
+    },
+    {
+      "answer_scope": "user",
+      "context": "rental_business",
+      "description": "For joint lettings tick the box and include name(s) and address(es) of record holder(s) in the additional text note.",
+      "display_order": 4,
+      "icon": "users",
+      "is_active": false,
+      "is_archived": true,
+      "name": "Joint Lettings",
+      "slug": "rental-joint-lettings",
+      "uuid": "c1394c37-2bf2-4cda-8962-b7362bac2667"
+    },
+    {
+      "answer_scope": "user",
+      "context": "rental_business",
+      "description": "HMRC lets you claim up to £1,000 of property income tax-free — but you can't also deduct expenses when you claim it.",
+      "display_order": 3,
+      "icon": "sparkles",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Property Income Allowance (up to £1,000)",
+      "slug": "rental-property-income-allowance",
+      "uuid": "1712a919-c4c2-4cb3-98c1-03809d91fc47"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental_business_year",
+      "description": "The period your books cover for this tax year.",
+      "display_order": 1,
+      "icon": "calendar",
+      "is_active": false,
+      "is_archived": true,
+      "name": "Accounting period",
+      "slug": "rental-reporting-period-and-notes",
+      "uuid": "db9c330f-eb6a-4e19-a9d2-655219ea784a"
+    },
+    {
+      "answer_scope": "user",
+      "context": "rental_business",
+      "description": "The dates your property business started and (if applicable) ended, and whether you were resident overseas while letting.",
+      "display_order": 1,
+      "icon": "home",
+      "is_active": true,
+      "is_archived": false,
+      "name": "UK Property Business",
+      "slug": "rental-uk-property-business",
+      "uuid": "cb8232ec-9af0-4c75-9433-03bc3005c5f0"
     },
     {
       "answer_scope": "year",
@@ -671,11 +818,11 @@
       "description": "SA103F basis-period reform (2023-24 transition). Elections and spreading of transition profit — check helpsheet HS252.",
       "display_order": 21,
       "icon": "briefcase",
-      "is_active": true,
-      "is_archived": false,
+      "is_active": false,
+      "is_archived": true,
       "name": "Basis-period reform adjustments",
       "slug": "sa103f-basis-reform",
-      "uuid": "b8590538-434c-4c73-a296-d64651ab635d"
+      "uuid": "6eaa8ef6-26db-4a50-970f-c562142a52f8"
     },
     {
       "answer_scope": "year",
@@ -683,11 +830,11 @@
       "description": "SA103F boxes 100-102. Class 4 NIC exemption / adjustment. Actual Class 4 LIABILITY box 4 is on SA110 — this section captures the reason/adjustment.",
       "display_order": 20,
       "icon": "briefcase",
-      "is_active": true,
-      "is_archived": false,
+      "is_active": false,
+      "is_archived": true,
       "name": "Class 4 National Insurance",
       "slug": "sa103f-class4-nic",
-      "uuid": "003bf8bd-3e40-4f92-bf2e-9f84981de24e"
+      "uuid": "9cfea76d-b3e1-427d-ac7f-14d874fd4830"
     },
     {
       "answer_scope": "year",
@@ -695,23 +842,95 @@
       "description": "SA103F boxes 77-79. Options for using self-employment losses against OTHER income (not just future self-employment profits).",
       "display_order": 22,
       "icon": "briefcase",
-      "is_active": true,
-      "is_archived": false,
+      "is_active": false,
+      "is_archived": true,
       "name": "Loss offset options",
       "slug": "sa103f-loss-offset",
-      "uuid": "5d6cd693-4f20-426a-81f7-9932b8945e13"
+      "uuid": "8fa5887a-afd9-4852-846a-f7bec86b8da6"
     },
     {
       "answer_scope": "year",
       "context": "rental",
-      "description": "SA105 boxes 46-48. Per-year totals across your whole UK property portfolio.",
-      "display_order": 11,
+      "description": "SA105 boxes 21, 23 and 37 — income items entered as year totals rather than per property.",
+      "display_order": 9,
+      "icon": "home",
+      "is_active": false,
+      "is_archived": true,
+      "name": "Additional property income",
+      "slug": "sa105-additional-income",
+      "uuid": "2e00af47-170e-4d39-ac7b-7d60ea4b3785"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental",
+      "description": "SA105 boxes 32-36. If the only property entry within this tab is Rent-a-Room, no adjustments and allowances should be entered.",
+      "display_order": 3,
+      "icon": "sliders",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Adjustments and allowances",
+      "slug": "sa105-adjustments-and-allowances",
+      "uuid": "6d52dca9-a110-44ee-b196-43143e62cdb5"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental",
+      "description": "If the only property entry within this tab is Rent-a-Room, no expenses should be entered. Values roll up from the line items you record on each property in the Properties tab.",
+      "display_order": 2,
+      "icon": "receipt",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Expenses",
+      "slug": "sa105-expenses",
+      "uuid": "64232752-1451-4fb0-b32a-0aae045d5390"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental",
+      "description": "SA105 boxes 20-23. Rents and other income roll up from the Properties tab; use the fields below for the year-totals HMRC asks for separately.",
+      "display_order": 1,
       "icon": "home",
       "is_active": true,
       "is_archived": false,
-      "name": "Property losses",
+      "name": "Income (except Rent-A-Room)",
+      "slug": "sa105-income-except-rent-a-room",
+      "uuid": "1259829d-a88b-4e6e-8280-5a6125aeac7f"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental",
+      "description": "SA105 boxes 46-48. Adjusted profit and taxable profit are computed from your income, expenses and adjustments above.",
+      "display_order": 5,
+      "icon": "trending-up",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Calculate taxable profit or loss",
       "slug": "sa105-property-losses",
-      "uuid": "58de392b-92c0-44b0-89a3-e568b1fee186"
+      "uuid": "ecdb1fa4-343c-43bf-9adb-a899160bacde"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental",
+      "description": "The scheme lets you receive up to £7,500 per year (£3,750 if shared) tax-free from letting a furnished room in your own home.",
+      "display_order": 4,
+      "icon": "bed",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Rent-a-Room Scheme",
+      "slug": "sa105-rent-a-room-scheme",
+      "uuid": "5d8f8209-d6ba-4243-acd9-816bf42d02b0"
+    },
+    {
+      "answer_scope": "year",
+      "context": "rental",
+      "description": "SA105 boxes 44-45. Mortgage interest on residential lets gets a 20% tax credit rather than a full deduction — enter the FULL amount here and HMRC restricts it automatically.",
+      "display_order": 6,
+      "icon": "banknote",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Residential property finance costs",
+      "slug": "sa105-residential-finance-costs",
+      "uuid": "15bfa65b-b425-46ad-badf-05a392d7529b"
     },
     {
       "answer_scope": "year",
@@ -719,11 +938,11 @@
       "description": "SA105 boxes 32-45. Per-year totals across your whole UK property portfolio — not per property.",
       "display_order": 10,
       "icon": "home",
-      "is_active": true,
-      "is_archived": false,
+      "is_active": false,
+      "is_archived": true,
       "name": "Tax adjustments and allowances",
       "slug": "sa105-tax-adjustments",
-      "uuid": "1e8c3c3f-625f-4c2f-aa2f-c742de1ffd10"
+      "uuid": "4b9e45bf-e1f7-4f5e-a8b2-f88c18e408d8"
     },
     {
       "answer_scope": "year",
@@ -735,7 +954,7 @@
       "is_archived": false,
       "name": "Dividends from foreign companies",
       "slug": "sa106-foreign-dividends",
-      "uuid": "f7095071-ee52-4109-ae6d-91c04d8cb38a"
+      "uuid": "938b2665-3bea-4009-b98e-3ca1e03c140a"
     },
     {
       "answer_scope": "year",
@@ -747,7 +966,7 @@
       "is_archived": false,
       "name": "Foreign savings interest",
       "slug": "sa106-foreign-interest",
-      "uuid": "f3d3ea8a-ee63-41a3-bc4a-2b2a68352429"
+      "uuid": "7f070a2b-20b3-45b9-8932-6138542a0015"
     },
     {
       "answer_scope": "year",
@@ -759,7 +978,7 @@
       "is_archived": false,
       "name": "Gains on foreign life insurance policies",
       "slug": "sa106-foreign-life-insurance",
-      "uuid": "aba15fa9-8768-4be1-b1a0-3fb78ec21818"
+      "uuid": "b290834c-0bf5-4def-bd6a-c18156370b6a"
     },
     {
       "answer_scope": "year",
@@ -771,7 +990,7 @@
       "is_archived": false,
       "name": "Foreign tax on employment and other income",
       "slug": "sa106-foreign-tax-other-income",
-      "uuid": "cd2a9d7b-a5e4-4c83-8cdf-6b12858967aa"
+      "uuid": "2f14e030-cbae-4f03-ad5d-51c5299ba6eb"
     },
     {
       "answer_scope": "year",
@@ -783,7 +1002,46 @@
       "is_archived": false,
       "name": "Overseas pensions and social security benefits",
       "slug": "sa106-overseas-pensions",
-      "uuid": "b68131aa-58de-461a-9821-903f41a86472"
+      "uuid": "fe0d6e90-3b22-4d27-82a3-97add922d82a"
+    },
+    {
+      "answer_scope": "entity",
+      "context": "overseas_property",
+      "description": "SA106 boxes 20 to 23. Adjustments and capital allowances for this overseas property. Your income and expenses above give the net profit; these boxes turn it into the adjusted profit HMRC taxes.",
+      "display_order": 20,
+      "entity_type": "overseas_property",
+      "icon": "sliders",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Calculating profits and losses for tax purposes",
+      "slug": "sa106-property-adjustments",
+      "uuid": "5822fe0f-def1-44af-a9cc-7d206b47dba7"
+    },
+    {
+      "answer_scope": "entity",
+      "context": "overseas_property",
+      "description": "The summary details HMRC asks for per country on SA106 page F 4 — the tax already paid on this property's income, and which relief you're claiming for it.",
+      "display_order": 21,
+      "entity_type": "overseas_property",
+      "icon": "globe",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Foreign tax and reliefs",
+      "slug": "sa106-property-foreign-tax",
+      "uuid": "35e6f9af-ef57-4ca2-9c2d-44a7d53632df"
+    },
+    {
+      "answer_scope": "entity",
+      "context": "overseas_property",
+      "description": "SA106 boxes 26, 31 and 32. Overseas property losses stay in the overseas pool — they can't be set against UK rental profits.",
+      "display_order": 22,
+      "entity_type": "overseas_property",
+      "icon": "trending-down",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Losses",
+      "slug": "sa106-property-losses",
+      "uuid": "4c957ec9-89b6-46f8-bc7d-baf4d07ed40f"
     },
     {
       "answer_scope": "year",
@@ -795,7 +1053,7 @@
       "is_archived": false,
       "name": "Unremittable overseas income",
       "slug": "sa106-unremittable-income",
-      "uuid": "b1030a16-77b7-4d66-8dd2-e9df2a3ffd55"
+      "uuid": "c40f6eeb-dc1b-45ce-b623-1714f7df6bea"
     },
     {
       "answer_scope": "year",
@@ -807,7 +1065,7 @@
       "is_archived": false,
       "name": "Domicile",
       "slug": "sa109-domicile",
-      "uuid": "bf0d9733-708d-4094-90de-f12c6d36c2a3"
+      "uuid": "8cf25a57-e290-4dcb-a93a-4e2d2541b8f1"
     },
     {
       "answer_scope": "year",
@@ -819,7 +1077,7 @@
       "is_archived": false,
       "name": "Any other information",
       "slug": "sa109-other-information",
-      "uuid": "ea401575-68f1-49e6-a39e-78cb826235aa"
+      "uuid": "65f84174-2f41-48d5-b616-356e78bf6118"
     },
     {
       "answer_scope": "year",
@@ -831,7 +1089,7 @@
       "is_archived": false,
       "name": "Personal allowance (non-resident claim)",
       "slug": "sa109-personal-allowance-non-resident",
-      "uuid": "ccd1ec9b-de44-4c13-882b-2e5bbb87a96c"
+      "uuid": "a730e60e-b318-44dc-8a7f-9eaaf14389de"
     },
     {
       "answer_scope": "year",
@@ -843,7 +1101,7 @@
       "is_archived": false,
       "name": "Remittance basis",
       "slug": "sa109-remittance-basis",
-      "uuid": "3cf78470-d11d-4284-a24f-902056941ec6"
+      "uuid": "7f9377f5-500c-4f99-b13b-89f177caa7e1"
     },
     {
       "answer_scope": "year",
@@ -855,7 +1113,7 @@
       "is_archived": false,
       "name": "Residence status",
       "slug": "sa109-residence-status",
-      "uuid": "549a9b3d-724d-433d-902e-28dc26934f2e"
+      "uuid": "f7d114d0-4e9b-4598-bc76-fee2c1d0c4fb"
     },
     {
       "answer_scope": "year",
@@ -867,7 +1125,7 @@
       "is_archived": false,
       "name": "Adjustments to tax due",
       "slug": "sa110-adjustments",
-      "uuid": "83fe63af-0c61-46c6-ace5-dca985510b7a"
+      "uuid": "ff5c6804-6a96-4095-91c1-392324f56a3f"
     },
     {
       "answer_scope": "year",
@@ -879,7 +1137,7 @@
       "is_archived": false,
       "name": "Any other information",
       "slug": "sa110-other-info",
-      "uuid": "24294aed-f985-4d13-b8af-e2fa02204037"
+      "uuid": "ab53f78a-a4c1-483e-9f05-8b283c056283"
     },
     {
       "answer_scope": "year",
@@ -891,7 +1149,7 @@
       "is_archived": false,
       "name": "Payments on account",
       "slug": "sa110-payments-on-account",
-      "uuid": "a9fda311-cb0a-4bd5-bbc4-c28d4e06b26c"
+      "uuid": "1e2184b4-1188-4b08-ac8b-da81ea4f80ea"
     },
     {
       "answer_scope": "year",
@@ -903,7 +1161,7 @@
       "is_archived": false,
       "name": "Self Assessment",
       "slug": "sa110-self-assessment",
-      "uuid": "f7519350-6215-4d53-9a0b-280117aabb91"
+      "uuid": "ab1df638-0747-4f59-b89d-b85f8481aecd"
     },
     {
       "answer_scope": "year",
@@ -915,7 +1173,7 @@
       "is_archived": false,
       "name": "Blind person's and married couple's surplus allowance",
       "slug": "sa110-surplus-allowances",
-      "uuid": "c08735af-8ee3-40af-a3b8-827060b848d8"
+      "uuid": "ae5619e1-87aa-49fc-8e14-d5be2598b2d9"
     },
     {
       "answer_scope": "year",
@@ -927,18 +1185,65 @@
       "is_archived": false,
       "name": "Underpaid tax and other debts",
       "slug": "sa110-underpaid-tax",
-      "uuid": "36005a44-84f1-4fdb-b90c-e1135c0155b7"
+      "uuid": "04e7ef4a-a317-4f1d-a7aa-94022b1c2d8b"
     },
     {
       "answer_scope": "user",
       "description": "Self-employment details",
       "display_order": 3,
       "icon": "building",
-      "is_active": false,
+      "is_active": true,
       "is_archived": false,
       "name": "Self-Employment",
       "slug": "self-employment",
-      "uuid": "0d80975b-38ca-452b-ae93-537f65a7e942"
+      "uuid": "11fc0877-92cb-4574-9f22-4d214a6fb7e5"
+    },
+    {
+      "answer_scope": "year",
+      "context": "pension",
+      "description": "Taxable benefits paid by the DWP. Enter the dates each one started and stopped so only the part falling in this tax year is counted.",
+      "display_order": 20,
+      "icon": "shield",
+      "is_active": true,
+      "is_archived": false,
+      "name": "State Benefits",
+      "slug": "state-benefits",
+      "uuid": "b7e370e2-7216-40f8-a9d0-559f98371aa7"
+    },
+    {
+      "answer_scope": "year",
+      "context": "pension",
+      "description": "What you were entitled to for the year — not what was actually paid into your account. Your BR735 or the DWP letter shows the weekly rate and the dates it applied from.",
+      "display_order": 10,
+      "icon": "piggy-bank",
+      "is_active": true,
+      "is_archived": false,
+      "name": "State Pension",
+      "slug": "state-pension",
+      "uuid": "4c9191ec-062b-43bc-8e9b-a434d8ce75a2"
+    },
+    {
+      "answer_scope": "user",
+      "description": "Tell us about payments that qualify for tax relief",
+      "display_order": 60,
+      "icon": "hand-coins",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Tax Relief",
+      "slug": "tax-relief",
+      "uuid": "dd6689f3-fcfe-439a-a079-a5cad52b480a"
+    },
+    {
+      "answer_scope": "year",
+      "context": "vct_subscriptions",
+      "description": "New VCT shares you subscribed for in the year. Relief is 30% of the amount subscribed, up to £200,000.",
+      "display_order": 10,
+      "icon": "trending-up",
+      "is_active": true,
+      "is_archived": false,
+      "name": "Subscriptions for Venture Capital Trust shares",
+      "slug": "vct-share-subscriptions",
+      "uuid": "ef1a21c8-0cc8-4c2b-aac8-470df7029a83"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",

@@ -1,78 +1,353 @@
 {
   "entries": [
     {
+      "accepts_hmrc_categories": {},
       "category_key": "accelerated_transition_profit",
-      "description": "Extra transition profit you choose to tax this year on top of the automatic spread",
-      "display_order": 2,
-      "hmrc_mapping": "{\"sa103f_box\":\"73\"}",
+      "description": "Extra transition profit you choose to tax this year on top of the automatic spread.",
+      "display_order": 403,
+      "hmrc_mapping": "{\"section\": \"transitional_profit\", \"sa103f_box\": \"73\", \"section_label\": \"Transitional Profit\", \"section_order\": 40, \"section_subtitle\": \"Basis-period reform: spread from the 2023-24 transition year.\"}",
       "is_active": true,
       "kind": "adjustment",
       "label": "Accelerated transition profit",
       "supports_disallowable": false,
-      "uuid": "563e2237-5a4e-4a3a-aa64-49f44430b09e"
+      "uuid": "90472aed-4b07-41ce-af74-f7292f517655"
     },
     {
+      "accepts_hmrc_categories": {},
+      "category_key": "adjusted_profit",
+      "display_order": 304,
+      "hmrc_mapping": "{\"section\": \"adjustments\", \"computed\": \"adjusted_profit\", \"readonly\": true, \"section_label\": \"Adjustments\", \"section_order\": 30, \"section_subtitle\": \"One-off tweaks to the calculated profit for the accounting period.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Adjusted profit",
+      "supports_disallowable": false,
+      "uuid": "2c8cf0ea-702f-435a-9ab2-3e42aacb78fd"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "adjustment_accounting_period",
+      "display_order": 301,
+      "hmrc_mapping": "{\"section\": \"adjustments\", \"sa103f_box\": \"68\", \"section_label\": \"Adjustments\", \"section_order\": 30, \"section_subtitle\": \"One-off tweaks to the calculated profit for the accounting period.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Adjustment to arrive at profit or loss for the accounting period",
+      "supports_disallowable": false,
+      "uuid": "6bf26b31-0065-44e9-92dc-09145ab5ae7c"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "adjustment_change_accounting_practice",
+      "display_order": 302,
+      "hmrc_mapping": "{\"section\": \"adjustments\", \"sa103f_box\": \"69\", \"section_label\": \"Adjustments\", \"section_order\": 30, \"section_subtitle\": \"One-off tweaks to the calculated profit for the accounting period.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Adjustment for change of accounting practice",
+      "supports_disallowable": false,
+      "uuid": "c264b186-cb6e-4985-835c-4a9fb3d3a7d3"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "allowable_loss",
+      "display_order": 508,
+      "hmrc_mapping": "{\"section\": \"losses\", \"computed\": \"allowable_loss\", \"readonly\": true, \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Allowable loss",
+      "supports_disallowable": false,
+      "uuid": "6627948e-6325-4117-82df-e21b9e1b492e"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "apportioned_transition_profit",
+      "display_order": 402,
+      "hmrc_mapping": "{\"section\": \"transitional_profit\", \"computed\": \"apportioned_transition_profit\", \"readonly\": true, \"section_label\": \"Transitional Profit\", \"section_order\": 40, \"section_subtitle\": \"Basis-period reform: spread from the 2023-24 transition year.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Apportioned transition profit",
+      "supports_disallowable": false,
+      "uuid": "d7851e6f-6154-4423-8b87-7f975c424621"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "averaging_adjustment",
+      "description": "Averaging is available for farmers, market gardeners and creators of literary or artistic works.",
+      "display_order": 303,
+      "hmrc_mapping": "{\"section\": \"adjustments\", \"sa103f_box\": \"71\", \"section_label\": \"Adjustments\", \"section_order\": 30, \"section_subtitle\": \"One-off tweaks to the calculated profit for the accounting period.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Averaging adjustment",
+      "supports_disallowable": false,
+      "uuid": "0989c76f-6662-456a-a6ab-f519c0f000ad"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "balancing_charge_bpra",
+      "display_order": 101,
+      "hmrc_mapping": "{\"section\": \"balancing_charges\", \"sa103f_box\": \"59\", \"section_label\": \"Add: Balancing charges and Goods for own use\", \"section_order\": 10, \"section_subtitle\": \"Amounts to add back to profit before HMRC's tax calculation.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Balancing charge (BPRA)",
+      "supports_disallowable": false,
+      "uuid": "afcfbd96-da6c-48f4-ad41-c3edf8fa06fe"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "balancing_charges_disposal",
+      "display_order": 102,
+      "hmrc_mapping": "{\"section\": \"balancing_charges\", \"sa103f_box\": \"60\", \"section_label\": \"Add: Balancing charges and Goods for own use\", \"section_order\": 10, \"section_subtitle\": \"Amounts to add back to profit before HMRC's tax calculation.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Balancing charges on disposal",
+      "supports_disallowable": false,
+      "uuid": "2b3debed-668d-453e-a7e6-78e370946090"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "cis_deductions_contractors",
+      "display_order": 514,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"81\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "CIS deductions on payments from contractors",
+      "supports_disallowable": false,
+      "uuid": "f60c2d26-c451-4048-bc60-23d4f73114cb"
+    },
+    {
+      "accepts_hmrc_categories": {},
       "category_key": "fig_claim",
-      "display_order": 6,
-      "hmrc_mapping": "{\"sa103f_box\":\"75\"}",
+      "display_order": 507,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"75\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
       "is_active": true,
       "kind": "adjustment",
       "label": "Amount claimed under the foreign income and gains (FIG) regime",
       "supports_disallowable": false,
-      "uuid": "0c64b41b-b750-478e-8f66-3c0f121aa72c"
+      "uuid": "80eff137-2bce-4dcd-8650-3d20868c61a7"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "fig_loss_adjustment",
-      "display_order": 7,
-      "hmrc_mapping": "{\"sa103f_box\":\"75\"}",
+      "display_order": 509,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"75\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
       "is_active": true,
       "kind": "adjustment",
-      "label": "Adjustment to losses from a FIG regime claim",
+      "label": "Adjustment to losses as a result of a claim under the foreign income and gains (FIG) regime",
       "supports_disallowable": false,
-      "uuid": "e503292f-8d30-4558-a26e-c08a5e4918ff"
+      "uuid": "4e1e925f-94ce-42fa-bfb0-56765da82170"
     },
     {
+      "accepts_hmrc_categories": {},
+      "category_key": "goods_own_use",
+      "display_order": 103,
+      "hmrc_mapping": "{\"section\": \"balancing_charges\", \"sa103f_box\": \"61\", \"section_label\": \"Add: Balancing charges and Goods for own use\", \"section_order\": 10, \"section_subtitle\": \"Amounts to add back to profit before HMRC's tax calculation.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Goods and services for your own use",
+      "supports_disallowable": false,
+      "uuid": "27d6255d-c32a-4dff-9df1-13cc4c476224"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "income_receipts_not_taxable",
+      "description": "Anything already inside your income or expenses figures that isn't taxable as business profit — SA103F box 60. Deducted from your taxable profit.",
+      "display_order": 8,
+      "hmrc_mapping": "{\"sa103f_box\":\"60\"}",
+      "is_active": false,
+      "kind": "adjustment",
+      "label": "Income, receipts and other profits not taxable",
+      "supports_disallowable": false,
+      "uuid": "695eb694-d4cd-418b-8be0-f742af71cc25"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "loss_bf_set_off_this_year",
+      "display_order": 503,
+      "hmrc_mapping": "{\"section\": \"losses\", \"computed\": \"loss_bf_set_off_this_year\", \"readonly\": true, \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss brought forward set off against this year's profits",
+      "supports_disallowable": false,
+      "uuid": "751e28b1-0a58-43e4-99cd-9d3f7bc0a27b"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "loss_bf_set_off_transitional",
+      "display_order": 502,
+      "hmrc_mapping": "{\"section\": \"losses\", \"computed\": \"loss_bf_set_off_transitional\", \"readonly\": true, \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss brought forward set off against transitional profits",
+      "supports_disallowable": false,
+      "uuid": "dd713ce2-54a8-4498-93e2-319ca5e7e3b9"
+    },
+    {
+      "accepts_hmrc_categories": {},
       "category_key": "loss_brought_forward",
-      "display_order": 4,
-      "hmrc_mapping": "{\"sa103f_box\":\"74\"}",
+      "display_order": 501,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"74\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
       "is_active": true,
       "kind": "adjustment",
       "label": "Loss brought forward from earlier years",
       "supports_disallowable": false,
-      "uuid": "0d267fbc-9c52-42a7-8aa5-69d76c381734"
+      "uuid": "414c71cd-b61d-4998-9676-c1029148ac41"
     },
     {
+      "accepts_hmrc_categories": {},
+      "category_key": "loss_carried_back",
+      "display_order": 512,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"80\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss carried back",
+      "supports_disallowable": false,
+      "uuid": "5ef594f4-d096-480d-b927-69cf949ad527"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "loss_carried_forward",
+      "display_order": 513,
+      "hmrc_mapping": "{\"section\": \"losses\", \"computed\": \"loss_carried_forward\", \"readonly\": true, \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss carried forward",
+      "supports_disallowable": false,
+      "uuid": "7c6dcd29-efc0-40a0-8e0c-95e0eb68d7de"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "loss_set_off_other_income",
+      "display_order": 510,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"78\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss set off against other income",
+      "supports_disallowable": false,
+      "uuid": "19c26a5e-e527-4d20-aa74-9250a6fc7334"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "loss_used_capital_gains",
+      "display_order": 511,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"79\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Loss used against capital gains",
+      "supports_disallowable": false,
+      "uuid": "2e5b3b10-ad1d-46e9-884b-384426d9114f"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "net_profit_loss_tax",
+      "display_order": 203,
+      "hmrc_mapping": "{\"section\": \"net_profit_calc\", \"computed\": \"net_profit_loss_tax\", \"readonly\": true, \"section_label\": \"Calculate net profit for tax purposes\", \"section_order\": 20, \"section_subtitle\": \"Read-only running totals — computed from the boxes above.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Net business profit/(loss) for tax purposes",
+      "supports_disallowable": false,
+      "uuid": "48e5e679-71d4-48ec-a70a-bdb8ec157369"
+    },
+    {
+      "accepts_hmrc_categories": {},
       "category_key": "non_arms_length_income",
-      "display_order": 5,
-      "hmrc_mapping": "{\"sa103f_box\":\"75\"}",
+      "display_order": 505,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"75\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
       "is_active": true,
       "kind": "adjustment",
       "label": "Any other business income (e.g. non-arm's-length reverse premiums)",
       "supports_disallowable": false,
-      "uuid": "67205cc8-2ad2-443f-99db-9f06ab8adb83"
+      "uuid": "7bed6d1a-7850-4aac-94dc-2af15b8bf1f1"
     },
     {
+      "accepts_hmrc_categories": {},
+      "category_key": "other_tax_taken_off",
+      "display_order": 515,
+      "hmrc_mapping": "{\"section\": \"losses\", \"sa103f_box\": \"82\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Other tax taken off trading income",
+      "supports_disallowable": false,
+      "uuid": "6b5bc739-1a4f-4ecb-9353-90527c18ba9e"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "override_calculated_losses_bf",
+      "description": "Tick to enter a losses-brought-forward figure that overrides the automatic calculation from prior years' returns.",
+      "display_order": 504,
+      "hmrc_mapping": "{\"section\": \"losses\", \"value_type\": \"boolean\", \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Override calculated losses brought forward?",
+      "supports_disallowable": false,
+      "uuid": "22b75894-55f2-4dd0-9ed4-eedb6a8c426c"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "total_additions",
+      "display_order": 201,
+      "hmrc_mapping": "{\"section\": \"net_profit_calc\", \"computed\": \"total_additions\", \"readonly\": true, \"section_label\": \"Calculate net profit for tax purposes\", \"section_order\": 20, \"section_subtitle\": \"Read-only running totals — computed from the boxes above.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Total additions",
+      "supports_disallowable": false,
+      "uuid": "4ea940df-a2f1-43f3-93d1-5241c20c58fe"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "total_deductions",
+      "display_order": 202,
+      "hmrc_mapping": "{\"section\": \"net_profit_calc\", \"computed\": \"total_deductions\", \"readonly\": true, \"section_label\": \"Calculate net profit for tax purposes\", \"section_order\": 20, \"section_subtitle\": \"Read-only running totals — computed from the boxes above.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Total deductions",
+      "supports_disallowable": false,
+      "uuid": "c7729fa0-48af-436e-a2fb-d3248056164c"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "total_taxable_profits",
+      "display_order": 506,
+      "hmrc_mapping": "{\"section\": \"losses\", \"computed\": \"total_taxable_profits\", \"readonly\": true, \"section_label\": \"Losses, other income and deductions\", \"section_order\": 50, \"section_subtitle\": \"Losses brought forward, FIG regime, CIS deductions and other tax taken off trading income.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Total taxable profits",
+      "supports_disallowable": false,
+      "uuid": "db00fd62-4f77-467f-a74c-4bbb39ae5c9d"
+    },
+    {
+      "accepts_hmrc_categories": {},
       "category_key": "transitional_profit_bf",
-      "description": "Basis-period reform: profit being spread from the 2023–24 transition year",
-      "display_order": 1,
-      "hmrc_mapping": "{\"sa103f_box\":\"73\"}",
+      "description": "Basis-period reform: profit being spread from the 2023-24 transition year.",
+      "display_order": 401,
+      "hmrc_mapping": "{\"section\": \"transitional_profit\", \"sa103f_box\": \"73\", \"section_label\": \"Transitional Profit\", \"section_order\": 40, \"section_subtitle\": \"Basis-period reform: spread from the 2023-24 transition year.\"}",
       "is_active": true,
       "kind": "adjustment",
       "label": "Transitional profit brought forward",
       "supports_disallowable": false,
-      "uuid": "e548e4be-6bbe-40cb-90cc-3e12d6fa947a"
+      "uuid": "9572c3e2-39b8-4a09-97b3-7ca622351e58"
     },
     {
+      "accepts_hmrc_categories": {},
+      "category_key": "transitional_profit_carried_forward",
+      "display_order": 405,
+      "hmrc_mapping": "{\"section\": \"transitional_profit\", \"computed\": \"transitional_profit_carried_forward\", \"readonly\": true, \"section_label\": \"Transitional Profit\", \"section_order\": 40, \"section_subtitle\": \"Basis-period reform: spread from the 2023-24 transition year.\"}",
+      "is_active": true,
+      "kind": "adjustment",
+      "label": "Transitional profit carried forward",
+      "supports_disallowable": false,
+      "uuid": "ea26b91f-5115-40f2-96a1-f008db35910e"
+    },
+    {
+      "accepts_hmrc_categories": {},
       "category_key": "transitional_profit_taxable",
-      "display_order": 3,
-      "hmrc_mapping": "{\"sa103f_box\":\"73\"}",
+      "display_order": 404,
+      "hmrc_mapping": "{\"section\": \"transitional_profit\", \"sa103f_box\": \"73\", \"section_label\": \"Transitional Profit\", \"section_order\": 40, \"section_subtitle\": \"Basis-period reform: spread from the 2023-24 transition year.\"}",
       "is_active": true,
       "kind": "adjustment",
       "label": "Transitional profit taxable this year",
       "supports_disallowable": false,
-      "uuid": "b2296c04-28be-459e-907d-30fd659aa3b5"
+      "uuid": "e046f04b-d83b-4cce-96e3-4ffc470f53e4"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "trading_income_allowance",
       "description": "If you claim the allowance you can't also claim expenses. Only worth it when expenses are under £1,000 — and it's one allowance across ALL your trades.",
       "display_order": 1,
@@ -81,139 +356,197 @@
       "kind": "allowance",
       "label": "Trading income allowance claimed (up to £1,000)",
       "supports_disallowable": false,
-      "uuid": "7075f1d2-a858-409f-9a10-b1263050e4ab"
+      "uuid": "018cd098-eb51-44cf-90d6-838ad0cb1b46"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_balance_start",
-      "display_order": 11,
+      "display_order": 13,
       "hmrc_mapping": "{\"sa103f_box\":\"94\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Balance at start of period",
       "supports_disallowable": false,
-      "uuid": "aa3ab90b-47b3-4268-989e-d438201dff97"
+      "uuid": "25db6aea-97c8-4b50-a9e1-378410a2d039"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_bank",
       "display_order": 5,
-      "hmrc_mapping": "{\"sa103f_box\":\"87\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"87\"}",
       "is_active": true,
       "kind": "balance_sheet",
-      "label": "Bank and building society balances",
+      "label": "Bank/building society balances",
       "supports_disallowable": false,
-      "uuid": "8fe4dc54-092c-4ae5-8c68-ec8aa729d99b"
+      "uuid": "8a6a9b23-1159-445a-82c4-efc87553c2fe"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_capital_introduced",
-      "display_order": 12,
+      "display_order": 15,
       "hmrc_mapping": "{\"sa103f_box\":\"96\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Capital introduced",
       "supports_disallowable": false,
-      "uuid": "52145529-f08a-42e9-b55f-4020d3812b21"
+      "uuid": "3bc1ff20-cd77-46db-8057-0c5d3c691092"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_cash",
       "display_order": 6,
-      "hmrc_mapping": "{\"sa103f_box\":\"88\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"88\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Cash in hand",
       "supports_disallowable": false,
-      "uuid": "89aa5c93-75d2-4f21-b817-214735c55e2d"
+      "uuid": "471b5d0c-05fa-4b95-a372-5e6224bf4236"
     },
     {
+      "accepts_hmrc_categories": {},
+      "category_key": "bs_computed_balance_end",
+      "display_order": 17,
+      "hmrc_mapping": "{\"computed\": \"balance_end_period\", \"readonly\": true}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Balance at end of period",
+      "supports_disallowable": false,
+      "uuid": "b7a884af-bb9b-4edc-aeac-c79e4cfa8cd2"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "bs_computed_net_biz_assets",
+      "display_order": 12,
+      "hmrc_mapping": "{\"computed\": \"net_business_assets\", \"readonly\": true}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Net business assets",
+      "supports_disallowable": false,
+      "uuid": "caab44c1-969c-4f71-91ee-2860e53bddb9"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "bs_computed_net_profit_loss",
+      "display_order": 14,
+      "hmrc_mapping": "{\"computed\": \"net_profit_loss\", \"readonly\": true}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Net profit or loss",
+      "supports_disallowable": false,
+      "uuid": "6ca33bc2-0725-4f9a-9640-f02fd4262ac0"
+    },
+    {
+      "accepts_hmrc_categories": {},
+      "category_key": "bs_computed_total_assets",
+      "display_order": 8,
+      "hmrc_mapping": "{\"computed\": \"total_assets\", \"readonly\": true}",
+      "is_active": true,
+      "kind": "balance_sheet",
+      "label": "Total assets",
+      "supports_disallowable": false,
+      "uuid": "df32ef78-13b1-4418-a1a9-5b725e4f4315"
+    },
+    {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_drawings",
-      "display_order": 13,
+      "display_order": 16,
       "hmrc_mapping": "{\"sa103f_box\":\"97\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Drawings",
       "supports_disallowable": false,
-      "uuid": "70036aa2-0803-435c-8670-ddd8843d9100"
+      "uuid": "ffb46dcb-6d9a-4fda-a260-8acbb68756e6"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_equipment",
       "display_order": 1,
-      "hmrc_mapping": "{\"sa103f_box\":\"83\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"83\"}",
       "is_active": true,
       "kind": "balance_sheet",
-      "label": "Equipment, machinery and vehicles",
+      "label": "Equipment, machinery and vehicle",
       "supports_disallowable": false,
-      "uuid": "f70a158d-2f21-46c6-880a-c93c5fe601d9"
+      "uuid": "7ab98e36-4512-45fa-bf53-d1b2066ffe6a"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_loans_overdrafts",
-      "display_order": 9,
-      "hmrc_mapping": "{\"sa103f_box\":\"92\"}",
+      "display_order": 10,
+      "hmrc_mapping": "{\"bs_group\": \"liability\", \"sa103f_box\": \"92\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Loans and overdrafts",
       "supports_disallowable": false,
-      "uuid": "b711d0dd-7583-45e6-a588-588f3d17f38a"
+      "uuid": "cc476341-013d-4e8d-9298-5a97479a6510"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_other_current_assets",
       "display_order": 7,
-      "hmrc_mapping": "{\"sa103f_box\":\"89\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"89\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Other current assets and prepayments",
       "supports_disallowable": false,
-      "uuid": "4ebea96c-cb13-49e5-a35d-b1061ae31eb0"
+      "uuid": "1a87e427-bc13-48bf-bffa-0f2fc0a7f8a4"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_other_fixed_assets",
       "display_order": 2,
-      "hmrc_mapping": "{\"sa103f_box\":\"84\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"84\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Other fixed assets",
       "supports_disallowable": false,
-      "uuid": "b825ca97-86fc-4c9e-846e-d8a4fb4667ad"
+      "uuid": "186693ed-22ad-407c-b980-65e9bb07987b"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_other_liabilities",
-      "display_order": 10,
-      "hmrc_mapping": "{\"sa103f_box\":\"93\"}",
+      "display_order": 11,
+      "hmrc_mapping": "{\"bs_group\": \"liability\", \"sa103f_box\": \"93\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Other liabilities and accruals",
       "supports_disallowable": false,
-      "uuid": "672aefbb-bd3e-4560-916a-e00936516d32"
+      "uuid": "a2e76241-cc7e-4a9c-a2c0-6d8f34257a5e"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_stock",
       "display_order": 3,
-      "hmrc_mapping": "{\"sa103f_box\":\"85\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"85\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Stock and work in progress",
       "supports_disallowable": false,
-      "uuid": "03261b58-9283-47a1-98d3-855b387b79a5"
+      "uuid": "9d54a250-ff8f-4c06-925e-b31a34478bac"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_trade_creditors",
-      "display_order": 8,
-      "hmrc_mapping": "{\"sa103f_box\":\"91\"}",
+      "display_order": 9,
+      "hmrc_mapping": "{\"bs_group\": \"liability\", \"sa103f_box\": \"91\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Trade creditors",
       "supports_disallowable": false,
-      "uuid": "3f2f0a6d-7960-41f2-915b-25304ec695cd"
+      "uuid": "ce7f360d-0445-4432-9298-779162eb02d4"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bs_trade_debtors",
       "display_order": 4,
-      "hmrc_mapping": "{\"sa103f_box\":\"86\"}",
+      "hmrc_mapping": "{\"bs_group\": \"asset\", \"sa103f_box\": \"86\"}",
       "is_active": true,
       "kind": "balance_sheet",
       "label": "Trade debtors",
       "supports_disallowable": false,
-      "uuid": "01ee3329-faa2-4b20-803b-25ee1b1c348f"
+      "uuid": "a672f842-160b-4975-964b-124168c31215"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "aia",
       "display_order": 1,
       "hmrc_mapping": "{\"sa103f_box\":\"49\"}",
@@ -221,9 +554,10 @@
       "kind": "capital_allowance",
       "label": "Annual Investment Allowance",
       "supports_disallowable": false,
-      "uuid": "48f21460-9907-47f6-8c66-22c28fcd1938"
+      "uuid": "cc9844cd-24fc-463e-bffe-9b4a8b7cc64c"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "ca_equipment_main",
       "display_order": 3,
       "hmrc_mapping": "{\"sa103f_box\":\"50\"}",
@@ -231,9 +565,10 @@
       "kind": "capital_allowance",
       "label": "Capital allowance on equipment — main rate",
       "supports_disallowable": false,
-      "uuid": "3777b7d1-f41e-4a07-83cb-6e7dd411e5b8"
+      "uuid": "cb9e19f9-c0aa-45f8-85de-3c51da54cf49"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "ca_equipment_special",
       "display_order": 4,
       "hmrc_mapping": "{\"sa103f_box\":\"51\"}",
@@ -241,9 +576,10 @@
       "kind": "capital_allowance",
       "label": "Capital allowance on equipment — special rate",
       "supports_disallowable": false,
-      "uuid": "b40a7964-a52b-41a2-8311-eef74539816e"
+      "uuid": "e51199a3-6937-49fb-a394-d061dca456ea"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "ca_single_asset_main",
       "display_order": 5,
       "hmrc_mapping": "{\"sa103f_box\":\"50\"}",
@@ -251,9 +587,10 @@
       "kind": "capital_allowance",
       "label": "Capital allowances on single asset pools — main rate",
       "supports_disallowable": false,
-      "uuid": "030b47b1-902a-47dd-a843-0176a40c9de0"
+      "uuid": "5b05ce2e-5de9-460b-8b2d-516ff5948777"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "ca_single_asset_special",
       "display_order": 6,
       "hmrc_mapping": "{\"sa103f_box\":\"51\"}",
@@ -261,9 +598,10 @@
       "kind": "capital_allowance",
       "label": "Capital allowances on single asset pools — special rate",
       "supports_disallowable": false,
-      "uuid": "ad4b39df-209f-47af-86f5-70a0ba2d1162"
+      "uuid": "043e6766-43a3-4bc7-aba8-ce3d5a8e8ec6"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "electric_charge_point",
       "display_order": 11,
       "hmrc_mapping": "{\"sa103f_box\":\"54\"}",
@@ -271,9 +609,10 @@
       "kind": "capital_allowance",
       "label": "Electric charge-point allowance",
       "supports_disallowable": false,
-      "uuid": "2d82449f-16bc-434d-a4ef-93fa655b08a4"
+      "uuid": "2348ab00-f249-4c51-bcaa-bcd3cba142f6"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "enhanced_100",
       "display_order": 12,
       "hmrc_mapping": "{\"sa103f_box\":\"54\"}",
@@ -281,9 +620,10 @@
       "kind": "capital_allowance",
       "label": "100% and other enhanced capital allowances",
       "supports_disallowable": false,
-      "uuid": "ac862e0b-189b-4953-81d5-3ac878b49bd3"
+      "uuid": "dadaf6f8-1566-4745-bf89-6191257b640f"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "freeport_sba",
       "display_order": 10,
       "hmrc_mapping": "{\"sa103f_box\":\"53\"}",
@@ -291,9 +631,10 @@
       "kind": "capital_allowance",
       "label": "Freeport and Investment Zones Structures and Buildings Allowance",
       "supports_disallowable": false,
-      "uuid": "ab4a8f38-9bd6-4a96-8343-335caf62493f"
+      "uuid": "8b5208fb-5756-479b-8c8f-62b355e2d0b7"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "sba",
       "display_order": 9,
       "hmrc_mapping": "{\"sa103f_box\":\"53\"}",
@@ -301,9 +642,10 @@
       "kind": "capital_allowance",
       "label": "Structures and Buildings Allowance",
       "supports_disallowable": false,
-      "uuid": "896bae51-b8dd-4f7c-88fd-46f5e309e81c"
+      "uuid": "2879daac-f569-441a-9dea-099b25b38e83"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "small_pool_balance",
       "display_order": 2,
       "hmrc_mapping": "{\"sa103f_box\":\"50\"}",
@@ -311,9 +653,10 @@
       "kind": "capital_allowance",
       "label": "Small pool balance written off",
       "supports_disallowable": false,
-      "uuid": "b22c72da-3d9b-4162-b151-559671c1ed6b"
+      "uuid": "bf3a67d2-1283-4264-9a4c-41e557c143cc"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "zero_emission_car",
       "display_order": 8,
       "hmrc_mapping": "{\"sa103f_box\":\"52\"}",
@@ -321,9 +664,10 @@
       "kind": "capital_allowance",
       "label": "Zero-emission car allowance",
       "supports_disallowable": false,
-      "uuid": "a3370a54-4b80-44eb-a575-4d8bd7f55469"
+      "uuid": "e19254c2-4be2-4313-918d-0704370d412f"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "zero_emission_goods_vehicle",
       "display_order": 7,
       "hmrc_mapping": "{\"sa103f_box\":\"52\"}",
@@ -331,9 +675,12 @@
       "kind": "capital_allowance",
       "label": "Zero-emission goods vehicle allowance",
       "supports_disallowable": false,
-      "uuid": "f8ccd59a-ab26-445a-a5ca-1d921c1b6637"
+      "uuid": "4faf5b8d-a538-445f-bc80-911792f5195e"
     },
     {
+      "accepts_hmrc_categories": [
+        "advertising_marketing"
+      ],
       "category_key": "advertising",
       "display_order": 8,
       "hmrc_mapping": "{\"sa103f_box\":\"24\",\"disallowable_box\":\"39\"}",
@@ -341,9 +688,10 @@
       "kind": "expense",
       "label": "Advertising costs",
       "supports_disallowable": true,
-      "uuid": "3dc8348f-f6c9-4ee8-8703-2b1c65efa020"
+      "uuid": "a74eefdf-def4-4f21-bd35-5bd843f9e18f"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "bank_charges",
       "display_order": 11,
       "hmrc_mapping": "{\"sa103f_box\":\"26\",\"disallowable_box\":\"41\"}",
@@ -351,9 +699,12 @@
       "kind": "expense",
       "label": "Bank, credit card and other financial charges",
       "supports_disallowable": true,
-      "uuid": "6c4690ea-3589-4836-8537-103256df6b5c"
+      "uuid": "2d7b9df0-2da7-40d4-8d96-daedcbf1eeb3"
     },
     {
+      "accepts_hmrc_categories": [
+        "entertainment_costs"
+      ],
       "category_key": "business_entertainment",
       "description": "Client entertainment is normally disallowable for tax — record it in the disallowable column too",
       "display_order": 9,
@@ -362,9 +713,12 @@
       "kind": "expense",
       "label": "Business entertainment costs",
       "supports_disallowable": true,
-      "uuid": "77456206-0dab-4f22-93b6-fda0c81d5359"
+      "uuid": "25b3be01-9e83-4388-a36d-fbc3b812f64b"
     },
     {
+      "accepts_hmrc_categories": [
+        "car_van_travel"
+      ],
       "category_key": "car_van_travel",
       "display_order": 4,
       "hmrc_mapping": "{\"sa103f_box\":\"20\",\"disallowable_box\":\"35\"}",
@@ -372,9 +726,12 @@
       "kind": "expense",
       "label": "Car, van and travel expenses",
       "supports_disallowable": true,
-      "uuid": "6196b901-17c8-4b58-aea2-1b9384be8cde"
+      "uuid": "f71971b4-7c03-4f64-9e7a-cf42bc4bba26"
     },
     {
+      "accepts_hmrc_categories": [
+        "subcontractor_payments"
+      ],
       "category_key": "cis_subcontractors",
       "display_order": 2,
       "hmrc_mapping": "{\"sa103f_box\":\"18\",\"disallowable_box\":\"33\"}",
@@ -382,9 +739,12 @@
       "kind": "expense",
       "label": "Construction industry — payments to subcontractors",
       "supports_disallowable": true,
-      "uuid": "0c7e4b13-f5d4-4e5b-a082-72b885d49ea4"
+      "uuid": "4b502e33-dfcf-4fa7-a45f-822092f55682"
     },
     {
+      "accepts_hmrc_categories": [
+        "cost_of_goods"
+      ],
       "category_key": "cost_of_goods",
       "display_order": 1,
       "hmrc_mapping": "{\"sa103f_box\":\"17\",\"disallowable_box\":\"32\"}",
@@ -392,9 +752,13 @@
       "kind": "expense",
       "label": "Cost of goods bought for resale or goods used",
       "supports_disallowable": true,
-      "uuid": "344de93f-1c5d-4e91-ab36-0318fe943751"
+      "uuid": "9a729115-2d23-4e61-aa85-12fc3b0a8550"
     },
     {
+      "accepts_hmrc_categories": [
+        "depreciation",
+        "capital_allowances"
+      ],
       "category_key": "depreciation",
       "description": "Depreciation is always disallowable for tax — claim capital allowances instead",
       "display_order": 14,
@@ -403,9 +767,12 @@
       "kind": "expense",
       "label": "Depreciation and loss/profit on sale of assets",
       "supports_disallowable": true,
-      "uuid": "e3236771-2c97-4407-ab6e-7d8b71ec7b9f"
+      "uuid": "5e03cd3f-3f26-421b-b851-e3cc777c0b53"
     },
     {
+      "accepts_hmrc_categories": [
+        "interest_finance"
+      ],
       "category_key": "interest_loans",
       "display_order": 10,
       "hmrc_mapping": "{\"sa103f_box\":\"25\",\"disallowable_box\":\"40\"}",
@@ -413,9 +780,12 @@
       "kind": "expense",
       "label": "Interest on bank and other loans",
       "supports_disallowable": true,
-      "uuid": "9beaf909-2bf0-4d09-99d5-d4ee77384bbb"
+      "uuid": "8320df23-6f58-4027-8a6b-7be04c6bab03"
     },
     {
+      "accepts_hmrc_categories": [
+        "bad_debts"
+      ],
       "category_key": "irrecoverable_debts",
       "display_order": 12,
       "hmrc_mapping": "{\"sa103f_box\":\"27\",\"disallowable_box\":\"42\"}",
@@ -423,9 +793,12 @@
       "kind": "expense",
       "label": "Irrecoverable debts written off",
       "supports_disallowable": true,
-      "uuid": "19795624-e254-4dbd-b463-d3e04209160a"
+      "uuid": "d7348c5c-b1df-4f69-973a-a67063dd2590"
     },
     {
+      "accepts_hmrc_categories": [
+        "other_expenses"
+      ],
       "category_key": "other_expenses",
       "display_order": 15,
       "hmrc_mapping": "{\"sa103f_box\":\"30\",\"disallowable_box\":\"45\"}",
@@ -433,9 +806,13 @@
       "kind": "expense",
       "label": "Other business expenses",
       "supports_disallowable": true,
-      "uuid": "467970bb-abaa-4414-8214-0ded95e91924"
+      "uuid": "9247bfbc-4ecc-4791-acb6-222dc5ff5b67"
     },
     {
+      "accepts_hmrc_categories": [
+        "telephone_office",
+        "use_of_home"
+      ],
       "category_key": "phone_office",
       "display_order": 7,
       "hmrc_mapping": "{\"sa103f_box\":\"23\",\"disallowable_box\":\"38\"}",
@@ -443,9 +820,12 @@
       "kind": "expense",
       "label": "Phone, fax, stationery and other office costs",
       "supports_disallowable": true,
-      "uuid": "7c9d3ac8-7ccb-4aba-a5ee-5e2be6136a31"
+      "uuid": "efe28cbd-9a49-4824-869a-3f5debb51dfe"
     },
     {
+      "accepts_hmrc_categories": [
+        "accountancy_legal"
+      ],
       "category_key": "professional_fees",
       "display_order": 13,
       "hmrc_mapping": "{\"sa103f_box\":\"28\",\"disallowable_box\":\"43\"}",
@@ -453,9 +833,12 @@
       "kind": "expense",
       "label": "Accountancy, legal and other professional fees",
       "supports_disallowable": true,
-      "uuid": "245adeee-6d0f-4507-9a24-56b1351fd203"
+      "uuid": "28e32e87-9b68-4331-ace9-447d2c14c038"
     },
     {
+      "accepts_hmrc_categories": [
+        "rent_rates"
+      ],
       "category_key": "rent_rates_power",
       "display_order": 5,
       "hmrc_mapping": "{\"sa103f_box\":\"21\",\"disallowable_box\":\"36\"}",
@@ -463,9 +846,12 @@
       "kind": "expense",
       "label": "Rent, rates, power and insurance costs",
       "supports_disallowable": true,
-      "uuid": "e522dda1-f103-4b2f-80c0-8f0ba46a6862"
+      "uuid": "b3b62f52-ef6a-458b-8399-07e2743a69a6"
     },
     {
+      "accepts_hmrc_categories": [
+        "repairs_maintenance"
+      ],
       "category_key": "repairs_maintenance",
       "display_order": 6,
       "hmrc_mapping": "{\"sa103f_box\":\"22\",\"disallowable_box\":\"37\"}",
@@ -473,9 +859,12 @@
       "kind": "expense",
       "label": "Repairs and maintenance of property and equipment",
       "supports_disallowable": true,
-      "uuid": "9f9b9d34-c024-492d-a8cc-2b184625602e"
+      "uuid": "7da4f806-7257-4c7c-9243-c937038ac629"
     },
     {
+      "accepts_hmrc_categories": [
+        "wages_staff"
+      ],
       "category_key": "wages_staff",
       "description": "Don't include money you took out for yourself — that's drawings, not an expense",
       "display_order": 3,
@@ -484,9 +873,12 @@
       "kind": "expense",
       "label": "Wages, salaries and other staff costs",
       "supports_disallowable": true,
-      "uuid": "fcc185b0-2dff-413b-8d1c-c399edef4b9f"
+      "uuid": "0ea5c387-9939-4a96-9e3f-124e61efb84c"
     },
     {
+      "accepts_hmrc_categories": [
+        "other_income"
+      ],
       "category_key": "other_income",
       "description": "e.g. grants or rental income from business premises — not the trading allowance",
       "display_order": 2,
@@ -495,9 +887,12 @@
       "kind": "income",
       "label": "Any other business income",
       "supports_disallowable": false,
-      "uuid": "28832a79-c27f-47f0-a88a-288d9fe2d1a4"
+      "uuid": "5714ee9a-ece2-48c8-9fec-518cc2d6b0ff"
     },
     {
+      "accepts_hmrc_categories": [
+        "turnover"
+      ],
       "category_key": "turnover",
       "description": "Your takings, fees and sales before any expenses",
       "display_order": 1,
@@ -506,7 +901,7 @@
       "kind": "income",
       "label": "Business turnover",
       "supports_disallowable": false,
-      "uuid": "4f32da4c-11ec-4f6b-9039-088196f26d1c"
+      "uuid": "7de3457e-5dcf-4a35-9b34-e9362bf135b8"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",

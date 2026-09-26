@@ -10,7 +10,7 @@
       "key": "accountancy_fees",
       "label": "Accountancy Fees",
       "type": "expense",
-      "uuid": "cf103064-bd73-482d-84c1-31e21399b8ea"
+      "uuid": "76ad6e1b-a076-43c1-9f57-496be09811e3"
     },
     {
       "deduction_rate": 1,
@@ -22,7 +22,7 @@
       "key": "advertising",
       "label": "Advertising",
       "type": "expense",
-      "uuid": "0ec78eb8-1ca4-4c75-b80b-99d6a0c6d582"
+      "uuid": "1574c636-52a5-4e45-a3c6-4bfd7e0b6b93"
     },
     {
       "deduction_rate": 1,
@@ -34,7 +34,7 @@
       "key": "bank_charges",
       "label": "Bank Charges",
       "type": "expense",
-      "uuid": "6dae96eb-7a59-4f72-9d82-c74e28a9037c"
+      "uuid": "0275ad48-3340-4e8f-89b4-85bd07090576"
     },
     {
       "deduction_rate": 1,
@@ -46,7 +46,7 @@
       "key": "business_insurance",
       "label": "Business Insurance",
       "type": "expense",
-      "uuid": "ae2ffe81-a4cc-4a2d-b555-af194d794cd8"
+      "uuid": "525aa022-385d-49e3-af55-05c818c32d0c"
     },
     {
       "deduction_rate": 1,
@@ -58,7 +58,7 @@
       "key": "business_rates",
       "label": "Business Rates",
       "type": "expense",
-      "uuid": "d23b1115-7321-4ad4-876b-f5d1f4762b59"
+      "uuid": "ec91cdf0-1594-4c64-94a7-8547f5139bd5"
     },
     {
       "deduction_rate": 0,
@@ -70,7 +70,7 @@
       "key": "charitable_contributions",
       "label": "Charitable Contributions",
       "type": "expense",
-      "uuid": "241cff8c-50b4-4628-b036-cf50e8464f88"
+      "uuid": "4ab2717b-8677-4dc2-a34e-70ce41563b14"
     },
     {
       "deduction_rate": 1,
@@ -82,7 +82,7 @@
       "key": "cleaning",
       "label": "Cleaning",
       "type": "expense",
-      "uuid": "41122415-495a-4728-8f13-78197413a414"
+      "uuid": "e7e9052f-118f-49f1-a1fd-368fd388281c"
     },
     {
       "deduction_rate": 0,
@@ -94,7 +94,7 @@
       "key": "client_entertainment",
       "label": "Client Entertainment",
       "type": "expense",
-      "uuid": "6968108c-d366-46b4-b55a-7525c0cd9655"
+      "uuid": "067593eb-3ce2-44d5-9383-87731e45f399"
     },
     {
       "deduction_rate": 1,
@@ -106,7 +106,7 @@
       "key": "consulting_income",
       "label": "Consulting/Freelance Income",
       "type": "income",
-      "uuid": "78f467b8-cf6d-4ea2-aedc-9ec17a95742c"
+      "uuid": "26686b08-3a59-4289-8e64-5e82599e5ee2"
     },
     {
       "deduction_rate": 1,
@@ -118,7 +118,7 @@
       "key": "cost_of_sales",
       "label": "Cost of Sales",
       "type": "expense",
-      "uuid": "3b9d2482-a9bd-4e4b-9352-ddb0da41b74d"
+      "uuid": "570ed641-955d-4aab-a786-ac17b788eb75"
     },
     {
       "deduction_rate": 1,
@@ -130,7 +130,7 @@
       "key": "council_tax",
       "label": "Council Tax",
       "type": "expense",
-      "uuid": "46d80455-a652-4cda-8330-74315e604311"
+      "uuid": "caa89254-aa0e-4f65-9ce0-257974ed96a5"
     },
     {
       "deduction_rate": 0,
@@ -142,7 +142,7 @@
       "key": "directors_loan_account",
       "label": "Directors Loan Account",
       "type": "expense",
-      "uuid": "2beea029-54f0-40dd-97ec-f5e96b1e132b"
+      "uuid": "5d37ffb9-285f-45ff-958f-892c474d94b1"
     },
     {
       "deduction_rate": 0,
@@ -154,7 +154,7 @@
       "key": "dividend_payments",
       "label": "Dividend Payments",
       "type": "expense",
-      "uuid": "e3d99598-b574-4283-aacd-3a4779317689"
+      "uuid": "a87573ef-e93a-4133-8fa4-4ddcba8b231a"
     },
     {
       "deduction_rate": 0,
@@ -166,7 +166,7 @@
       "key": "drawings",
       "label": "Drawings/Owner Withdrawals",
       "type": "expense",
-      "uuid": "86a8a0fe-c047-4d46-acf2-341200f7e290"
+      "uuid": "0f726ce0-45ff-4723-a3be-3e92582c93d0"
     },
     {
       "deduction_rate": 1,
@@ -178,7 +178,370 @@
       "key": "dues_and_subscriptions",
       "label": "Dues And Subscriptions",
       "type": "expense",
-      "uuid": "90754acc-7a8c-4b54-8096-e895703a33b8"
+      "uuid": "66608a31-fe4f-49dc-95a0-0abbb5953e86"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1787862047735",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "22025c5c-6a4a-438a-88b3-7f3e456a0e8a"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1787980816133",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "029eab6a-50ca-4e52-a319-b9a291e1ed1b"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788240125115",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "c5e2b5dd-c377-4c32-bf2b-0d7cee0757da"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788341274771",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "3eb7a0e9-7a37-477c-9897-fdfe14eb1902"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788428243961",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "5dcf12e1-e1f7-430c-8db4-367ce11010e0"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788455220977",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "6d19d15a-2509-4e0e-9992-caea4b1bc29c"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788514231757",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "7ba8cfcc-a912-4050-9d1c-2606b5cd50b6"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788598726394",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "57b468d5-3d57-4e3b-aec6-2a6f04ef8e10"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788686301287",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "10d06290-b830-4a17-a89d-1048b41d17a9"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788775675976",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "b1778f80-060a-4f7e-8230-9d0c08fc908e"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788860004778",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "b2dca40a-59a7-4101-84f4-72114cbee246"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788944430225",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "72c8fb03-111c-4189-ae91-59bf13c966b9"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1788946417889",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "ddd1206e-6ec6-45c1-846a-57b7aa488b8f"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789032929458",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "65adaca8-ff43-4361-a495-6c03c7a4c50f"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789044838627",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "48382970-9ec7-4c17-ba2b-e2a72fa3c9cb"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789069535607",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "9a352c7d-bc54-448c-b61f-1785081d9bf5"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789119140248",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "b917e25a-311b-4ffa-938b-11e001857cbc"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789204439663",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "6ade0f20-b285-47b6-9afd-b689d193c1e9"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789364640385",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "a0a499d7-21d0-4f19-b109-d55d7e4185e4"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789382004126",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "a0b2bf0d-65ba-436c-acdf-7aaa9c709d61"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789466382970",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "63975682-0ad8-442c-8b6f-1718dd59da59"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789552422785",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "7042b95a-8c9a-4dfd-b47d-88230f86ab33"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789639275617",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "e622f215-f6ec-4fa0-b31b-167573ce1044"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789675021251",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "3501aa21-34c2-42cd-8156-319d45e53d50"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789724256881",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "6ad6be45-7aa3-4a77-a1ab-91414879f5dd"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789809912177",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "b9e94f39-9f88-4c84-9667-34523a1c4597"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789897609634",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "d9839e5c-90b0-478e-bade-724c3274c794"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1789987104658",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "f567cd60-188a-49f3-89e6-1a59af2694f2"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1790070659776",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "b7051b47-fbfd-4253-a5e3-d11ff9fdbe00"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1790157398429",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "87e411d3-fc95-4ee3-ae51-ef28a60b5b68"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1790243663242",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "9d5d6427-33b1-4917-84f0-2ed616b7155e"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1790282021579",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "8a1d6510-9ce8-4b68-9c29-ee8c2646dfa1"
+    },
+    {
+      "deduction_rate": 1,
+      "description": "",
+      "hmrc_category_key": null,
+      "is_active": false,
+      "is_tax_deductible": false,
+      "key": "e2e_cat_1790331065972",
+      "label": "E2E Updated Label 2",
+      "type": "expense",
+      "uuid": "daf4ebf7-a222-40ff-945f-cdd9579d29d6"
     },
     {
       "deduction_rate": 1,
@@ -190,7 +553,7 @@
       "key": "employer_ni",
       "label": "Employer NI Contributions",
       "type": "expense",
-      "uuid": "c8394afa-3ed3-4c4e-a968-8ac664e28e2c"
+      "uuid": "95ffd62d-659f-4b73-8cef-68ddbecf3c1e"
     },
     {
       "deduction_rate": 1,
@@ -202,7 +565,7 @@
       "key": "equipment_purchase",
       "label": "Equipment Purchases",
       "type": "expense",
-      "uuid": "bb020ab4-64f7-41f8-9a3e-ffeb3aabeec2"
+      "uuid": "f9ab4e16-6b5f-486d-8002-f61e20ef3b14"
     },
     {
       "deduction_rate": 1,
@@ -214,7 +577,7 @@
       "key": "equipment_rental",
       "label": "Equipment Rental",
       "type": "expense",
-      "uuid": "a0f5c1b4-1b09-4fef-8df4-b110a5547a64"
+      "uuid": "c0636f89-cf10-452d-83e2-5154db205f60"
     },
     {
       "deduction_rate": 1,
@@ -226,7 +589,7 @@
       "key": "equipment_repairs",
       "label": "Equipment Repairs",
       "type": "expense",
-      "uuid": "7d683ef8-cce2-4bf6-b53a-0ebbc5a9d54f"
+      "uuid": "59488e62-1936-46f2-8bce-9510d854979a"
     },
     {
       "deduction_rate": 1,
@@ -238,7 +601,7 @@
       "key": "finance_charges",
       "label": "Finance Charges",
       "type": "expense",
-      "uuid": "0752d98c-6e72-4caf-9f13-0a1ec4cfd726"
+      "uuid": "88cef1f3-25d5-40fb-b5a2-8e12bcfd7db0"
     },
     {
       "deduction_rate": 1,
@@ -250,7 +613,7 @@
       "key": "furnishing_expense",
       "label": "Furnishing Expense",
       "type": "expense",
-      "uuid": "c677ead5-8e5b-4290-8d68-bc6ce99b083e"
+      "uuid": "f2ddad71-0262-4988-b685-5505b6dd4a25"
     },
     {
       "deduction_rate": 1,
@@ -262,7 +625,7 @@
       "key": "garage_rent_expense",
       "label": "Garage Rent Expense",
       "type": "expense",
-      "uuid": "4d61c3fc-a002-41fe-96dd-6d9d313b29f4"
+      "uuid": "8b522cc3-4150-4e7f-b87d-e54795f9e029"
     },
     {
       "deduction_rate": 1,
@@ -274,7 +637,7 @@
       "key": "gas_certificate",
       "label": "Gas Certificate",
       "type": "expense",
-      "uuid": "67384a3d-eb8f-4619-89ac-c51b46a02b8b"
+      "uuid": "e5b15ac3-ca77-41bf-91cc-806f4692a7a8"
     },
     {
       "deduction_rate": 1,
@@ -286,7 +649,7 @@
       "key": "general_admin_expenses",
       "label": "General Administrative Expenses",
       "type": "expense",
-      "uuid": "1f2bd7ff-c378-43f7-9508-ab2899a5b7ff"
+      "uuid": "34feae24-288e-405d-adb8-5c902d8302a2"
     },
     {
       "deduction_rate": 1,
@@ -298,7 +661,7 @@
       "key": "home_office",
       "label": "Home Office Costs",
       "type": "expense",
-      "uuid": "d9fa77ca-7c49-4dd2-9b13-9946a84b99f4"
+      "uuid": "2bdb59a6-7889-4918-8065-e1d7d5d8f0b8"
     },
     {
       "deduction_rate": 0,
@@ -310,7 +673,7 @@
       "key": "income_dividend",
       "label": "Income Dividend",
       "type": "income",
-      "uuid": "d59b4d35-cd8d-4c6d-b125-584562784938"
+      "uuid": "4c21ec04-c99d-4801-b030-ca0e7bc04413"
     },
     {
       "deduction_rate": 0,
@@ -322,7 +685,7 @@
       "key": "income_government",
       "label": "Income Government",
       "type": "income",
-      "uuid": "ddfbf8ea-a5e6-4cd2-b418-2da63600f197"
+      "uuid": "4f522745-9e10-413c-b1d6-21e06a2c8608"
     },
     {
       "deduction_rate": 0,
@@ -334,7 +697,7 @@
       "key": "income_interest",
       "label": "Income Interest",
       "type": "income",
-      "uuid": "dac82d1f-ef81-4e50-b529-bd517cf1510f"
+      "uuid": "c84621d4-bb0d-4efe-8c45-7d0bf1ab8a9c"
     },
     {
       "deduction_rate": 1,
@@ -346,7 +709,7 @@
       "key": "income_other",
       "label": "Other Income",
       "type": "income",
-      "uuid": "4d44b545-4b13-449c-afea-8d69a93ce7d9"
+      "uuid": "ed60a08b-7648-44a5-a049-5390bbee0b51"
     },
     {
       "deduction_rate": 0,
@@ -358,7 +721,7 @@
       "key": "income_refund",
       "label": "Income Refund",
       "type": "income",
-      "uuid": "458e55e3-23e8-49a6-8f84-6de09676fb32"
+      "uuid": "24ba8940-a6eb-4bde-aec5-65ec956d20d5"
     },
     {
       "deduction_rate": 0,
@@ -370,7 +733,7 @@
       "key": "income_rental",
       "label": "Income Rental",
       "type": "income",
-      "uuid": "b2774665-5d73-4940-b680-046dc09484dd"
+      "uuid": "de1a321e-b675-4841-b451-5eb8b9dc637c"
     },
     {
       "deduction_rate": 0,
@@ -382,7 +745,7 @@
       "key": "income_salary",
       "label": "Income Salary",
       "type": "income",
-      "uuid": "a3e3155f-e22a-4724-a22a-e54b2f012f60"
+      "uuid": "f5c42fe3-1143-4044-bfe1-03f7e49b2f03"
     },
     {
       "deduction_rate": 0,
@@ -394,7 +757,7 @@
       "key": "income_sales",
       "label": "Income Sales",
       "type": "income",
-      "uuid": "a3de5347-5505-49c3-b3de-5fc311f7ba19"
+      "uuid": "ebcabf63-74cb-49f0-855c-6125bd5fc3f1"
     },
     {
       "deduction_rate": 1,
@@ -406,7 +769,7 @@
       "key": "insurance_expense",
       "label": "Insurance Expense",
       "type": "expense",
-      "uuid": "c6c7ad24-7c43-4b61-a907-0eac07e41391"
+      "uuid": "55705bad-0e7a-48fe-936e-baa701eded83"
     },
     {
       "deduction_rate": 1,
@@ -418,7 +781,7 @@
       "key": "insurance_expense_general_liability",
       "label": "Insurance Expense General Liability",
       "type": "expense",
-      "uuid": "7ab4fc0f-a766-402f-9249-ca906edff9be"
+      "uuid": "83e9ed9e-67b0-4fe9-b0f0-6d4e4c14aa43"
     },
     {
       "deduction_rate": 1,
@@ -430,7 +793,7 @@
       "key": "insurance_expense_health",
       "label": "Insurance Expense Health",
       "type": "expense",
-      "uuid": "c30ec28c-26eb-4391-85e9-abca5d1a086d"
+      "uuid": "9c3b5379-2b63-4694-961d-6b009a57d7cd"
     },
     {
       "deduction_rate": 1,
@@ -442,7 +805,7 @@
       "key": "interest_income",
       "label": "Interest Received",
       "type": "income",
-      "uuid": "33772927-d19c-412c-bc03-12353917880b"
+      "uuid": "388170bb-feca-43d7-a4c1-396d1dcb9f44"
     },
     {
       "deduction_rate": 1,
@@ -454,7 +817,7 @@
       "key": "internet",
       "label": "Internet & Broadband",
       "type": "expense",
-      "uuid": "31fc0e6f-3e49-4181-8d45-1cb2287ad28a"
+      "uuid": "490d6033-c29d-456e-99ac-02b37faff52c"
     },
     {
       "deduction_rate": 1,
@@ -466,7 +829,7 @@
       "key": "inventory_stock",
       "label": "Inventory/Stock Purchases",
       "type": "expense",
-      "uuid": "19062b5f-0734-4b86-92e1-ebc1c287d803"
+      "uuid": "93a9a35f-77b4-45fd-9f70-51b4bb32dac6"
     },
     {
       "deduction_rate": 1,
@@ -478,7 +841,7 @@
       "key": "it_support",
       "label": "It Support",
       "type": "expense",
-      "uuid": "5d973076-a6fb-4e4e-9322-d03ab4b74a3c"
+      "uuid": "b0793d9f-ac54-474b-98b4-757b2914e4b2"
     },
     {
       "deduction_rate": 1,
@@ -490,7 +853,7 @@
       "key": "legal_and_professional_fees",
       "label": "Legal And Professional Fees",
       "type": "expense",
-      "uuid": "1f25b46d-843a-4f99-89cb-dc1f244abd4e"
+      "uuid": "554da926-5267-4d23-bfd0-8426caf19d6e"
     },
     {
       "deduction_rate": 1,
@@ -502,7 +865,7 @@
       "key": "legal_fees",
       "label": "Legal Fees",
       "type": "expense",
-      "uuid": "110a95c1-5b02-41b7-96d4-ec5e52482b16"
+      "uuid": "cb20d745-ac09-4f8d-8bba-13a40169caf1"
     },
     {
       "deduction_rate": 1,
@@ -514,7 +877,7 @@
       "key": "light_and_heat",
       "label": "Light And Heat",
       "type": "expense",
-      "uuid": "a96a4842-fbfe-43f8-afa2-d3833ed80503"
+      "uuid": "f6e3e2c4-89e4-4f04-9cd9-00c770c02b65"
     },
     {
       "deduction_rate": 1,
@@ -526,7 +889,7 @@
       "key": "loan_interest",
       "label": "Loan Interest",
       "type": "expense",
-      "uuid": "10e36433-1fd8-4979-b57c-c4cd0e3fcc37"
+      "uuid": "1c2c44a8-60f8-4135-a7c4-c64e3538662c"
     },
     {
       "deduction_rate": 0,
@@ -538,7 +901,7 @@
       "key": "loan_repayments",
       "label": "Loan Repayments",
       "type": "expense",
-      "uuid": "2f83bc13-6ad2-483b-906f-d246d46dfb84"
+      "uuid": "c4192cad-5db4-4895-b172-da13440ea48f"
     },
     {
       "deduction_rate": 1,
@@ -550,7 +913,7 @@
       "key": "marketing_advertising",
       "label": "Marketing & Advertising",
       "type": "expense",
-      "uuid": "06891fd4-bb24-43e7-85a5-4a82af601b8a"
+      "uuid": "0c647a98-e333-4021-9380-b7706af50b02"
     },
     {
       "deduction_rate": 1,
@@ -562,7 +925,7 @@
       "key": "material_and_supplies",
       "label": "Material And Supplies",
       "type": "expense",
-      "uuid": "782e713d-e8b4-4add-b552-b709a0769238"
+      "uuid": "949df81a-c9ee-4d9b-b68e-0b2fbd595c2a"
     },
     {
       "deduction_rate": 1,
@@ -574,7 +937,7 @@
       "key": "materials_supplies",
       "label": "Materials & Supplies",
       "type": "expense",
-      "uuid": "eed48d94-648e-4526-880d-95f7ced4ad17"
+      "uuid": "5adf840b-7d99-4aa0-992b-86ddab24325f"
     },
     {
       "deduction_rate": 0,
@@ -586,7 +949,7 @@
       "key": "meals_and_entertainment",
       "label": "Meals And Entertainment",
       "type": "expense",
-      "uuid": "d1143ffa-b958-45f3-a62e-f2b4f59a269c"
+      "uuid": "e57e9e0e-7e5e-4162-a17a-01109676551f"
     },
     {
       "deduction_rate": 0,
@@ -598,7 +961,7 @@
       "key": "meetings",
       "label": "Meetings",
       "type": "expense",
-      "uuid": "dcb7917e-146c-47ca-9436-c0e6951a386d"
+      "uuid": "af274098-b862-4568-bbb6-b17c9e6f41aa"
     },
     {
       "deduction_rate": 1,
@@ -610,7 +973,7 @@
       "key": "mileage",
       "label": "Mileage Allowance",
       "type": "expense",
-      "uuid": "1c0e93f1-d219-4079-a2f6-2b60f840eb1e"
+      "uuid": "9cbd0f6e-a9a8-4eeb-9781-9041ff55d3cd"
     },
     {
       "deduction_rate": 1,
@@ -622,7 +985,7 @@
       "key": "motor_expenses",
       "label": "Motor Expenses",
       "type": "expense",
-      "uuid": "0f39f804-7e46-42b9-b161-023a9d7f9ff4"
+      "uuid": "150a121d-2521-42c3-be73-a54d7c871aa0"
     },
     {
       "deduction_rate": 1,
@@ -634,7 +997,7 @@
       "key": "office_supplies",
       "label": "Office Supplies",
       "type": "expense",
-      "uuid": "643510f7-d2ed-4616-bae7-1a71f635e47a"
+      "uuid": "b60c8ec9-e42c-48cd-898e-58e041266d6c"
     },
     {
       "deduction_rate": 1,
@@ -646,7 +1009,7 @@
       "key": "pension_contributions",
       "label": "Pension Contributions",
       "type": "expense",
-      "uuid": "f71aad83-be22-4571-b461-c7a2b47ffe89"
+      "uuid": "2a5565ff-1805-4d34-bbe2-61b605287fd5"
     },
     {
       "deduction_rate": 1,
@@ -658,7 +1021,7 @@
       "key": "pension_expense",
       "label": "Pension Expense",
       "type": "expense",
-      "uuid": "413490a8-6f19-4a89-98df-43dfbc9422a7"
+      "uuid": "22ed1904-604e-4b65-aa61-6677574805ba"
     },
     {
       "deduction_rate": 0,
@@ -670,7 +1033,7 @@
       "key": "personal_expense",
       "label": "Personal/Non-Business",
       "type": "expense",
-      "uuid": "c9d31f29-dfa5-4cc4-b972-eb4b31432b77"
+      "uuid": "b71382b6-80a1-4509-8af2-2c8ab5861a0a"
     },
     {
       "deduction_rate": 1,
@@ -682,7 +1045,7 @@
       "key": "postage_delivery",
       "label": "Postage & Delivery",
       "type": "expense",
-      "uuid": "eefb79a8-e762-4b3d-bd4c-9d21260176d4"
+      "uuid": "ec96301e-d9fb-4a06-a3bb-5b29cc6f0cb8"
     },
     {
       "deduction_rate": 1,
@@ -694,7 +1057,7 @@
       "key": "premises_insurance",
       "label": "Premises Insurance",
       "type": "expense",
-      "uuid": "3f6f6e12-1f33-44d1-975c-128c8936c8ef"
+      "uuid": "3780d3c4-0c28-44ec-91f0-20935d136595"
     },
     {
       "deduction_rate": 1,
@@ -706,7 +1069,7 @@
       "key": "printing_and_reproduction",
       "label": "Printing & Reproduction",
       "type": "expense",
-      "uuid": "4c69fc13-8421-4354-bc80-26f8cd0b3c6c"
+      "uuid": "8374c69f-41ea-40f9-84f6-5231907f55cc"
     },
     {
       "deduction_rate": 1,
@@ -718,7 +1081,7 @@
       "key": "professional_fees",
       "label": "Other Professional Fees",
       "type": "expense",
-      "uuid": "21d4b758-da45-48b7-8901-5cd00effc393"
+      "uuid": "af98ab01-f3dc-4592-b84b-4ab0d5bd256e"
     },
     {
       "deduction_rate": 1,
@@ -730,7 +1093,7 @@
       "key": "professional_memberships",
       "label": "Professional Memberships",
       "type": "expense",
-      "uuid": "1dd21ce5-6783-4239-94f5-d8c9c93f6ede"
+      "uuid": "b86afe6c-e9f2-450b-b802-2d9583723cfe"
     },
     {
       "deduction_rate": 1,
@@ -742,7 +1105,7 @@
       "key": "purchase_of_equipments",
       "label": "Purchase Of Equipments",
       "type": "expense",
-      "uuid": "53956a87-86b2-4fa0-88b3-80e112f1edf9"
+      "uuid": "503885e3-aa6d-4e10-924c-d77d61f7bb63"
     },
     {
       "deduction_rate": 1,
@@ -754,7 +1117,7 @@
       "key": "purchases",
       "label": "Purchases",
       "type": "expense",
-      "uuid": "021fd637-9fb5-45f8-8a47-072ec4863bba"
+      "uuid": "5f15b23b-e8fd-4654-85ae-68d47eaafa4f"
     },
     {
       "deduction_rate": 1,
@@ -766,7 +1129,7 @@
       "key": "rates_and_water",
       "label": "Rates And Water",
       "type": "expense",
-      "uuid": "82689586-d923-44ca-97f8-f9c4d3cf4f24"
+      "uuid": "a467096b-1215-4665-a14e-3688525f03d2"
     },
     {
       "deduction_rate": 1,
@@ -778,7 +1141,7 @@
       "key": "refund_income",
       "label": "Refunds Received",
       "type": "income",
-      "uuid": "5168810d-d33d-420b-914c-d35ac4f4f719"
+      "uuid": "d011a7a2-eb44-46e9-96f9-f537f2b9d246"
     },
     {
       "deduction_rate": 1,
@@ -790,7 +1153,7 @@
       "key": "rent_business",
       "label": "Business Rent",
       "type": "expense",
-      "uuid": "ae43edf0-a00a-405f-a4b8-0856734cc3fe"
+      "uuid": "0f488ae9-78a2-46da-86e9-57a1f6b38c54"
     },
     {
       "deduction_rate": 1,
@@ -802,7 +1165,7 @@
       "key": "rent_expense",
       "label": "Rent Expense",
       "type": "expense",
-      "uuid": "6ad78746-cfb0-4d01-a369-34cfa870b69b"
+      "uuid": "802425b4-44a7-44ed-8cc8-760f0c1d06cc"
     },
     {
       "deduction_rate": 1,
@@ -814,7 +1177,7 @@
       "key": "rental_income",
       "label": "Rental Income",
       "type": "income",
-      "uuid": "d6089f53-801d-4132-94aa-f0d90611b3dc"
+      "uuid": "255dbf3c-b4d7-4641-a4b2-a7091b1dda91"
     },
     {
       "deduction_rate": 1,
@@ -826,7 +1189,7 @@
       "key": "repair_and_maintenance",
       "label": "Repair And Maintenance",
       "type": "expense",
-      "uuid": "d9463cb3-59b8-457b-8fdd-537f614e6806"
+      "uuid": "74517d8b-5a87-4760-a5d2-1abea4969719"
     },
     {
       "deduction_rate": 1,
@@ -838,7 +1201,7 @@
       "key": "repairs_property",
       "label": "Property Repairs",
       "type": "expense",
-      "uuid": "68cdc2f5-a839-4b50-9c97-0a792f9e8b78"
+      "uuid": "4aea2719-8100-4306-a2ff-61aa36e4311d"
     },
     {
       "deduction_rate": 1,
@@ -850,7 +1213,7 @@
       "key": "salaries_wages",
       "label": "Salaries & Wages",
       "type": "expense",
-      "uuid": "faa4a9d3-48b3-4e40-9786-f56a704e426c"
+      "uuid": "cc567979-8545-41ee-b320-bf55904908e7"
     },
     {
       "deduction_rate": 1,
@@ -862,7 +1225,7 @@
       "key": "sales_income",
       "label": "Sales/Revenue",
       "type": "income",
-      "uuid": "b84f8537-b333-45d1-bc2c-3c627c932034"
+      "uuid": "e850c958-66e9-4e73-92d5-26e2ba8aeebd"
     },
     {
       "deduction_rate": 1,
@@ -874,7 +1237,7 @@
       "key": "service_charges",
       "label": "Service Charges",
       "type": "expense",
-      "uuid": "4013f2d8-4341-4a35-bb8c-3d10177e51c4"
+      "uuid": "636593e7-7577-42c6-82d8-e26376accfad"
     },
     {
       "deduction_rate": 1,
@@ -886,7 +1249,7 @@
       "key": "shipping_and_delivery",
       "label": "Postage, Shipping & Delivery",
       "type": "expense",
-      "uuid": "2076e85a-a545-4341-9291-7a9b6069833b"
+      "uuid": "841a928b-d54c-468a-a07c-3e37466860bf"
     },
     {
       "deduction_rate": 1,
@@ -898,7 +1261,7 @@
       "key": "software_subscriptions",
       "label": "Software & Subscriptions",
       "type": "expense",
-      "uuid": "5bd76a8e-d428-4b40-8604-da92323d01eb"
+      "uuid": "2bf1e582-9133-42f7-b874-775bce83a667"
     },
     {
       "deduction_rate": 1,
@@ -910,7 +1273,7 @@
       "key": "staff_welfare",
       "label": "Staff Welfare",
       "type": "expense",
-      "uuid": "02931083-260d-48d7-9fa9-b7528e558c93"
+      "uuid": "d1b64041-84c3-4236-9c84-337be70d99a9"
     },
     {
       "deduction_rate": 1,
@@ -922,7 +1285,7 @@
       "key": "storage_expense",
       "label": "Storage Expense",
       "type": "expense",
-      "uuid": "7ee590dd-eb11-4a96-aba9-ee9c5f884a42"
+      "uuid": "ea100e9b-dd79-4918-a07f-a9db57bd2138"
     },
     {
       "deduction_rate": 1,
@@ -934,7 +1297,7 @@
       "key": "subcontractors",
       "label": "Subcontractor Payments",
       "type": "expense",
-      "uuid": "81a9e36a-ae53-4539-9035-90c58907f26a"
+      "uuid": "27cc5166-a0dc-42fb-9460-2a2eb65c9fd3"
     },
     {
       "deduction_rate": 1,
@@ -946,7 +1309,7 @@
       "key": "sundry_expense",
       "label": "Sundry Expense",
       "type": "expense",
-      "uuid": "926f19d8-b86a-40a6-a321-192f9f936fa9"
+      "uuid": "9f8b4e91-3fbf-43ba-8543-8f82e4616553"
     },
     {
       "deduction_rate": 0,
@@ -958,7 +1321,7 @@
       "key": "tax_payments",
       "label": "Tax Payments",
       "type": "expense",
-      "uuid": "5481db1a-92da-40b0-ace4-95edd5101956"
+      "uuid": "7d9486aa-a33d-46ad-81f2-d7f9d151bed7"
     },
     {
       "deduction_rate": 1,
@@ -970,7 +1333,7 @@
       "key": "taxes_property",
       "label": "Taxes Property",
       "type": "expense",
-      "uuid": "ae9e6fcf-4fc0-4fe1-a7b6-d5cdf9f709e9"
+      "uuid": "f82f694f-aea2-4f41-900f-04b6c9a9f65f"
     },
     {
       "deduction_rate": 1,
@@ -982,7 +1345,7 @@
       "key": "telephone",
       "label": "Telephone & Mobile",
       "type": "expense",
-      "uuid": "7f4e131b-fd95-49a2-b2ff-2ba91197610f"
+      "uuid": "b89baf01-4604-4628-ae8a-af7385dee65e"
     },
     {
       "deduction_rate": 1,
@@ -994,7 +1357,7 @@
       "key": "telephone_expense",
       "label": "Telephone Expense",
       "type": "expense",
-      "uuid": "122fec0a-e69f-48db-923d-0e70c6c6de59"
+      "uuid": "59ea7f2f-e798-4627-a30e-5a77c1449911"
     },
     {
       "deduction_rate": 1,
@@ -1006,7 +1369,7 @@
       "key": "testing_expense",
       "label": "Testing Expense",
       "type": "expense",
-      "uuid": "e796e7a1-0413-4294-9d6a-ef27c2cea352"
+      "uuid": "3adb0fa7-9586-4230-9596-539027f58b66"
     },
     {
       "deduction_rate": 1,
@@ -1018,7 +1381,7 @@
       "key": "training_courses",
       "label": "Training & Courses",
       "type": "expense",
-      "uuid": "28105d37-c11e-455c-a5d8-c6cf72bd2412"
+      "uuid": "178783c5-4a74-4ff1-a929-7db7fc030564"
     },
     {
       "deduction_rate": 1,
@@ -1030,7 +1393,7 @@
       "key": "training_expense",
       "label": "Training Expense",
       "type": "expense",
-      "uuid": "fe8d6568-ac69-4e9c-bc29-677f3ea5014b"
+      "uuid": "b670e5d3-d794-442a-9801-56239be2e6ac"
     },
     {
       "deduction_rate": 0,
@@ -1042,7 +1405,7 @@
       "key": "transfer",
       "label": "Transfer Between Accounts",
       "type": "expense",
-      "uuid": "675b7267-f21c-4b77-b08e-ec19cfee9209"
+      "uuid": "54fde0a9-7a3e-44ab-be75-57a78ccb5e27"
     },
     {
       "deduction_rate": 1,
@@ -1054,7 +1417,7 @@
       "key": "travel_expense",
       "label": "Travel Expense",
       "type": "expense",
-      "uuid": "4c5b08e7-2e78-407e-b4d4-27745ee9c8e2"
+      "uuid": "cd27868d-b753-4da6-9e80-164e1902c7c2"
     },
     {
       "deduction_rate": 1,
@@ -1066,7 +1429,7 @@
       "key": "travel_transport",
       "label": "Travel & Transport",
       "type": "expense",
-      "uuid": "49863a08-cf53-46a9-925a-280bc522ad60"
+      "uuid": "02c6958f-77a9-4d9a-9c6e-fbcce4c92f6c"
     },
     {
       "deduction_rate": 1,
@@ -1078,7 +1441,7 @@
       "key": "uncategorised_expense",
       "label": "Uncategorised Expense",
       "type": "expense",
-      "uuid": "bdf2a6b7-3d00-4f37-be6a-ba6df0267949"
+      "uuid": "b960fcd8-6f01-4028-9872-8212d233a487"
     },
     {
       "deduction_rate": 1,
@@ -1090,7 +1453,7 @@
       "key": "use_of_home",
       "label": "Use Of Home",
       "type": "expense",
-      "uuid": "98c088cd-45c3-4e9a-8167-edf52255fab2"
+      "uuid": "ca81c638-9641-4740-847e-833d29a2b97f"
     },
     {
       "deduction_rate": 1,
@@ -1102,7 +1465,7 @@
       "key": "utilities",
       "label": "Utilities",
       "type": "expense",
-      "uuid": "d1e42c14-0bb4-49b6-b9c0-d10fd713da0f"
+      "uuid": "30856f54-d32c-4cf0-a9d3-8391d7e9c07a"
     },
     {
       "deduction_rate": 1,
@@ -1114,7 +1477,7 @@
       "key": "vehicle_fuel",
       "label": "Vehicle Fuel",
       "type": "expense",
-      "uuid": "4fa85430-395f-419c-976c-b15060cc71b7"
+      "uuid": "359c18d7-98a3-47fe-8219-50fbb0d52c1a"
     },
     {
       "deduction_rate": 1,
@@ -1126,7 +1489,7 @@
       "key": "vehicle_insurance",
       "label": "Vehicle Insurance",
       "type": "expense",
-      "uuid": "a6aefb66-07de-45a4-8478-357701165ad8"
+      "uuid": "8135ab40-9290-4c24-9a72-fe4ab74a8f2f"
     },
     {
       "deduction_rate": 1,
@@ -1138,7 +1501,7 @@
       "key": "vehicle_maintenance",
       "label": "Vehicle Maintenance",
       "type": "expense",
-      "uuid": "033c3aad-f876-47a5-a68a-8261a238a9c1"
+      "uuid": "ae3619f9-6144-4fa7-afef-551df5222f0e"
     },
     {
       "deduction_rate": 1,
@@ -1150,7 +1513,7 @@
       "key": "website_costs",
       "label": "Website Costs",
       "type": "expense",
-      "uuid": "0dab9067-afcd-4b22-b6e6-8d863b5c4e1a"
+      "uuid": "8e74cc35-7f81-4193-a2c4-22e96567c33e"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",

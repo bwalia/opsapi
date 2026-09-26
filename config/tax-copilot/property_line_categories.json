@@ -1,6 +1,7 @@
 {
   "entries": [
     {
+      "accepts_hmrc_categories": {},
       "category_key": "op_unused_rfc_bf",
       "display_order": 1,
       "hmrc_mapping": "{\"sa106_box\":\"24B\"}",
@@ -8,20 +9,24 @@
       "kind": "adjustment",
       "label": "Unused residential finance costs brought forward",
       "schedule": "overseas_property",
-      "uuid": "e6b2525a-38bd-4077-b35c-fb367d4aba99"
+      "uuid": "98cd4e6a-7504-4f5a-ac81-02fa114f7bec"
     },
     {
+      "accepts_hmrc_categories": [
+        "interest_finance"
+      ],
       "category_key": "finance_costs",
       "description": "Residential mortgage interest is restricted to basic-rate relief (box 44)",
       "display_order": 3,
-      "hmrc_mapping": "{\"sa105_box\":\"26\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":3,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"26\",\"sa105_display_label\":\"Loan interest and other financial costs\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Loan interest and other financial costs",
       "schedule": "uk_property",
-      "uuid": "eaebbb13-b23b-4c3d-981b-08750ef227d4"
+      "uuid": "0f0464c3-c45c-419c-b7d4-baa481f0e1ac"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "op_expense",
       "description": "Excluding finance costs for residential properties. Use the private-use column for any part that isn't wholly for the letting.",
       "display_order": 1,
@@ -30,80 +35,103 @@
       "kind": "expense",
       "label": "Property expense",
       "schedule": "overseas_property",
-      "uuid": "dc7d584a-873a-4b28-bd5f-faabfc3e07e6"
+      "uuid": "9bd1072e-b70a-46e1-b808-3069a7ea48cf"
     },
     {
+      "accepts_hmrc_categories": [
+        "other_expenses",
+        "telephone_office",
+        "use_of_home",
+        "advertising_marketing"
+      ],
       "category_key": "other_expenses",
       "display_order": 7,
-      "hmrc_mapping": "{\"sa105_box\":\"29\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":7,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"29\",\"sa105_display_label\":\"Other allowable expenses\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Other allowable property expenses",
       "schedule": "uk_property",
-      "uuid": "9d090c1d-c25f-456d-8116-945860bf82dd"
+      "uuid": "d5650aa9-20fb-4633-949b-a76521a23412"
     },
     {
+      "accepts_hmrc_categories": [
+        "accountancy_legal"
+      ],
       "category_key": "professional_fees",
       "display_order": 4,
-      "hmrc_mapping": "{\"sa105_box\":\"27\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":4,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"27\",\"sa105_display_label\":\"Legal, management and professional fees\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Legal, management and other professional fees",
       "schedule": "uk_property",
-      "uuid": "4be98429-e66c-48cf-9e38-1b88115e22d0"
+      "uuid": "6d91173f-bc65-4dab-ad6a-5af51cd667f0"
     },
     {
+      "accepts_hmrc_categories": [
+        "rent_rates"
+      ],
       "category_key": "rates_insurance",
       "display_order": 1,
-      "hmrc_mapping": "{\"sa105_box\":\"24\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":1,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"24\",\"sa105_display_label\":\"Rent, rates, insurance, ground rents etc\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Rent, rates, insurance and ground rents",
       "schedule": "uk_property",
-      "uuid": "82dd28fa-783c-4acc-972a-2c5393910c66"
+      "uuid": "08d203b1-963a-429d-ab3d-5991f88ef2c5"
     },
     {
+      "accepts_hmrc_categories": [
+        "repairs_maintenance"
+      ],
       "category_key": "repairs_maintenance",
       "display_order": 2,
-      "hmrc_mapping": "{\"sa105_box\":\"25\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":2,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"25\",\"sa105_display_label\":\"Repairs, maintenance and renewals\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Property repairs and maintenance",
       "schedule": "uk_property",
-      "uuid": "175f04ab-630c-49c9-9a6d-0dad63263489"
+      "uuid": "fe061fe7-d290-4b61-85ad-25ec9e872304"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "replacement_domestic_items",
       "description": "Like-for-like replacement of furniture, appliances, kitchenware or soft furnishings in residential lets. Improvements (buying an item that's better than the one it replaces) don't qualify.",
       "display_order": 8,
-      "hmrc_mapping": "{\"sa105_box\":\"39\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":1,\"sa105_display_section\":\"adjustments\",\"sa105_box\":\"39\",\"sa105_display_label\":\"Costs of replacing domestic items in residential lettings\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Replacement of domestic items",
       "schedule": "uk_property",
-      "uuid": "c95e8973-26e3-46b5-a52e-19cae8140980"
+      "uuid": "8697be71-e5ac-4f84-be3f-dabba6543059"
     },
     {
+      "accepts_hmrc_categories": [
+        "wages_staff"
+      ],
       "category_key": "services_wages",
       "display_order": 5,
-      "hmrc_mapping": "{\"sa105_box\":\"28\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":5,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"28\",\"sa105_display_label\":\"Costs of services provided, including wages\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Costs of services provided, including wages",
       "schedule": "uk_property",
-      "uuid": "1e2bbdd4-0672-4fcb-b4c2-b58280d38642"
+      "uuid": "a7ea0237-541e-44de-b60f-ab448df04814"
     },
     {
+      "accepts_hmrc_categories": [
+        "car_van_travel"
+      ],
       "category_key": "travel",
       "display_order": 6,
-      "hmrc_mapping": "{\"sa105_box\":\"29\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":6,\"sa105_display_section\":\"expenses\",\"sa105_box\":\"29\",\"sa105_display_label\":\"Travel costs\"}",
       "is_active": true,
       "kind": "expense",
       "label": "Property-related travel costs",
       "schedule": "uk_property",
-      "uuid": "18b6450f-3105-4807-b333-c5828895a73b"
+      "uuid": "02ecaf6a-aa88-4a05-bb94-d384af046105"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "op_finance_costs",
       "description": "Residential finance costs are restricted to basic-rate relief — they don't reduce profits directly",
       "display_order": 1,
@@ -112,9 +140,10 @@
       "kind": "finance_cost",
       "label": "Interest and other finance costs",
       "schedule": "overseas_property",
-      "uuid": "4c6e9a6c-7ae6-4905-bd8e-5116da25a929"
+      "uuid": "90d52ae0-035c-4529-993d-a57021ccb00b"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "lease_premiums",
       "display_order": 3,
       "hmrc_mapping": "{\"sa105_box\":\"22\"}",
@@ -122,9 +151,10 @@
       "kind": "income",
       "label": "Premiums for the grant of a lease",
       "schedule": "uk_property",
-      "uuid": "1f0ddd91-4597-400b-9e46-9cf36c9b06a7"
+      "uuid": "6d9d523a-820d-4c47-a1bb-5aaa52207a10"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "op_lease_premiums",
       "display_order": 2,
       "hmrc_mapping": "{\"sa106_box\":\"14\"}",
@@ -132,9 +162,10 @@
       "kind": "income",
       "label": "Premiums paid for the grant of a lease",
       "schedule": "overseas_property",
-      "uuid": "f823f6b8-16b6-4195-8d22-42348e3068f2"
+      "uuid": "d49901b2-2503-45dc-9b13-5dbf156de62d"
     },
     {
+      "accepts_hmrc_categories": {},
       "category_key": "op_rents",
       "display_order": 1,
       "hmrc_mapping": "{\"sa106_box\":\"14\"}",
@@ -142,28 +173,34 @@
       "kind": "income",
       "label": "Total rents and other receipts",
       "schedule": "overseas_property",
-      "uuid": "33b2c531-24a8-4a2f-a610-f58cba1199d2"
+      "uuid": "069d7ec1-342c-4470-9ce7-17b0ec57c38b"
     },
     {
+      "accepts_hmrc_categories": [
+        "other_income"
+      ],
       "category_key": "other_income",
       "description": "e.g. insurance payouts, service charges you keep",
       "display_order": 2,
-      "hmrc_mapping": "{\"sa105_box\":\"20\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":2,\"sa105_display_section\":\"income\",\"sa105_box\":\"20\",\"sa105_display_label\":\"Other income from property\"}",
       "is_active": true,
       "kind": "income",
       "label": "Other property income",
       "schedule": "uk_property",
-      "uuid": "39e524f9-f29b-4707-92bc-c234879e4930"
+      "uuid": "2cab73c2-7005-4e29-9fe0-bf0205bd1a73"
     },
     {
+      "accepts_hmrc_categories": [
+        "turnover"
+      ],
       "category_key": "rents",
       "display_order": 1,
-      "hmrc_mapping": "{\"sa105_box\":\"20\"}",
+      "hmrc_mapping": "{\"sa105_display_order\":1,\"sa105_display_section\":\"income\",\"sa105_box\":\"20\",\"sa105_display_label\":\"Rents\"}",
       "is_active": true,
       "kind": "income",
       "label": "Rental income",
       "schedule": "uk_property",
-      "uuid": "a2866100-3210-426c-a7dd-401cfa129b21"
+      "uuid": "0141b8ad-bcd4-439c-ae1c-c11ae493239b"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",

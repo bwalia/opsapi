@@ -2,6 +2,20 @@
   "entries": [
     {
       "always_show": false,
+      "icon": "Key",
+      "is_active": true,
+      "is_admin_only": false,
+      "key": "api-keys",
+      "module": "settings",
+      "name": "API Keys",
+      "path": "/dashboard/namespace/api-keys",
+      "priority": 101,
+      "required_action": "read",
+      "settings": "{}",
+      "uuid": "b22fc405-a40e-461e-8611-13abb504f2b7"
+    },
+    {
+      "always_show": false,
       "icon": "MessageSquare",
       "is_active": true,
       "is_admin_only": false,
@@ -12,7 +26,7 @@
       "priority": 13,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "2ed9360c-097e-4491-bf37-38a47bc7c9a9"
+      "uuid": "ff852a97-349e-468d-9b24-7e9dd9c1c6f2"
     },
     {
       "always_show": false,
@@ -26,7 +40,7 @@
       "priority": 11,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "83a037b5-6b35-4004-aa71-bc278c3f87be"
+      "uuid": "8bca7313-44f4-4727-b045-9ea0bf1bd0da"
     },
     {
       "always_show": false,
@@ -40,7 +54,7 @@
       "priority": 1,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "14330378-f0c1-491b-b463-5c9f09c7cbf5"
+      "uuid": "d1ece539-7537-41b0-901e-c2f0e15c594d"
     },
     {
       "always_show": false,
@@ -54,7 +68,35 @@
       "priority": 12,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "bc3e9dec-f13b-4104-bafa-d7502e0cc441"
+      "uuid": "9320fe2f-64d7-4393-9f81-c0a7dbf97698"
+    },
+    {
+      "always_show": false,
+      "icon": "Globe",
+      "is_active": true,
+      "is_admin_only": false,
+      "key": "domains",
+      "module": "domains",
+      "name": "Domains",
+      "path": "/dashboard/domains",
+      "priority": 60,
+      "required_action": "read",
+      "settings": "{}",
+      "uuid": "2f998bd1-2c55-419c-92e3-7b51be869b4b"
+    },
+    {
+      "always_show": false,
+      "icon": "Users",
+      "is_active": true,
+      "is_admin_only": false,
+      "key": "employees",
+      "module": "employees",
+      "name": "Employees",
+      "path": "/dashboard/employees",
+      "priority": 41,
+      "required_action": "read",
+      "settings": "{}",
+      "uuid": "188bd79a-2ad4-47cf-a2fc-e99b7f52d05c"
     },
     {
       "always_show": true,
@@ -68,7 +110,7 @@
       "priority": 2,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "46fc5be9-23f7-40ad-835a-40370358e3d3"
+      "uuid": "65e8e4de-fecc-4c13-8ebe-b151f64d248e"
     },
     {
       "always_show": false,
@@ -82,7 +124,7 @@
       "priority": 3,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "2700cfbe-85d5-4a62-a404-5d57748124c7"
+      "uuid": "4b2ab907-c92d-409f-8abe-ae58dd3c78ab"
     },
     {
       "always_show": false,
@@ -96,7 +138,7 @@
       "priority": 8,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "877f0de6-c40f-4737-932b-c138fa0b4927"
+      "uuid": "fea433dc-5060-4be9-8c21-de45140c024b"
     },
     {
       "always_show": false,
@@ -110,7 +152,7 @@
       "priority": 9,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "1ede3e5f-9d02-405a-95b3-7c60b64147a6"
+      "uuid": "c0f7f239-e944-4082-8754-5b8684c3be7b"
     },
     {
       "always_show": false,
@@ -124,7 +166,7 @@
       "priority": 4,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "f643de39-b980-44f0-8447-cb99583a3f21"
+      "uuid": "8a40c4e7-bc85-4d26-9b8c-6a3420dbc100"
     },
     {
       "always_show": false,
@@ -138,7 +180,7 @@
       "priority": 14,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "608f28f3-da39-4373-b636-e29b974a808d"
+      "uuid": "19fc873a-9876-4a80-a7ac-3ecb996ecf79"
     },
     {
       "always_show": false,
@@ -152,7 +194,7 @@
       "priority": 7,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "dda70a2f-64c0-4f41-85c9-aeed30a50fdb"
+      "uuid": "3d56d2cd-f90d-4021-a500-96a91f4f7e21"
     },
     {
       "always_show": false,
@@ -166,7 +208,7 @@
       "priority": 5,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "1cbb2a69-c206-4af4-a9e4-814ac06358c2"
+      "uuid": "f0043db8-5446-4729-90f3-819956388526"
     },
     {
       "always_show": false,
@@ -180,7 +222,7 @@
       "priority": 100,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "b49cedc9-ea34-4a79-b878-41814f76647d"
+      "uuid": "fcac09d9-dab6-450f-84ee-cf06c9fb5eb7"
     },
     {
       "always_show": false,
@@ -194,7 +236,7 @@
       "priority": 10,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "cacde6e8-92c3-4922-b7db-a38e79ce8af5"
+      "uuid": "1446efc9-8964-4a82-9eb2-1bebf102b4af"
     },
     {
       "always_show": false,
@@ -208,7 +250,7 @@
       "priority": 30,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "15e1d01a-cccd-4cbd-ac7b-9a97b39d84e6"
+      "uuid": "e99f1186-1cc3-44c5-96b1-808b81de7827"
     },
     {
       "always_show": false,
@@ -222,7 +264,7 @@
       "priority": 31,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "d5e3b0e2-28dc-4a81-b4d6-d3f0cb0b9006"
+      "uuid": "e0f4e97f-b94f-4861-8af3-20d219c62136"
     },
     {
       "always_show": false,
@@ -236,7 +278,7 @@
       "priority": 35,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "f5a7b7d4-ffed-4045-89d3-cc39a8af576f"
+      "uuid": "a258e9a5-5855-4f42-b8a2-5e481339a09d"
     },
     {
       "always_show": false,
@@ -250,7 +292,7 @@
       "priority": 35,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "d0ac4f24-690b-4dac-9c85-3f1d17fe7f53"
+      "uuid": "d4b7e1c3-79ea-4475-a1a2-cd8b33d78469"
     },
     {
       "always_show": false,
@@ -264,7 +306,7 @@
       "priority": 36,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "dd019634-5375-41f8-a3c3-964ef31c576c"
+      "uuid": "cc4e07d2-10c7-4df6-9a90-823c2a2e8cda"
     },
     {
       "always_show": false,
@@ -278,7 +320,7 @@
       "priority": 34,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "4c75d712-7061-48df-af43-590ba94eebfa"
+      "uuid": "b80aefc2-e64a-4cd8-bb26-a1c80734d507"
     },
     {
       "always_show": false,
@@ -292,7 +334,7 @@
       "priority": 32,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "44fb4de9-e79a-45dc-92ca-c788a94b565c"
+      "uuid": "60c1c120-3533-4dda-b279-3942c6ec6e90"
     },
     {
       "always_show": false,
@@ -306,7 +348,7 @@
       "priority": 33,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "42d41cf8-dcf7-4846-ba27-d901817a938c"
+      "uuid": "438d5f3c-eafd-4f2c-9e35-466b36647888"
     },
     {
       "always_show": false,
@@ -320,13 +362,13 @@
       "priority": 6,
       "required_action": "read",
       "settings": "{}",
-      "uuid": "de7d5733-e37a-4efb-8f31-990c7d62e067"
+      "uuid": "a30662d9-48ff-42ef-8a18-274b3e095055"
     }
   ],
   "exported_at_note": "regenerated by `lapis exec require('scripts.config-cli').export()`",
   "key": "key",
   "namespace_scope": "global",
-  "namespace_slug": "system",
+  "namespace_slug": "tax-copilot",
   "registry_version": 1,
   "table": "menu_items"
 }
