@@ -40,4 +40,21 @@ function ChatNamespace.resolve()
     return nil
 end
 
+--- Is this user an active member of the channel's namespace?
+-- Guards the "public channel" paths (join, read as non-member): public means
+-- public WITHIN its tenant, never across tenants. A channel with no namespace
+-- (legacy rows) is not joinable by anyone but platform admins.
+function ChatNamespace.canAccessPublic(channel, user)
+    if not channel or not user then return false end
+    if require("helper.admin-check").isPlatformAdmin(user) then return true end
+    if not channel.namespace_id then return false end
+    local r = db.query([[
+        SELECT 1 FROM namespace_members nm
+        JOIN users u ON u.id = nm.user_id
+        WHERE nm.namespace_id = ? AND u.uuid = ? AND nm.status = 'active'
+        LIMIT 1
+    ]], channel.namespace_id, user.uuid or user.sub)
+    return r and r[1] ~= nil
+end
+
 return ChatNamespace

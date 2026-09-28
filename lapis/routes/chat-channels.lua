@@ -570,6 +570,11 @@ return function(app)
             return { status = 403, json = { error = "Cannot join private channels directly" } }
         end
 
+        -- ...and only public channels of a workspace you belong to.
+        if not ChatNamespace.canAccessPublic(channel, user) then
+            return { status = 404, json = { error = "Channel not found" } }
+        end
+
         -- Check if already a member
         if ChatChannelQueries.isMember(channel_uuid, user.uuid) then
             return { status = 400, json = { error = "Already a member of this channel" } }

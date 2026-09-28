@@ -1,13 +1,21 @@
 --[[
     Test Notification Route
 
-    For testing push notifications. Remove in production.
+    For testing push notifications. Platform admins only: this used to be on
+    the public allow-list with auth commented out, letting anyone on the
+    internet push arbitrary text to every user of every tenant. It now needs a
+    platform-admin JWT and an explicit target user — no broadcast.
 ]]
 
 local cJson = require("cjson")
 local PushNotification = require "helper.push-notification"
 local AuthMiddleware = require("middleware.auth")
 local db = require("lapis.db")
+
+-- Platform admins only (exact "administrative" role).
+local function platform_admin_only(handler)
+    return AuthMiddleware.requireRole("administrative", handler)
+end
 
 return function(app)
     -- Helper function to parse JSON body
@@ -27,8 +35,6 @@ return function(app)
             end
         end
 
-        ngx.log(ngx.NOTICE, "[TestNotification] Raw body: ", body or "nil")
-
         if not body or body == "" then
             return {}
         end
@@ -38,45 +44,24 @@ return function(app)
             return result
         end
 
-        ngx.log(ngx.ERR, "[TestNotification] Failed to parse JSON: ", body)
+        ngx.log(ngx.ERR, "[TestNotification] Failed to parse JSON body")
         return {}
     end
 
     -- POST /api/v2/test-notification - Send test notification
     -- Body: { "title": "...", "body": "...", "user_uuid": "..." (optional) }
-    -- TODO: Re-enable auth after testing: AuthMiddleware.requireAuth(function(self)
-    app:post("/api/v2/test-notification", function(self)
+    app:post("/api/v2/test-notification", platform_admin_only(function(self)
         local data = parse_json_body()
-
-        -- Debug logging
-        ngx.log(ngx.NOTICE, "[TestNotification] Parsed data: ", cJson.encode(data))
 
         local title = data.title or "Test Notification"
         local body = data.body or "This is a test notification"
 
-        ngx.log(ngx.NOTICE, "[TestNotification] Title: ", title, ", Body: ", body)
-
-        local recipient_uuids = {}
-
-        if data.user_uuid then
-            -- Send to specific user
-            table.insert(recipient_uuids, data.user_uuid)
-        else
-            -- Send to all users with registered tokens
-            local tokens = db.query([[
-                SELECT DISTINCT user_uuid FROM device_tokens WHERE is_active = true
-            ]])
-            for _, t in ipairs(tokens or {}) do
-                table.insert(recipient_uuids, t.user_uuid)
-            end
+        -- Always a single, explicit recipient: a test tool must never be able
+        -- to broadcast to every user on the platform.
+        if type(data.user_uuid) ~= "string" or data.user_uuid == "" then
+            return { status = 400, json = { error = "user_uuid is required" } }
         end
-
-        if #recipient_uuids == 0 then
-            return {
-                status = 400,
-                json = { error = "No users with registered device tokens found" }
-            }
-        end
+        local recipient_uuids = { data.user_uuid }
 
         local success, result = PushNotification.sendNotification(recipient_uuids, title, body, {
             type = "test"
@@ -91,10 +76,10 @@ return function(app)
                 result = result
             }
         }
-    end)
+    end))
 
     -- GET /api/v2/test-notification/tokens - List all registered tokens (for debugging)
-    app:get("/api/v2/test-notification/tokens", AuthMiddleware.requireAuth(function(self)
+    app:get("/api/v2/test-notification/tokens", platform_admin_only(function(self)
         local tokens = db.query([[
             SELECT dt.uuid, dt.user_uuid, dt.device_type, dt.device_name, dt.is_active, dt.created_at,
                    u.first_name, u.last_name, u.email

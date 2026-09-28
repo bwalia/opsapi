@@ -147,7 +147,16 @@ function DocumentQueries.create(data)
     }
 end
 
-function DocumentQueries.all(params)
+-- Ownership: documents have no namespace column, so access is per OWNER
+-- (user_id). `owner_id` = the caller's internal user id; nil only for platform
+-- admins (see routes/documents.lua owner_scope). Previously every logged-in
+-- user of every tenant could list/edit/delete every document.
+local function owner_clause(owner_id)
+    if owner_id == nil then return "" end
+    return "where user_id = " .. db.escape_literal(owner_id) .. " "
+end
+
+function DocumentQueries.all(params, owner_id)
     local page = params.page or 1
     local perPage = params.perPage or 10
 
@@ -155,7 +164,7 @@ function DocumentQueries.all(params)
     local valid_fields = { id = true, title = true, status = true, published_date = true, created_at = true, updated_at = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "id", "desc")
 
-    local paginated = DocumentModel:paginated("order by " .. orderField .. " " .. orderDir, {
+    local paginated = DocumentModel:paginated(owner_clause(owner_id) .. "order by " .. orderField .. " " .. orderDir, {
         per_page = perPage
     })
 
@@ -181,8 +190,8 @@ function DocumentQueries.all(params)
     }
 end
 
-function DocumentQueries.allData()
-    local data = DocumentModel:select()
+function DocumentQueries.allData(owner_id)
+    local data = DocumentModel:select(owner_clause(owner_id))
 
     local documents, updatedRecords = data, {}
     for _, document in ipairs(documents) do
@@ -216,7 +225,7 @@ function DocumentQueries.show(id)
         singleRecord.internal_id = singleRecord.id
         singleRecord.id = singleRecord.uuid
 
-        singleRecord.cover_image = singleRecord.images[1].url
+        singleRecord.cover_image = singleRecord.images[1] and singleRecord.images[1].url or nil
         local tagIds = {}
         ---@diagnostic disable-next-line: param-type-mismatch
         for index, tag in ipairs(singleRecord.tags) do
@@ -317,16 +326,19 @@ function DocumentQueries.destroy(id)
     return record:delete()
 end
 
-function DocumentQueries.deleteMultiple(params)
+function DocumentQueries.deleteMultiple(params, owner_id)
     local ids = cJson.decode(params.ids)
-    local deleteAble = DocumentModel:find_all(ids.id, "uuid")
-    if deleteAble then
-        for _, record in ipairs(deleteAble) do
+    local found = DocumentModel:find_all(ids.id, "uuid") or {}
+    local deleted = {}
+    for _, record in ipairs(found) do
+        -- Silently skip documents the caller doesn't own.
+        if owner_id == nil or tostring(record.user_id) == tostring(owner_id) then
             record:delete()
+            deleted[#deleted + 1] = record
         end
     end
     return {
-        data = deleteAble
+        data = deleted
     }
 end
 

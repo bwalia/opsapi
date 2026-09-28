@@ -154,9 +154,9 @@ return function(app)
 
     -- Update pricing configuration (Admin only - requires special permission)
     app:match("/api/v2/delivery/pricing-config/update", respond_to({
-        PUT = AuthMiddleware.requireAuth(function(self)
-            -- TODO: Add admin role check here
-            -- For now, any authenticated user can update (should be restricted to admin)
+        -- Platform admins only: PRICING_CONFIG is one process-wide table shared
+        -- by every tenant, so any user could previously change everyone's fees.
+        PUT = AuthMiddleware.requireRole("administrative", function(self)
 
             local body_success, body = pcall(function()
                 return require("cjson").decode(self.req.read_body())
