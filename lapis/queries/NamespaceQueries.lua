@@ -240,11 +240,14 @@ function NamespaceQueries.show(id)
     return namespace
 end
 
---- Find namespace by slug
+--- Find an ACTIVE namespace by slug
+-- Every caller is a public / tenant-facing page (CMS, academy, themes CSS), so
+-- a suspended/archived/pending tenant resolves to nil → "not found" — its
+-- public site goes dark with the rest of it.
 -- @param slug string The namespace slug
 -- @return table|nil The namespace or nil
 function NamespaceQueries.findBySlug(slug)
-    return Namespaces:find({ slug = slug })
+    return Namespaces:find({ slug = slug, status = "active" })
 end
 
 --- Find namespace by domain
