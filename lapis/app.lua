@@ -460,6 +460,8 @@ load_if("notifications", "routes.test-notification")
 -- ============================================
 -- HOSPITAL & CARE HOME MANAGEMENT
 -- ============================================
+-- Tenant gate for every hospital route below (must load first; see file header)
+load_if("hospital", "routes.hospital-scope")
 load_if("hospital", "routes.hospital-departments")
 load_if("hospital", "routes.hospital-wards")
 load_if("hospital", "routes.care-plans")

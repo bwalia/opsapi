@@ -97,12 +97,12 @@ function DementiaAssessmentQueries.getLatest(patient_id)
     return DementiaAssessmentModel:getLatest(patient_id)
 end
 
-function DementiaAssessmentQueries.getHighRiskWandering()
-    return DementiaAssessmentModel:getHighRiskWandering()
+function DementiaAssessmentQueries.getHighRiskWandering(namespace_id)
+    return DementiaAssessmentModel:getHighRiskWandering(namespace_id)
 end
 
-function DementiaAssessmentQueries.getDueForReassessment()
-    return DementiaAssessmentModel:getDueForReassessment()
+function DementiaAssessmentQueries.getDueForReassessment(namespace_id)
+    return DementiaAssessmentModel:getDueForReassessment(namespace_id)
 end
 
 return DementiaAssessmentQueries

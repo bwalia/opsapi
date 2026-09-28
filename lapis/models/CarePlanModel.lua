@@ -25,8 +25,10 @@ function CarePlanModel:getActive(patient_id)
     return self:select("WHERE patient_id = ? AND status = 'active' ORDER BY priority DESC, created_at DESC", patient_id)
 end
 
-function CarePlanModel:getDueForReview()
-    return self:select("WHERE status = 'active' AND review_date <= CURRENT_DATE ORDER BY review_date ASC")
+-- Tenant-scoped: only patients whose hospital is in namespace_id.
+function CarePlanModel:getDueForReview(namespace_id)
+    return self:select("WHERE patient_id IN (SELECT p.id FROM patients p JOIN hospitals h ON h.id = p.hospital_id WHERE h.namespace_id = ?) AND status = 'active' AND review_date <= CURRENT_DATE ORDER BY review_date ASC",
+        namespace_id)
 end
 
 function CarePlanModel:getWithParsedData(id)

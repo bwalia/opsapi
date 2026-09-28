@@ -22,7 +22,7 @@ return function(app)
     end
 
     local function resolve_patient(patient_uuid)
-        local results = db.select("SELECT id, hospital_id FROM patients WHERE uuid = ? LIMIT 1", patient_uuid)
+        local results = db.select("id, hospital_id FROM patients WHERE uuid = ? LIMIT 1", patient_uuid)
         return results and results[1] or nil
     end
 
@@ -82,7 +82,7 @@ return function(app)
 
     -- Plans due for review (staff dashboard)
     app:get("/api/v2/care-plans/due-for-review", AuthMiddleware.requireAuth(function(self)
-        local ok, result = pcall(CarePlanQueries.getDueForReview)
+        local ok, result = pcall(CarePlanQueries.getDueForReview, self.namespace.id)
         if not ok then return error_response(500, "Failed to fetch review queue", tostring(result)) end
 
         return { status = 200, json = { data = result or {} } }
