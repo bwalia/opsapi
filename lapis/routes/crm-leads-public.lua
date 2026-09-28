@@ -32,7 +32,7 @@ return function(app)
             -- Resolve namespace from slug
             local namespaces = db.query([[
                 SELECT id, slug, name FROM namespaces
-                WHERE slug = ?
+                WHERE slug = ? AND status = 'active'
                 LIMIT 1
             ]], self.params.namespace_slug)
 

@@ -283,6 +283,12 @@ app:before_filter(function(self)
 
     ngx.log(ngx.NOTICE, "Applying auth to: ", uri)
     local ok, auth = pcall(require, "helper.auth")
+    if not ok then
+        -- Fail CLOSED: previously a load error here silently skipped auth for
+        -- every protected route.
+        ngx.log(ngx.ERR, "[auth] helper.auth failed to load: ", tostring(auth))
+        return self:write({ status = 500, json = { error = "Authentication unavailable" } })
+    end
     if ok then
         auth.authenticate()
         -- Populate self.current_user from ngx.ctx.user for Lapis routes
@@ -297,6 +303,15 @@ app:before_filter(function(self)
                 if ns_ok then
                     pcall(ns_resolver.resolve, self.current_user)
                 end
+            end
+
+            -- Refuse requests made in the context of a suspended/archived
+            -- tenant on EVERY route, not just requireNamespace ones.
+            local st_ok, blocked = pcall(require("helper.namespace-status").check, self, uri)
+            if not st_ok then
+                ngx.log(ngx.ERR, "[namespace-status] ", tostring(blocked))
+            elseif blocked then
+                return self:write(blocked)
             end
         end
     end
