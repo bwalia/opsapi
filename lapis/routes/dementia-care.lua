@@ -26,7 +26,7 @@ return function(app)
     end
 
     local function resolve_patient_id(patient_uuid)
-        local results = db.select("SELECT id FROM patients WHERE uuid = ? LIMIT 1", patient_uuid)
+        local results = db.select("id FROM patients WHERE uuid = ? LIMIT 1", patient_uuid)
         return results and results[1] and results[1].id or nil
     end
 
@@ -94,7 +94,7 @@ return function(app)
 
     -- Dashboard: high wandering risk
     app:get("/api/v2/dementia/high-risk-wandering", AuthMiddleware.requireAuth(function(self)
-        local ok, result = pcall(DementiaAssessmentQueries.getHighRiskWandering)
+        local ok, result = pcall(DementiaAssessmentQueries.getHighRiskWandering, self.namespace.id)
         if not ok then return error_response(500, "Failed to fetch high-risk patients", tostring(result)) end
 
         return { status = 200, json = { data = result or {} } }
@@ -102,7 +102,7 @@ return function(app)
 
     -- Dashboard: due for reassessment
     app:get("/api/v2/dementia/due-for-reassessment", AuthMiddleware.requireAuth(function(self)
-        local ok, result = pcall(DementiaAssessmentQueries.getDueForReassessment)
+        local ok, result = pcall(DementiaAssessmentQueries.getDueForReassessment, self.namespace.id)
         if not ok then return error_response(500, "Failed to fetch reassessment queue", tostring(result)) end
 
         return { status = 200, json = { data = result or {} } }

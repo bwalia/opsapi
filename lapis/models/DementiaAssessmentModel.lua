@@ -34,15 +34,18 @@ function DementiaAssessmentModel:getByType(patient_id, assessment_type)
     )
 end
 
-function DementiaAssessmentModel:getHighRiskWandering()
+-- Tenant-scoped: only patients whose hospital is in namespace_id.
+function DementiaAssessmentModel:getHighRiskWandering(namespace_id)
     return self:select(
-        "WHERE wandering_risk = 'high' AND status = 'completed' ORDER BY assessment_date DESC"
+        "WHERE patient_id IN (SELECT p.id FROM patients p JOIN hospitals h ON h.id = p.hospital_id WHERE h.namespace_id = ?) AND wandering_risk = 'high' AND status = 'completed' ORDER BY assessment_date DESC",
+        namespace_id
     )
 end
 
-function DementiaAssessmentModel:getDueForReassessment()
+function DementiaAssessmentModel:getDueForReassessment(namespace_id)
     return self:select(
-        "WHERE next_assessment_date IS NOT NULL AND next_assessment_date <= CURRENT_DATE AND status = 'completed' ORDER BY next_assessment_date ASC"
+        "WHERE patient_id IN (SELECT p.id FROM patients p JOIN hospitals h ON h.id = p.hospital_id WHERE h.namespace_id = ?) AND next_assessment_date IS NOT NULL AND next_assessment_date <= CURRENT_DATE AND status = 'completed' ORDER BY next_assessment_date ASC",
+        namespace_id
     )
 end
 

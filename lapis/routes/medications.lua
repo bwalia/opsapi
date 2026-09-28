@@ -23,7 +23,7 @@ return function(app)
     end
 
     local function resolve_patient_id(patient_uuid)
-        local results = db.select("SELECT id FROM patients WHERE uuid = ? LIMIT 1", patient_uuid)
+        local results = db.select("id FROM patients WHERE uuid = ? LIMIT 1", patient_uuid)
         return results and results[1] and results[1].id or nil
     end
 

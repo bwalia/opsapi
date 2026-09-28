@@ -94,8 +94,8 @@ function CarePlanQueries.destroy(id)
     return record:delete()
 end
 
-function CarePlanQueries.getDueForReview()
-    return CarePlanModel:getDueForReview()
+function CarePlanQueries.getDueForReview(namespace_id)
+    return CarePlanModel:getDueForReview(namespace_id)
 end
 
 return CarePlanQueries

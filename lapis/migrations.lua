@@ -2395,6 +2395,33 @@ local _migrations = {
     ['997_create_cms_post_categories'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 7),
     ['998_create_cms_webhooks'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 8),
     ['999_cms_posts_search_trgm'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_migrations, 9),
+    -- Hospital tenant anchor: hospitals had NO tenant column, so every hospital
+    -- route was cross-tenant. namespace_id on hospitals is the single anchor
+    -- (everything else hangs off a hospital); routes/hospital-scope.lua enforces
+    -- it. Backfill ONLY when a hospital's staff all belong to exactly one
+    -- namespace; anything else stays NULL = platform-admin only (secure default,
+    -- nothing deleted — assign it with UPDATE hospitals SET namespace_id = ...).
+    ['zzh_hospital_namespace_id'] = conditional(ProjectConfig.FEATURES.HOSPITAL, function()
+        db.query([[
+            ALTER TABLE hospitals
+            ADD COLUMN IF NOT EXISTS namespace_id BIGINT REFERENCES namespaces(id) ON DELETE CASCADE
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_hospitals_namespace_id ON hospitals (namespace_id)")
+        db.query([[
+            UPDATE hospitals h SET namespace_id = x.ns
+            FROM (
+                SELECT hs.hospital_id, MIN(nm.namespace_id) AS ns
+                FROM hospital_staff hs
+                JOIN namespace_members nm ON nm.user_id = hs.user_id AND nm.status = 'active'
+                GROUP BY hs.hospital_id
+                HAVING COUNT(DISTINCT nm.namespace_id) = 1
+            ) x
+            WHERE h.id = x.hospital_id AND h.namespace_id IS NULL
+        ]])
+        local left = db.query("SELECT COUNT(*) AS n FROM hospitals WHERE namespace_id IS NULL")
+        print("[zzh_hospital_namespace_id] hospitals without a namespace (platform-admin only): "
+            .. tostring(left and left[1] and left[1].n or 0))
+    end),
     -- Chat AI agent: server-side conversation + background runs (routes/chat-agent.lua)
     ['2000_create_chat_agent_runs'] = conditional(ProjectConfig.FEATURES.CHAT, function()
         db.query([[
