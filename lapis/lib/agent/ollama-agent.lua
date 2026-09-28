@@ -77,7 +77,11 @@ local function call_ollama(messages, tools)
         messages = messages,
         stream = false,
         think = false,
-        options = { temperature = 0.2 },
+        -- num_predict caps each reply. Without it a looping model generates
+        -- forever (the runner context-shifts), pinning an Ollama slot after we
+        -- time out — seen on hh193: 4 slots stuck at 22k–69k tokens starved
+        -- every other request.
+        options = { temperature = 0.2, num_predict = 2048 },
     }
     if tools and #tools > 0 then
         body.tools = tools
