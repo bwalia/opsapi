@@ -224,7 +224,8 @@ local function upsert_entity_and_answers(record)
                 -- ON CONFLICT DO UPDATE, not DO NOTHING like backfill.
                 --
                 -- The conflict target `idx_upa_user_question_entity` is a
-                -- PARTIAL unique index (WHERE entity_uuid IS NOT NULL),
+                -- PARTIAL unique index (WHERE entity_uuid IS NOT NULL AND
+                -- tax_year IS NULL — year-less entity rows),
                 -- not a constraint — Postgres's `ON CONFLICT ON
                 -- CONSTRAINT <name>` doesn't accept indexes. We use the
                 -- inferred form with a matching index_predicate so
@@ -238,7 +239,7 @@ local function upsert_entity_and_answers(record)
                     VALUES (gen_random_uuid()::text, ?, ?, ?, ?, 1, ?,
                             ?, ?, ?, ?, false, NOW(), NOW())
                     ON CONFLICT (user_id, question_id, entity_uuid)
-                    WHERE entity_uuid IS NOT NULL
+                    WHERE entity_uuid IS NOT NULL AND tax_year IS NULL
                     DO UPDATE SET
                         answer_text = EXCLUDED.answer_text,
                         answer_number = EXCLUDED.answer_number,

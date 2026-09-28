@@ -314,6 +314,10 @@ local config_cmi_unique_keys_migrations = load_if_enabled(ProjectConfig.FEATURES
 -- export/import can filter cleanly. See the module docstring for detail.
 local config_cmi_namespace_cleanup_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.config-cmi-namespace-cleanup") or {}
 
+-- answer_scope='entity_year' — per-entity-per-year profile answers (a job's
+-- expenses / a holding's allowances for ONE tax year). See the module docstring.
+local entity_year_answer_scope_migrations = load_if_enabled(ProjectConfig.FEATURES.TAX_COPILOT, "migrations.entity-year-answer-scope") or {}
+
 -- CRM
 local crm_system_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-system") or {}
 local crm_menu_items_migrations = load_if_enabled(ProjectConfig.FEATURES.CRM, "migrations.crm-menu-items") or {}
@@ -2422,6 +2426,8 @@ local _migrations = {
         print("[zzh_hospital_namespace_id] hospitals without a namespace (platform-admin only): "
             .. tostring(left and left[1] and left[1].n or 0))
     end),
+    ['2001_answer_scope_allow_entity_year'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, entity_year_answer_scope_migrations, 1),
+    ['2002_answer_entity_year_unique_index'] = conditional_array(ProjectConfig.FEATURES.TAX_COPILOT, entity_year_answer_scope_migrations, 2),
     -- Chat AI agent: server-side conversation + background runs (routes/chat-agent.lua)
     ['2000_create_chat_agent_runs'] = conditional(ProjectConfig.FEATURES.CHAT, function()
         db.query([[
