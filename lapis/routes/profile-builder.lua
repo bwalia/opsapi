@@ -1002,6 +1002,11 @@ return function(app)
         --   answer_scope='user'   → one answer per user (classic + rental_business)
         --   answer_scope='entity' → one answer per user per entity of `entity_type`
         --   answer_scope='year'   → one answer per user per tax year
+        --   answer_scope='entity_year' → one answer per user per entity per tax
+        --                           year (a job's expenses, a holding's
+        --                           allowances). Both params required; a
+        --                           year-less answer saved before the category
+        --                           became per-year is served as the fallback.
         -- The `?entity=<uuid>` and `?tax_year=YYYY-YY` params carry the
         -- extra scope key; missing / mismatched params return a 400 so
         -- clients that skip a required param fail loud instead of silently
@@ -1038,9 +1043,10 @@ return function(app)
 
         -- Validate required scope params. 400 (bad request) rather than
         -- 404 so clients get a clear "you forgot the tax_year" message.
-        if answer_scope == "entity" and not entity_uuid then
+        if (answer_scope == "entity" or answer_scope == "entity_year") and not entity_uuid then
             return { status = 400, json = { error = "entity is required for entity-scoped context" } }
-        elseif answer_scope == "year" then
+        end
+        if answer_scope == "year" or answer_scope == "entity_year" then
             if not tax_year or not tax_year:match("^%d%d%d%d%-%d%d$") then
                 return { status = 400, json = { error = "tax_year is required in YYYY-YY format for year-scoped context" } }
             end
@@ -1097,7 +1103,16 @@ return function(app)
         local answer_map = {}
         if user_id then
             local ok_all_ans, all_ans
-            if entity_uuid then
+            if entity_uuid and answer_scope == "entity_year" then
+                -- This year's row wins over the legacy year-less row
+                -- (ordered first; the map keeps the first per question).
+                ok_all_ans, all_ans = pcall(db.query, [[
+                    SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
+                    FROM user_profile_answers
+                    WHERE user_id = ? AND entity_uuid = ? AND (tax_year = ? OR tax_year IS NULL)
+                    ORDER BY (tax_year IS NULL) ASC
+                ]], user_id, entity_uuid, tax_year)
+            elseif entity_uuid then
                 ok_all_ans, all_ans = pcall(db.query, [[
                     SELECT question_id, answer_text, answer_number, answer_boolean, answer_date, answer_json
                     FROM user_profile_answers
@@ -1118,7 +1133,7 @@ return function(app)
             end
             if ok_all_ans and all_ans then
                 for _, a in ipairs(all_ans) do
-                    answer_map[a.question_id] = a
+                    answer_map[a.question_id] = answer_map[a.question_id] or a
                 end
             end
         end
@@ -3254,6 +3269,10 @@ return function(app)
         local entity_filter = " AND upa.entity_uuid IS NULL"
         if entity_uuid then
             entity_filter = " AND upa.entity_uuid = " .. db.escape_literal(tostring(entity_uuid))
+            local ty = self.params.tax_year
+            if ty and ty ~= "" and ty:match("^%d%d%d%d%-%d%d$") then
+                entity_filter = entity_filter .. " AND upa.tax_year = " .. db.escape_literal(ty)
+            end
         end
 
         local sql
@@ -3312,6 +3331,8 @@ return function(app)
         -- matching scope, or the individual write is rejected below:
         --   entity_uuid → per-entity save   (batch's `entity_uuid` param)
         --   tax_year    → per-year save     (batch's `tax_year`    param)
+        --   both        → per-entity-per-year save (answer_scope='entity_year');
+        --                 an 'entity' question in such a batch ignores the year
         --   neither     → classic per-user save
         local entity_uuid = params.entity_uuid
         if entity_uuid == "" or entity_uuid == cjson.null then entity_uuid = nil end
@@ -3319,9 +3340,6 @@ return function(app)
         if tax_year == "" or tax_year == cjson.null then tax_year = nil end
         if tax_year and not tax_year:match("^%d%d%d%d%-%d%d$") then
             return { status = 400, json = { error = "tax_year must be YYYY-YY format" } }
-        end
-        if entity_uuid and tax_year then
-            return { status = 400, json = { error = "entity_uuid and tax_year are mutually exclusive scopes" } }
         end
         local entity_type = nil
         if entity_uuid then
@@ -3379,6 +3397,9 @@ return function(app)
                 local q_scope = "user"
                 local q_entity_type = nil
                 local reject = nil
+                -- Effective scope of THIS answer (an 'entity' question in an
+                -- entity+year batch is stored year-less).
+                local a_entity, a_year = entity_uuid, tax_year
                 if not question then
                     reject = "Question not found: " .. ans.question_uuid
                 else
@@ -3390,10 +3411,14 @@ return function(app)
                         q_entity_type = nil
                     end
 
-                    if q_scope == "entity" then
+                    if q_scope == "entity" or q_scope == "entity_year" then
+                        if q_scope == "entity" then a_year = nil end
                         if not entity_uuid then
                             reject = "Question " .. ans.question_uuid
                                 .. " is per-entity — entity_uuid is required"
+                        elseif q_scope == "entity_year" and not tax_year then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is per-entity per-year — tax_year is required"
                         elseif q_entity_type and q_entity_type ~= entity_type then
                             reject = "Question " .. ans.question_uuid
                                 .. " belongs to a '" .. tostring(q_entity_type)
@@ -3404,6 +3429,9 @@ return function(app)
                         if not tax_year then
                             reject = "Question " .. ans.question_uuid
                                 .. " is per-year — tax_year is required"
+                        elseif entity_uuid then
+                            reject = "Question " .. ans.question_uuid
+                                .. " is not per-entity — save it without entity_uuid"
                         end
                     else
                         -- q_scope == "user" (or unrecognised → treat as user)
@@ -3420,6 +3448,8 @@ return function(app)
                 if reject then
                     table.insert(errors, { index = i, error = reject })
                 else
+                    -- From here on the batch scope is this answer's scope.
+                    local entity_uuid, tax_year = a_entity, a_year
                     -- Completion is a classic-profile concept; contexted
                     -- (hub / per-property) categories are excluded from the
                     -- gate, so never cache completion rows for them.
@@ -3434,10 +3464,17 @@ return function(app)
                     -- distinct rows under the three partial unique indexes.
                     local old_answer = nil
                     local ok_old, old_rows
-                    if entity_uuid then
+                    if entity_uuid and tax_year then
                         ok_old, old_rows = pcall(db.query, [[
                             SELECT * FROM user_profile_answers
-                            WHERE user_id = ? AND question_id = ? AND entity_uuid = ? LIMIT 1
+                            WHERE user_id = ? AND question_id = ? AND entity_uuid = ?
+                              AND tax_year = ? LIMIT 1
+                        ]], user_id, question.id, entity_uuid, tax_year)
+                    elseif entity_uuid then
+                        ok_old, old_rows = pcall(db.query, [[
+                            SELECT * FROM user_profile_answers
+                            WHERE user_id = ? AND question_id = ? AND entity_uuid = ?
+                              AND tax_year IS NULL LIMIT 1
                         ]], user_id, question.id, entity_uuid)
                     elseif tax_year then
                         ok_old, old_rows = pcall(db.query, [[
@@ -3689,8 +3726,10 @@ return function(app)
                     -- exactly — Postgres won't infer the right partial
                     -- index from the values alone.
                     local conflict_clause
-                    if entity_uuid then
-                        conflict_clause = "ON CONFLICT (user_id, question_id, entity_uuid) WHERE entity_uuid IS NOT NULL DO UPDATE SET"
+                    if entity_uuid and tax_year then
+                        conflict_clause = "ON CONFLICT (user_id, question_id, entity_uuid, tax_year) WHERE entity_uuid IS NOT NULL AND tax_year IS NOT NULL DO UPDATE SET"
+                    elseif entity_uuid then
+                        conflict_clause = "ON CONFLICT (user_id, question_id, entity_uuid) WHERE entity_uuid IS NOT NULL AND tax_year IS NULL DO UPDATE SET"
                     elseif tax_year then
                         conflict_clause = "ON CONFLICT (user_id, question_id, tax_year) WHERE entity_uuid IS NULL AND tax_year IS NOT NULL DO UPDATE SET"
                     else
