@@ -2,7 +2,10 @@
     Tags Routes
 
     SECURITY: All endpoints require JWT authentication via AuthMiddleware.
-    User identity is derived from the validated JWT token.
+    Tags are a PLATFORM-GLOBAL taxonomy (no namespace column, used by
+    documents), so any user may read them but only platform admins may
+    create/update/delete — otherwise one tenant could rename or delete tags
+    every other tenant sees.
 ]]
 
 local TagsQueries = require "queries.TagsQueries"
@@ -17,7 +20,7 @@ return function(app)
     end))
 
     -- POST /api/v2/tags - Create tag
-    app:post("/api/v2/tags", AuthMiddleware.requireAuth(function(self)
+    app:post("/api/v2/tags", AuthMiddleware.requireRole("administrative", function(self)
         local tag = TagsQueries.create(self.params)
         return { json = tag, status = 201 }
     end))
@@ -32,7 +35,7 @@ return function(app)
     end))
 
     -- PUT /api/v2/tags/:id - Update tag
-    app:put("/api/v2/tags/:id", AuthMiddleware.requireAuth(function(self)
+    app:put("/api/v2/tags/:id", AuthMiddleware.requireRole("administrative", function(self)
         local tag = TagsQueries.show(tostring(self.params.id))
         if not tag then
             return { json = { error = "Tag not found" }, status = 404 }
@@ -42,7 +45,7 @@ return function(app)
     end))
 
     -- DELETE /api/v2/tags/:id - Delete tag
-    app:delete("/api/v2/tags/:id", AuthMiddleware.requireAuth(function(self)
+    app:delete("/api/v2/tags/:id", AuthMiddleware.requireRole("administrative", function(self)
         local tag = TagsQueries.show(tostring(self.params.id))
         if not tag then
             return { json = { error = "Tag not found" }, status = 404 }

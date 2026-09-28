@@ -276,8 +276,7 @@ app:before_filter(function(self)
         uri:match("^/api/v2/projects$") or
         uri:match("^/api/v2/themes/active/styles%.css$") or
         uri:match("^/api/v2/[^/]+/public/") or
-        uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") or
-        uri:match("^/api/v2/test%-notification") then
+        uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
     end

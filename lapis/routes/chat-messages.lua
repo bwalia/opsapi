@@ -7,6 +7,7 @@
 
 local cJson = require("cjson")
 local ChatMessageQueries = require "queries.ChatMessageQueries"
+local ChatNamespace = require("helper.chat-namespace")
 local ChatChannelQueries = require "queries.ChatChannelQueries"
 local AuthMiddleware = require("middleware.auth")
 local Global = require "helper.global"
@@ -42,7 +43,8 @@ return function(app)
         if not ChatChannelQueries.isMember(channel_uuid, user.uuid) then
             -- Allow access to public channels
             local channel = ChatChannelQueries.show(channel_uuid)
-            if not channel or channel.type ~= "public" then
+            if not channel or channel.type ~= "public"
+                or not ChatNamespace.canAccessPublic(channel, user) then
                 return { status = 403, json = { error = "Access denied" } }
             end
         end

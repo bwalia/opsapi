@@ -35,6 +35,8 @@
 ]]
 
 local respond_to = require("lapis.application").respond_to
+local AdminCheck = require("helper.admin-check")
+local db = require("lapis.db")
 local DocumentQueries = require("queries.DocumentQueries")
 local Global = require("helper.global")
 local MinioClient = require("helper.minio")
@@ -418,6 +420,35 @@ local function handleFileUpload(file, options)
     return url, metadata, nil
 end
 
+-- Tenant/ownership guards. Documents and uploaded files carry no namespace, so
+-- access is scoped to the OWNER: a user sees and changes only their own
+-- documents and can only sign URLs for files under their own user folder.
+-- Platform admins keep full access. (Before this, any logged-in user of any
+-- tenant could read/edit/delete every document and presign any object key.)
+
+--- Internal user id to filter documents by, or nil for platform admins.
+-- Returns false when the caller can't be resolved (deny).
+local function owner_scope(self)
+    local user = self.current_user
+    if AdminCheck.isPlatformAdmin(user) then return nil end
+    local uuid = user and (user.uuid or user.sub)
+    if not uuid then return false end
+    local row = db.select("id FROM users WHERE uuid = ? LIMIT 1", uuid)[1]
+    return row and row.id or false
+end
+
+--- Does this object key live under the caller's own user folder?
+-- Upload keys are "<prefix>/<user_uuid>/..." (handleFileUpload) or
+-- "<user_uuid>/<doc_uuid>.ext" (DocumentQueries.create).
+local function key_owned_by(object_key, user_uuid)
+    if not user_uuid or user_uuid == "" then return false end
+    if object_key:find("..", 1, true) then return false end
+    for segment in object_key:gmatch("[^/]+") do
+        if segment == user_uuid then return true end
+    end
+    return false
+end
+
 return function(app)
     ----------------- Document Routes --------------------
 
@@ -471,7 +502,9 @@ return function(app)
 
     -- GET /api/v2/all-documents - Get all documents without pagination
     app:get("/api/v2/all-documents", AuthMiddleware.requireAuth(function(self)
-        local result = DocumentQueries.allData()
+        local owner = owner_scope(self)
+        if owner == false then return apiResponse(403, nil, "Forbidden") end
+        local result = DocumentQueries.allData(owner)
 
         if not result or not result.data then
             return apiResponse(500, nil, "Failed to fetch documents")
@@ -495,7 +528,9 @@ return function(app)
                 orderDir = self.params.orderDir or "desc"
             }
 
-            local result = DocumentQueries.all(params)
+            local owner = owner_scope(self)
+            if owner == false then return apiResponse(403, nil, "Forbidden") end
+            local result = DocumentQueries.all(params, owner)
 
             if not result then
                 return apiResponse(500, nil, "Failed to fetch documents")
@@ -554,7 +589,9 @@ return function(app)
                 return apiResponse(400, nil, "Document IDs are required")
             end
 
-            local result = DocumentQueries.deleteMultiple(self.params)
+            local owner = owner_scope(self)
+            if owner == false then return apiResponse(403, nil, "Forbidden") end
+            local result = DocumentQueries.deleteMultiple(self.params, owner)
 
             if not result then
                 return apiResponse(500, nil, "Failed to delete documents")
@@ -573,7 +610,10 @@ return function(app)
             if self.res and self.res.status then return end
 
             local record = DocumentQueries.show(tostring(self.params.id))
-            if not record then
+            -- Someone else's document is reported as not found (don't leak existence).
+            local owner = record and owner_scope(self)
+            if not record or owner == false
+                or (owner ~= nil and tostring(record.user_id) ~= tostring(owner)) then
                 self:write(apiResponse(404, nil, "Document not found"))
                 return
             end
@@ -722,13 +762,15 @@ return function(app)
         -- skipping the auto-generated UUID. The prefix is prepended when provided.
         -- Example: object_name="e2e-report-2026-03-09.md", prefix="e2e-reports"
         --          → stored as "e2e-reports/e2e-report-2026-03-09.md"
+        -- The key ALWAYS stays inside the caller's own user folder: a free-form
+        -- key used to let any user overwrite any object (incl. other tenants').
         if self.params.object_name and self.params.object_name ~= "" then
-            local name = self.params.object_name
-            if prefix and prefix ~= "" and prefix ~= "uploads" then
-                upload_options.object_key = prefix .. "/" .. name
-            else
-                upload_options.object_key = name
+            local name = tostring(self.params.object_name):gsub("^/+", "")
+            local user_uuid = upload_options.user_uuid
+            if not user_uuid or name:find("..", 1, true) or tostring(prefix):find("..", 1, true) then
+                return apiResponse(400, nil, "Invalid object_name")
             end
+            upload_options.object_key = (prefix ~= "" and prefix or "uploads") .. "/" .. user_uuid .. "/" .. name
         end
 
         local url, metadata, upload_err = handleFileUpload(file, upload_options)
@@ -797,7 +839,7 @@ return function(app)
     end))
 
     -- GET /api/v2/documents/presigned/:key - Get presigned URL for file
-    app:get("/api/v2/documents/presigned/(.*)", AuthMiddleware.requireAuth(function(self)
+    app:get("/api/v2/documents/presigned/*", AuthMiddleware.requireAuth(function(self)
         local object_key = self.params.splat
 
         if not object_key or object_key == "" then
@@ -807,8 +849,22 @@ return function(app)
         -- URL decode the key
         object_key = ngx.unescape_uri(object_key)
 
-        -- Optional bucket parameter
+        -- Only files under the caller's own user folder (platform admins: any).
+        local user = self.current_user
+        if not AdminCheck.isPlatformAdmin(user) and not key_owned_by(object_key, user and (user.uuid or user.sub)) then
+            return apiResponse(403, nil, "You don't have access to this file")
+        end
+
+        -- Optional bucket parameter — must be an allow-listed bucket.
         local bucket = self.params.bucket
+        if bucket and bucket ~= "" then
+            local bucket_valid, bucket_err = validateBucket(bucket)
+            if not bucket_valid then
+                return apiResponse(400, nil, bucket_err)
+            end
+        else
+            bucket = nil
+        end
 
         local expires_in = tonumber(self.params.expires) or 3600 -- Default 1 hour
 
