@@ -13,6 +13,11 @@
       [2] user_activity     what signed-in users did, partitioned by month
                             (retention 90 days by default: whole partitions are
                             dropped, no row-by-row deletes).
+      [3] opsapi_reporting  views for Grafana (only the columns reports need —
+                            never passwords, tokens or other tables) and the
+                            NOLOGIN role opsapi_reporting_reader that may read
+                            them. The Grafana login is created by ops:
+                            see USER_ACTIVITY.md.
 
     Idempotent; gated on FEATURES.CORE so every deployment gets it.
 ]]
@@ -88,5 +93,67 @@ return {
                    ON user_activity (namespace_id, occurred_at DESC)]])
         db.query("CREATE INDEX IF NOT EXISTS idx_user_activity_time ON user_activity USING BRIN (occurred_at)")
         require("lib.user-activity").ensurePartitions()
+    end,
+
+    [3] = function()
+        db.query("CREATE SCHEMA IF NOT EXISTS opsapi_reporting")
+        db.query([[
+            CREATE OR REPLACE VIEW opsapi_reporting.users AS
+            SELECT u.uuid AS user_uuid, u.email,
+                   NULLIF(trim(coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, '')), '') AS name,
+                   u.active, u.created_at,
+                   s.last_login_at, s.last_login_ip, s.last_login_method, s.last_login_user_agent,
+                   coalesce(s.login_count, 0) AS login_count, s.last_failed_login_at,
+                   coalesce(s.failed_login_count, 0) AS failed_login_count, s.last_seen_at
+            FROM users u LEFT JOIN user_login_stats s ON s.user_uuid = u.uuid
+        ]])
+        db.query([[
+            CREATE OR REPLACE VIEW opsapi_reporting.namespaces AS
+            SELECT id AS namespace_id, uuid AS namespace_uuid, slug, name, status FROM namespaces
+        ]])
+        db.query([[
+            CREATE OR REPLACE VIEW opsapi_reporting.memberships AS
+            SELECT u.uuid AS user_uuid, nm.namespace_id, n.slug AS namespace_slug, nm.status, nm.is_owner,
+                   nm.joined_at
+            FROM namespace_members nm JOIN users u ON u.id = nm.user_id JOIN namespaces n ON n.id = nm.namespace_id
+        ]])
+        db.query([[
+            CREATE OR REPLACE VIEW opsapi_reporting.user_activity AS
+            SELECT a.occurred_at, a.user_uuid, u.email, a.namespace_id, n.slug AS namespace_slug, a.via,
+                   a.api_key_uuid, a.method, a.route, a.action, a.entity_id, a.status, a.hits, a.duration_ms,
+                   a.ip, a.user_agent, a.request_id
+            FROM user_activity a
+            LEFT JOIN users u ON u.uuid = a.user_uuid
+            LEFT JOIN namespaces n ON n.id = a.namespace_id
+        ]])
+        db.query([[
+            CREATE OR REPLACE VIEW opsapi_reporting.auth_events AS
+            SELECT e.occurred_at, e.event, e.result, e.method, e.user_uuid, coalesce(u.email, e.email) AS email,
+                   e.namespace_id, e.ip, e.user_agent, e.reason, e.request_id
+            FROM auth_events e LEFT JOIN users u ON u.uuid = e.user_uuid
+        ]])
+
+        -- Reader role: SELECT on these views only. Creating roles needs
+        -- CREATEROLE, which a managed app user often lacks — then a DBA runs
+        -- the printed statements once.
+        local ok, err = pcall(db.query, [[
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opsapi_reporting_reader') THEN
+                    CREATE ROLE opsapi_reporting_reader NOLOGIN;
+                END IF;
+            END $$
+        ]])
+        if ok then
+            db.query("GRANT USAGE ON SCHEMA opsapi_reporting TO opsapi_reporting_reader")
+            db.query("GRANT SELECT ON ALL TABLES IN SCHEMA opsapi_reporting TO opsapi_reporting_reader")
+            db.query([[ALTER DEFAULT PRIVILEGES IN SCHEMA opsapi_reporting
+                       GRANT SELECT ON TABLES TO opsapi_reporting_reader]])
+            print("[UserActivity] opsapi_reporting views ready; role opsapi_reporting_reader granted")
+        else
+            print("[UserActivity] Could not create role opsapi_reporting_reader (" .. tostring(err):sub(1, 120)
+                .. "). As a DBA run: CREATE ROLE opsapi_reporting_reader NOLOGIN; "
+                .. "GRANT USAGE ON SCHEMA opsapi_reporting TO opsapi_reporting_reader; "
+                .. "GRANT SELECT ON ALL TABLES IN SCHEMA opsapi_reporting TO opsapi_reporting_reader;")
+        end
     end,
 }
