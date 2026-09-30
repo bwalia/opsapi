@@ -398,6 +398,10 @@ Run `opsapi migrate`, which registers the subscription and the database trigger,
 - Don't do work when the file loads: `lapis migrate` and `plugin:check` load it too.
 - For your own domain events, prefer table events (`publishes`), which are transactional. Use `sdk.emit` for things that aren't a row change ("escalated", "reminder due").
 
+### Workspace webhooks use the same outbox
+
+Tenants can have these events sent to their own URLs without writing code. See [WEBHOOKS.md](WEBHOOKS.md). Each webhook is a subscriber scoped to its workspace, so it shares these guarantees and the retries. Everything a plugin lists in `publishes` is offered to webhooks too.
+
 ### Watching and fixing
 
 - `GET /api/v2/plugins/:code` (platform admin) → `events`: subscriptions, published tables, delivery counts (pending / running / done / dead), and recent failures with their last error.

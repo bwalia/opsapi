@@ -190,6 +190,43 @@ check("sdk.emit refuses core events", not pcall(PluginEvents.emit, 1, "invoice.p
 check("sdk.emit refuses nested core entities", not pcall(PluginEvents.emit, 1, "crm.lead.hot", {}))
 check("sdk.emit refuses wildcards", not pcall(PluginEvents.emit, 1, "evp.thing.*", {}))
 
+print("workspace webhooks: URL policy + signing")
+local Webhooks = require("lib.outbound-webhooks")
+local function url_ok(u) return (Webhooks.parseUrl(u)) ~= nil end
+check("https public URL accepted", url_ok("https://hooks.example.com/opsapi?x=1"))
+check("path defaults to /", (Webhooks.parseUrl("https://example.com") or {}).path == "/")
+check("custom port kept", (Webhooks.parseUrl("https://example.com:8443/h") or {}).port == 8443)
+check("http refused", not url_ok("http://example.com/h"))
+check("credentials refused", not url_ok("https://user:pw@example.com/h"))
+check("cloud metadata IP refused", not url_ok("https://169.254.169.254/latest/meta-data"))
+check("loopback refused", not url_ok("https://127.0.0.1/h"))
+check("private 10/8 refused", not url_ok("https://10.1.2.3/h"))
+check("private 172.16/12 refused", not url_ok("https://172.20.0.1/h"))
+check("private 192.168/16 refused", not url_ok("https://192.168.1.10/h"))
+check("CGNAT refused", not url_ok("https://100.64.0.1/h"))
+check("localhost refused", not url_ok("https://localhost/h"))
+check("cluster names refused", not url_ok("https://api.default.svc/h") and not url_ok("https://x.cluster.local/h"))
+check("dotless names refused", not url_ok("https://webhook-rx:8080/h"))
+check("IPv6 literal refused", not url_ok("https://[::1]/h"))
+check("public IP literal accepted", url_ok("https://8.8.8.8/h"))
+check("isPublicIPv4", Webhooks.isPublicIPv4("1.1.1.1") and not Webhooks.isPublicIPv4("0.0.0.0")
+    and not Webhooks.isPublicIPv4("172.31.255.255") and Webhooks.isPublicIPv4("172.32.0.1")
+    and not Webhooks.isPublicIPv4("224.0.0.1") and not Webhooks.isPublicIPv4("999.1.1.1"))
+check("signature matches an independent HMAC-SHA256 (Python)",
+    Webhooks.sign("whsec_test", "1700000000", '{"type":"webhook.test"}')
+        == "sha256=cf7d053522b08300fae293c3bcbf4e183d4a9538620c18dc9a46d063337936fa")
+local body = cjson.decode(Webhooks.payload({ id = "e1", type = "invoice.updated", created_at = "2026-09-30T07:00:00Z",
+    namespace = { id = "n1", slug = "acme" }, data = { uuid = "i1" }, changes = { status = { from = "sent", to = "paid" } } }))
+check("payload shape", body.id == "e1" and body.type == "invoice.updated" and body.namespace.slug == "acme"
+    and body.data.object.uuid == "i1" and body.data.changes.status.to == "paid")
+check("'webhook' and 'core' are reserved plugin codes",
+    ProjectLoader.isReservedCode("webhook") and ProjectLoader.isReservedCode("core"))
+local modules_ok = true
+for _, e in ipairs(PluginEvents.CATALOG) do
+    if type(e.module) ~= "string" then modules_ok = false end
+end
+check("every core entity names its RBAC module", modules_ok)
+
 print("bin/opsapi")
 local dir = tmp .. "/plugins"
 local cli = "luajit " .. APP .. "/bin/opsapi"

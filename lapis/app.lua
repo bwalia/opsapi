@@ -404,6 +404,7 @@ safe_load_routes("routes.namespaces")
 safe_load_routes("routes.api-keys")
 safe_load_routes("routes.email")
 safe_load_routes("routes.plugins")
+safe_load_routes("routes.namespace-webhooks")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)

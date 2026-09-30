@@ -50,27 +50,29 @@ local BATCH = 20
 
 -- Core entities plugins can subscribe to. Only tables with a tenant: each
 -- event carries a namespace_id (`ns_sql` resolves it for tables without the
--- column). `hide` = columns left out of payloads (comma-separated).
+-- column). `hide` = columns left out of payloads (comma-separated). `module`
+-- = the RBAC module that guards the data: a workspace webhook can only
+-- subscribe to entities its creator may read.
 PluginEvents.CATALOG = {
-    { entity = "customer", table = "customers" },
-    { entity = "invoice", table = "invoices" },
-    { entity = "invoice.payment", table = "invoice_payments" },
-    { entity = "crm.account", table = "crm_accounts" },
-    { entity = "crm.contact", table = "crm_contacts" },
-    { entity = "crm.deal", table = "crm_deals" },
-    { entity = "crm.lead", table = "crm_leads" },
-    { entity = "crm.activity", table = "crm_activities" },
-    { entity = "employee", table = "employees" },
-    { entity = "timesheet", table = "timesheets" },
-    { entity = "order", table = "orders" },
-    { entity = "kanban.project", table = "kanban_projects" },
+    { entity = "customer", table = "customers", module = "customers" },
+    { entity = "invoice", table = "invoices", module = "invoices" },
+    { entity = "invoice.payment", table = "invoice_payments", module = "invoices" },
+    { entity = "crm.account", table = "crm_accounts", module = "crm_accounts" },
+    { entity = "crm.contact", table = "crm_contacts", module = "crm_contacts" },
+    { entity = "crm.deal", table = "crm_deals", module = "crm_deals" },
+    { entity = "crm.lead", table = "crm_leads", module = "crm_leads" },
+    { entity = "crm.activity", table = "crm_activities", module = "crm_activities" },
+    { entity = "employee", table = "employees", module = "employees" },
+    { entity = "timesheet", table = "timesheets", module = "timesheets" },
+    { entity = "order", table = "orders", module = "orders" },
+    { entity = "kanban.project", table = "kanban_projects", module = "projects" },
     {
-        entity = "kanban.task", table = "kanban_tasks", hide = "search_vector", ns_key = "board_id",
+        entity = "kanban.task", table = "kanban_tasks", module = "projects", hide = "search_vector", ns_key = "board_id",
         ns_sql = "SELECT p.namespace_id FROM kanban_boards b JOIN kanban_projects p ON p.id = b.project_id WHERE b.id = $1::int",
     },
-    { entity = "fs.job", table = "fs_jobs" },
-    { entity = "fs.visit", table = "fs_visits" },
-    { entity = "member", table = "namespace_members" },
+    { entity = "fs.job", table = "fs_jobs", module = "fs_jobs" },
+    { entity = "fs.visit", table = "fs_visits", module = "fs_visits" },
+    { entity = "member", table = "namespace_members", module = "users" },
 }
 
 local EVENT_KEY = "^[a-z][a-z0-9_]*[a-z0-9_.]*%.[a-z0-9_*]+$"
@@ -186,6 +188,17 @@ function PluginEvents.ensureSchema()
         ON plugin_event_deliveries (subscriber, status)
     ]])
     q("CREATE INDEX IF NOT EXISTS idx_plugin_events_created ON plugin_events (created_at)")
+    -- Later additions (idempotent for databases created before them):
+    -- sources.module (RBAC guard), subscriptions.namespace_id (NULL = every
+    -- namespace, i.e. plugins; set = one workspace's webhook), and the
+    -- response of webhook deliveries.
+    q("ALTER TABLE plugin_event_sources ADD COLUMN IF NOT EXISTS module VARCHAR(100)")
+    q([[
+        ALTER TABLE plugin_event_subscriptions
+        ADD COLUMN IF NOT EXISTS namespace_id INTEGER REFERENCES namespaces(id) ON DELETE CASCADE
+    ]])
+    q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS response_status INTEGER")
+    q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS duration_ms INTEGER")
 
     -- args: entity, hidden columns, namespace SQL, namespace key column
     q([==[
@@ -207,6 +220,7 @@ function PluginEvents.ensureSchema()
                     RETURN NULL;
                 END IF;
                 IF TG_OP = 'DELETE' THEN d := to_jsonb(OLD); ELSE d := to_jsonb(NEW); END IF;
+                -- (namespace resolved below; subscribers are re-checked against it)
                 IF TG_OP = 'UPDATE' THEN
                     SELECT jsonb_object_agg(n.key, jsonb_build_object('from', o.value, 'to', n.value))
                     INTO diff
@@ -221,11 +235,18 @@ function PluginEvents.ensureSchema()
                 ELSE
                     ns := (d ->> 'namespace_id')::bigint;
                 END IF;
+                -- Plugins (namespace_id NULL) hear every tenant; a webhook only its own.
+                IF NOT EXISTS (SELECT 1 FROM plugin_event_subscriptions
+                               WHERE event IN (ev, entity || '.*')
+                                 AND (namespace_id IS NULL OR namespace_id = ns)) THEN
+                    RETURN NULL;
+                END IF;
                 INSERT INTO plugin_events (event, entity, entity_id, namespace_id, data, changes)
                 VALUES (ev, entity, COALESCE(d ->> 'uuid', d ->> 'id'), ns, d, diff)
                 RETURNING id INTO ev_id;
                 INSERT INTO plugin_event_deliveries (event_id, subscriber)
-                SELECT ev_id, subscriber FROM plugin_event_subscriptions WHERE event IN (ev, entity || '.*');
+                SELECT ev_id, subscriber FROM plugin_event_subscriptions
+                WHERE event IN (ev, entity || '.*') AND (namespace_id IS NULL OR namespace_id = ns);
             EXCEPTION WHEN OTHERS THEN
                 RAISE WARNING 'opsapi_plugin_event(%): %', ev, SQLERRM;
             END;
@@ -237,19 +258,20 @@ function PluginEvents.ensureSchema()
     -- Core sources (catalog changes are picked up here).
     local keep = {}
     for _, s in ipairs(PluginEvents.CATALOG) do
-        PluginEvents.upsertSource(s.entity, s.table, "core", s.hide, s.ns_sql, s.ns_key)
+        PluginEvents.upsertSource(s.entity, s.table, "core", s.hide, s.ns_sql, s.ns_key, s.module)
         keep[#keep + 1] = db().escape_literal(s.entity)
     end
     q("DELETE FROM plugin_event_sources WHERE owner = 'core' AND entity NOT IN (" .. table.concat(keep, ", ") .. ")")
 end
 
-function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_key)
+function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_key, module)
     db().query([[
-        INSERT INTO plugin_event_sources (entity, table_name, owner, hide, ns_sql, ns_key)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO plugin_event_sources (entity, table_name, owner, hide, ns_sql, ns_key, module)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (entity) DO UPDATE SET table_name = EXCLUDED.table_name, owner = EXCLUDED.owner,
-            hide = EXCLUDED.hide, ns_sql = EXCLUDED.ns_sql, ns_key = EXCLUDED.ns_key, updated_at = NOW()
-    ]], entity, table_name, owner, hide or "", ns_sql or "", ns_key or "")
+            hide = EXCLUDED.hide, ns_sql = EXCLUDED.ns_sql, ns_key = EXCLUDED.ns_key,
+            module = EXCLUDED.module, updated_at = NOW()
+    ]], entity, table_name, owner, hide or "", ns_sql or "", ns_key or "", module or db().NULL)
 end
 
 --- Sync one plugin: the entities it publishes (manifest.publishes) and the
@@ -259,9 +281,13 @@ function PluginEvents.syncPlugin(manifest)
     local d = db()
     local prefix = manifest.code .. "."
 
+    local modules = {}
+    for _, m in ipairs(manifest.modules) do modules[m.machine_name] = true end
     local entities = {}
     for name, table_name in pairs(manifest.publishes) do
-        PluginEvents.upsertSource(prefix .. name, table_name, manifest.code)
+        -- By convention (make:resource) a table's RBAC module shares its name.
+        PluginEvents.upsertSource(prefix .. name, table_name, manifest.code, nil, nil, nil,
+            modules[table_name] and table_name or nil)
         entities[#entities + 1] = d.escape_literal(prefix .. name)
     end
     d.query("DELETE FROM plugin_event_sources WHERE owner = " .. d.escape_literal(manifest.code)
@@ -319,8 +345,10 @@ function PluginEvents.syncTriggers()
         if present and wanted then
             if not (current and current:find(call, 1, true)) then
                 d.query("DROP TRIGGER IF EXISTS opsapi_plugin_event ON " .. T)
-                d.query("CREATE TRIGGER opsapi_plugin_event AFTER INSERT OR UPDATE OR DELETE ON " .. T
-                    .. " FOR EACH ROW EXECUTE FUNCTION " .. call)
+                local ok, err = pcall(d.query, "CREATE TRIGGER opsapi_plugin_event AFTER INSERT OR UPDATE OR DELETE ON "
+                    .. T .. " FOR EACH ROW EXECUTE FUNCTION " .. call)
+                -- Another request/pod created it between our DROP and CREATE: fine.
+                if not ok and not tostring(err):find("already exists", 1, true) then error(err, 0) end
                 print("[PluginEvents] listening to " .. s.table_name .. " (" .. s.entity .. ")")
             end
         elseif present and current then
@@ -353,7 +381,8 @@ function PluginEvents.emit(namespace_id, name, data)
     assert(not is_core_entity(entity), "'" .. name .. "' is a core event; core events come from table changes")
     local res = db().query([[
         WITH subs AS (
-            SELECT subscriber FROM plugin_event_subscriptions WHERE event IN (?, ?)
+            SELECT subscriber FROM plugin_event_subscriptions
+            WHERE event IN (?, ?) AND (namespace_id IS NULL OR namespace_id = ?)
         ), ev AS (
             INSERT INTO plugin_events (event, entity, namespace_id, data)
             SELECT ?, ?, ?, ?::jsonb WHERE EXISTS (SELECT 1 FROM subs)
@@ -361,7 +390,8 @@ function PluginEvents.emit(namespace_id, name, data)
         )
         INSERT INTO plugin_event_deliveries (event_id, subscriber)
         SELECT ev.id, subs.subscriber FROM ev, subs
-    ]], name, entity .. ".*", name, entity, namespace_id or db().NULL, cjson.encode(data or {}))
+    ]], name, entity .. ".*", namespace_id or db().NULL, name, entity, namespace_id or db().NULL,
+        cjson.encode(data or {}))
     return res.affected_rows or 0
 end
 
@@ -395,19 +425,24 @@ local function decode(v)
     return strip_nulls(v)
 end
 
-local function finish(delivery_id, ok, err)
+-- response_status / duration_ms: set for webhook deliveries.
+local function finish(delivery_id, ok, err, response_status, duration_ms)
     local d = db()
+    local status, ms = response_status or d.NULL, duration_ms or d.NULL
     if ok then
-        d.query("UPDATE plugin_event_deliveries SET status = 'done', last_error = NULL, updated_at = NOW() WHERE id = ?",
-            delivery_id)
+        d.query([[
+            UPDATE plugin_event_deliveries SET status = 'done', last_error = NULL, response_status = ?,
+                duration_ms = ?, updated_at = NOW()
+            WHERE id = ?
+        ]], status, ms, delivery_id)
     else
         d.query([[
             UPDATE plugin_event_deliveries
             SET status = CASE WHEN attempts >= ? THEN 'dead' ELSE 'pending' END,
                 next_attempt_at = NOW() + make_interval(secs => LEAST(3600, 15 * power(2, attempts - 1))),
-                last_error = ?, updated_at = NOW()
+                last_error = ?, response_status = ?, duration_ms = ?, updated_at = NOW()
             WHERE id = ?
-        ]], PluginEvents.MAX_ATTEMPTS, tostring(err):sub(1, 2000), delivery_id)
+        ]], PluginEvents.MAX_ATTEMPTS, tostring(err):sub(1, 2000), status, ms, delivery_id)
     end
 end
 
@@ -417,6 +452,10 @@ local function process_batch()
     for subscriber in pairs(_handlers) do
         subscribers[#subscribers + 1] = d.escape_literal(subscriber)
     end
+    local mine = "left(subscriber, 8) = 'webhook.'"
+    if #subscribers > 0 then
+        mine = "(" .. mine .. " OR subscriber IN (" .. table.concat(subscribers, ", ") .. "))"
+    end
     -- Inline literals only: no "?" placeholders in this statement.
     local claimed = d.query([[
         UPDATE plugin_event_deliveries d
@@ -425,7 +464,7 @@ local function process_batch()
         WHERE d.id IN (
             SELECT id FROM plugin_event_deliveries
             WHERE status IN ('pending', 'running') AND next_attempt_at <= NOW()
-              AND subscriber IN (]] .. table.concat(subscribers, ", ") .. [[)
+              AND ]] .. mine .. [[
             ORDER BY id
             LIMIT ]] .. BATCH .. [[
             FOR UPDATE SKIP LOCKED
@@ -443,6 +482,14 @@ local function process_batch()
 
     for _, c in ipairs(claimed) do
         local e = events[tonumber(c.event_id)]
+        local webhook_uuid = c.subscriber:match("^webhook%.(.+)$")
+        if webhook_uuid then
+            -- Workspace webhooks: an HTTP POST (lib/outbound-webhooks.lua).
+            local ok, err, status, ms = require("lib.outbound-webhooks").deliverEvent(webhook_uuid, e, c)
+            finish(c.id, ok, err, status, ms)
+            goto next_delivery
+        end
+        do
         local handlers = _handlers[c.subscriber] or {}
         local handler = e and (handlers[e.event] or handlers[e.entity .. ".*"])
         if not handler then
@@ -475,6 +522,8 @@ local function process_batch()
             end
             finish(c.id, ok, result)
         end
+        end
+        ::next_delivery::
     end
     return #claimed
 end
@@ -537,8 +586,8 @@ local function purge(premature)
     end
 end
 
---- Load every plugin's events/*.lua and, if any handlers exist, start
--- polling. A worker with no handlers does nothing.
+--- Load every plugin's events/*.lua and start polling for deliveries
+-- (plugin handlers and workspace webhooks).
 function PluginEvents.start(projects_root)
     local ProjectLoader = require("helper.project-loader")
     for _, entry in ipairs(ProjectLoader.discover(projects_root)) do
@@ -554,8 +603,7 @@ function PluginEvents.start(projects_root)
             end
         end
     end
-    if next(_handlers) == nil then return end
-
+    -- Always poll: workspace webhooks are deliveries too, plugins or not.
     ngx.timer.every(POLL_SECONDS, tick)
     if ngx.worker.id() == 0 then
         ngx.timer.every(600, purge)

@@ -358,6 +358,7 @@ local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATU
 -- Employees is a CORE module (generic staff directory): the table/module/menu/grants
 -- install for every deployment, including those without field service.
 local employees_core_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.employees") or {}
+local outbound_webhooks_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.outbound-webhooks") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
 local field_service_parts_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts") or {}
@@ -2423,6 +2424,10 @@ local _migrations = {
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
     ['zzemp3_employees_core_grants'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 3),
+
+    -- Workspace (outbound) webhooks — core; rides on the plugin-events outbox
+    ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
+    ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),
     ['zzemp4_employees_core_menu_enable'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 4),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),

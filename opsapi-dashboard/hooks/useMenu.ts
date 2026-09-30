@@ -87,6 +87,7 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     HelpCircle: icons.HelpCircle,
     // Generic icons for plugin pages (manifest `menu` icon; see PLUGINS.md)
     Puzzle: icons.Puzzle,
+    Webhook: icons.Webhook,
     LifeBuoy: icons.LifeBuoy,
     Ticket: icons.Ticket,
     Inbox: icons.Inbox,

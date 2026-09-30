@@ -74,6 +74,8 @@ end
 --- A plugin may not take a built-in feature's code: its RBAC modules and
 -- feature flag would silently replace core's.
 function ProjectLoader.isReservedCode(code)
+    -- Event subscribers are "<code>.<file>"; "webhook.<uuid>" are workspace webhooks.
+    if code == "webhook" or code == "core" then return true end
     local ok, ProjectConfig = pcall(require, "helper.project-config")
     if not ok then return false end
     return ProjectConfig.PROJECT_FEATURES[code] ~= nil

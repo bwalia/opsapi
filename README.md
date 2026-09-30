@@ -253,6 +253,8 @@ docker exec opsapi opsapi make:listener helpdesk invoice.updated   # react to co
 
 Full guide: [PLUGINS.md](PLUGINS.md). Example: [`projects/helpdesk`](projects/helpdesk).
 
+Tenants who just need integrations don't need a plugin. Under **Dashboard → Webhooks** each workspace can send its events (invoice paid, lead created, …) to its own URLs, signed and retried. See [WEBHOOKS.md](WEBHOOKS.md).
+
 ## Environment Variables
 
 All environment variables are in `lapis/.env`. The `.sample.env` file has working defaults for local dev.
