@@ -238,6 +238,19 @@ The `start.sh` script handles the full setup: environment config, Docker build, 
 
 ---
 
+## Extending OpsAPI (plugins)
+
+Need an API OpsAPI doesn't have? Write a plugin instead of forking: a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules.
+
+```bash
+docker exec opsapi opsapi plugin:new helpdesk
+docker exec opsapi opsapi make:resource helpdesk ticket title:string:required status:string
+docker exec opsapi opsapi migrate && docker restart opsapi
+# → /api/v2/helpdesk/tickets (list/show/create/update/delete, tenant-scoped)
+```
+
+Full guide: [PLUGINS.md](PLUGINS.md). Example: [`projects/helpdesk`](projects/helpdesk).
+
 ## Environment Variables
 
 All environment variables are in `lapis/.env`. The `.sample.env` file has working defaults for local dev.

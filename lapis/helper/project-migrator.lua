@@ -1,21 +1,31 @@
 --[[
-  Project Migration Runner
+  Plugin (project) migration runner
+  =================================
 
-  Runs migrations for projects discovered under /projects/.
-  Each project has its own /migrations/ directory with numbered migration files.
-  Migration state is tracked in the `project_migrations` table, scoped by project_code.
+  Runs projects/<plugin>/migrations/*.lua in filename order, once each,
+  tracked per plugin in `project_migrations` (separate from core
+  lapis_migrations). `lapis migrate` runs every plugin via the
+  zzx_run_project_migrations core migration; consumer images call
+  migrate(code, path) directly from their deploy hook.
 
-  Migration file format:
-    -- /projects/{code}/migrations/001_create_foo.lua
-    return function(schema, db)
-      schema.create_table("prefix_foo", { ... })
-    end
+  A migration file returns either
 
-  Usage:
-    local ProjectMigrator = require("helper.project-migrator")
-    ProjectMigrator.migrateAll("/app/projects")
-    -- or for a single project:
-    ProjectMigrator.migrate("hospital_patient_manager", "/app/projects/hospital-patient-manager")
+    return function(schema, db) ... end
+
+  or, when a statement can't run inside a transaction (CREATE INDEX
+  CONCURRENTLY):
+
+    return { transaction = false, up = function(schema, db) ... end }
+
+  Guarantees:
+    * each migration + its tracking row commit together (a savepoint when
+      already inside `lapis migrate --transaction/--dry-run`), so a failure
+      never leaves a half-applied migration marked as done
+    * one runner at a time across pods/hooks (Postgres advisory lock)
+    * a file edited after it was applied is reported (checksum drift)
+    * the plugin's manifest `modules` are added to the RBAC `modules` table
+    * any failure raises, so the deploy step fails instead of shipping pods
+      without their schema
 ]]
 
 local schema = require("lapis.db.schema")
@@ -23,11 +33,12 @@ local db = require("lapis.db")
 
 local ProjectMigrator = {}
 
+local LOCK_KEY = "opsapi.project_migrations"
+
 -- ---------------------------------------------------------------------------
--- Tracking table management
+-- Tracking table
 -- ---------------------------------------------------------------------------
 
---- Ensure the project_migrations tracking table exists
 function ProjectMigrator.ensureTrackingTable()
     db.query([[
         CREATE TABLE IF NOT EXISTS project_migrations (
@@ -45,78 +56,16 @@ function ProjectMigrator.ensureTrackingTable()
     ]])
 end
 
--- ---------------------------------------------------------------------------
--- Query executed migrations
--- ---------------------------------------------------------------------------
-
---- Get set of migration names that have already been executed for a project
--- @param project_code string
--- @return table Set of migration names (name -> true)
+--- Executed migrations of a project: name -> checksum (false when unknown).
 function ProjectMigrator.getExecuted(project_code)
-    local rows = db.select("migration_name FROM project_migrations WHERE project_code = ? ORDER BY migration_name", project_code)
+    local rows = db.select("migration_name, checksum FROM project_migrations WHERE project_code = ?", project_code)
     local executed = {}
     for _, row in ipairs(rows) do
-        executed[row.migration_name] = true
+        executed[row.migration_name] = row.checksum ~= db.NULL and row.checksum or false
     end
     return executed
 end
 
--- ---------------------------------------------------------------------------
--- Discovery
--- ---------------------------------------------------------------------------
-
---- Discover migration files in a project's /migrations/ directory
--- @param migrations_dir string Absolute path to project's migrations directory
--- @return table Ordered list of { name, path }
-function ProjectMigrator.discover(migrations_dir)
-    local files = {}
-
-    local ok_lfs, lfs = pcall(require, "lfs")
-    if ok_lfs then
-        local attr = lfs.attributes(migrations_dir)
-        if not attr or attr.mode ~= "directory" then
-            return files
-        end
-        for entry in lfs.dir(migrations_dir) do
-            if entry:match("%.lua$") then
-                local name = entry:gsub("%.lua$", "")
-                table.insert(files, {
-                    name = name,
-                    path = migrations_dir .. "/" .. entry,
-                })
-            end
-        end
-    else
-        local handle = io.popen("ls " .. migrations_dir .. "/*.lua 2>/dev/null")
-        if handle then
-            for line in handle:lines() do
-                local filename = line:match("([^/]+)$")
-                if filename then
-                    local name = filename:gsub("%.lua$", "")
-                    table.insert(files, {
-                        name = name,
-                        path = line,
-                    })
-                end
-            end
-            handle:close()
-        end
-    end
-
-    -- Sort by filename (001_xxx < 002_xxx)
-    table.sort(files, function(a, b) return a.name < b.name end)
-
-    return files
-end
-
--- ---------------------------------------------------------------------------
--- Record migration execution
--- ---------------------------------------------------------------------------
-
---- Record that a migration was executed
--- @param project_code string
--- @param migration_name string
--- @param checksum string|nil Optional SHA256 of migration file
 function ProjectMigrator.recordExecution(project_code, migration_name, checksum)
     db.insert("project_migrations", {
         project_code = project_code,
@@ -126,133 +75,179 @@ function ProjectMigrator.recordExecution(project_code, migration_name, checksum)
 end
 
 -- ---------------------------------------------------------------------------
--- Run migrations
+-- Discovery
 -- ---------------------------------------------------------------------------
 
---- Run pending migrations for a single project
--- @param project_code string Machine name of the project
--- @param project_path string Absolute path to project directory
--- @return number Number of migrations executed
-function ProjectMigrator.migrate(project_code, project_path)
-    local migrations_dir = project_path .. "/migrations"
-    local migration_files = ProjectMigrator.discover(migrations_dir)
-
-    if #migration_files == 0 then
-        print("[ProjectMigrator] " .. project_code .. ": No migrations found")
-        return 0
-    end
-
-    local executed = ProjectMigrator.getExecuted(project_code)
-    local count = 0
-
-    for _, mig in ipairs(migration_files) do
-        if not executed[mig.name] then
-            print("[ProjectMigrator] " .. project_code .. ": Running " .. mig.name .. "...")
-
-            -- Load migration file
-            local chunk, load_err = loadfile(mig.path)
-            if not chunk then
-                print("[ProjectMigrator] ERROR: Failed to load " .. mig.path .. ": " .. tostring(load_err))
-                error("Migration " .. project_code .. "/" .. mig.name .. " failed to load: " .. tostring(load_err))
-            end
-
-            local ok_exec, migration_fn = pcall(chunk)
-            if not ok_exec then
-                print("[ProjectMigrator] ERROR: Failed to execute " .. mig.path .. ": " .. tostring(migration_fn))
-                error("Migration " .. project_code .. "/" .. mig.name .. " failed to execute: " .. tostring(migration_fn))
-            end
-
-            if type(migration_fn) ~= "function" then
-                print("[ProjectMigrator] WARNING: " .. mig.path .. " did not return a function, skipping")
-            else
-                -- Run the migration
-                local ok_run, run_err = pcall(migration_fn, schema, db)
-                if not ok_run then
-                    print("[ProjectMigrator] ERROR: Migration " .. project_code .. "/" .. mig.name .. " failed: " .. tostring(run_err))
-                    error("Migration " .. project_code .. "/" .. mig.name .. " failed: " .. tostring(run_err))
-                end
-
-                -- Record execution
-                ProjectMigrator.recordExecution(project_code, mig.name)
-                count = count + 1
-                print("[ProjectMigrator] " .. project_code .. ": Completed " .. mig.name)
-            end
+--- Migration files in a directory, in filename order.
+-- @return table List of { name, path }
+function ProjectMigrator.discover(migrations_dir)
+    local files = {}
+    for _, entry in ipairs(require("helper.project-loader").listDir(migrations_dir)) do
+        if entry:match("%.lua$") then
+            table.insert(files, { name = entry:gsub("%.lua$", ""), path = migrations_dir .. "/" .. entry })
         end
     end
+    return files
+end
 
-    if count == 0 then
-        print("[ProjectMigrator] " .. project_code .. ": All migrations already applied")
-    else
-        print("[ProjectMigrator] " .. project_code .. ": " .. count .. " migration(s) applied")
+local function checksum(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local src = f:read("*a")
+    f:close()
+    return db.query("SELECT encode(sha256(convert_to(?, 'UTF8')), 'hex') AS c", src)[1].c
+end
+
+-- ---------------------------------------------------------------------------
+-- Running
+-- ---------------------------------------------------------------------------
+
+-- `lapis migrate --transaction/--dry-run` wraps everything in one transaction;
+-- a COMMIT of ours would end it (and make a dry run real). now() is the
+-- transaction start, so it only differs from the statement start inside one.
+local function in_transaction()
+    return db.query("SELECT now() <> statement_timestamp() AS t")[1].t
+end
+
+local function load_migration(path)
+    local chunk, err = loadfile(path)
+    if not chunk then error(err, 0) end
+    local m = chunk()
+    if type(m) == "function" then return m, true end
+    if type(m) == "table" and type(m.up) == "function" then return m.up, m.transaction ~= false end
+    error("must return function(schema, db) or { up = function(schema, db) ... }", 0)
+end
+
+local function run_one(project_code, mig, sum)
+    local label = project_code .. "/" .. mig.name
+    print("[ProjectMigrator] " .. label .. ": running")
+
+    local ok, up, use_tx = pcall(load_migration, mig.path)
+    if not ok then error(label .. " failed to load: " .. tostring(up), 0) end
+
+    local begin, commit, rollback = "BEGIN", "COMMIT", "ROLLBACK"
+    if use_tx and in_transaction() then
+        begin, commit, rollback = "SAVEPOINT project_migration",
+            "RELEASE SAVEPOINT project_migration", "ROLLBACK TO SAVEPOINT project_migration"
     end
 
+    if use_tx then db.query(begin) end
+    local ok_run, err = pcall(function()
+        up(schema, db)
+        ProjectMigrator.recordExecution(project_code, mig.name, sum)
+    end)
+    if not ok_run then
+        if use_tx then pcall(db.query, rollback) end
+        error(label .. " failed: " .. tostring(err), 0)
+    end
+    if use_tx then db.query(commit) end
+end
+
+--- Add the plugin's manifest modules to `modules` so roles can be granted
+-- them, giving admin/owner roles "manage" the first time a module appears
+-- (as ModuleQueries.create does). Existing modules are left alone, so a
+-- permission an admin revoked isn't re-granted on the next deploy.
+function ProjectMigrator.syncModules(project_path)
+    local manifest = require("helper.project-loader").loadManifest(project_path .. "/project.lua", project_path)
+    if not manifest then return end
+    for _, m in ipairs(manifest.modules) do
+        local inserted = db.query([[
+            INSERT INTO modules (uuid, machine_name, name, description, category, priority,
+                                 is_active, is_system, default_actions, created_at, updated_at)
+            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, '0', true, false,
+                    'create,read,update,delete,manage', NOW(), NOW())
+            ON CONFLICT (machine_name) DO NOTHING
+            RETURNING id
+        ]], m.machine_name, m.name or m.machine_name, m.description or "", m.category or manifest.name)
+        if inserted[1] then
+            require("queries.ModuleQueries").propagateToNamespaceAdmins(m.machine_name)
+            print("[ProjectMigrator] " .. manifest.code .. ": added RBAC module " .. m.machine_name)
+        end
+    end
+end
+
+local function run_pending(project_code, project_path)
+    local executed = ProjectMigrator.getExecuted(project_code)
+    local count = 0
+    for _, mig in ipairs(ProjectMigrator.discover(project_path .. "/migrations")) do
+        local sum = checksum(mig.path)
+        local applied = executed[mig.name]
+        if applied == nil then
+            run_one(project_code, mig, sum)
+            count = count + 1
+        elseif applied and applied ~= sum then
+            print("[ProjectMigrator] WARNING: " .. project_code .. "/" .. mig.name
+                .. " was edited after it was applied — add a new migration instead")
+        end
+    end
+    ProjectMigrator.syncModules(project_path)
     return count
 end
 
---- Run migrations for all discovered projects
--- @param projects_root string Absolute path to /projects/ directory
--- @return number Total migrations executed across all projects
-function ProjectMigrator.migrateAll(projects_root)
-    print("=== Project Migrator: Running migrations for all projects ===")
-
-    -- Ensure tracking table exists
+--- Run pending migrations for one plugin. Raises on failure.
+-- @return number Number of migrations executed
+function ProjectMigrator.migrate(project_code, project_path)
     ProjectMigrator.ensureTrackingTable()
 
-    -- Discover projects
-    local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")
-    if not ok_loader then
-        print("[ProjectMigrator] WARNING: project-loader not available: " .. tostring(ProjectLoader))
-        return 0
-    end
+    db.query("SELECT pg_advisory_lock(hashtext(?))", LOCK_KEY)
+    local ok, res = pcall(run_pending, project_code, project_path)
+    db.query("SELECT pg_advisory_unlock(hashtext(?))", LOCK_KEY)
+    if not ok then error(res, 0) end
 
-    local discovered = ProjectLoader.discover(projects_root)
-    local total = 0
+    print("[ProjectMigrator] " .. project_code .. ": "
+        .. (res == 0 and "up to date" or (res .. " migration(s) applied")))
+    return res
+end
 
-    for _, entry in ipairs(discovered) do
+--- Run migrations for every plugin under projects_root. Every plugin is
+-- attempted; if any failed this raises at the end.
+-- @return number Total migrations executed
+function ProjectMigrator.migrateAll(projects_root)
+    local ProjectLoader = require("helper.project-loader")
+    local total, failed = 0, {}
+
+    for _, entry in ipairs(ProjectLoader.discover(projects_root)) do
         local manifest, err = ProjectLoader.loadManifest(entry.manifest_path, entry.path)
         if manifest and manifest.enabled then
-            local ok, count_or_err = pcall(ProjectMigrator.migrate, manifest.code, manifest.path)
+            local ok, res = pcall(ProjectMigrator.migrate, manifest.code, manifest.path)
             if ok then
-                total = total + count_or_err
+                total = total + res
             else
-                print("[ProjectMigrator] ERROR: Failed migrations for " .. manifest.code .. ": " .. tostring(count_or_err))
+                err = res
             end
-        elseif err then
-            print("[ProjectMigrator] WARNING: Skipping " .. entry.dir_name .. ": " .. tostring(err))
+        end
+        if err then
+            print("[ProjectMigrator] ERROR: " .. entry.dir_name .. ": " .. tostring(err))
+            table.insert(failed, entry.dir_name)
         end
     end
 
-    print("=== Project Migrator: " .. total .. " total migration(s) applied ===")
+    if #failed > 0 then
+        error("plugin migrations failed: " .. table.concat(failed, ", "), 0)
+    end
     return total
 end
 
---- Get migration status for a project (useful for CLI/API)
--- @param project_code string
--- @param project_path string
--- @return table { executed = {...}, pending = {...}, total = N }
+--- Migration status of a plugin: executed / pending / drift (edited after
+-- being applied).
 function ProjectMigrator.status(project_code, project_path)
     ProjectMigrator.ensureTrackingTable()
-
-    local migrations_dir = project_path .. "/migrations"
-    local all_migrations = ProjectMigrator.discover(migrations_dir)
     local executed = ProjectMigrator.getExecuted(project_code)
-
-    local pending = {}
-    local executed_list = {}
-
-    for _, mig in ipairs(all_migrations) do
-        if executed[mig.name] then
-            table.insert(executed_list, mig.name)
+    local out = { executed = {}, pending = {}, drift = {} }
+    local all = ProjectMigrator.discover(project_path .. "/migrations")
+    for _, mig in ipairs(all) do
+        local applied = executed[mig.name]
+        if applied == nil then
+            table.insert(out.pending, mig.name)
         else
-            table.insert(pending, mig.name)
+            table.insert(out.executed, mig.name)
+            if applied and applied ~= checksum(mig.path) then
+                table.insert(out.drift, mig.name)
+            end
         end
     end
-
-    return {
-        executed = executed_list,
-        pending = pending,
-        total = #all_migrations,
-    }
+    out.total = #all
+    return out
 end
 
 return ProjectMigrator

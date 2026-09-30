@@ -110,12 +110,20 @@ app:get("/ready", function(self)
     end
 
     local db_check = HealthCheck.checkDatabase()
-
-    if db_check.status == "healthy" then
-        return { status = 200, json = { ready = true, timestamp = ngx.time() } }
-    else
+    if db_check.status ~= "healthy" then
         return { status = 503, json = { ready = false, reason = db_check.error or "Database unhealthy" } }
     end
+
+    -- A plugin that failed to load would 404 its whole API; keep the pod out
+    -- of rotation so the rollout stops instead (details: GET /api/v2/plugins).
+    local failed = require("helper.project-loader").failures()
+    if #failed > 0 then
+        local codes = {}
+        for _, f in ipairs(failed) do codes[#codes + 1] = f.code end
+        return { status = 503, json = { ready = false, reason = "Plugin failed to load: " .. table.concat(codes, ", ") } }
+    end
+
+    return { status = 200, json = { ready = true, timestamp = ngx.time() } }
 end)
 
 -- Liveness probe (for Kubernetes)
@@ -273,7 +281,6 @@ app:before_filter(function(self)
         uri == "/swagger/swagger.json" or uri == "/metrics" or
         uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
-        uri:match("^/api/v2/projects$") or
         uri:match("^/api/v2/themes/active/styles%.css$") or
         uri:match("^/api/v2/[^/]+/public/") or
         uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") then
@@ -396,7 +403,7 @@ safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
 safe_load_routes("routes.api-keys")
 safe_load_routes("routes.email")
-safe_load_routes("routes.project-dashboard")
+safe_load_routes("routes.plugins")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
@@ -645,40 +652,14 @@ load_if("cms", "routes.cms-taxonomy")
 load_if("cms", "routes.cms-webhooks")
 
 -- ============================================
--- PROJECT MODULE ROUTES (auto-loaded from /projects/)
+-- PLUGINS (projects/<plugin>/ — see PLUGINS.md)
+-- Loaded after every core route: the loader refuses a plugin route that
+-- would replace an existing one, and /ready reports 503 while any plugin
+-- failed to load.
 -- ============================================
-local ok_loader, ProjectLoader = pcall(require, "helper.project-loader")
-if ok_loader then
-    local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
-    local projects = ProjectLoader.init(projects_root)
-    for _, manifest in ipairs(projects) do
-        ProjectLoader.loadRoutes(app, manifest)
-    end
-else
-    ngx.log(ngx.NOTICE, "Project loader not available: ", tostring(ProjectLoader))
-end
-
--- ============================================
--- CUSTOM ROUTES (loaded from external directory)
--- ============================================
-local custom_routes_dir = os.getenv("OPSAPI_CUSTOM_ROUTES_DIR")
-if custom_routes_dir then
-    ngx.log(ngx.NOTICE, "Loading custom routes from: ", custom_routes_dir)
-    local custom_route_files = io.popen("ls " .. custom_routes_dir .. "/*.lua")
-    if custom_route_files ~= nil then
-        for file in custom_route_files:lines() do
-            local route_name = file:match(".*/(.*)%.lua$")
-            if route_name then
-                local full_route_path = custom_routes_dir .. "." .. route_name
-                safe_load_routes(full_route_path)
-            end
-        end
-        custom_route_files:close()
-    else
-        ngx.log(ngx.ERR, "Failed to list custom routes in directory: ", custom_routes_dir)
-    end
-else
-    ngx.log(ngx.NOTICE, "No custom routes directory specified.")
+local ProjectLoader = require("helper.project-loader")
+for _, manifest in ipairs(ProjectLoader.init(os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects")) do
+    ProjectLoader.loadRoutes(app, manifest)
 end
 ngx.log(ngx.NOTICE, "All routes loaded")
 

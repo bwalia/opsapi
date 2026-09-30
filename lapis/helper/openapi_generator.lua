@@ -1674,6 +1674,21 @@ function _M.generate()
         end
     end
 
+    -- 6b. Plugin routes (recorded by helper.project-loader at boot), one tag
+    -- per plugin
+    for _, plugin in ipairs(require("helper.project-loader").getRegistered()) do
+        for _, route in ipairs(plugin.routes) do
+            local method = route.method:lower()
+            if method ~= "any" then
+                local openapi_path = lapis_to_openapi_path(route.path)
+                spec.paths[openapi_path] = spec.paths[openapi_path] or {}
+                spec.paths[openapi_path][method] = spec.paths[openapi_path][method]
+                    or build_operation(method, route.path, plugin.name)
+                discovered_tags[plugin.name] = true
+            end
+        end
+    end
+
     -- 7. Build ordered tags
     spec.tags = build_tags(discovered_tags)
 
