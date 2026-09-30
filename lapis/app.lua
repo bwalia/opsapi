@@ -395,6 +395,7 @@ safe_load_routes("routes.enquiries")
 safe_load_routes("routes.register")
 safe_load_routes("routes.namespaces")
 safe_load_routes("routes.api-keys")
+safe_load_routes("routes.namespace-activity") -- workspace activity (owners/admins)
 safe_load_routes("routes.email")
 safe_load_routes("routes.project-dashboard")
 

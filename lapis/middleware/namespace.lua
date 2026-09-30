@@ -102,6 +102,7 @@ function NamespaceMiddleware.requireNamespace(handler)
             end
 
             self.namespace = ns
+            ngx.ctx.namespace_id = ns.id -- attributes the request in user_activity
             self.namespace_membership = nil
             self.namespace_member = nil
             self.namespace_permissions = self.current_user.scopes or {}
@@ -184,6 +185,7 @@ function NamespaceMiddleware.requireNamespace(handler)
 
             -- Set namespace context
             self.namespace = namespace
+            ngx.ctx.namespace_id = namespace.id -- attributes the request in user_activity
 
             if membership then
                 -- Get member's roles and permissions
@@ -246,6 +248,7 @@ function NamespaceMiddleware.optionalNamespace(handler)
 
             if namespace and namespace.status == "active" then
                 self.namespace = namespace
+                ngx.ctx.namespace_id = namespace.id
 
                 if self.current_user then
                     -- Match requireNamespace: a platform admin must read as one
