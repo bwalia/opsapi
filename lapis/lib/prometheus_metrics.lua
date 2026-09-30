@@ -72,6 +72,19 @@ function _M.init()
     -- Upstream / External service metrics
     package.loaded._metric_upstream_requests = prometheus:counter("nginx_upstream_requests_total", "Upstream service requests", {"upstream", "status"})
     package.loaded._metric_upstream_latency = prometheus:histogram("nginx_upstream_response_time_seconds", "Upstream response time", {"upstream"})
+
+    -- User activity & login tracking (lib/user-activity.lua). Bounded labels
+    -- only: who-did-what lives in Postgres (user_activity / auth_events).
+    package.loaded._metric_auth_events = prometheus:counter("opsapi_auth_events_total",
+        "Authentication events (login, 2fa_challenge, token_refresh, logout, password_*)", {"event", "result", "method"})
+    package.loaded._metric_active_users = prometheus:gauge("opsapi_active_users",
+        "Distinct users active within the window (same value on every pod: use max())", {"window"})
+    package.loaded._metric_activity_rows = prometheus:counter("opsapi_activity_rows_written_total",
+        "User activity rows written to Postgres")
+    package.loaded._metric_activity_dropped = prometheus:counter("opsapi_activity_dropped_total",
+        "User activity entries dropped instead of written", {"reason"})
+    package.loaded._metric_activity_flush = prometheus:histogram("opsapi_activity_flush_duration_seconds",
+        "Time to write one batch of user activity")
     
     ngx.log(ngx.NOTICE, "Prometheus metrics initialized successfully with enhanced monitoring")
     return true
@@ -186,6 +199,11 @@ end
 
 function _M.get_metric_upstream_latency()
     return package.loaded._metric_upstream_latency
+end
+
+--- Metric by short name (e.g. "auth_events" → opsapi_auth_events_total), or nil.
+function _M.metric(name)
+    return package.loaded["_metric_" .. name]
 end
 
 function _M.is_initialized()

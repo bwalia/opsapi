@@ -15,6 +15,13 @@ local RefreshToken = require("helper.refresh-token")
 local AuthCookies = require("helper.auth-cookies")
 local PasswordReset = require("helper.password-reset")
 local Mail = require("helper.mail")
+-- Login / security events → auth_events + user_login_stats (lib/user-activity.lua).
+-- guardAuth() records any failed response of a route; successes are recorded
+-- explicitly where the user is known.
+local UserActivity = require("lib.user-activity")
+local function login_identifier(self)
+    return self.params.username or self.params.identifier
+end
 
 -- Rate limit configs
 local LOGIN_LIMIT    = { rate = 10,  window = 60,  prefix = "auth:login" }     -- 10/min per IP
@@ -234,7 +241,7 @@ end
 return function(app)
     ----------------- Auth Routes --------------------
 
-    app:post("/auth/login", RateLimit.wrap(LOGIN_LIMIT, function(self)
+    app:post("/auth/login", UserActivity.guardAuth("login", "password", RateLimit.wrap(LOGIN_LIMIT, function(self)
         local identifier = self.params.username or self.params.identifier
         local password = self.params.password
 
@@ -291,6 +298,7 @@ return function(app)
         -- The frontend must send this back with /auth/2fa/verify and /auth/2fa/resend.
         local session_token = OTP.generateSessionToken(userWithRoles.uuid, user_id)
 
+        UserActivity.auth("2fa_challenge", { method = "password", user = userWithRoles })
         return {
             status = 200,
             json = {
@@ -300,7 +308,7 @@ return function(app)
                 message = "Verification code sent to your email"
             }
         }
-    end))
+    end), login_identifier))
 
     -- =========================================================================
     -- 2FA OTP Verification — completes admin login after password was verified
@@ -309,7 +317,7 @@ return function(app)
     -- POST /auth/2fa/verify — Verify OTP and issue full JWT
     -- Body: { "session_token": "...", "code": "123456" }
     -- The session_token proves the user already passed password verification.
-    app:post("/auth/2fa/verify", RateLimit.wrap(OTP_LIMIT, function(self)
+    app:post("/auth/2fa/verify", UserActivity.guardAuth("login", "password", RateLimit.wrap(OTP_LIMIT, function(self)
         local params = parse_json_body()
         local session_token = params.session_token or self.params.session_token
         local code = params.code or self.params.code
@@ -339,6 +347,8 @@ return function(app)
         -- Verify OTP
         local verified, otp_err = OTP.verify(user_id, code)
         if not verified then
+            UserActivity.auth("login", { result = "failure", method = "password", user = userWithRoles,
+                reason = "invalid_otp" })
             return { status = 401, json = { error = otp_err or "Invalid code" } }
         end
 
@@ -351,11 +361,13 @@ return function(app)
             device_info = device_info:sub(1, 255)
         end
 
+        local body = build_login_response(self, userWithRoles, user_id, device_info)
+        UserActivity.auth("login", { method = "password", user = userWithRoles })
         return {
             status = 200,
-            json = build_login_response(self, userWithRoles, user_id, device_info)
+            json = body
         }
-    end))
+    end)))
 
     -- POST /auth/2fa/resend — Resend OTP code
     -- Body: { "session_token": "..." }
@@ -434,7 +446,7 @@ return function(app)
     --     admin UI. ``redirect_url`` from the client is ignored;
     --     destination is admin-controlled, not caller-controlled.
     -- =====================================================================
-    app:post("/auth/forgot-password", RateLimit.wrap(FORGOT_LIMIT, function(self)
+    app:post("/auth/forgot-password", UserActivity.guardAuth("password_reset_request", "email", RateLimit.wrap(FORGOT_LIMIT, function(self)
         local body = parse_json_body()
         local email = body.email or self.params.email
         -- OpsAPI is an API consumed by many frontends, so the reset link must
@@ -452,6 +464,7 @@ return function(app)
             })
         end
         email = email:lower():match("^%s*(.-)%s*$")
+        UserActivity.auth("password_reset_request", { method = "email", email = email })
 
         -- Generic success response — same shape whether the email
         -- exists or not. Prevents an attacker from enumerating
@@ -606,10 +619,10 @@ return function(app)
         end
 
         return generic_ok
-    end))
+    end)))
 
 
-    app:post("/auth/reset-password", RateLimit.wrap(RESET_LIMIT, function(self)
+    app:post("/auth/reset-password", UserActivity.guardAuth("password_reset", "token", RateLimit.wrap(RESET_LIMIT, function(self)
         local body = parse_json_body()
         local token = body.token or self.params.token
         local new_password = body.new_password or self.params.new_password
@@ -697,13 +710,14 @@ return function(app)
         -- second link from an earlier request.
         pcall(PasswordReset.revokeAllForUser, user_id)
 
+        UserActivity.auth("password_reset", { method = "token", user = { uuid = user_row[1].uuid } })
         return {
             status = 200,
             json = {
                 message = "Your password has been reset. Please sign in.",
             },
         }
-    end))
+    end)))
 
     -- ────────────────────────────────────────────────────────────────
     -- Authenticated self-service account management.
@@ -718,7 +732,7 @@ return function(app)
     -- revokes ALL refresh tokens (every session, including this one) — a
     -- password change should end any session an attacker might hold. The client
     -- is told to sign in again.
-    app:post("/auth/change-password", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
+    app:post("/auth/change-password", UserActivity.guardAuth("password_change", "password", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
         local user = self.current_user
         if not user or not user.uuid then
             return { status = 401, json = { error = "Authentication required" } }
@@ -764,16 +778,17 @@ return function(app)
         pcall(RefreshToken.revokeAllForUser, record.id)
         pcall(AuthCookies.clear, self)
 
+        UserActivity.auth("password_change", { method = "password", user = user })
         return {
             status = 200,
             json = { message = "Password changed successfully. Please sign in again." },
         }
-    end))
+    end)))
 
     -- Deactivate own account (soft delete: active=false). Requires password
     -- confirmation, then revokes all sessions. Permanent deletion stays an
     -- admin/support action (UserQueries.destroy) — matching the tax-settings copy.
-    app:post("/auth/delete-account", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
+    app:post("/auth/delete-account", UserActivity.guardAuth("account_deactivation", "password", RateLimit.wrap(PWCHANGE_LIMIT, function(self)
         local user = self.current_user
         if not user or not user.uuid then
             return { status = 401, json = { error = "Authentication required" } }
@@ -800,11 +815,12 @@ return function(app)
         pcall(RefreshToken.revokeAllForUser, record.id)
         pcall(AuthCookies.clear, self)
 
+        UserActivity.auth("account_deactivation", { method = "password", user = user })
         return {
             status = 200,
             json = { message = "Your account has been deactivated. Contact support to permanently delete your data." },
         }
-    end))
+    end)))
 
     -- Google OAuth Routes
     app:get("/auth/google", RateLimit.wrap(OAUTH_LIMIT, function(self)
@@ -853,7 +869,7 @@ return function(app)
         }
     end))
 
-    app:get("/auth/google/callback", RateLimit.wrap(OAUTH_LIMIT, function(self)
+    app:get("/auth/google/callback", UserActivity.guardAuth("login", "google", RateLimit.wrap(OAUTH_LIMIT, function(self)
         local code = self.params.code
         local raw_state = self.params.state or "/"
 
@@ -1132,49 +1148,12 @@ return function(app)
                 frontend_url, ngx.escape_uri(token), ngx.escape_uri(redirect_from))
         end
 
+        UserActivity.auth("login", { method = "google", user = userWithRoles })
         return {
             redirect_to = final_url
         }
-    end))
+    end)))
 
-    -- Logout endpoint
-    app:post("/auth/logout", function(self)
-        -- Clear any session data
-        if self.session then
-            for k, _ in pairs(self.session) do
-                self.session[k] = nil
-            end
-        end
-
-        -- Clear the refresh-token cookie. Browser keeps the cookie
-        -- around indefinitely otherwise — even after the user logs
-        -- out — and would auto-include it on subsequent /auth/refresh
-        -- attempts, which would then succeed if the underlying DB
-        -- token wasn't also revoked. Belt-and-braces: zero out both.
-        pcall(AuthCookies.clear, self)
-
-        -- Clear user's cart and deactivate device tokens
-        local user_uuid = ngx.var.http_x_user_id
-        if user_uuid and user_uuid ~= "guest" then
-            local db = require("lapis.db")
-            local user_result = db.select("id from users where uuid = ?", user_uuid)
-            if user_result and #user_result > 0 then
-                db.delete("cart_items", "user_id = ?", user_result[1].id)
-            end
-
-            -- Device token cleanup is handled by the iOS app calling
-            -- DELETE /api/v2/device-tokens with the specific fcm_token
-            -- before this endpoint. We don't delete all tokens here
-            -- because the user may be logged in on other devices.
-        end
-
-        return {
-            json = {
-                message = "Logged out successfully"
-            },
-            status = 200
-        }
-    end)
 
     -- Helper function to check if token is a Google ID token
     local function is_google_id_token(token)
@@ -1248,7 +1227,7 @@ return function(app)
     end
 
     -- OAuth token validation endpoint (handles both Google ID tokens and app JWTs)
-    app:post("/auth/oauth/validate", RateLimit.wrap(VALIDATE_LIMIT, function(self)
+    app:post("/auth/oauth/validate", UserActivity.guardAuth("login", "oauth", RateLimit.wrap(VALIDATE_LIMIT, function(self)
         local token = self.params.token
         if not token then
             return {
@@ -1391,6 +1370,7 @@ return function(app)
                 })
             end
 
+            UserActivity.auth("login", { method = "oauth", user = userWithRoles })
             -- Return user data and token (matching login response format)
             return {
                 status = 200,
@@ -1424,6 +1404,7 @@ return function(app)
         end
 
         local userinfo = result.payload.userinfo
+        UserActivity.auth("login", { method = "oauth", user = { uuid = userinfo.uuid, email = userinfo.email } })
         return {
             status = 200,
             json = {
@@ -1437,7 +1418,7 @@ return function(app)
                 token = token
             }
         }
-    end))
+    end)))
 
     -- Token refresh endpoint with opaque refresh token + backward compat
     --
@@ -1452,7 +1433,7 @@ return function(app)
     -- XSS-safe (HttpOnly), CSRF-safe (SameSite=Strict), and never
     -- traverses URL/log/history/Referer channels. See
     -- helper/auth-cookies.lua for the full rationale.
-    app:post("/auth/refresh", RateLimit.wrap(REFRESH_LIMIT, function(self)
+    app:post("/auth/refresh", UserActivity.guardAuth("token_refresh", "refresh", RateLimit.wrap(REFRESH_LIMIT, function(self)
         local params = parse_json_body()
         local refresh_token_raw = params.refresh_token or self.params.refresh_token
 
@@ -1558,6 +1539,7 @@ return function(app)
                     pcall(AuthCookies.set, self, new_refresh)
                 end
 
+                UserActivity.auth("token_refresh", { method = "refresh", user = userWithRoles })
                 return {
                     status = 200,
                     json = {
@@ -1601,7 +1583,7 @@ return function(app)
                 message = "Token refreshed successfully"
             }
         }
-    end))
+    end)))
 
     -- =========================================================================
     -- Logout — revoke refresh token
@@ -1619,11 +1601,18 @@ return function(app)
             refresh_token_raw = AuthCookies.read(self)
         end
 
+        local session_user
         if refresh_token_raw and refresh_token_raw ~= "" then
+            local ok_rt, rt = pcall(RefreshToken.validate, refresh_token_raw)
+            if ok_rt and rt and rt.user_id then
+                local row = db.select("uuid FROM users WHERE id = ?", rt.user_id)[1]
+                session_user = row and { uuid = row.uuid } or nil
+            end
             pcall(RefreshToken.revoke, refresh_token_raw)
         end
 
         pcall(AuthCookies.clear, self)
+        UserActivity.auth("logout", { method = "session", user = session_user })
 
         return {
             status = 200,
