@@ -71,30 +71,33 @@ The dashboard is `sre/grafana/dashboards/user-activity.json`. It reads:
 - **per-user data** from Postgres, through the `opsapi_reporting` views;
 - **aggregates** from Prometheus. The *Environment* dropdown filters by the Prometheus `namespace` label, because one Prometheus serves every environment.
 
-Datasources are chosen from dashboard variables, so the same JSON works in every environment.
+It picks datasources from dashboard variables, so the same JSON works everywhere. The Postgres datasource's **name must contain "OpsAPI"**.
 
-**1. Database login for Grafana.** Run once per environment database, as a DBA. The migration already created the views and the `NOLOGIN` role `opsapi_reporting_reader`. If the app user lacked `CREATEROLE`, the migration printed the statements to create it.
+**Keep it admin-only with a separate Grafana organization, not a folder permission.** Grafana OSS lets any signed-in user of an org query that org's datasources through the API, because datasource permissions are Enterprise-only. Put the datasource and dashboard in an org whose only members are admins.
 
-```sql
-CREATE ROLE grafana_opsapi LOGIN PASSWORD '<from your secret store>' IN ROLE opsapi_reporting_reader;
-ALTER ROLE grafana_opsapi SET search_path = opsapi_reporting;
-ALTER ROLE grafana_opsapi SET statement_timeout = '30s';   -- a heavy panel can't hurt production
-```
+**diytaxreturn environments (int, acc, prod): automatic.** The `diytaxreturn-grafana` chart in the diy-tax-return-uk repo (`opsapiReporting`) does it on every deploy:
 
-This login can read only the reporting views, which exclude password hashes, tokens and the secret vault. It can't write anything.
+- creates the DB login below;
+- creates the **OpsAPI** org with its datasources and this dashboard.
 
-**2. Datasource.** A Postgres datasource per environment Grafana:
+To view it, go to Grafana → switch organization → **OpsAPI**.
 
-```yaml
-- name: OpsAPI Postgres (reporting)
-  type: grafana-postgresql-datasource
-  url: <env opsapi postgres host>:5432
-  user: grafana_opsapi
-  jsonData: { database: <opsapi db>, sslmode: require, postgresVersion: 1400, maxOpenConns: 5 }
-  secureJsonData: { password: $GRAFANA_OPSAPI_DB_PASSWORD }
-```
+**Other deployments: by hand.**
 
-**3. Dashboard.** Provision the JSON into its own folder, for example "OpsAPI Activity". Give only the **Admin** role access to that folder, since the dashboard shows personal data. Anonymous access must stay disabled.
+1. **Database login.** Run once per database, as a superuser. The migration already created the views. It also created the `NOLOGIN` role `opsapi_reporting_reader`, unless the app user lacked `CREATEROLE`; in that case the migration printed the statements to run.
+
+   ```sql
+   CREATE ROLE grafana_opsapi LOGIN PASSWORD '<from your secret store>' IN ROLE opsapi_reporting_reader;
+   ALTER ROLE grafana_opsapi SET search_path = opsapi_reporting;
+   ALTER ROLE grafana_opsapi SET statement_timeout = '30s';        -- a heavy panel can't hurt production
+   ALTER ROLE grafana_opsapi SET default_transaction_read_only = on;
+   ```
+
+   This login can read only the reporting views, which exclude password hashes, tokens and the secret vault.
+
+2. **Organization.** Create an org for admins only.
+3. **Datasource.** Add a Postgres datasource in that org, named e.g. "OpsAPI Postgres (reporting)": user `grafana_opsapi`, `sslmode` require. Also add your Prometheus datasource.
+4. **Dashboard.** Import this JSON into that org.
 
 ## Metrics
 
@@ -129,6 +132,6 @@ The DDoS alerts on this metric keep working for the addresses that matter. Per-u
 
 ## Privacy
 
-- **Personal data.** IP addresses, browser strings and activity histories are personal data under UK GDPR. They're kept for security and service operation, deleted automatically at the end of their retention period, and visible only to platform admins in Grafana. Workspace admins see only their own workspace's activity.
+- **Personal data.** IP addresses, browser strings and activity histories are personal data under UK GDPR. They're kept for security and service operation, deleted automatically at the end of their retention period, and visible only to Grafana admins (a separate Grafana org). Workspace admins see only their own workspace's activity.
 - **Account deletion.** Deleting a user row erases that person's `user_activity` and `auth_events`, whichever code path or SQL deleted it (database trigger `trg_users_forget_activity`). Their `user_login_stats` row cascades. Deactivating an account (soft delete) keeps the history until retention.
 - **Privacy policy.** Mention this processing in your privacy policy.

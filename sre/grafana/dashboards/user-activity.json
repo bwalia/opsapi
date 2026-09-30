@@ -25,7 +25,7 @@
         "label": "Database",
         "type": "datasource",
         "query": "grafana-postgresql-datasource",
-        "regex": "",
+        "regex": "/OpsAPI/",
         "hide": 0,
         "current": {},
         "options": [],
