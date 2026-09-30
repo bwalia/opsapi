@@ -9,6 +9,7 @@ OpsAPI records who signed in, when, from where, and what they did. Platform admi
 | Sign-ins and security events: login success and failure (password, Google, OAuth), 2FA challenge, token refresh, logout, password reset request / reset / change, account deactivation. Each has method, reason, client IP, browser and request id. | `auth_events` | 365 days |
 | Per user: last login (time, IP, method, browser), login count, failed logins since the last success, last seen. | `user_login_stats` (1:1 with `users`) | while the account exists |
 | What signed-in users did: route pattern (`/api/v2/invoices/:id`), action (`invoices.update`), record id, status, duration, workspace, IP, browser, request id. | `user_activity` (partitioned by month) | 90 days |
+| Per workspace, day, member and action: changes, requests, failed requests, last time. Feeds the in-app Activity page. | `user_activity_daily` | 90 days |
 | Counts only: auth events, active users, pipeline health. | Prometheus (`/metrics`) | your Prometheus retention |
 
 - **Changes vs reads.** Every change (POST / PUT / PATCH / DELETE) is its own row. Identical reads (same user, route, record and status) within a minute are merged into one row with a `hits` count, so background polling doesn't flood the table.
@@ -19,6 +20,7 @@ OpsAPI records who signed in, when, from where, and what they did. Platform admi
 ## How it works
 
 - **Capture.** Activity is captured in nginx's log phase, *after* the response has been sent. It's buffered per worker and written to Postgres in batches every 2 seconds, so it adds no latency to requests and can never fail one.
+- **Daily counters.** The same statement that writes activity rows also adds them to `user_activity_daily`, so the counters can't drift from the rows. The Activity page reads these counters instead of scanning months of raw rows.
 - **Failures.** If the database is unavailable, a batch is retried 3 times, then dropped and counted in `opsapi_activity_dropped_total`. Buffers are bounded, so memory never grows.
 - **Sign-in events.** These are written immediately; they're low-volume and matter for security. Rate-limited login floods are only counted in Prometheus, not stored one row per request.
 - **Maintenance.** An hourly job, run by one pod at a time:
@@ -27,6 +29,26 @@ OpsAPI records who signed in, when, from where, and what they did. Platform admi
   - deletes auth events past `OPSAPI_AUTH_EVENTS_RETENTION_DAYS`.
 
   Whole partitions are dropped, so there are no expensive row-by-row deletes.
+
+## In the dashboard (workspace admins)
+
+**Activity** in the sidebar (`/dashboard/namespace/activity`) needs the `activity` permission (`read`). Owners and admins get it by default; give it to other roles under **Roles**. It always shows the current workspace only.
+
+- **Overview.** Active members, changes and failed requests for the last 7, 30 or 90 days, as totals and per-day charts. Also the most used areas and the most active members.
+- **Members.** Each member's last sign-in (time, method, count), last activity in this workspace, the last 30 days' usage, and failed sign-ins since their last success. Click a member to see their activity log.
+- **Activity log.** Every change, and merged reads, newest first. Filter by member, area, changes-only or failed-only, and time range. It shows the route, record id, result, duration, browser and IP.
+
+Deliberately left out: sign-in IP addresses and the login history. A sign-in isn't tied to one workspace and a person can belong to several, so those stay with platform admins in Grafana.
+
+API (the same `activity.read` check):
+
+```
+GET /api/v2/namespace/activity/summary?days=30
+GET /api/v2/namespace/activity/members?search=&sort=last_login|name&page=&per_page=
+GET /api/v2/namespace/activity?days=7&user_uuid=&area=&kind=changes|errors&limit=50&cursor=
+```
+
+The log uses cursor paging: pass `meta.next_cursor` as `cursor` to get the next page. Deep pages cost the same as the first.
 
 ## Configuration
 

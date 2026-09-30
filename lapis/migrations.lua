@@ -2501,6 +2501,8 @@ local _migrations = {
     ['zzua2_user_activity'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 2),
     ['zzua3_reporting_views'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 3),
     ['zzua4_erase_on_user_delete'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 4),
+    ['zzua5_activity_daily_rollup'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 5),
+    ['zzua6_activity_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 6),
     ['zzemp4_employees_core_menu_enable'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 4),
 
     ['868_fs_create_request_sequences'] = conditional_array(ProjectConfig.FEATURES.FIELD_SERVICE, field_service_request_migrations, 1),

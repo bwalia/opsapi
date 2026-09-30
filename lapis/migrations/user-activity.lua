@@ -21,6 +21,12 @@
       [4] erase on delete   deleting a user row deletes their activity and
                             auth events (UK GDPR erasure), whatever path
                             deleted it; user_login_stats cascades via its FK.
+      [5] user_activity_daily  per workspace × day × user × action counters,
+                            kept up to date by the same statement that writes
+                            the activity rows. The in-app Activity page reads
+                            this instead of scanning months of raw rows.
+      [6] Activity module   RBAC module `activity` + "Activity" menu item for
+                            workspace owners/admins.
 
     Idempotent; gated on FEATURES.CORE so every deployment gets it.
 ]]
@@ -175,5 +181,83 @@ return {
             CREATE TRIGGER trg_users_forget_activity AFTER DELETE ON users
             FOR EACH ROW EXECUTE FUNCTION opsapi_forget_user_activity()
         ]])
+    end,
+
+    [5] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS user_activity_daily (
+                namespace_id INTEGER NOT NULL,
+                day DATE NOT NULL,
+                user_uuid VARCHAR(255) NOT NULL,
+                action VARCHAR(120) NOT NULL,
+                changes INTEGER NOT NULL DEFAULT 0,
+                requests INTEGER NOT NULL DEFAULT 0,
+                errors INTEGER NOT NULL DEFAULT 0,
+                last_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (namespace_id, day, user_uuid, action)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_user_activity_daily_day ON user_activity_daily (day)")
+        db.query([[CREATE INDEX IF NOT EXISTS idx_user_activity_daily_user
+                   ON user_activity_daily (namespace_id, user_uuid, day DESC)]])
+        -- Backfill from rows already recorded (a no-op on a fresh install).
+        db.query([[
+            INSERT INTO user_activity_daily (namespace_id, day, user_uuid, action, changes, requests, errors, last_at)
+            SELECT namespace_id, (occurred_at AT TIME ZONE 'UTC')::date, user_uuid, action,
+                   COUNT(*) FILTER (WHERE method NOT IN ('GET', 'HEAD')), SUM(hits),
+                   COALESCE(SUM(hits) FILTER (WHERE status >= 400), 0), MAX(occurred_at)
+            FROM user_activity WHERE namespace_id IS NOT NULL
+            GROUP BY 1, 2, 3, 4
+            ON CONFLICT DO NOTHING
+        ]])
+        db.query([[
+            CREATE OR REPLACE FUNCTION opsapi_forget_user_activity() RETURNS trigger LANGUAGE plpgsql AS $fn$
+            BEGIN
+                DELETE FROM user_activity WHERE user_uuid = OLD.uuid;
+                DELETE FROM user_activity_daily WHERE user_uuid = OLD.uuid;
+                DELETE FROM auth_events WHERE user_uuid = OLD.uuid;
+                RETURN NULL;
+            END
+            $fn$
+        ]])
+    end,
+
+    [6] = function()
+        local MigrationUtils = require("helper.migration-utils")
+        local ts = MigrationUtils.getCurrentTimestamp()
+        if #db.select("1 FROM modules WHERE machine_name = 'activity'") == 0 then
+            db.insert("modules", {
+                uuid = MigrationUtils.generateUUID(),
+                machine_name = "activity",
+                name = "Activity",
+                description = "Who signed in and what they did in this workspace",
+                category = "Core",
+                priority = 99,
+                allowed_actions = '["read"]',
+                created_at = ts,
+                updated_at = ts,
+            })
+        end
+        if #db.select("1 FROM menu_items WHERE key = 'activity'") == 0 then
+            db.insert("menu_items", {
+                uuid = MigrationUtils.generateUUID(),
+                key = "activity",
+                name = "Activity",
+                icon = "Activity",
+                path = "/dashboard/namespace/activity",
+                module = "activity",
+                required_action = "read",
+                priority = 99,
+                is_active = true,
+                is_admin_only = false,
+                always_show = false,
+                settings = "{}",
+                created_at = ts,
+                updated_at = ts,
+            })
+        end
+        -- Owners and admins of every existing workspace; new workspaces get it
+        -- from the modules table when their default roles are seeded.
+        require("queries.ModuleQueries").propagateToNamespaceAdmins("activity")
     end,
 }

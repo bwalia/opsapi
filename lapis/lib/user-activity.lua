@@ -370,13 +370,43 @@ end
 local INSERT = "INSERT INTO user_activity (occurred_at, user_uuid, namespace_id, via, api_key_uuid, method, route, "
     .. "action, entity_id, status, hits, duration_ms, ip, user_agent, request_id) VALUES "
 
+-- The same statement bumps the per-day counters the in-app Activity page reads,
+-- so rows and counters can't drift apart (one statement = one transaction).
+-- Sorted upserts keep concurrent workers from deadlocking on the same keys.
+local ROLLUP = [[
+    RETURNING occurred_at, namespace_id, user_uuid, action, method, status, hits
+)
+INSERT INTO user_activity_daily (namespace_id, day, user_uuid, action, changes, requests, errors, last_at)
+SELECT namespace_id, (occurred_at AT TIME ZONE 'UTC')::date, user_uuid, action,
+       COUNT(*) FILTER (WHERE method NOT IN ('GET', 'HEAD')), SUM(hits),
+       COALESCE(SUM(hits) FILTER (WHERE status >= 400), 0), MAX(occurred_at)
+FROM ins WHERE namespace_id IS NOT NULL
+GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4
+ON CONFLICT (namespace_id, day, user_uuid, action) DO UPDATE SET
+    changes = user_activity_daily.changes + EXCLUDED.changes,
+    requests = user_activity_daily.requests + EXCLUDED.requests,
+    errors = user_activity_daily.errors + EXCLUDED.errors,
+    last_at = GREATEST(user_activity_daily.last_at, EXCLUDED.last_at)
+]]
+local rollup_retry_at = 0 -- while the rollup table is missing (not migrated yet), write rows only
+
 local function write_batch(batch)
     local sql = {}
     for i, r in ipairs(batch) do sql[i] = values_sql(r) end
-    local ok, err = pcall(db().query, INSERT .. table.concat(sql, ",\n"))
+    local rows = INSERT .. table.concat(sql, ",\n")
+    local function run()
+        if ngx.now() < rollup_retry_at then return pcall(db().query, rows) end
+        local ok, err = pcall(db().query, "WITH ins AS (" .. rows .. ROLLUP)
+        if not ok and tostring(err):find('relation "user_activity_daily" does not exist', 1, true) then
+            rollup_retry_at = ngx.now() + 60
+            return pcall(db().query, rows)
+        end
+        return ok, err
+    end
+    local ok, err = run()
     if not ok and tostring(err):find("no partition of relation", 1, true) then
         pcall(UserActivity.ensurePartitions)
-        ok, err = pcall(db().query, INSERT .. table.concat(sql, ",\n"))
+        ok, err = run()
     end
     return ok, err
 end
@@ -490,6 +520,8 @@ function UserActivity.applyRetention()
             end
         end
     end
+    d.query(("DELETE FROM user_activity_daily WHERE day < CURRENT_DATE - %d")
+        :format(UserActivity.ACTIVITY_RETENTION_DAYS))
     local deleted = 0
     for _ = 1, 50 do
         local res = d.query(([[

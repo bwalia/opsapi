@@ -76,6 +76,7 @@ async function loadIconMap(): Promise<Record<string, LucideIcon>> {
     Wrench: icons.Wrench,
     MapPin: icons.MapPin,
     ClipboardList: icons.ClipboardList,
+    Activity: icons.Activity,
     Boxes: icons.Boxes,
     // Simpro-aligned field service (Assets / Contracts / Reports / Simpro Sync)
     HardDrive: icons.HardDrive,
