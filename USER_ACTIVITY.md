@@ -106,7 +106,7 @@ To view it, go to Grafana → switch organization → **OpsAPI**.
 | `opsapi_auth_events_total` | `event`, `result` (success / failure / rate_limited), `method` | Login and failure rates; alert on spikes. |
 | `opsapi_active_users` | `window` = `5m` / `1h` / `24h` | Same value on every pod: use `max()`, not `sum()`. |
 | `opsapi_activity_rows_written_total` | — | Pipeline throughput. |
-| `opsapi_activity_dropped_total` | `reason` = `buffer_full` / `write_failed` | Anything above zero means activity was lost. See the runbook. |
+| `opsapi_activity_dropped_total` | `reason` = `buffer_full` / `write_failed` / `not_migrated` | Anything above zero means activity was lost. See the runbook. |
 | `opsapi_activity_flush_duration_seconds` | — | Batch write latency. |
 
 ### Alerts
@@ -129,6 +129,17 @@ The DDoS alerts on this metric keep working for the addresses that matter. Per-u
 
 - **`write_failed`:** the database refused or was unreachable for more than 3 flush cycles (about 6 seconds). Check Postgres health and `[user-activity] write failed` in the OpsAPI logs. Requests are unaffected; only the activity records for that window are missing.
 - **`buffer_full`:** one worker buffered more than 20,000 entries between flushes, meaning writes can't keep up with traffic. Check `opsapi_activity_flush_duration_seconds`. If it's high, look at database load or add the noisiest read endpoints to `OPSAPI_ACTIVITY_EXCLUDE`.
+
+- **`not_migrated`:** the image is running against a database that hasn't had `lapis migrate` yet, so the activity tables don't exist. This happens when a deployment pulls a new image before its next deploy runs migrations. Recording pauses and logs one warning every 5 minutes per worker. Nothing else is affected: logins and requests work normally. It resumes by itself within 5 minutes of the migration.
+
+## Deployments that consume the OpsAPI image
+
+Tracking is a core feature, so every deployment gets it whatever its `PROJECT_CODE`: the tables are created by `lapis migrate`, and recording is on by default.
+
+- **Data stays in that deployment's own database.** Nothing is sent anywhere else.
+- **To opt out**, set `OPSAPI_ACTIVITY_ENABLED=false`. The tables still exist but stay empty.
+- **Activity in the dashboard.** The Activity module and menu item are added, and owner/admin roles get `activity.read`.
+- **Logs.** Error messages from this feature never include SQL, so no emails or IPs reach the logs through it.
 
 ## Privacy
 

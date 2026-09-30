@@ -77,5 +77,11 @@ check("activity queries are namespace-scoped", scoped >= 6, scoped)
 check("activity rows and daily counters written in one statement",
     read("lapis/lib/user-activity.lua"):find('"WITH ins AS %(" %.%. rows %.%. ROLLUP') ~= nil)
 
+local lib = read("lapis/lib/user-activity.lua")
+check("errors are logged without the SQL (it holds emails / IPs)",
+    not lib:find("ngx%.log%([^\n]*tostring%(err%)") and lib:find("db_error%(err%)") ~= nil)
+check("recording pauses when the tables are not migrated yet",
+    lib:find("function UserActivity%.capture%(%)\n    if not ENABLED or ngx%.now%(%) < paused_until") ~= nil)
+
 print(failures == 0 and "\nall passed" or ("\n" .. failures .. " failure(s)"))
 os.exit(failures == 0 and 0 or 1)

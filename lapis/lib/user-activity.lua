@@ -79,6 +79,35 @@ local function inc(name, labels, by)
     if m then pcall(m.inc, m, by or 1, labels) end
 end
 
+--- The Postgres message only. Lapis puts the whole interpolated SQL in front of
+-- it, and that holds personal data (emails, IPs, browsers) — keep it out of logs.
+local function db_error(err)
+    err = tostring(err)
+    return (err:match("\n([^\n]*)$") or err):sub(1, 200)
+end
+
+-- Tables missing = this image is running before `lapis migrate` (e.g. a
+-- deployment that pulls :latest and migrates on its next deploy). Pause
+-- recording and warn once, instead of an error on every flush.
+local PAUSE_SECONDS = 300
+local paused_until = 0
+local TABLES = { user_activity = true, auth_events = true, user_login_stats = true }
+
+local function not_migrated(err)
+    local rel = db_error(err):match('relation "([%w_]+)" does not exist')
+    if not (rel and TABLES[rel]) then return false end
+    if ngx.now() >= paused_until then
+        ngx.log(ngx.WARN, "[user-activity] table ", rel, " missing — run `lapis migrate`. Recording paused for ",
+            PAUSE_SECONDS, "s.")
+    end
+    paused_until = ngx.now() + PAUSE_SECONDS
+    return true
+end
+
+local function report(what, err)
+    if not not_migrated(err) then ngx.log(ngx.ERR, "[user-activity] ", what, ": ", db_error(err)) end
+end
+
 local function db()
     return require("lapis.db")
 end
@@ -153,7 +182,7 @@ function UserActivity.auth(event, opts)
     local method = opts.method or "none"
     inc("auth_events", { event, result, method })
     ngx.ctx.auth_event_recorded = true
-    if opts.metric_only or not ENABLED then return end
+    if opts.metric_only or not ENABLED or ngx.now() < paused_until then return end
 
     local ok, err = pcall(function()
         local d = db()
@@ -207,9 +236,7 @@ function UserActivity.auth(event, opts)
             ]], user_uuid)
         end
     end)
-    if not ok then
-        ngx.log(ngx.ERR, "[user-activity] auth event ", event, " not recorded: ", tostring(err))
-    end
+    if not ok then report("auth event " .. event .. " not recorded", err) end
 end
 
 local function reason_of(res)
@@ -266,7 +293,7 @@ local seen_pushed      -- lrucache: user_uuid → last time pushed
 
 --- Called from nginx.conf log_by_lua for every request. Cheap, never raises.
 function UserActivity.capture()
-    if not ENABLED then return end
+    if not ENABLED or ngx.now() < paused_until then return end
     local user = ngx.ctx.user
     if type(user) ~= "table" or not user.uuid then return end -- anonymous
     local status = ngx.status
@@ -427,8 +454,10 @@ local function flush_activity()
         local ok, err = write_batch(batch)
         if ok then
             written = written + #batch
+        elseif not_migrated(err) then
+            inc("activity_dropped", { "not_migrated" }, #batch) -- nowhere to write them yet
         else
-            ngx.log(ngx.ERR, "[user-activity] write failed (", #batch, " rows): ", tostring(err))
+            ngx.log(ngx.ERR, "[user-activity] write failed (", #batch, " rows): ", db_error(err))
             for _, r in ipairs(batch) do
                 r.tries = (r.tries or 0) + 1
                 if r.tries < MAX_TRIES and #pending < MAX_BUFFERED then
@@ -475,7 +504,7 @@ local function flush(premature)
     end)
     release_connection()
     flushing = false
-    if not ok then ngx.log(ngx.ERR, "[user-activity] flush failed: ", tostring(err)) end
+    if not ok then report("flush failed", err) end
     if premature then return end
 end
 
@@ -554,7 +583,7 @@ local function maintenance(premature)
         if not ok_run then error(run_err, 0) end
     end)
     release_connection()
-    if not ok then ngx.log(ngx.ERR, "[user-activity] maintenance failed: ", tostring(err)) end
+    if not ok then report("maintenance failed", err) end
 end
 
 -- Same value on every pod (read from the database): graph with max(), not sum().
@@ -575,7 +604,7 @@ local function active_users(premature)
         end
     end)
     release_connection()
-    if not ok then ngx.log(ngx.ERR, "[user-activity] active users gauge failed: ", tostring(err)) end
+    if not ok then report("active users gauge failed", err) end
 end
 
 --- Start the per-worker timers (nginx.conf init_worker_by_lua).
