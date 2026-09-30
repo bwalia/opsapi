@@ -18,6 +18,9 @@
                             NOLOGIN role opsapi_reporting_reader that may read
                             them. The Grafana login is created by ops:
                             see USER_ACTIVITY.md.
+      [4] erase on delete   deleting a user row deletes their activity and
+                            auth events (UK GDPR erasure), whatever path
+                            deleted it; user_login_stats cascades via its FK.
 
     Idempotent; gated on FEATURES.CORE so every deployment gets it.
 ]]
@@ -155,5 +158,22 @@ return {
                 .. "GRANT USAGE ON SCHEMA opsapi_reporting TO opsapi_reporting_reader; "
                 .. "GRANT SELECT ON ALL TABLES IN SCHEMA opsapi_reporting TO opsapi_reporting_reader;")
         end
+    end,
+
+    [4] = function()
+        db.query([[
+            CREATE OR REPLACE FUNCTION opsapi_forget_user_activity() RETURNS trigger LANGUAGE plpgsql AS $fn$
+            BEGIN
+                DELETE FROM user_activity WHERE user_uuid = OLD.uuid;
+                DELETE FROM auth_events WHERE user_uuid = OLD.uuid;
+                RETURN NULL;
+            END
+            $fn$
+        ]])
+        db.query("DROP TRIGGER IF EXISTS trg_users_forget_activity ON users")
+        db.query([[
+            CREATE TRIGGER trg_users_forget_activity AFTER DELETE ON users
+            FOR EACH ROW EXECUTE FUNCTION opsapi_forget_user_activity()
+        ]])
     end,
 }

@@ -201,6 +201,35 @@ function _M.get_metric_upstream_latency()
     return package.loaded._metric_upstream_latency
 end
 
+-- Per-client-IP request counter with BOUNDED cardinality. Labelling every
+-- address lets a botnet (or simply many users) create unbounded series and
+-- fill the metrics dict — taking every other metric down with it. An address
+-- only gets its own series once it exceeds HEAVY_HITTER_RPM requests within
+-- a minute, and at most MAX_TRACKED_IPS addresses do; all other traffic is
+-- counted as ip="other". The DDoS alerts on this metric keep working for
+-- the addresses that matter.
+local HEAVY_HITTER_RPM, MAX_TRACKED_IPS = 60, 500
+
+function _M.count_request_ip(ip, host)
+    local metric = package.loaded._metric_requests_per_ip
+    local window = ngx.shared.metrics_ip_window
+    if not metric or not ip then return end
+    local label = "other"
+    if window then
+        if window:get("tracked:" .. ip) then
+            label = ip
+        else
+            local per_minute = window:incr("rpm:" .. ip, 1, 0, 60)
+            if per_minute and per_minute > HEAVY_HITTER_RPM
+                and (window:incr("tracked_count", 1, 0) or math.huge) <= MAX_TRACKED_IPS then
+                window:set("tracked:" .. ip, true)
+                label = ip
+            end
+        end
+    end
+    metric:inc(1, { label, host })
+end
+
 --- Metric by short name (e.g. "auth_events" → opsapi_auth_events_total), or nil.
 function _M.metric(name)
     return package.loaded["_metric_" .. name]

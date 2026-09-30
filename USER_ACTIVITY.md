@@ -84,6 +84,22 @@ This login can read only the reporting views, which exclude password hashes, tok
 | `opsapi_activity_dropped_total` | `reason` = `buffer_full` / `write_failed` | Anything above zero means activity was lost. See the runbook. |
 | `opsapi_activity_flush_duration_seconds` | — | Batch write latency. |
 
+### Alerts
+
+`sre/prometheus/rules/user-activity.rules.yml`:
+
+- **`OpsapiActivityDropped`** (P3): any entries dropped in 10 minutes.
+- **`OpsapiLoginFailureSpike`** (P2): more than 50 failed sign-ins in 10 minutes.
+- **`OpsapiAuthRateLimiting`** (P3): more than 100 rate-limited auth requests in 10 minutes.
+
+All three are grouped by the Prometheus `namespace` label, so each environment alerts on its own.
+
+### Per-IP request metric
+
+`nginx_http_requests_by_ip_total` used to label every client address. That created one series per visitor, and a botnet could fill the metrics store and take every other metric down with it. It now counts the real client IP (see *Client IP* above), but only for heavy hitters: an address gets its own series once it exceeds 60 requests in a minute, and at most 500 addresses do. All other traffic is counted as `ip="other"`.
+
+The DDoS alerts on this metric keep working for the addresses that matter. Per-user detail is in Postgres.
+
 ## Runbook: activity is being dropped
 
 - **`write_failed`:** the database refused or was unreachable for more than 3 flush cycles (about 6 seconds). Check Postgres health and `[user-activity] write failed` in the OpsAPI logs. Requests are unaffected; only the activity records for that window are missing.
@@ -92,5 +108,5 @@ This login can read only the reporting views, which exclude password hashes, tok
 ## Privacy
 
 - **Personal data.** IP addresses, browser strings and activity histories are personal data under UK GDPR. They're kept for security and service operation, deleted automatically at the end of their retention period, and visible only to platform admins in Grafana. Workspace admins see only their own workspace's activity.
-- **Account deletion.** When a user account is deleted, its `user_login_stats` row goes with it (foreign key cascade). Activity rows reference the user's UUID only and expire with retention.
+- **Account deletion.** Deleting a user row erases that person's `user_activity` and `auth_events`, whichever code path or SQL deleted it (database trigger `trg_users_forget_activity`). Their `user_login_stats` row cascades. Deactivating an account (soft delete) keeps the history until retention.
 - **Privacy policy.** Mention this processing in your privacy policy.

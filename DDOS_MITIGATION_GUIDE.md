@@ -1,5 +1,7 @@
 # DDoS Mitigation & Security Monitoring Guide
 
+> **Note:** `nginx_http_requests_by_ip_total` now has bounded cardinality. An address gets its own `ip` label only after it exceeds 60 requests in a minute, and at most 500 addresses do; everything else is counted as `ip="other"`. It also uses the real client IP behind proxies. The queries below still find heavy hitters. See [USER_ACTIVITY.md](USER_ACTIVITY.md#per-ip-request-metric).
+
 ## Real-time DDoS Detection Queries
 
 ### 1. Identify High-Traffic IPs (Potential DDoS)
