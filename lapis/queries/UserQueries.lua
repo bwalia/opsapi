@@ -8,6 +8,16 @@ local bcrypt = require("bcrypt")
 
 local UserQueries = {}
 
+-- Credential material never leaves this module: the password hash and the
+-- PIN hash (a 4-digit PIN's bcrypt hash is brute-forced in seconds).
+local function strip_secrets(user)
+    if user then
+        user.password = nil
+        user.pin_hash = nil
+    end
+    return user
+end
+
 function UserQueries.create(params)
     local db = require("lapis.db")
     local userData = params
@@ -41,7 +51,7 @@ function UserQueries.create(params)
     local user = Users:create(userData, {
         returning = "*"
     })
-    user.password = nil
+    strip_secrets(user)
 
     -- Add global role (legacy system)
     UserRolesQueries.addRole(user.id, role)
@@ -233,7 +243,7 @@ function UserQueries.show(id)
             user.roles[index]["name"] = roleData.role_name
             user.roles[index]["role_name"] = roleData.role_name
         end
-        user.password = nil
+        strip_secrets(user)
         user.internal_id = user.id
         user.id = user.uuid
         return user, ngx.HTTP_OK
@@ -257,7 +267,7 @@ function UserQueries.showDetailed(id)
         user.roles[index]["name"] = roleData.role_name
         user.roles[index]["role_name"] = roleData.role_name
     end
-    user.password = nil
+    strip_secrets(user)
 
     -- Get namespace memberships
     local memberships = db.query([[
@@ -357,7 +367,7 @@ function UserQueries.createOAuthUser(params)
     local user = Users:create(userData, {
         returning = "*"
     })
-    user.password = nil
+    strip_secrets(user)
     
     -- Add default role
     UserRolesQueries.addRole(user.id, params.role or "buyer")
@@ -408,7 +418,7 @@ function UserQueries.SCIMcreate(params)
     local user = Users:create(userData, {
         returning = "*"
     })
-    user.password = nil
+    strip_secrets(user)
 
     UserRolesQueries.addRole(user.id, role)
     return user
