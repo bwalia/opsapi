@@ -13,6 +13,13 @@ return {
         -- opsapi:modules (make:resource adds entries above this line)
     },
 
+    -- Tables whose changes are published as events (helpdesk.ticket.created /
+    -- updated / deleted) for this and other plugins to subscribe to.
+    publishes = {
+        ticket = "helpdesk_tickets",
+        -- opsapi:publishes (make:resource adds entries above this line)
+    },
+
     -- Dashboard sidebar: each entry opens a generated list/form page for an
     -- sdk.crud resource. icon = a Lucide icon name (see PLUGINS.md).
     menu = {

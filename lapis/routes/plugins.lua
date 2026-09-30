@@ -2,7 +2,9 @@
     Plugin API
 
       GET /api/v2/plugins          platform admins: installed plugins, routes, load failures
-      GET /api/v2/plugins/:code    platform admins: one plugin, plus its migration status
+      GET /api/v2/plugins/:code    platform admins: one plugin, plus its migration + event status
+      POST /api/v2/plugins/:code/events/retry
+                                   platform admins: re-queue the plugin's dead event deliveries
       GET /api/v2/plugins/:code/resources/:resource
                                    namespace members with <module>.read: the
                                    dashboard page schema of an sdk.crud resource
@@ -60,7 +62,23 @@ return function(app)
             pending = array(status.pending),
             drift = array(status.drift),
         }
+        local events = require("helper.plugin-events").stats(m.code)
+        if events then
+            events.subscriptions = array(events.subscriptions)
+            events.publishes = array(events.publishes)
+            events.failures = array(events.failures)
+        end
+        data.events = events
         return { status = 200, json = { success = true, data = data } }
+    end))
+
+    app:post("/api/v2/plugins/:code/events/retry", AuthMiddleware.requireRole("administrative", function(self)
+        local m = ProjectLoader.getByCode(self.params.code)
+        if not m then
+            return { status = 404, json = { success = false, error = "Plugin not found" } }
+        end
+        local requeued = require("helper.plugin-events").retryDead(m.code)
+        return { status = 200, json = { success = true, data = { requeued = requeued } } }
     end))
 
     -- Drives the dashboard's generic plugin page: /dashboard/plugins/<code>/<resource>

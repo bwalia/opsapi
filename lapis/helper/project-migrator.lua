@@ -23,8 +23,9 @@
       never leaves a half-applied migration marked as done
     * one runner at a time across pods/hooks (Postgres advisory lock)
     * a file edited after it was applied is reported (checksum drift)
-    * the plugin's manifest `modules` are added to the RBAC `modules` table
-      and its `menu` entries to the dashboard sidebar (menu_items)
+    * the plugin's manifest `modules` are added to the RBAC `modules` table,
+      its `menu` entries to the dashboard sidebar (menu_items), and its event
+      subscriptions / published tables to helper.plugin-events
     * any failure raises, so the deploy step fails instead of shipping pods
       without their schema
 ]]
@@ -189,12 +190,17 @@ local function sync_menu(manifest)
         .. (#keys > 0 and (" AND key NOT IN (" .. table.concat(keys, ", ") .. ")") or ""))
 end
 
---- Apply the manifest's RBAC modules and sidebar menu to the database.
+--- Apply the manifest to the database: RBAC modules, sidebar menu, and the
+-- events it publishes / subscribes to (then the table triggers that feed them).
 function ProjectMigrator.syncManifest(project_path)
     local manifest = require("helper.project-loader").loadManifest(project_path .. "/project.lua", project_path)
     if not manifest then return end
     sync_modules(manifest)
     sync_menu(manifest)
+    local PluginEvents = require("helper.plugin-events")
+    PluginEvents.ensureSchema()
+    PluginEvents.syncPlugin(manifest)
+    PluginEvents.syncTriggers()
 end
 
 local function run_pending(project_code, project_path)

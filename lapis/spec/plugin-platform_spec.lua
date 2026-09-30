@@ -150,6 +150,46 @@ check("only closed-set fields become filters", table.concat(filters, ",") == "b,
 check("default columns skip text fields", page and table.concat(page.columns, ",") == "a,b,s")
 check("actions follow `only`", page and page.actions.create and not page.actions.update and not page.actions.delete)
 
+print("plugin events")
+local PluginEvents = require("helper.plugin-events")
+local seen_entities, seen_tables, catalog_ok = {}, {}, true
+for _, e in ipairs(PluginEvents.CATALOG) do
+    if seen_entities[e.entity] or seen_tables[e.table] then catalog_ok = false end
+    seen_entities[e.entity], seen_tables[e.table] = true, true
+end
+check("catalog: one entity per table", catalog_ok)
+
+local function events_plugin(files)
+    os.execute("rm -rf " .. tmp .. "/ev && mkdir -p " .. tmp .. "/ev/events")
+    for name, src in pairs(files) do
+        local fh = assert(io.open(tmp .. "/ev/events/" .. name .. ".lua", "w"))
+        fh:write(src)
+        fh:close()
+    end
+    local fh = assert(io.open(tmp .. "/ev/project.lua", "w"))
+    fh:write('return { code = "evp", name = "Ev", publishes = { thing = "evp_things" } }')
+    fh:close()
+    local em = assert(ProjectLoader.loadManifest(tmp .. "/ev/project.lua", tmp .. "/ev"))
+    return PluginEvents.loadSubscribers(em)
+end
+local subs, errs = events_plugin({
+    billing = 'return { ["invoice.updated"] = function() end, ["crm.lead.*"] = function() end }',
+})
+check("subscriber = <code>.<file>", subs["evp.billing"] and subs["evp.billing"]["invoice.updated"] ~= nil)
+check("wildcard subscriptions allowed", subs["evp.billing"] and subs["evp.billing"]["crm.lead.*"] ~= nil)
+check("valid events file has no errors", #errs == 0, errs[1])
+subs, errs = events_plugin({ bad = 'return { ["Invoice Updated"] = function() end }' })
+check("bad event name refused", #errs == 1 and next(subs) == nil)
+subs, errs = events_plugin({ bad = 'return { ["invoice.updated"] = "nope" }' })
+check("non-function handler refused", #errs == 1)
+subs, errs = events_plugin({ bad = 'return 42' })
+check("events file must return a table", #errs == 1)
+check("manifest publishes validated",
+    manifest('return { code = "x", name = "x", publishes = { ["Bad Name"] = "t" } }') == nil)
+check("sdk.emit refuses core events", not pcall(PluginEvents.emit, 1, "invoice.paid", {}))
+check("sdk.emit refuses nested core entities", not pcall(PluginEvents.emit, 1, "crm.lead.hot", {}))
+check("sdk.emit refuses wildcards", not pcall(PluginEvents.emit, 1, "evp.thing.*", {}))
+
 print("bin/opsapi")
 local dir = tmp .. "/plugins"
 local cli = "luajit " .. APP .. "/bin/opsapi"
@@ -177,6 +217,13 @@ check("generated api declares its dashboard page", api_src:find("ui = {", 1, tru
 check("no unfilled template placeholders", not api_src:find("{{", 1, true)
     and not io.open(mig):read("*a"):find("{{", 1, true))
 check("plugin:check passes", succeeded(run("plugin:check")))
+m = ProjectLoader.loadManifest(plugin .. "/project.lua", plugin)
+check("make:resource publishes the table's events", m and m.publishes.ticket == "help_desk_tickets")
+check("make:listener", succeeded(run("make:listener help-desk invoice.updated")))
+check("listener file compiles", loadfile(plugin .. "/events/on_invoice_updated.lua") ~= nil)
+check("listener registers its event",
+    (PluginEvents.loadSubscribers(m))["help_desk.on_invoice_updated"] ~= nil)
+check("make:listener refuses a malformed event", not succeeded(run("make:listener help-desk Invoice")))
 
 os.execute("rm -rf " .. tmp)
 

@@ -153,6 +153,16 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
         end
     end
 
+    -- Tables whose changes this plugin publishes as events:
+    -- { ticket = "helpdesk_tickets" } → helpdesk.ticket.created/updated/deleted
+    manifest.publishes = manifest.publishes or {}
+    for name, table_name in pairs(manifest.publishes) do
+        if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$")
+            or type(table_name) ~= "string" or not table_name:match("^[a-z_][a-z0-9_]*$") then
+            return nil, manifest_path .. ": publishes entries look like ticket = \"helpdesk_tickets\""
+        end
+    end
+
     manifest.path = project_path
     manifest.manifest_path = manifest_path
     manifest.version = manifest.version or "0.1.0"
@@ -356,11 +366,15 @@ function ProjectLoader.getCount()
     return #_registered_list
 end
 
---- Plugins that failed to load (bad manifest, reserved code, route errors).
+--- Plugins that failed to load (bad manifest, reserved code, route errors,
+-- events/*.lua errors).
 -- @return table List of { code, errors = { message, ... } }
 function ProjectLoader.failures()
     local out = {}
     for _, f in ipairs(_failures) do
+        out[#out + 1] = f
+    end
+    for _, f in ipairs(require("helper.plugin-events").failures()) do
         out[#out + 1] = f
     end
     for _, m in ipairs(_registered_list) do

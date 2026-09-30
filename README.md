@@ -240,7 +240,7 @@ The `start.sh` script handles the full setup: environment config, Docker build, 
 
 ## Extending OpsAPI (plugins)
 
-Need an API OpsAPI doesn't have? Write a plugin instead of forking: a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules, plus generated dashboard pages.
+Need an API OpsAPI doesn't have? Write a plugin instead of forking: a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules, plus generated dashboard pages and hooks into core events (invoice paid, lead created, …).
 
 ```bash
 docker exec opsapi opsapi plugin:new helpdesk
@@ -248,6 +248,7 @@ docker exec opsapi opsapi make:resource helpdesk ticket title:string:required st
 docker exec opsapi opsapi migrate && docker restart opsapi
 # → /api/v2/helpdesk/tickets (list/show/create/update/delete, tenant-scoped)
 #   and a Tickets page in the dashboard sidebar (/dashboard/plugins/helpdesk/tickets)
+docker exec opsapi opsapi make:listener helpdesk invoice.updated   # react to core events
 ```
 
 Full guide: [PLUGINS.md](PLUGINS.md). Example: [`projects/helpdesk`](projects/helpdesk).

@@ -1,6 +1,6 @@
 # Extending OpsAPI with plugins
 
-OpsAPI ships many modules: CRM, invoicing, accounting, HR, chat, kanban and more. When you need an API it doesn't have, you don't fork it. You write a **plugin**: a folder of Lua files that OpsAPI loads at startup. It sits next to the built-in modules and gets the same authentication, multi-tenancy, RBAC, migrations and Swagger docs, plus generated pages in the admin dashboard.
+OpsAPI ships many modules: CRM, invoicing, accounting, HR, chat, kanban and more. When you need an API it doesn't have, you don't fork it. You write a **plugin**: a folder of Lua files that OpsAPI loads at startup. It sits next to the built-in modules and gets the same authentication, multi-tenancy, RBAC, migrations and Swagger docs, plus generated pages in the admin dashboard, and it can react to events such as "invoice paid" or "lead created".
 
 ```
 my-plugins/
@@ -9,6 +9,8 @@ my-plugins/
     ├── api/
     │   ├── tickets.lua                      # → /api/v2/helpdesk/tickets
     │   └── stats.lua                        # → /api/v2/helpdesk/stats
+    ├── events/
+    │   └── billing.lua                      # runs when an invoice is paid / a customer is added
     └── migrations/
         └── 20260930120000_create_helpdesk_tickets.lua
 ```
@@ -25,14 +27,15 @@ The same mechanism powers real products built on OpsAPI (for example diy-tax-ret
 4. [Generating a resource](#4-generating-a-resource)
 5. [Writing routes](#5-writing-routes)
 6. [Dashboard pages](#6-dashboard-pages)
-7. [Migrations](#7-migrations)
-8. [Multi-tenancy and RBAC](#8-multi-tenancy-and-rbac)
-9. [Settings and secrets](#9-settings-and-secrets)
-10. [Deploying](#10-deploying)
-11. [Operating plugins](#11-operating-plugins)
-12. [SDK reference](#12-sdk-reference)
-13. [CLI reference](#13-cli-reference)
-14. [Limits and roadmap](#14-limits-and-roadmap)
+7. [Reacting to events](#7-reacting-to-events)
+8. [Migrations](#8-migrations)
+9. [Multi-tenancy and RBAC](#9-multi-tenancy-and-rbac)
+10. [Settings and secrets](#10-settings-and-secrets)
+11. [Deploying](#11-deploying)
+12. [Operating plugins](#12-operating-plugins)
+13. [SDK reference](#13-sdk-reference)
+14. [CLI reference](#14-cli-reference)
+15. [Limits and roadmap](#15-limits-and-roadmap)
 
 ---
 
@@ -45,6 +48,7 @@ The same mechanism powers real products built on OpsAPI (for example diy-tax-ret
   - `sdk.crud` / `sdk.handler` require an active namespace membership and an RBAC permission.
   - `sdk.crud` / `sdk.resource` scope every query to the caller's namespace.
   - Input is whitelisted and type-checked.
+  - Event handlers receive the tenant (`event.namespace_id`) of every event and must scope their writes to it.
 - The loader keeps plugins in their lane:
   - A plugin can't replace a built-in route or use a built-in module's code or URL prefix.
   - A plugin's `before_filter` only runs for its own routes.
@@ -83,7 +87,7 @@ docker exec opsapi opsapi migrate && docker restart opsapi
 
 ### Try it
 
-Log in as a user whose role has the new permission. Admin and owner roles get it automatically, see [§8](#8-multi-tenancy-and-rbac).
+Log in as a user whose role has the new permission. Admin and owner roles get it automatically, see [§9](#9-multi-tenancy-and-rbac).
 
 ```bash
 TOKEN=...   # from POST /auth/login
@@ -124,6 +128,13 @@ return {
         -- opsapi:menu (make:resource adds entries above this line)
     },
 
+    -- Tables whose changes are published as events other plugins can
+    -- subscribe to: helpdesk.ticket.created / updated / deleted (§7).
+    publishes = {
+        ticket = "helpdesk_tickets",
+        -- opsapi:publishes (make:resource adds entries above this line)
+    },
+
     -- api_prefix = "/api/v2/helpdesk",   -- default: /api/v2/<code with hyphens>
 }
 ```
@@ -149,7 +160,7 @@ For `opsapi make:resource helpdesk ticket title:string:required due_on:date` you
 |---|---|
 | `migrations/<timestamp>_create_helpdesk_tickets.lua` | Creates the `helpdesk_tickets` table: `id`, `uuid` (public id), `namespace_id` (FK, cascade), your fields, `created_at` and `updated_at`, and a tenant index. |
 | `api/tickets.lua` | List, show, create, update and delete via `sdk.crud`, plus the `ui` block for its dashboard page. |
-| `project.lua` | The `helpdesk_tickets` RBAC module and a **Tickets** sidebar entry are added. |
+| `project.lua` | The `helpdesk_tickets` RBAC module, a **Tickets** sidebar entry, and `publishes` (events `helpdesk.ticket.*`) are added. |
 
 Field types (validation → column type):
 
@@ -311,7 +322,91 @@ The API stays the security boundary; the page only mirrors what the server allow
 
 ---
 
-## 7. Migrations
+## 7. Reacting to events
+
+Plugins can react when something changes in OpsAPI (an invoice is paid, a lead comes in, a task moves) without touching core code.
+
+```bash
+opsapi events                                      # everything you can subscribe to
+opsapi make:listener helpdesk invoice.updated billing
+```
+
+```lua
+-- projects/helpdesk/events/billing.lua
+local sdk = require("helper.plugin-sdk")
+local tickets = sdk.resource("helpdesk_tickets")
+
+return {
+    ["invoice.updated"] = function(event)
+        local status = event.changes and event.changes.status
+        if not (status and status.to == "paid") then return end
+        local row, code = tickets.create(event.namespace_id, {
+            title = "Thank " .. (event.data.customer_name or "the customer") .. " for paying",
+            status = "open",
+            source_event = event.id,    -- unique index: a redelivery can't open a second ticket
+        })
+        if not row and code ~= 409 then error("could not open ticket") end  -- retried later
+    end,
+}
+```
+
+Run `opsapi migrate`, which registers the subscription and the database trigger, then restart OpsAPI. The full example is [`projects/helpdesk/events`](projects/helpdesk/events).
+
+### Events you can subscribe to
+
+- **Core table events**, `<entity>.created` / `.updated` / `.deleted` (or `<entity>.*` for all three):
+
+  | Area | Entities |
+  |---|---|
+  | Sales | `customer`, `order`, `invoice`, `invoice.payment` |
+  | CRM | `crm.account`, `crm.contact`, `crm.deal`, `crm.lead`, `crm.activity` |
+  | People | `employee`, `timesheet`, `member` (namespace membership) |
+  | Work | `kanban.project`, `kanban.task`, `fs.job`, `fs.visit` |
+
+  Entities whose module isn't enabled in your deployment never fire. `opsapi events` prints the list with each entity's table.
+- **Plugin table events**: every table in a manifest's `publishes` gives `<plugin>.<name>.created` / `.updated` / `.deleted`. `make:resource` adds its table.
+- **Custom events**: `sdk.emit(namespace_id, "helpdesk.ticket.escalated", { ... })` from any plugin code. Name them `<plugin>.<entity>.<action>`; core entity names are reserved.
+
+### The event
+
+| Field | |
+|---|---|
+| `id` | UUID, the same on every retry. Use it to make handlers idempotent. |
+| `name`, `entity` | `"invoice.updated"`, `"invoice"`. |
+| `entity_id` | The row's `uuid` (or `id`). |
+| `namespace_id` | The tenant. **Scope everything you read or write to it.** |
+| `data` | The row after the change (before it, for `*.deleted`); for custom events, what was emitted. NULL columns are absent. |
+| `changes` | `*.updated` only: `{ column = { from = …, to = … } }` for the columns that changed. An update that only touches `updated_at` isn't an event. |
+| `occurred_at`, `attempt` | When it happened; which delivery attempt this is (1, 2, …). |
+
+`data` mirrors the database row, so column names follow the table (see `opsapi events`). Read it defensively; columns can change between OpsAPI releases.
+
+### Delivery guarantees
+
+- **Transactional.** Events are recorded in the same database transaction as the change. A rolled-back change never fires; a committed one always does, whoever made it: the API, the AI assistant, an import, or another service writing to the database.
+- **Background, at least once.** Handlers run in background workers about 2 seconds after the commit, never inside the user's request. If a handler raises an error (or returns `false, "reason"`), the event is retried with backoff (15s, 30s, 1m … up to 1h). After 8 attempts it is marked dead. Events can arrive more than once and in any order, so make handlers idempotent: key on `event.id`, as `projects/helpdesk` does with a unique index.
+- **Isolated.** Each events file is its own subscriber, so a failing handler doesn't hold up the others. Eventing never fails the original write.
+- **Scales out.** Every worker in every pod pulls deliveries, and each delivery is claimed by exactly one of them (`FOR UPDATE SKIP LOCKED`).
+- **No cost when unused.** A table only gets its trigger while some plugin subscribes to its events.
+- **Retention.** Delivered events are purged after 7 days, dead ones after 30.
+
+### Writing good handlers
+
+- Scope every query to `event.namespace_id`.
+- Be idempotent (above), and keep handlers short. Call external services with timeouts (`httpc:set_timeouts(...)`). A delivery that runs longer than 5 minutes is handed to another worker.
+- Read secrets with `sdk.env` (§10).
+- Don't do work when the file loads: `lapis migrate` and `plugin:check` load it too.
+- For your own domain events, prefer table events (`publishes`), which are transactional. Use `sdk.emit` for things that aren't a row change ("escalated", "reminder due").
+
+### Watching and fixing
+
+- `GET /api/v2/plugins/:code` (platform admin) → `events`: subscriptions, published tables, delivery counts (pending / running / done / dead), and recent failures with their last error.
+- `POST /api/v2/plugins/:code/events/retry` re-queues dead deliveries once you've fixed the handler.
+- A broken events file fails `opsapi migrate`, and `/ready` reports it.
+
+---
+
+## 8. Migrations
 
 - Files in `migrations/` run once each, in filename order, when `opsapi migrate` / `lapis migrate` runs. They're tracked per plugin in `project_migrations`.
 - **Each migration runs in a transaction together with its tracking row.** A failure rolls everything back, nothing is marked done, and the migrate command exits non-zero so your deploy stops.
@@ -332,7 +427,7 @@ The API stays the security boundary; the page only mirrors what the server allow
 
 ---
 
-## 8. Multi-tenancy and RBAC
+## 9. Multi-tenancy and RBAC
 
 - Every request carries a **namespace** (tenant), from the `X-Namespace-Id` / `X-Namespace-Slug` header or the login token. Suspended namespaces are refused globally.
 - Each `modules` entry in your manifest is added to OpsAPI's RBAC catalogue on migrate. **On first install, every namespace's `admin` and `owner` roles get `manage` on it.** Other roles get nothing until someone grants it in the dashboard's role editor. Later deploys never re-grant a permission an admin removed.
@@ -342,7 +437,7 @@ The API stays the security boundary; the page only mirrors what the server allow
 
 ---
 
-## 9. Settings and secrets
+## 10. Settings and secrets
 
 nginx hides environment variables from request handlers unless each is declared in `nginx.conf`, which plugins can't edit. So OpsAPI captures every variable named **`PLUGIN_*`** at startup:
 
@@ -359,7 +454,7 @@ Name them `PLUGIN_<CODE>_<SETTING>`. These are deployment-wide. A setting that d
 
 ---
 
-## 10. Deploying
+## 11. Deploying
 
 ### Production image (recommended)
 
@@ -385,12 +480,13 @@ RUN opsapi plugin:check             # fail the build on a broken plugin
 
 ---
 
-## 11. Operating plugins
+## 12. Operating plugins
 
 | | |
 |---|---|
 | `GET /api/v2/plugins` | Platform admins. Every plugin, its routes, status, and load failures. |
-| `GET /api/v2/plugins/:code` | The above plus migration status: executed, pending and drift. |
+| `GET /api/v2/plugins/:code` | The above plus migration status (executed, pending, drift) and events (subscriptions, delivery counts, recent failures). |
+| `POST /api/v2/plugins/:code/events/retry` | Re-queue the plugin's dead event deliveries. |
 | `GET /ready` | 503 with `"Plugin failed to load: <codes>"` while any plugin is broken. |
 | Logs | `[Plugin:<code>] …` lines at startup, and `[ProjectMigrator] …` lines on migrate. |
 
@@ -406,7 +502,7 @@ Each one is listed with its message in `GET /api/v2/plugins`.
 
 ---
 
-## 12. SDK reference
+## 13. SDK reference
 
 `local sdk = require("helper.plugin-sdk")`
 
@@ -420,7 +516,8 @@ Each one is listed with its message in `GET /api/v2/plugins`.
 | `sdk.page(params)` | `page, per_page, offset` (`per_page` clamped to 1..100). |
 | `sdk.namespace_id(self)` / `sdk.user(self)` | Caller's namespace id / user. |
 | `sdk.can(self, module, action)` | Boolean permission check. |
-| `sdk.env(name, default)` | A `PLUGIN_*` setting (§9). |
+| `sdk.env(name, default)` | A `PLUGIN_*` setting (§10). |
+| `sdk.emit(namespace_id, name, data)` | Publish a custom event (§7). Returns the number of deliveries queued (0 when nobody listens). |
 | `sdk.ok(data, meta)` / `sdk.created(data)` | 200 / 201 in the `{ success, data, meta }` envelope. |
 | `sdk.error(status, message, details)` / `sdk.not_found(what)` | Error envelope `{ success = false, error, details }`. |
 | `sdk.array(t)` | Marks a list so an empty one encodes as `[]`, not `{}`. |
@@ -439,24 +536,26 @@ Resource methods (the first argument is always the caller's namespace id):
 
 ---
 
-## 13. CLI reference
+## 14. CLI reference
 
 `opsapi` is on the `PATH` in the image. In the repo it's `lapis/bin/opsapi`.
 
 | Command | |
 |---|---|
 | `opsapi plugin:new <name>` | Scaffold `<dir>/<name>/`. |
-| `opsapi make:resource <plugin> <resource> <field:type[:required]>...` | Migration, CRUD API, RBAC module and dashboard page (§4, §6). |
-| `opsapi plugin:check` | Validate every manifest and the Lua syntax of every file. Exit 1 on problems; use it in CI. |
+| `opsapi make:resource <plugin> <resource> <field:type[:required]>...` | Migration, CRUD API, RBAC module, dashboard page and published events (§4, §6, §7). |
+| `opsapi make:listener <plugin> <event> [file]` | `events/<file>.lua` with a handler for `<event>` (§7). |
+| `opsapi events` | List the events you can subscribe to: core tables and every plugin's `publishes`. |
+| `opsapi plugin:check` | Validate every manifest, events file and the Lua syntax of every file. Exit 1 on problems; warns about events nothing publishes. Use it in CI. |
 | `opsapi migrate` | `lapis migrate`: core, then plugins. |
 
 Plugins directory: `--dir <path>`, else `$OPSAPI_PROJECTS_DIR`, else `/app/projects`.
 
 ---
 
-## 14. Limits and roadmap
+## 15. Limits and roadmap
 
 - **Code changes need a restart.** OpsAPI caches compiled Lua per worker (`lua_code_cache on`), so restart the container or roll the deployment after changing a plugin.
 - **Dashboard pages are generic.** Plugins get list/form pages for their `sdk.crud` resources (§6), not custom screens. Build anything else in your own frontend against the plugin's API.
-- **No event hooks yet.** A plugin can't yet react to core events (e.g. "invoice paid"). For now, poll or call your plugin from your own frontend.
+- **Events are table-level.** Core events are row changes (`invoice.updated` with `changes`), not business verbs; derive "paid" from `changes.status`. The payload is the database row, not the API's JSON shape.
 - Built-in modules (in `lapis/routes`) follow the same layering. See `CLAUDE.md` if you're contributing to OpsAPI itself rather than extending it.

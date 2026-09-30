@@ -171,6 +171,18 @@ function sdk.env(name, default)
     return value
 end
 
+-- ---------------------------------------------------------------------------
+-- Events (see helper/plugin-events.lua)
+-- ---------------------------------------------------------------------------
+
+--- Publish a custom event, e.g. sdk.emit(ns, "helpdesk.ticket.escalated",
+-- { uuid = ticket.uuid }). Subscribers get it like any other event. Name it
+-- <plugin>.<entity>.<action>; core entity names are reserved.
+-- @return number of deliveries queued (0 when nobody listens)
+function sdk.emit(namespace_id, name, data)
+    return require("helper.plugin-events").emit(namespace_id, name, data)
+end
+
 --- page, per_page and SQL offset from ?page=&per_page= (clamped, 1..100).
 function sdk.page(params)
     local Global = require("helper.global")
