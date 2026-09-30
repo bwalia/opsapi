@@ -23,6 +23,7 @@ import type {
   NamespacePermissions,
 } from '@/types';
 import { menuService } from '@/services/menu.service';
+import { useNamespaceStore } from '@/store/namespace.store';
 
 // Cache duration: 5 minutes (menus don't change frequently)
 const CACHE_DURATION_MS = 5 * 60 * 1000;
@@ -197,6 +198,18 @@ export const useMenuStore = create<MenuStore>()(
               isLoading: false,
               error: null,
             });
+
+            // The menu carries the caller's CURRENT permissions. Page guards read
+            // the namespace store, which otherwise keeps what it got at sign-in /
+            // namespace switch — so a role change or a newly deployed module would
+            // show in the sidebar but be refused by the page until re-login.
+            const ns = useNamespaceStore.getState();
+            if (response?.permissions && response.namespace?.uuid === ns.currentNamespace?.uuid) {
+              useNamespaceStore.setState({
+                namespacePermissions: response.permissions,
+                isNamespaceOwner: Boolean(response.namespace.is_owner),
+              });
+            }
           } catch (fetchError) {
             const errorMessage = getErrorMessage(fetchError);
             set({
