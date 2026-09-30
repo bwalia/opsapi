@@ -20,12 +20,18 @@ return function(app)
             description = { type = "text" },
             status = { type = "string", required = true, enum = { "open", "pending", "closed" } },
             priority = { type = "integer", min = 1, max = 5 },
-            requester_email = { type = "email" },
-            due_on = { type = "date" },
+            requester_email = { type = "email", label = "Requester" },
+            due_on = { type = "date", label = "Due" },
             resolved = { type = "boolean" },
         },
         searchable = { "title", "description", "status", "requester_email" },
         filterable = { "title", "status", "priority", "requester_email", "due_on", "resolved" },
         sortable = { "title", "status", "priority", "requester_email", "due_on", "resolved", "created_at", "updated_at" },
+        -- Dashboard page (/dashboard/plugins/helpdesk/tickets): title, table columns, form order
+        ui = {
+            label = "Tickets",
+            columns = { "title", "status", "priority", "requester_email", "due_on" },
+            form = { "title", "status", "priority", "requester_email", "due_on", "resolved", "description" },
+        },
     })
 end

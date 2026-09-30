@@ -1,6 +1,6 @@
 # Extending OpsAPI with plugins
 
-OpsAPI ships many modules: CRM, invoicing, accounting, HR, chat, kanban and more. When you need an API it doesn't have, you don't fork it. You write a **plugin**: a folder of Lua files that OpsAPI loads at startup. It sits next to the built-in modules and gets the same authentication, multi-tenancy, RBAC, migrations and Swagger docs.
+OpsAPI ships many modules: CRM, invoicing, accounting, HR, chat, kanban and more. When you need an API it doesn't have, you don't fork it. You write a **plugin**: a folder of Lua files that OpsAPI loads at startup. It sits next to the built-in modules and gets the same authentication, multi-tenancy, RBAC, migrations and Swagger docs, plus generated pages in the admin dashboard.
 
 ```
 my-plugins/
@@ -24,14 +24,15 @@ The same mechanism powers real products built on OpsAPI (for example diy-tax-ret
 3. [The manifest](#3-the-manifest-projectlua)
 4. [Generating a resource](#4-generating-a-resource)
 5. [Writing routes](#5-writing-routes)
-6. [Migrations](#6-migrations)
-7. [Multi-tenancy and RBAC](#7-multi-tenancy-and-rbac)
-8. [Settings and secrets](#8-settings-and-secrets)
-9. [Deploying](#9-deploying)
-10. [Operating plugins](#10-operating-plugins)
-11. [SDK reference](#11-sdk-reference)
-12. [CLI reference](#12-cli-reference)
-13. [Limits and roadmap](#13-limits-and-roadmap)
+6. [Dashboard pages](#6-dashboard-pages)
+7. [Migrations](#7-migrations)
+8. [Multi-tenancy and RBAC](#8-multi-tenancy-and-rbac)
+9. [Settings and secrets](#9-settings-and-secrets)
+10. [Deploying](#10-deploying)
+11. [Operating plugins](#11-operating-plugins)
+12. [SDK reference](#12-sdk-reference)
+13. [CLI reference](#13-cli-reference)
+14. [Limits and roadmap](#14-limits-and-roadmap)
 
 ---
 
@@ -61,9 +62,11 @@ The same mechanism powers real products built on OpsAPI (for example diy-tax-ret
 docker exec opsapi opsapi plugin:new helpdesk
 docker exec opsapi opsapi make:resource helpdesk ticket \
     title:string:required description:text status:string:required due_on:date
-docker exec opsapi opsapi migrate        # creates the table, registers RBAC module
+docker exec opsapi opsapi migrate        # creates the table, registers RBAC module + sidebar entry
 docker restart opsapi                    # loads the new routes
 ```
+
+Then open the dashboard: **Tickets** is in the sidebar, at `/dashboard/plugins/helpdesk/tickets`.
 
 ### With only the Docker image
 
@@ -80,7 +83,7 @@ docker exec opsapi opsapi migrate && docker restart opsapi
 
 ### Try it
 
-Log in as a user whose role has the new permission. Admin and owner roles get it automatically, see [§7](#7-multi-tenancy-and-rbac).
+Log in as a user whose role has the new permission. Admin and owner roles get it automatically, see [§8](#8-multi-tenancy-and-rbac).
 
 ```bash
 TOKEN=...   # from POST /auth/login
@@ -114,6 +117,13 @@ return {
         -- opsapi:modules (make:resource adds entries above this line)
     },
 
+    -- Dashboard sidebar entries: each opens the generated page of an sdk.crud
+    -- resource (§6).
+    menu = {
+        { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },
+        -- opsapi:menu (make:resource adds entries above this line)
+    },
+
     -- api_prefix = "/api/v2/helpdesk",   -- default: /api/v2/<code with hyphens>
 }
 ```
@@ -123,6 +133,7 @@ Rules enforced at load time:
 - `code` is lowercase letters, digits and `_`, and must not be a built-in module's code (`crm`, `hospital`, …).
 - `api_prefix` must be under `/api/` and must not already be used by OpsAPI or another plugin.
 - A plugin needing a newer `sdk_version` than the running OpsAPI is refused. Upgrade OpsAPI first.
+- Every `menu` entry needs a `label`, a `resource` and a `module` that is one of the plugin's `modules`.
 
 ---
 
@@ -137,8 +148,8 @@ For `opsapi make:resource helpdesk ticket title:string:required due_on:date` you
 | File | What it does |
 |---|---|
 | `migrations/<timestamp>_create_helpdesk_tickets.lua` | Creates the `helpdesk_tickets` table: `id`, `uuid` (public id), `namespace_id` (FK, cascade), your fields, `created_at` and `updated_at`, and a tenant index. |
-| `api/tickets.lua` | List, show, create, update and delete via `sdk.crud`. |
-| `project.lua` | The `helpdesk_tickets` RBAC module entry is added. |
+| `api/tickets.lua` | List, show, create, update and delete via `sdk.crud`, plus the `ui` block for its dashboard page. |
+| `project.lua` | The `helpdesk_tickets` RBAC module and a **Tickets** sidebar entry are added. |
 
 Field types (validation → column type):
 
@@ -249,7 +260,58 @@ return sdk.error(409, "Ticket already closed")
 
 ---
 
-## 6. Migrations
+## 6. Dashboard pages
+
+Every `sdk.crud` resource can have a page in the admin dashboard: a searchable, sortable, filterable table with create, edit and delete forms. The dashboard builds the page at runtime from the resource's definition, so installing or changing a plugin needs **no dashboard rebuild**.
+
+To show a page, list it in the manifest's `menu` (`make:resource` does this) and run `opsapi migrate`:
+
+```lua
+menu = {
+    { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },
+},
+```
+
+| Key | |
+|---|---|
+| `label` | Sidebar text. |
+| `resource` | The `sdk.crud` path without the leading `/`. The page lives at `/dashboard/plugins/<code-with-hyphens>/<resource>`. |
+| `module` | One of the plugin's `modules`. The item only shows to roles holding `<module>.read`, and each namespace can hide it in its menu settings. |
+| `icon` | Optional Lucide icon name (default `Puzzle`). Besides the icons built-in modules use, the dashboard ships: Puzzle, LifeBuoy, Ticket, Inbox, Mail, Bell, Calendar, CalendarDays, CheckSquare, ListTodo, Folder, Archive, Box, Database, Layers, Tag, Bookmark, Star, Flag, Receipt, Wallet, CreditCard, Car, Plane, Camera, Image, Link, Megaphone, Target, TrendingUp, PieChart, Activity, Zap, Award, Gift, Lightbulb, Bug, Code, Server, Cloud, Headphones, Stethoscope, Utensils, Leaf, Hammer, Handshake, Newspaper. Unknown names show a generic icon. |
+| `priority` | Optional sort position. By default plugin items come after the built-in ones. |
+
+Shape the page in `sdk.crud`:
+
+```lua
+sdk.crud(app, "/tickets", {
+    -- ...table, module, searchable, filterable, sortable as in §5.1
+    fields = {
+        requester_email = { type = "email", label = "Requester" },   -- caption in the table and form
+        -- ...
+    },
+    ui = {
+        label = "Tickets",                                        -- page title
+        columns = { "title", "status", "priority", "due_on" },    -- default: the first 5 non-text fields
+        form = { "title", "status", "priority", "due_on", "description" }, -- default: required first, then A–Z
+    },
+})
+```
+
+How the page behaves:
+
+- **Inputs follow the field type**: text box, textarea, number, checkbox, date and date-time pickers, a dropdown for `enum`, and a JSON editor.
+- **Search** appears when `searchable` is set. Each `filterable` field that is an `enum` or `boolean` gets a dropdown filter. `sortable` columns sort when their header is clicked.
+- **Validation errors** from the API show under the field that caused them.
+- **Buttons follow permissions.** New, Edit and Delete only appear when the user holds `<module>.create` / `.update` / `.delete` and the action isn't excluded with `only`. Without update rights, clicking a row opens a read-only view.
+- Users without `<module>.read` see an access notice and no sidebar item. If the plugin is removed from the deployment, its sidebar items disappear.
+
+The API stays the security boundary; the page only mirrors what the server allows. Custom screens (charts, workflows, hand-written routes like `/stats`) aren't generated: build those in your own frontend against the plugin's API.
+
+`opsapi migrate` upserts the menu entries (key `plugin:<code>:<resource>`) and hides entries removed from the manifest. Per-namespace menu customisations are kept.
+
+---
+
+## 7. Migrations
 
 - Files in `migrations/` run once each, in filename order, when `opsapi migrate` / `lapis migrate` runs. They're tracked per plugin in `project_migrations`.
 - **Each migration runs in a transaction together with its tracking row.** A failure rolls everything back, nothing is marked done, and the migrate command exits non-zero so your deploy stops.
@@ -270,7 +332,7 @@ return sdk.error(409, "Ticket already closed")
 
 ---
 
-## 7. Multi-tenancy and RBAC
+## 8. Multi-tenancy and RBAC
 
 - Every request carries a **namespace** (tenant), from the `X-Namespace-Id` / `X-Namespace-Slug` header or the login token. Suspended namespaces are refused globally.
 - Each `modules` entry in your manifest is added to OpsAPI's RBAC catalogue on migrate. **On first install, every namespace's `admin` and `owner` roles get `manage` on it.** Other roles get nothing until someone grants it in the dashboard's role editor. Later deploys never re-grant a permission an admin removed.
@@ -280,7 +342,7 @@ return sdk.error(409, "Ticket already closed")
 
 ---
 
-## 8. Settings and secrets
+## 9. Settings and secrets
 
 nginx hides environment variables from request handlers unless each is declared in `nginx.conf`, which plugins can't edit. So OpsAPI captures every variable named **`PLUGIN_*`** at startup:
 
@@ -297,7 +359,7 @@ Name them `PLUGIN_<CODE>_<SETTING>`. These are deployment-wide. A setting that d
 
 ---
 
-## 9. Deploying
+## 10. Deploying
 
 ### Production image (recommended)
 
@@ -323,7 +385,7 @@ RUN opsapi plugin:check             # fail the build on a broken plugin
 
 ---
 
-## 10. Operating plugins
+## 11. Operating plugins
 
 | | |
 |---|---|
@@ -344,21 +406,21 @@ Each one is listed with its message in `GET /api/v2/plugins`.
 
 ---
 
-## 11. SDK reference
+## 12. SDK reference
 
 `local sdk = require("helper.plugin-sdk")`
 
 | Function | Returns / does |
 |---|---|
-| `sdk.crud(app, path, opts)` | Registers the 5 REST routes (§5.1) and returns the resource. |
+| `sdk.crud(app, path, opts)` | Registers the 5 REST routes (§5.1) and the resource's dashboard page (§6, `opts.ui`), and returns the resource. |
 | `sdk.resource(table, opts)` | Tenant-scoped repository (below). `opts`: `fields`, `searchable`, `filterable`, `sortable`, `key` (default `"uuid"`, needs a DB default), `timestamps` (default `true`: bump `updated_at`). |
 | `sdk.handler(opts, fn)` | Wraps a handler with the namespace and permission checks (§5.2). |
-| `sdk.validate(input, rules, partial)` | `clean` or `nil, { field = message }`. Rules: `type`, `required`, `min`, `max`, `enum`. |
+| `sdk.validate(input, rules, partial)` | `clean` or `nil, { field = message }`. Rules: `type`, `required`, `min`, `max`, `enum` (`label` is used by dashboard pages only). |
 | `sdk.body(self)` | Decoded JSON object, or `nil, message`. |
 | `sdk.page(params)` | `page, per_page, offset` (`per_page` clamped to 1..100). |
 | `sdk.namespace_id(self)` / `sdk.user(self)` | Caller's namespace id / user. |
 | `sdk.can(self, module, action)` | Boolean permission check. |
-| `sdk.env(name, default)` | A `PLUGIN_*` setting (§8). |
+| `sdk.env(name, default)` | A `PLUGIN_*` setting (§9). |
 | `sdk.ok(data, meta)` / `sdk.created(data)` | 200 / 201 in the `{ success, data, meta }` envelope. |
 | `sdk.error(status, message, details)` / `sdk.not_found(what)` | Error envelope `{ success = false, error, details }`. |
 | `sdk.array(t)` | Marks a list so an empty one encodes as `[]`, not `{}`. |
@@ -377,14 +439,14 @@ Resource methods (the first argument is always the caller's namespace id):
 
 ---
 
-## 12. CLI reference
+## 13. CLI reference
 
 `opsapi` is on the `PATH` in the image. In the repo it's `lapis/bin/opsapi`.
 
 | Command | |
 |---|---|
 | `opsapi plugin:new <name>` | Scaffold `<dir>/<name>/`. |
-| `opsapi make:resource <plugin> <resource> <field:type[:required]>...` | Migration, CRUD API and RBAC module (§4). |
+| `opsapi make:resource <plugin> <resource> <field:type[:required]>...` | Migration, CRUD API, RBAC module and dashboard page (§4, §6). |
 | `opsapi plugin:check` | Validate every manifest and the Lua syntax of every file. Exit 1 on problems; use it in CI. |
 | `opsapi migrate` | `lapis migrate`: core, then plugins. |
 
@@ -392,9 +454,9 @@ Plugins directory: `--dir <path>`, else `$OPSAPI_PROJECTS_DIR`, else `/app/proje
 
 ---
 
-## 13. Limits and roadmap
+## 14. Limits and roadmap
 
 - **Code changes need a restart.** OpsAPI caches compiled Lua per worker (`lua_code_cache on`), so restart the container or roll the deployment after changing a plugin.
-- **No dashboard pages yet.** Plugins add APIs, not screens in the admin dashboard. Build your own frontend against the API, or watch for plugin menu/page support.
+- **Dashboard pages are generic.** Plugins get list/form pages for their `sdk.crud` resources (§6), not custom screens. Build anything else in your own frontend against the plugin's API.
 - **No event hooks yet.** A plugin can't yet react to core events (e.g. "invoice paid"). For now, poll or call your plugin from your own frontend.
 - Built-in modules (in `lapis/routes`) follow the same layering. See `CLAUDE.md` if you're contributing to OpsAPI itself rather than extending it.

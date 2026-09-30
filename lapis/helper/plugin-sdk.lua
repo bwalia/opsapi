@@ -411,6 +411,74 @@ function sdk.resource(tbl, opts)
     return R
 end
 
+local function humanize(name)
+    local words = name:gsub("_", " ")
+    return (words:gsub("^%l", string.upper))
+end
+
+-- The dashboard page for a crud resource (served by GET
+-- /api/v2/plugins/:code/resources/:key): fields in form order, table columns,
+-- filters and which actions exist. Built once at boot.
+local function page_schema(path, opts, only)
+    local fields, ui = opts.fields or {}, opts.ui or {}
+    local order, seen = {}, {}
+    for _, name in ipairs(ui.form or {}) do
+        if fields[name] and not seen[name] then
+            order[#order + 1], seen[name] = name, true
+        end
+    end
+    local rest = {}
+    for name in pairs(fields) do
+        if not seen[name] then rest[#rest + 1] = name end
+    end
+    table.sort(rest, function(a, b) -- required first, then by name
+        local ra, rb = fields[a].required and 1 or 0, fields[b].required and 1 or 0
+        if ra ~= rb then return ra > rb end
+        return a < b
+    end)
+    for _, name in ipairs(rest) do order[#order + 1] = name end
+
+    local list, filters, columns = {}, {}, {}
+    local filterable = set(opts.filterable)
+    for _, name in ipairs(order) do
+        local rule = fields[name]
+        local field = {
+            name = name, label = rule.label or humanize(name), type = rule.type or "string",
+            required = rule.required == true, enum = rule.enum, min = rule.min, max = rule.max,
+        }
+        list[#list + 1] = field
+        -- Only closed-set fields get a filter dropdown in the UI.
+        if filterable[name] and (field.enum or field.type == "boolean") then
+            filters[#filters + 1] = field
+        end
+    end
+    for _, name in ipairs(ui.columns or {}) do
+        if fields[name] then columns[#columns + 1] = name end
+    end
+    if #columns == 0 then
+        for _, f in ipairs(list) do
+            if #columns < 5 and f.type ~= "text" and f.type ~= "json" then columns[#columns + 1] = f.name end
+        end
+    end
+
+    local key = path:gsub("^/", ""):gsub("[^%w_%-]", "-")
+    return key, {
+        key = key,
+        label = ui.label or humanize(key:gsub("%-", "_")),
+        module = opts.module,
+        fields = array(list),
+        columns = array(columns),
+        filters = array(filters),
+        searchable = opts.searchable ~= nil and #opts.searchable > 0,
+        sortable = array(opts.sortable or {}),
+        actions = {
+            create = not only or only.create == true,
+            update = not only or only.update == true,
+            delete = not only or only.delete == true,
+        },
+    }
+end
+
 --- Register REST routes for a tenant-scoped table and return its resource:
 --
 --   GET    path        list  ?page=&per_page=&q=&sort=&order=&<filterable>=
@@ -422,6 +490,11 @@ end
 -- opts: table, module (RBAC module; routes need module.read/create/update/
 -- delete), fields, searchable, filterable, sortable, key, timestamps, and
 -- only = { "list", "show", "create", "update", "delete" } to register a subset.
+--
+-- Each crud resource also gets a dashboard page (list + create/edit form) at
+-- /dashboard/plugins/<plugin>/<path> once the manifest's `menu` links to it.
+-- opts.ui = { label = "Tickets", columns = { ... }, form = { ... } } sets the
+-- title, table columns and form field order; a field's `label` its caption.
 function sdk.crud(app, path, opts)
     assert(opts and opts.table, "sdk.crud: opts.table is required")
     assert(opts.module, "sdk.crud: opts.module (the RBAC module guarding these routes) is required")
@@ -429,6 +502,11 @@ function sdk.crud(app, path, opts)
     local R = sdk.resource(opts.table, opts)
     local fields = opts.fields or {}
     local only = opts.only and set(opts.only)
+    if app.plugin then
+        local key, page = page_schema(path, opts, only)
+        page.api_path = app.plugin.api_prefix .. path
+        app.plugin.resources[key] = page
+    end
     local function on(action) return not only or only[action] end
     local function guard(action, fn)
         return sdk.handler({ permission = opts.module .. "." .. action }, fn)

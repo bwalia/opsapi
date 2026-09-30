@@ -88,6 +88,14 @@ check("bad code refused", manifest('return { code = "9x", name = "x" }') == nil)
 check("newer SDK refused", manifest('return { code = "x", name = "x", sdk_version = 99 }') == nil)
 check("module without machine_name refused", manifest('return { code = "x", name = "x", modules = { { name = "y" } } }') == nil)
 check("api_prefix outside /api refused", manifest('return { code = "x", name = "x", api_prefix = "/" }') == nil)
+check("menu entry needs a declared module",
+    manifest('return { code = "x", name = "x", menu = { { label = "L", resource = "r" } } }') == nil)
+check("menu entry module must be one of the plugin's",
+    manifest('return { code = "x", name = "x", modules = { { machine_name = "x_a" } }, '
+        .. 'menu = { { label = "L", resource = "r", module = "crm_accounts" } } }') == nil)
+check("valid menu entry loads",
+    manifest('return { code = "x", name = "x", modules = { { machine_name = "x_a" } }, '
+        .. 'menu = { { label = "L", resource = "r", module = "x_a" } } }') ~= nil)
 check("built-in feature code reserved", ProjectLoader.isReservedCode("crm"))
 check("fresh code not reserved", not ProjectLoader.isReservedCode("helpdesk"))
 
@@ -113,6 +121,35 @@ ProjectLoader.loadRoutes(app, m)
 check("squatting a core prefix is refused", m.errors[1] and m.errors[1]:find("already used"), m.errors[1])
 check("... and nothing was registered", #m.routes == 0)
 
+print("sdk.crud: dashboard page schema")
+m = manifest('return { code = "pages", name = "Pages" }')
+proxy = ProjectLoader.createPrefixedApp(app, "/api/v2/pages", m)
+sdk.crud(proxy, "/things", {
+    table = "pages_things",
+    module = "pages_things",
+    fields = {
+        b = { type = "boolean" },
+        a = { type = "string", required = true, label = "Alpha" },
+        z = { type = "text" },
+        s = { enum = { "x", "y" } },
+    },
+    filterable = { "a", "b", "s" },
+    ui = { form = { "z" } },
+    only = { "list", "show", "create" },
+})
+local page = m.resources.things
+check("crud resource recorded on the plugin", page ~= nil)
+local names = {}
+for i, f in ipairs(page and page.fields or {}) do names[i] = f.name end
+check("form order: ui.form, then required, then by name", table.concat(names, ",") == "z,a,b,s", table.concat(names, ","))
+check("field label override", page and page.fields[2].label == "Alpha")
+check("api_path includes the plugin prefix", page and page.api_path == "/api/v2/pages/things")
+local filters = {}
+for i, f in ipairs(page and page.filters or {}) do filters[i] = f.name end
+check("only closed-set fields become filters", table.concat(filters, ",") == "b,s", table.concat(filters, ","))
+check("default columns skip text fields", page and table.concat(page.columns, ",") == "a,b,s")
+check("actions follow `only`", page and page.actions.create and not page.actions.update and not page.actions.delete)
+
 print("bin/opsapi")
 local dir = tmp .. "/plugins"
 local cli = "luajit " .. APP .. "/bin/opsapi"
@@ -133,6 +170,12 @@ h:close()
 check("generated migration compiles", mig and loadfile(mig) ~= nil)
 m = ProjectLoader.loadManifest(plugin .. "/project.lua", plugin)
 check("RBAC module added to manifest", m and m.modules[1] and m.modules[1].machine_name == "help_desk_tickets")
+check("menu entry added to manifest", m and m.menu[1] and m.menu[1].resource == "tickets"
+    and m.menu[1].module == "help_desk_tickets")
+local api_src = io.open(plugin .. "/api/tickets.lua"):read("*a")
+check("generated api declares its dashboard page", api_src:find("ui = {", 1, true) ~= nil)
+check("no unfilled template placeholders", not api_src:find("{{", 1, true)
+    and not io.open(mig):read("*a"):find("{{", 1, true))
 check("plugin:check passes", succeeded(run("plugin:check")))
 
 os.execute("rm -rf " .. tmp)

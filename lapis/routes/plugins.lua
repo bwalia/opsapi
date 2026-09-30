@@ -1,14 +1,18 @@
 --[[
-    Plugin admin API (platform admins only)
+    Plugin API
 
-      GET /api/v2/plugins          installed plugins, their routes, load failures
-      GET /api/v2/plugins/:code    one plugin, plus its migration status
+      GET /api/v2/plugins          platform admins: installed plugins, routes, load failures
+      GET /api/v2/plugins/:code    platform admins: one plugin, plus its migration status
+      GET /api/v2/plugins/:code/resources/:resource
+                                   namespace members with <module>.read: the
+                                   dashboard page schema of an sdk.crud resource
 
     Plugins are loaded by helper.project-loader; see PLUGINS.md.
 ]]
 
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
+local NamespaceMiddleware = require("middleware.namespace")
 local ProjectLoader = require("helper.project-loader")
 
 local function array(t)
@@ -55,6 +59,30 @@ return function(app)
             executed = array(status.executed),
             pending = array(status.pending),
             drift = array(status.drift),
+        }
+        return { status = 200, json = { success = true, data = data } }
+    end))
+
+    -- Drives the dashboard's generic plugin page: /dashboard/plugins/<code>/<resource>
+    app:get("/api/v2/plugins/:code/resources/:resource", NamespaceMiddleware.requireNamespace(function(self)
+        local m = ProjectLoader.getByCode(self.params.code)
+        local page = m and m.resources[self.params.resource]
+        if not page then
+            return { status = 404, json = { success = false, error = "Page not found" } }
+        end
+        local function can(action)
+            return NamespaceMiddleware.hasPermission(self, page.module, action)
+        end
+        if not can("read") then
+            return { status = 403, json = { success = false, error = "Permission denied" } }
+        end
+
+        local data = { plugin = { code = m.code, name = m.name } }
+        for k, v in pairs(page) do data[k] = v end
+        data.can = {
+            create = page.actions.create and can("create"),
+            update = page.actions.update and can("update"),
+            delete = page.actions.delete and can("delete"),
         }
         return { status = 200, json = { success = true, data = data } }
     end))

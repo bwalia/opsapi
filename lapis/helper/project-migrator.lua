@@ -24,6 +24,7 @@
     * one runner at a time across pods/hooks (Postgres advisory lock)
     * a file edited after it was applied is reported (checksum drift)
     * the plugin's manifest `modules` are added to the RBAC `modules` table
+      and its `menu` entries to the dashboard sidebar (menu_items)
     * any failure raises, so the deploy step fails instead of shipping pods
       without their schema
 ]]
@@ -147,9 +148,7 @@ end
 -- them, giving admin/owner roles "manage" the first time a module appears
 -- (as ModuleQueries.create does). Existing modules are left alone, so a
 -- permission an admin revoked isn't re-granted on the next deploy.
-function ProjectMigrator.syncModules(project_path)
-    local manifest = require("helper.project-loader").loadManifest(project_path .. "/project.lua", project_path)
-    if not manifest then return end
+local function sync_modules(manifest)
     for _, m in ipairs(manifest.modules) do
         local inserted = db.query([[
             INSERT INTO modules (uuid, machine_name, name, description, category, priority,
@@ -166,6 +165,38 @@ function ProjectMigrator.syncModules(project_path)
     end
 end
 
+--- Upsert the manifest's sidebar entries into menu_items (key
+-- plugin:<code>:<resource>) and hide ones the manifest no longer lists.
+-- Per-namespace overrides live in namespace_menu_config and are untouched.
+local function sync_menu(manifest)
+    local prefix = "plugin:" .. manifest.code .. ":"
+    local slug = manifest.code:gsub("_", "-")
+    local keys = {}
+    for i, e in ipairs(manifest.menu) do
+        local key = prefix .. e.resource
+        db.query([[
+            INSERT INTO menu_items (uuid, key, name, icon, path, module, required_action, priority,
+                                    is_active, is_admin_only, always_show, settings, created_at, updated_at)
+            VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, 'read', ?, true, false, false, '{}', NOW(), NOW())
+            ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, icon = EXCLUDED.icon, path = EXCLUDED.path,
+                module = EXCLUDED.module, priority = EXCLUDED.priority, is_active = true, updated_at = NOW()
+        ]], key, e.label, e.icon or "Puzzle", "/dashboard/plugins/" .. slug .. "/" .. e.resource,
+            e.module, tonumber(e.priority) or 90 + i)
+        keys[#keys + 1] = db.escape_literal(key)
+    end
+    db.query("UPDATE menu_items SET is_active = false, updated_at = NOW() WHERE is_active AND left(key, "
+        .. #prefix .. ") = " .. db.escape_literal(prefix)
+        .. (#keys > 0 and (" AND key NOT IN (" .. table.concat(keys, ", ") .. ")") or ""))
+end
+
+--- Apply the manifest's RBAC modules and sidebar menu to the database.
+function ProjectMigrator.syncManifest(project_path)
+    local manifest = require("helper.project-loader").loadManifest(project_path .. "/project.lua", project_path)
+    if not manifest then return end
+    sync_modules(manifest)
+    sync_menu(manifest)
+end
+
 local function run_pending(project_code, project_path)
     local executed = ProjectMigrator.getExecuted(project_code)
     local count = 0
@@ -180,7 +211,7 @@ local function run_pending(project_code, project_path)
                 .. " was edited after it was applied — add a new migration instead")
         end
     end
-    ProjectMigrator.syncModules(project_path)
+    ProjectMigrator.syncManifest(project_path)
     return count
 end
 

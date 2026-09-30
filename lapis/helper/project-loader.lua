@@ -131,10 +131,25 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     end
 
     manifest.modules = manifest.modules or {}
+    local declared = {}
     for _, m in ipairs(manifest.modules) do
         if type(m) ~= "table" or type(m.machine_name) ~= "string"
             or not m.machine_name:match("^[a-z][a-z0-9_]*$") then
             return nil, manifest_path .. ": every modules entry needs a machine_name (lowercase letters, digits, _)"
+        end
+        declared[m.machine_name] = true
+    end
+
+    -- Dashboard sidebar entries, each opening the generated page of one
+    -- sdk.crud resource (/dashboard/plugins/<plugin>/<resource>).
+    manifest.menu = manifest.menu or {}
+    for _, e in ipairs(manifest.menu) do
+        if type(e) ~= "table" or type(e.label) ~= "string"
+            or type(e.resource) ~= "string" or not e.resource:match("^[%w_%-]+$") then
+            return nil, manifest_path .. ": every menu entry needs a label and a resource (the sdk.crud path without /)"
+        end
+        if not declared[e.module] then
+            return nil, manifest_path .. ": menu entry '" .. e.label .. "' needs module = one of the plugin's modules"
         end
     end
 
@@ -152,6 +167,7 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     end
     manifest.routes = {}
     manifest.errors = {}
+    manifest.resources = {} -- filled by sdk.crud: key -> dashboard page schema
 
     return manifest, nil
 end
@@ -195,7 +211,7 @@ local VERBS = { "get", "post", "put", "delete", "match" }
 -- existing routes, records what it registered (manifest.routes — used by
 -- /api/v2/plugins and the OpenAPI spec) and injects self.project.
 function ProjectLoader.createPrefixedApp(app, prefix, manifest)
-    local proxy = setmetatable({}, { __index = app })
+    local proxy = setmetatable({ plugin = manifest }, { __index = app })
 
     for _, verb in ipairs(VERBS) do
         proxy[verb] = function(_, a, b, c)
@@ -282,6 +298,13 @@ function ProjectLoader.loadRoutes(app, manifest)
                 table.insert(manifest.errors, file .. ": " .. tostring(mod))
                 log_err("[Plugin:", manifest.code, "] ", file, ": ", tostring(mod))
             end
+        end
+    end
+
+    for _, e in ipairs(manifest.menu) do
+        if not manifest.resources[e.resource] then
+            log_err("[Plugin:", manifest.code, "] menu entry '", e.label, "' links to resource '", e.resource,
+                "', but no sdk.crud registers it — the page will say it isn't available")
         end
     end
 

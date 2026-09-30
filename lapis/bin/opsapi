@@ -93,7 +93,7 @@ end
 
 -- Fill {{name}} placeholders.
 local function render(tpl, vars)
-    return (tpl:gsub("{{(%w+)}}", function(k)
+    return (tpl:gsub("{{([%w_]+)}}", function(k)
         return assert(vars[k], "template variable " .. k)
     end))
 end
@@ -136,6 +136,12 @@ return {
     -- them to other roles from the dashboard's role settings.
     modules = {
         -- opsapi:modules (make:resource adds entries above this line)
+    },
+
+    -- Dashboard sidebar: each entry opens a generated list/form page for an
+    -- sdk.crud resource. icon = a Lucide icon name (see PLUGINS.md).
+    menu = {
+        -- opsapi:menu (make:resource adds entries above this line)
     },
 }
 ]==]
@@ -183,6 +189,12 @@ return function(app)
         searchable = { {{searchable}} },
         filterable = { {{filterable}} },
         sortable = { {{sortable}} },
+        -- Dashboard page (/dashboard/plugins/{{slug}}{{route}}): title, table columns, form order
+        ui = {
+            label = "{{title}}",
+            columns = { {{cols}} },
+            form = { {{form}} },
+        },
     })
 end
 ]==]
@@ -233,7 +245,7 @@ local function cmd_resource(root, plugin, resource, specs)
     local route = "/" .. name:gsub("_", "-")
 
     local columns, rules, searchable, filterable = {}, {}, {}, {}
-    local sortable = {}
+    local sortable, form, columns_ui = {}, {}, {}
     for _, spec in ipairs(specs) do
         local field, ftype, flag = spec:match("^([%w_]+):(%a+):?(%a*)$")
         if not field then die("bad field '" .. spec .. "' — use name:type or name:type:required") end
@@ -245,6 +257,8 @@ local function cmd_resource(root, plugin, resource, specs)
 
         table.insert(columns, ("            %s %s%s,"):format(field, FIELD_TYPES[ftype], required and " NOT NULL" or ""))
         table.insert(rules, ('            %s = { type = "%s"%s },'):format(field, ftype, required and ", required = true" or ""))
+        table.insert(form, field)
+        if #columns_ui < 5 and ftype ~= "text" and ftype ~= "json" then table.insert(columns_ui, field) end
         if ftype == "string" or ftype == "text" or ftype == "email" then table.insert(searchable, field) end
         if ftype ~= "text" and ftype ~= "json" then
             table.insert(filterable, field)
@@ -258,6 +272,7 @@ local function cmd_resource(root, plugin, resource, specs)
         table = tbl, module = tbl, route = route, prefix = manifest.api_prefix, title = title(name),
         columns = table.concat(columns, "\n"), fields = table.concat(rules, "\n"),
         searchable = lua_list(searchable), filterable = lua_list(filterable), sortable = lua_list(sortable),
+        form = lua_list(form), cols = lua_list(columns_ui), slug = (manifest.code:gsub("_", "-")),
     }
 
     local api_path = dir .. "/api/" .. name .. ".lua"
@@ -269,24 +284,33 @@ local function cmd_resource(root, plugin, resource, specs)
     print("  created " .. migration_path)
     print("  created " .. api_path)
 
-    -- Register the RBAC module in the manifest.
+    -- Register the RBAC module and the sidebar entry in the manifest.
     local src = read(manifest_path)
-    if src:find('machine_name = "' .. tbl .. '"', 1, true) then
-        print("  project.lua already declares module " .. tbl)
-    else
-        local entry = ('        { machine_name = "%s", name = "%s", category = "%s" },\n'):format(tbl, title(name), manifest.name)
-        local at = src:find("\n[ \t]*%-%- opsapi:modules")
+    local function add(marker, already, entry, what)
+        if src:find(already, 1, true) then
+            print("  project.lua already has " .. what)
+            return
+        end
+        local at = src:find("\n[ \t]*%-%- opsapi:" .. marker)
         if at then
-            write(manifest_path, src:sub(1, at) .. entry .. src:sub(at + 1), true)
-            print("  added RBAC module " .. tbl .. " to project.lua")
+            src = src:sub(1, at) .. entry .. src:sub(at + 1)
+            print("  added " .. what .. " to project.lua")
         else
-            print("  ! add this to the modules list in project.lua:")
+            print("  ! add " .. what .. " to the " .. marker .. " list in project.lua:")
             print(entry)
         end
     end
+    add("modules", 'machine_name = "' .. tbl .. '"',
+        ('        { machine_name = "%s", name = "%s", category = "%s" },\n'):format(tbl, title(name), manifest.name),
+        "RBAC module " .. tbl)
+    add("menu", 'resource = "' .. route:sub(2) .. '"',
+        ('        { label = "%s", resource = "%s", module = "%s", icon = "Puzzle" },\n'):format(title(name), route:sub(2), tbl),
+        "menu entry " .. title(name))
+    write(manifest_path, src, true)
 
     print("")
-    print("Next: run `opsapi migrate`, restart OpsAPI, then call " .. manifest.api_prefix .. route)
+    print("Next: run `opsapi migrate`, restart OpsAPI, then open /dashboard/plugins/"
+        .. vars.slug .. route .. " (API: " .. manifest.api_prefix .. route .. ")")
 end
 
 local function cmd_check(root)
