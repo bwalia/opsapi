@@ -177,8 +177,7 @@ return function(app)
             end)
 
             if not success then
-                ngx.log(ngx.ERR, "Error accepting order: " .. tostring(result))
-                return { json = { error = "Failed to accept order: " .. tostring(result) }, status = 500 }
+                return require("lib.errors").fromException(self, result)
             end
 
             return { json = { success = true, data = result } }
@@ -347,8 +346,7 @@ return function(app)
             end)
 
             if not success then
-                ngx.log(ngx.ERR, "Error updating delivery status: " .. tostring(result))
-                return { json = { error = "Failed to update status: " .. tostring(result) }, status = 500 }
+                return require("lib.errors").fromException(self, result)
             end
 
             return { json = { success = true, data = result } }

@@ -65,6 +65,17 @@ check("a 500 never echoes the raw error (SQL + user data)", leaked.status == 500
 local input = Errors.legacy(500, "Failed", 'q\nERROR: null value in column "email" of relation "c" violates not-null constraint')
 check("an input error becomes 4xx, error still a string", input.status == 422 and type(input.json.error) == "string")
 check("4xx details written by the route are kept", Errors.legacy(400, "Bad", "name is required").json.details == "name is required")
+local echoing = {}
+for _, f in ipairs(files("lapis/routes")) do
+    local n = 0
+    for line in io.lines(f) do
+        n = n + 1
+        if line:find("status = 50%d") and line:find("json", 1, true) and line:find("%.%. *tostring%(") then
+            echoing[#echoing + 1] = f .. ":" .. n
+        end
+    end
+end
+check("no route concatenates a raw error into a 5xx body", #echoing == 0, table.concat(echoing, ", "))
 
 -- ── exact role names (no substring "admin") ────────────────────────────────
 print("AdminCheck.hasAnyRole")
