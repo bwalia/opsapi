@@ -359,6 +359,7 @@ local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATU
 -- install for every deployment, including those without field service.
 local employees_core_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.employees") or {}
 local outbound_webhooks_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.outbound-webhooks") or {}
+local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.audit-trail") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
@@ -2429,6 +2430,9 @@ local _migrations = {
     -- Workspace (outbound) webhooks — core; rides on the plugin-events outbox
     ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
     ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),
+    -- Audit trail of business-record changes (rides on the same event triggers)
+    ['zzwh3_audit_trail'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 1),
+    ['zzwh4_audit_forget_user'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 2),
     -- User activity & login tracking (lib/user-activity.lua)
     ['zzua1_login_tracking'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 1),
     ['zzua2_user_activity'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 2),

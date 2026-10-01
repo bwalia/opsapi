@@ -402,6 +402,10 @@ Run `opsapi migrate`, which registers the subscription and the database trigger,
 
 Tenants can have these events sent to their own URLs without writing code. See [WEBHOOKS.md](WEBHOOKS.md). Each webhook is a subscriber scoped to its workspace, so it shares these guarantees and the retries. Everything a plugin lists in `publishes` is offered to webhooks too.
 
+### Audit trail
+
+Every table in `publishes` and every `sdk.emit` is also recorded in the workspace's audit trail: who changed which record, with the fields before and after. Workspace admins see it under **Activity → Audit trail**. You don't need to write anything for this. Name secret columns so they contain `password`, `secret`, `token`, `api_key` or `private_key`, and they're left out of the trail. See [USER_ACTIVITY.md](USER_ACTIVITY.md#audit-trail-record-changes).
+
 ### Watching and fixing
 
 - `GET /api/v2/plugins/:code` (platform admin) → `events`: subscriptions, published tables, delivery counts (pending / running / done / dead), and recent failures with their last error.

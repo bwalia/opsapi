@@ -88,6 +88,35 @@ export interface ActivityLogParams {
   limit?: number;
 }
 
+/** One record change from the audit trail (who changed which record, and how). */
+export interface AuditChange {
+  cursor: string;
+  occurred_at: string;
+  event: string; // "invoice.updated", "helpdesk.ticket.escalated", ...
+  entity: string; // "invoice", "helpdesk.ticket", ...
+  entity_id?: string;
+  user_uuid?: string;
+  email?: string;
+  name?: string;
+  /** system = automations and background jobs; anonymous = public forms. */
+  via: 'jwt' | 'api_key' | 'anonymous' | 'system';
+  request_id?: string;
+  ip?: string;
+  /** Updates carry only the changed fields; creates have no old_values, deletes no new_values. */
+  old_values?: Record<string, unknown>;
+  new_values?: Record<string, unknown>;
+}
+
+export interface AuditChangeParams {
+  days?: number;
+  user_uuid?: string;
+  entity?: string;
+  entity_id?: string;
+  action?: 'created' | 'updated' | 'deleted';
+  cursor?: string;
+  limit?: number;
+}
+
 const BASE = '/api/v2/namespace/activity';
 
 type Envelope<T, M = undefined> = { data: T; meta: M };
@@ -119,6 +148,20 @@ export const activityService = {
     return {
       data: res.data.data ?? [],
       nextCursor: res.data.meta?.next_cursor,
+    };
+  },
+
+  async changes(
+    params: AuditChangeParams
+  ): Promise<{ data: AuditChange[]; nextCursor?: string; entities?: string[] }> {
+    const res = await apiClient.get<Envelope<AuditChange[], { next_cursor?: string; entities?: string[] }>>(
+      `${BASE}/changes${buildQueryString({ ...params })}`
+    );
+    const entities = res.data.meta?.entities;
+    return {
+      data: res.data.data ?? [],
+      nextCursor: res.data.meta?.next_cursor,
+      entities: Array.isArray(entities) ? entities : undefined,
     };
   },
 };

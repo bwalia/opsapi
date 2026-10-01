@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Workspace activity — who signed in and what they did in this workspace.
+ * Workspace activity — who signed in and what they did in this workspace,
+ * plus the audit trail of record changes (fields before → after).
  * Visible to roles with `activity.read` (owners and admins by default).
  * Sign-in IPs and login history stay with platform admins (Grafana): a login
  * isn't tied to one workspace. See USER_ACTIVITY.md.
@@ -12,6 +13,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  History,
   KeyRound,
   Loader2,
   PencilLine,
@@ -43,19 +45,22 @@ import type {
   ActivityLogParams,
   ActivityMember,
   ActivitySummary,
+  AuditChange,
+  AuditChangeParams,
   MemberPageMeta,
 } from '@/services/activity.service';
 import { cn, extractApiError, formatDateTime, formatNumber, formatRelativeTime } from '@/lib/utils';
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
-type Tab = 'overview' | 'members' | 'log';
+type Tab = 'overview' | 'members' | 'log' | 'changes';
 type MemberRef = { uuid: string; label: string };
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'members', label: 'Members' },
   { id: 'log', label: 'Activity log' },
+  { id: 'changes', label: 'Audit trail' },
 ];
 
 const VERBS: Record<string, { label: string; variant: 'info' | 'success' | 'warning' | 'error' }> = {
@@ -192,6 +197,7 @@ function ActivityContent() {
         {tab === 'overview' && <Overview key={nsKey} onMember={openLog} />}
         {tab === 'members' && <Members key={nsKey} onMember={openLog} />}
         {tab === 'log' && <Log key={nsKey} member={logMember} onMemberChange={setLogMember} />}
+        {tab === 'changes' && <Changes key={nsKey} />}
       </div>
     </div>
   );
@@ -635,21 +641,15 @@ function Log({
   } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [areas, setAreas] = useState<string[]>([]);
-  const [people, setPeople] = useState<MemberRef[]>([]);
+  const memberOptions = useMemberOptions(member);
 
-  // Filter options: areas seen in the window, and the workspace's members.
+  // Filter options: areas seen in the window.
   useEffect(() => {
     activityService
       .summary(days)
       .then((s) => setAreas(s.areas.map((a) => a.area)))
       .catch(() => {});
   }, [days]);
-  useEffect(() => {
-    activityService
-      .members({ sort: 'name', per_page: 100 })
-      .then((r) => setPeople(r.data.map((m) => ({ uuid: m.user_uuid, label: who(m) }))))
-      .catch(() => {});
-  }, []);
 
   const params = useMemo<ActivityLogParams>(
     () => ({
@@ -702,11 +702,6 @@ function Log({
       setLoadingMore(false);
     }
   };
-
-  const memberOptions = useMemo(() => {
-    const list = member && !people.some((p) => p.uuid === member.uuid) ? [member, ...people] : people;
-    return [{ value: '', label: 'All members' }, ...list.map((p) => ({ value: p.uuid, label: p.label }))];
-  }, [people, member]);
 
   const columns: TableColumn<ActivityEntry>[] = [
     {
@@ -855,6 +850,345 @@ function Log({
           isLoading={loading}
           emptyMessage="No activity matches these filters"
           caption="Activity log, newest first"
+        />
+      )}
+
+      {cursor && !loading && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore && <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />}
+            Load more
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "All members" + the workspace's members, for a member filter. */
+function useMemberOptions(member: MemberRef | null) {
+  const [people, setPeople] = useState<MemberRef[]>([]);
+  useEffect(() => {
+    activityService
+      .members({ sort: 'name', per_page: 100 })
+      .then((r) => setPeople(r.data.map((m) => ({ uuid: m.user_uuid, label: who(m) }))))
+      .catch(() => {});
+  }, []);
+  return useMemo(() => {
+    const list = member && !people.some((p) => p.uuid === member.uuid) ? [member, ...people] : people;
+    return [{ value: '', label: 'All members' }, ...list.map((p) => ({ value: p.uuid, label: p.label }))];
+  }, [people, member]);
+}
+
+// ── audit trail ────────────────────────────────────────────────────────────
+
+type ChangeAction = 'all' | 'created' | 'updated' | 'deleted';
+const CHANGE_ACTIONS: { id: ChangeAction; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'created', label: 'Created' },
+  { id: 'updated', label: 'Updated' },
+  { id: 'deleted', label: 'Deleted' },
+];
+
+const CHANGE_VERBS: Record<string, { label: string; variant: 'success' | 'warning' | 'error' }> = {
+  created: { label: 'Created', variant: 'success' },
+  updated: { label: 'Updated', variant: 'warning' },
+  deleted: { label: 'Deleted', variant: 'error' },
+};
+
+// Bookkeeping columns that say nothing on their own in a create/delete.
+const NOISE = new Set(['id', 'namespace_id', 'created_at', 'updated_at']);
+const FIELDS_SHOWN = 4;
+
+const entityLabel = (entity: string) => entity.split('.').map(pretty).join(' › ');
+
+function actor(r: AuditChange) {
+  if (r.user_uuid) return who(r);
+  return r.via === 'anonymous' ? 'Public (signed out)' : 'System';
+}
+
+function show(v: unknown) {
+  if (v === null || v === undefined || v === '') return '—';
+  return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
+function Value({ v, className }: { v: unknown; className?: string }) {
+  const text = show(v);
+  return (
+    <span className={cn('truncate max-w-[14rem]', className)} title={text}>
+      {text}
+    </span>
+  );
+}
+
+/** Field-level diff: "status: open → pending" for updates; values for creates/deletes. */
+function FieldChanges({ r, expanded, onToggle }: { r: AuditChange; expanded: boolean; onToggle: () => void }) {
+  const isUpdate = !!r.old_values && !!r.new_values;
+  const values = r.new_values ?? r.old_values ?? {};
+  const keys = isUpdate
+    ? Array.from(new Set([...Object.keys(r.old_values ?? {}), ...Object.keys(r.new_values ?? {})]))
+    : Object.keys(values).filter((k) => !NOISE.has(k) && show(values[k]) !== '—');
+  if (keys.length === 0) return <span className="text-sm text-secondary-400">—</span>;
+  const shown = expanded ? keys : keys.slice(0, FIELDS_SHOWN);
+
+  return (
+    <div className="text-xs min-w-0">
+      <dl className="space-y-0.5">
+        {shown.map((k) => (
+          <div key={k} className="flex items-baseline gap-1.5 min-w-0">
+            <dt className="text-secondary-500 shrink-0">{pretty(k)}:</dt>
+            <dd className="flex items-baseline gap-1.5 min-w-0 text-secondary-800">
+              {isUpdate ? (
+                <>
+                  <Value v={r.old_values?.[k]} className="text-secondary-500 line-through" />
+                  <ArrowRight className="w-3 h-3 shrink-0 self-center text-secondary-400" aria-label="changed to" />
+                  <Value v={r.new_values?.[k]} className="font-medium" />
+                </>
+              ) : (
+                <Value v={values[k]} />
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {keys.length > FIELDS_SHOWN && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          aria-expanded={expanded}
+          className="mt-1 text-primary-600 hover:underline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded"
+        >
+          {expanded ? 'Show less' : `Show all ${keys.length} fields`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Changes() {
+  const [days, setDays] = useState(30);
+  const [action, setAction] = useState<ChangeAction>('all');
+  const [entity, setEntity] = useState('');
+  const [record, setRecord] = useState<{ entity: string; id: string } | null>(null);
+  const [member, setMember] = useState<MemberRef | null>(null);
+  const [entities, setEntities] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [res, setRes] = useState<{
+    key: string;
+    rows: AuditChange[];
+    cursor?: string;
+    error?: string;
+  } | null>(null);
+  const memberOptions = useMemberOptions(member);
+
+  const params = useMemo<AuditChangeParams>(
+    () => ({
+      days,
+      action: action === 'all' ? undefined : action,
+      entity: record?.entity ?? (entity || undefined),
+      entity_id: record?.id,
+      user_uuid: member?.uuid,
+      limit: 50,
+    }),
+    [days, action, entity, record, member]
+  );
+  const key = JSON.stringify(params);
+
+  useEffect(() => {
+    let live = true;
+    activityService
+      .changes(params)
+      .then((r) => {
+        if (!live) return;
+        setRes({ key, rows: r.data, cursor: r.nextCursor });
+        if (r.entities) setEntities(r.entities);
+      })
+      .catch((e) => {
+        if (live) setRes({ key, rows: [], error: extractApiError(e, 'Could not load the audit trail') });
+      });
+    return () => {
+      live = false;
+    };
+  }, [key, params]);
+  const loading = res?.key !== key;
+  const rows = loading ? [] : (res?.rows ?? []);
+  const cursor = loading ? undefined : res?.cursor;
+  const error = loading ? null : res?.error;
+
+  const loadMore = async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const r = await activityService.changes({ ...params, cursor });
+      setRes((prev) =>
+        prev && prev.key === key ? { ...prev, rows: [...prev.rows, ...r.data], cursor: r.nextCursor } : prev
+      );
+    } catch (e) {
+      toast.error(extractApiError(e, 'Could not load more changes'));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const toggle = (c: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(c)) next.add(c);
+      return next;
+    });
+
+  const columns: TableColumn<AuditChange>[] = [
+    {
+      key: 'occurred_at',
+      header: 'When',
+      render: (r) => (
+        <div className="text-sm whitespace-nowrap">
+          <Relative at={r.occurred_at} />
+          <div className="text-xs text-secondary-500">{format(parseISO(r.occurred_at), 'd MMM, HH:mm:ss')}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'member',
+      header: 'Who',
+      render: (r) => (
+        <div className="min-w-0 max-w-[13rem]">
+          <div
+            className={cn('text-sm truncate', r.user_uuid ? 'font-medium text-secondary-900' : 'text-secondary-500')}
+            title={r.email}
+          >
+            {actor(r)}
+          </div>
+          <div className="text-xs text-secondary-500 truncate">
+            {r.via === 'api_key' && <KeyRound className="w-3 h-3 mr-1 inline" aria-hidden="true" />}
+            {[r.via === 'api_key' ? 'API key' : null, r.ip].filter(Boolean).join(' · ') || '\u00a0'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'record',
+      header: 'Record',
+      render: (r) => {
+        const verb = r.event.startsWith(r.entity + '.') ? r.event.slice(r.entity.length + 1) : r.event;
+        const v = CHANGE_VERBS[verb];
+        return (
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge size="sm" variant={v?.variant ?? 'info'}>
+                {v?.label ?? pretty(verb)}
+              </Badge>
+              <span className="text-sm text-secondary-800">{entityLabel(r.entity)}</span>
+            </div>
+            {r.entity_id && (
+              <button
+                onClick={() => setRecord({ entity: r.entity, id: r.entity_id! })}
+                title="Show this record's full history"
+                className="mt-0.5 inline-flex items-center gap-1 text-xs font-mono text-secondary-500 hover:text-primary-600 max-w-[16rem] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded"
+              >
+                <History className="w-3 h-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{r.entity_id}</span>
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'changes',
+      header: 'Changes',
+      render: (r) => (
+        <FieldChanges r={r} expanded={expanded.has(r.cursor)} onToggle={() => toggle(r.cursor)} />
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-3">
+        <div className="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-3">
+          <div role="group" aria-label="Kind of change" className="inline-flex rounded-lg bg-secondary-100 p-1">
+            {CHANGE_ACTIONS.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => setAction(a.id)}
+                aria-pressed={action === a.id}
+                className={cn(
+                  'px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500',
+                  action === a.id
+                    ? 'bg-surface text-secondary-900 shadow-sm font-medium'
+                    : 'text-secondary-600 hover:text-secondary-900'
+                )}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+          <div className="lg:w-64 shrink-0">
+            <SearchableSelect
+              options={memberOptions}
+              value={member?.uuid ?? ''}
+              onChange={(uuid) => {
+                const found = memberOptions.find((o) => o.value === uuid && o.value);
+                setMember(found ? { uuid: found.value, label: found.label } : null);
+              }}
+              placeholder="All members"
+              searchPlaceholder="Find a member"
+              clearable
+            />
+          </div>
+          <div className="lg:w-52 shrink-0">
+            <Select
+              aria-label="Record type"
+              value={record?.entity ?? entity}
+              disabled={!!record}
+              onChange={(e) => setEntity(e.target.value)}
+            >
+              <option value="">All record types</option>
+              {entities.map((e) => (
+                <option key={e} value={e}>
+                  {entityLabel(e)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="lg:w-40 shrink-0">
+            <Select aria-label="Time range" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+              <option value="1">Last 24 hours</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="365">Last 12 months</option>
+            </Select>
+          </div>
+        </div>
+        {record && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-secondary-700">
+            <History className="w-4 h-4 text-primary-600 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">
+              History of {entityLabel(record.entity)} <span className="font-mono text-xs">{record.id}</span>
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setRecord(null)}>
+              Show all records
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {error ? (
+        <ErrorCard message={error} />
+      ) : (
+        <Table
+          columns={columns}
+          data={rows}
+          keyExtractor={(r) => r.cursor}
+          isLoading={loading}
+          emptyMessage="No record changes match these filters"
+          caption="Record changes, newest first"
         />
       )}
 

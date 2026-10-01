@@ -2,6 +2,9 @@ local lapis = require("lapis")
 local app = lapis.Application()
 local CorsMiddleware = require("middleware.cors")
 local GlobalRateLimit = require("middleware.global-rate-limit")
+-- Every DB connection learns who is acting (audit trail). Also installed in
+-- nginx's init_by_lua; repeated here so it holds wherever the app is loaded.
+require("helper.request-context").install()
 local Errors = require("lib.errors")
 
 -- Build metadata baked into the image at `docker build` time — the CI

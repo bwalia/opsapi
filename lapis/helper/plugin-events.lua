@@ -37,6 +37,13 @@
       * `lapis migrate` syncs sources, subscriptions and triggers
         (helper.project-migrator); done/dead deliveries are purged after
         7/30 days.
+      * Audit trail: the reserved subscriber "core.audit" listens to every
+        source ("<entity>.*") while OPSAPI_AUDIT_ENABLED isn't "false". For it
+        the trigger writes an audit_events row (who, from where, what changed)
+        IN THE SAME TRANSACTION as the change, instead of a delivery: nothing
+        to dispatch, and a rolled-back write leaves no audit row. Who = the
+        session settings helper/request-context.lua puts on every connection.
+        Kept OPSAPI_AUDIT_RETENTION_DAYS (default 365).
 ]]
 
 local cjson = require("cjson")
@@ -44,6 +51,18 @@ local cjson = require("cjson")
 local PluginEvents = {}
 
 PluginEvents.MAX_ATTEMPTS = 8
+PluginEvents.AUDIT_SUBSCRIBER = "core.audit" -- reserved: written by the trigger, never dispatched
+
+--- The audit trail is on unless OPSAPI_AUDIT_ENABLED=false.
+function PluginEvents.auditEnabled()
+    return os.getenv("OPSAPI_AUDIT_ENABLED") ~= "false"
+end
+
+local function audit_retention_days()
+    local n = math.floor(tonumber(os.getenv("OPSAPI_AUDIT_RETENTION_DAYS") or "") or 365)
+    return n < 30 and 30 or n
+end
+PluginEvents.auditRetentionDays = audit_retention_days
 local LOCK_SECONDS = 300
 local POLL_SECONDS = 2
 local BATCH = 20
@@ -200,6 +219,44 @@ function PluginEvents.ensureSchema()
     q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS response_status INTEGER")
     q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS duration_ms INTEGER")
 
+    -- Audit row for one change (also used by emit()). Only when "core.audit"
+    -- subscribes to the event and the change belongs to a workspace. Keys that
+    -- look like credentials are dropped; the actor comes from the session
+    -- settings helper/request-context.lua puts on every connection.
+    q("CREATE INDEX IF NOT EXISTS idx_audit_events_ns_time ON audit_events (namespace_id, created_at DESC, id DESC)")
+    q("CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events USING BRIN (created_at)")
+    q([==[
+        CREATE OR REPLACE FUNCTION opsapi_audit(ev text, ent text, ent_id text, ns bigint, old_v jsonb, new_v jsonb)
+        RETURNS void LANGUAGE plpgsql AS $fn$
+        DECLARE
+            secret constant text := '(password|passwd|secret|token|pin_hash|api_key|private_key)';
+        BEGIN
+            IF ns IS NULL OR NOT EXISTS (SELECT 1 FROM plugin_event_subscriptions
+                                         WHERE subscriber = 'core.audit' AND event IN (ev, ent || '.*')) THEN
+                RETURN;
+            END IF;
+            IF old_v IS NOT NULL THEN
+                old_v := old_v - ARRAY(SELECT k FROM jsonb_object_keys(old_v) k WHERE k ~* secret);
+            END IF;
+            IF new_v IS NOT NULL THEN
+                new_v := new_v - ARRAY(SELECT k FROM jsonb_object_keys(new_v) k WHERE k ~* secret);
+            END IF;
+            INSERT INTO audit_events (uuid, namespace_id, event_type, entity_type, entity_id, actor_user_uuid,
+                                      actor_ip, old_values, new_values, metadata, created_at)
+            VALUES (gen_random_uuid()::text, ns, ev, ent, ent_id,
+                    NULLIF(current_setting('opsapi.actor_uuid', true), ''),
+                    NULLIF(current_setting('opsapi.actor_ip', true), ''),
+                    old_v, new_v,
+                    jsonb_strip_nulls(jsonb_build_object(
+                        'source', 'db',
+                        'via', COALESCE(NULLIF(current_setting('opsapi.actor_via', true), ''), 'system'),
+                        'request_id', NULLIF(current_setting('opsapi.request_id', true), ''),
+                        'api_key_uuid', NULLIF(current_setting('opsapi.api_key_uuid', true), ''))),
+                    now() AT TIME ZONE 'UTC');
+        END
+        $fn$
+    ]==])
+
     -- args: entity, hidden columns, namespace SQL, namespace key column
     q([==[
         CREATE OR REPLACE FUNCTION opsapi_plugin_event() RETURNS trigger LANGUAGE plpgsql AS $fn$
@@ -235,9 +292,18 @@ function PluginEvents.ensureSchema()
                 ELSE
                     ns := (d ->> 'namespace_id')::bigint;
                 END IF;
+                -- Audit trail: same transaction as the change. Updates keep only
+                -- the changed fields (before -> after).
+                PERFORM opsapi_audit(ev, entity, COALESCE(d ->> 'uuid', d ->> 'id'), ns,
+                    CASE TG_OP WHEN 'INSERT' THEN NULL
+                               WHEN 'UPDATE' THEN (SELECT jsonb_object_agg(k, v -> 'from') FROM jsonb_each(diff) x(k, v))
+                               ELSE d END,
+                    CASE TG_OP WHEN 'DELETE' THEN NULL
+                               WHEN 'UPDATE' THEN (SELECT jsonb_object_agg(k, v -> 'to') FROM jsonb_each(diff) x(k, v))
+                               ELSE d END);
                 -- Plugins (namespace_id NULL) hear every tenant; a webhook only its own.
                 IF NOT EXISTS (SELECT 1 FROM plugin_event_subscriptions
-                               WHERE event IN (ev, entity || '.*')
+                               WHERE event IN (ev, entity || '.*') AND subscriber <> 'core.audit'
                                  AND (namespace_id IS NULL OR namespace_id = ns)) THEN
                     RETURN NULL;
                 END IF;
@@ -246,7 +312,8 @@ function PluginEvents.ensureSchema()
                 RETURNING id INTO ev_id;
                 INSERT INTO plugin_event_deliveries (event_id, subscriber)
                 SELECT ev_id, subscriber FROM plugin_event_subscriptions
-                WHERE event IN (ev, entity || '.*') AND (namespace_id IS NULL OR namespace_id = ns);
+                WHERE event IN (ev, entity || '.*') AND subscriber <> 'core.audit'
+                  AND (namespace_id IS NULL OR namespace_id = ns);
             EXCEPTION WHEN OTHERS THEN
                 RAISE WARNING 'opsapi_plugin_event(%): %', ev, SQLERRM;
             END;
@@ -272,6 +339,26 @@ function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_k
             hide = EXCLUDED.hide, ns_sql = EXCLUDED.ns_sql, ns_key = EXCLUDED.ns_key,
             module = EXCLUDED.module, updated_at = NOW()
     ]], entity, table_name, owner, hide or "", ns_sql or "", ns_key or "", module or db().NULL)
+end
+
+--- The "core.audit" subscriptions: every source (core and plugin) while the
+-- audit trail is on, none when OPSAPI_AUDIT_ENABLED=false. Run syncTriggers
+-- after it.
+function PluginEvents.syncAudit()
+    local d = db()
+    if PluginEvents.auditEnabled() then
+        d.query([[
+            INSERT INTO plugin_event_subscriptions (event, subscriber)
+            SELECT entity || '.*', 'core.audit' FROM plugin_event_sources
+            ON CONFLICT DO NOTHING
+        ]])
+        d.query([[
+            DELETE FROM plugin_event_subscriptions s WHERE s.subscriber = 'core.audit'
+              AND NOT EXISTS (SELECT 1 FROM plugin_event_sources src WHERE src.entity || '.*' = s.event)
+        ]])
+    else
+        d.query("DELETE FROM plugin_event_subscriptions WHERE subscriber = 'core.audit'")
+    end
 end
 
 --- Sync one plugin: the entities it publishes (manifest.publishes) and the
@@ -371,6 +458,20 @@ local function is_core_entity(entity)
     return false
 end
 
+-- Checked before emit() calls it, so an unmigrated database can't abort the
+-- caller's transaction; re-checked every minute until present.
+local _audit_fn, _audit_checked = nil, 0
+local function audit_function_ready()
+    if _audit_fn then return true end
+    local now = ngx and ngx.now() or os.time()
+    if now - _audit_checked < 60 then return false end
+    _audit_checked = now
+    local ok, rows = pcall(db().query,
+        "SELECT to_regprocedure('opsapi_audit(text,text,text,bigint,jsonb,jsonb)') IS NOT NULL AS ok")
+    _audit_fn = ok and rows[1] and rows[1].ok or nil
+    return _audit_fn == true
+end
+
 --- Publish a custom event to its subscribers (one statement: the event is
 -- only stored when someone listens). Core entity names are reserved.
 -- @return number of deliveries queued
@@ -379,10 +480,15 @@ function PluginEvents.emit(namespace_id, name, data)
         "event name must look like <plugin>.<entity>.<action>")
     local entity = name:match("^(.*)%.[^.]+$")
     assert(not is_core_entity(entity), "'" .. name .. "' is a core event; core events come from table changes")
+    -- Audit trail (no-op unless "core.audit" subscribes and there is a workspace).
+    if namespace_id and audit_function_ready() then
+        pcall(db().query, "SELECT opsapi_audit(?, ?, NULL, ?, NULL, ?::jsonb)", name, entity, namespace_id,
+            cjson.encode(data or {}))
+    end
     local res = db().query([[
         WITH subs AS (
             SELECT subscriber FROM plugin_event_subscriptions
-            WHERE event IN (?, ?) AND (namespace_id IS NULL OR namespace_id = ?)
+            WHERE event IN (?, ?) AND subscriber <> 'core.audit' AND (namespace_id IS NULL OR namespace_id = ?)
         ), ev AS (
             INSERT INTO plugin_events (event, entity, namespace_id, data)
             SELECT ?, ?, ?, ?::jsonb WHERE EXISTS (SELECT 1 FROM subs)
@@ -570,6 +676,13 @@ local function purge(premature)
                        OR (status = 'dead' AND updated_at < NOW() - interval '30 days')
                     LIMIT 10000)
             ]])
+            d.query(([[
+                DELETE FROM audit_events WHERE id IN (
+                    SELECT id FROM audit_events
+                    WHERE created_at < (now() AT TIME ZONE 'UTC') - interval '%d days'
+                      AND metadata ->> 'source' = 'db'
+                    LIMIT 10000)
+            ]]):format(audit_retention_days()))
             d.query([[
                 DELETE FROM plugin_events WHERE id IN (
                     SELECT e.id FROM plugin_events e

@@ -259,6 +259,19 @@ function ProjectMigrator.migrateAll(projects_root)
         end
     end
 
+    -- Core event sources, the audit-trail subscriptions (OPSAPI_AUDIT_ENABLED)
+    -- and the table triggers — every migrate, plugins or not.
+    local ok, err = pcall(function()
+        local PluginEvents = require("helper.plugin-events")
+        PluginEvents.ensureSchema()
+        PluginEvents.syncAudit()
+        PluginEvents.syncTriggers()
+    end)
+    if not ok then
+        print("[ProjectMigrator] ERROR: event sources / audit trail: " .. tostring(err))
+        table.insert(failed, "audit-trail")
+    end
+
     if #failed > 0 then
         error("plugin migrations failed: " .. table.concat(failed, ", "), 0)
     end

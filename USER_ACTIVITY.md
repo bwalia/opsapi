@@ -1,6 +1,6 @@
 # User activity & login tracking
 
-OpsAPI records who signed in, when, from where, and what they did. Platform admins see it in Grafana (**OpsAPI · User Activity**). Workspace admins see their own workspace's slice in the dashboard, under **Activity**.
+OpsAPI records who signed in, when, from where, and what they did, plus an audit trail of which records each person created, changed or deleted, field by field. Platform admins see it in Grafana (**OpsAPI · User Activity**). Workspace admins see their own workspace's slice in the dashboard, under **Activity**.
 
 ## What is recorded
 
@@ -10,6 +10,7 @@ OpsAPI records who signed in, when, from where, and what they did. Platform admi
 | Per user: last login (time, IP, method, browser), login count, failed logins since the last success, last seen. | `user_login_stats` (1:1 with `users`) | while the account exists |
 | What signed-in users did: route pattern (`/api/v2/invoices/:id`), action (`invoices.update`), record id, status, duration, workspace, IP, browser, request id. | `user_activity` (partitioned by month) | 90 days |
 | Per workspace, day, member and action: changes, requests, failed requests, last time. Feeds the in-app Activity page. | `user_activity_daily` | 90 days |
+| Record changes (audit trail): which record was created, updated or deleted, by whom, and the fields before and after. See [Audit trail](#audit-trail-record-changes). | `audit_events` | 365 days |
 | Counts only: auth events, active users, pipeline health. | Prometheus (`/metrics`) | your Prometheus retention |
 
 - **Changes vs reads.** Every change (POST / PUT / PATCH / DELETE) is its own row. Identical reads (same user, route, record and status) within a minute are merged into one row with a `hits` count, so background polling doesn't flood the table.
@@ -37,6 +38,7 @@ OpsAPI records who signed in, when, from where, and what they did. Platform admi
 - **Overview.** Active members, changes and failed requests for the last 7, 30 or 90 days, as totals and per-day charts. Also the most used areas and the most active members.
 - **Members.** Each member's last sign-in (time, method, count), last activity in this workspace, the last 30 days' usage, and failed sign-ins since their last success. Click a member to see their activity log.
 - **Activity log.** Every change, and merged reads, newest first. Filter by member, area, changes-only or failed-only, and time range. It shows the route, record id, result, duration, browser and IP.
+- **Audit trail.** Record changes, newest first: who, which record, and each changed field as old → new. Filter by member, record type, created / updated / deleted, and time range. Click a record id to see that record's whole history.
 
 Deliberately left out: sign-in IP addresses and the login history. A sign-in isn't tied to one workspace and a person can belong to several, so those stay with platform admins in Grafana.
 
@@ -46,9 +48,38 @@ API (the same `activity.read` check):
 GET /api/v2/namespace/activity/summary?days=30
 GET /api/v2/namespace/activity/members?search=&sort=last_login|name&page=&per_page=
 GET /api/v2/namespace/activity?days=7&user_uuid=&area=&kind=changes|errors&limit=50&cursor=
+GET /api/v2/namespace/activity/changes?days=30&user_uuid=&entity=&entity_id=&action=created|updated|deleted&limit=50&cursor=
 ```
 
-The log uses cursor paging: pass `meta.next_cursor` as `cursor` to get the next page. Deep pages cost the same as the first.
+The log and the audit trail use cursor paging: pass `meta.next_cursor` as `cursor` to get the next page. Deep pages cost the same as the first. The first page of `/changes` also returns `meta.entities`, the record types that are audited.
+
+## Audit trail: record changes
+
+The activity log says *that* someone called `PUT /api/v2/invoices/:id`. The audit trail says *what changed*: `status: draft → sent`, `total: 120.00 → 150.00`.
+
+**What's audited.** Every table that feeds the event outbox (helper/plugin-events.lua):
+
+- **Core:** customers, employees, invoices and payments, orders, timesheets, workspace members, CRM (accounts, contacts, deals, leads, activities), field-service jobs and visits, kanban projects and tasks, helpdesk tickets.
+- **Plugins:** every table a plugin lists in `publishes`, and every `sdk.emit` event, recorded as the event and its data.
+
+`opsapi events` lists them all.
+
+**How it works.**
+
+- **Written by the database.** The table trigger that feeds plugin events also writes the `audit_events` row, in the same transaction as the change. So a change made through any API, a plugin, a background job or plain SQL is recorded, and a rolled-back change leaves nothing behind. There are no delivery rows or timers for it.
+- **Updates store only the fields that changed**, before and after. Creates store the new record, deletes the old one.
+- **Who did it.** Every database connection a request uses is told who is acting (session settings `opsapi.actor_*`, set by helper/request-context.lua): the user, whether it was a dashboard session or an API key, the client IP, and the request id. Background jobs and `lapis migrate` record **System**; public (signed-out) forms record **Public**. The request id matches the activity log, so you can join "what they called" to "what changed".
+- **Secrets are never stored.** Fields a source hides from events are left out, and so is any field whose name contains `password`, `passwd`, `secret`, `token`, `pin_hash`, `api_key` or `private_key`.
+- **Retention.** The hourly event-purge job deletes rows older than `OPSAPI_AUDIT_RETENTION_DAYS`, in batches.
+
+**Configuration.**
+
+| Variable | Default | |
+|---|---|---|
+| `OPSAPI_AUDIT_ENABLED` | `true` | `false` stops recording at the next `lapis migrate`. Existing rows are kept until retention. |
+| `OPSAPI_AUDIT_RETENTION_DAYS` | `365` | Minimum 30. |
+
+**Cost.** One extra row per changed record, written by the trigger that already runs for plugin events. Updates that change nothing that's tracked are skipped. Reads are indexed per workspace and time.
 
 ## Configuration
 
@@ -144,5 +175,5 @@ Tracking is a core feature, so every deployment gets it whatever its `PROJECT_CO
 ## Privacy
 
 - **Personal data.** IP addresses, browser strings and activity histories are personal data under UK GDPR. They're kept for security and service operation, deleted automatically at the end of their retention period, and visible only to Grafana admins (a separate Grafana org). Workspace admins see only their own workspace's activity.
-- **Account deletion.** Deleting a user row erases that person's `user_activity` and `auth_events`, whichever code path or SQL deleted it (database trigger `trg_users_forget_activity`). Their `user_login_stats` row cascades. Deactivating an account (soft delete) keeps the history until retention.
+- **Account deletion.** Deleting a user row erases that person's `user_activity` and `auth_events`, whichever code path or SQL deleted it (database trigger `trg_users_forget_activity`). Their `user_login_stats` row cascades. In the audit trail the record changes stay, because they're the workspace's business records, but the person's id, IP and request id are removed (`metadata.actor_erased`). Deactivating an account (soft delete) keeps the history until retention.
 - **Privacy policy.** Mention this processing in your privacy policy.
