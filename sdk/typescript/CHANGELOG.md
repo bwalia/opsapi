@@ -2,6 +2,10 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## Unreleased
+
+- Types for the workspace plugin endpoints: `GET /api/v2/namespace/plugins`, `PUT /api/v2/namespace/plugins/{code}` and `POST /api/v2/plugins/{code}/jobs/{job}/run`.
+
 ## 0.1.0
 
 First public release.

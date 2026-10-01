@@ -290,6 +290,11 @@ check("listener file compiles", loadfile(plugin .. "/events/on_invoice_updated.l
 check("listener registers its event",
     (PluginEvents.loadSubscribers(m))["help_desk.on_invoice_updated"] ~= nil)
 check("make:listener refuses a malformed event", not succeeded(run("make:listener help-desk Invoice")))
+check("make:job", succeeded(run("make:job help-desk close-stale 2h")))
+local made = require("helper.plugin-jobs").loadJobs(m)["help_desk.close_stale"]
+check("job file loads with its schedule", made ~= nil and made.every == 7200)
+check("make:job refuses a bad schedule", not succeeded(run("make:job help-desk tick 5s")))
+check("plugin:check passes with jobs", succeeded(run("plugin:check")))
 
 print("custom pages")
 check("make:page", succeeded(run('make:page help-desk overview "Desk overview"')))
@@ -348,6 +353,76 @@ check("ui paths: nested files allowed", safe("assets/app.js") == "assets/app.js"
 check("ui paths: traversal, hidden, absolute and odd characters refused",
     not safe("../project.lua") and not safe("a/../../x") and not safe(".env") and not safe("a/.git/x")
     and not safe("/etc/passwd") and not safe("a//b") and not safe("a b.html") and not safe("a%2e%2e") and not safe(""))
+
+print("plugins per workspace: settings, on/off, jobs")
+local function read_file(path)
+    local f = assert(io.open(APP .. "/" .. path))
+    local src = f:read("*a")
+    f:close()
+    return src
+end
+local ok_settings = manifest([[return { code = "x", name = "x", default_enabled = false, settings = {
+    days = { type = "integer", default = 14, min = 1 }, token = { type = "string", secret = true },
+    hook = { type = "url" } } }]])
+check("settings + default_enabled load", ok_settings ~= nil and ok_settings.default_enabled == false
+    and ok_settings.settings.days.default == 14)
+check("settings default to {}", manifest('return { code = "x", name = "x" }').settings ~= nil)
+check("default_enabled must be a boolean", manifest('return { code = "x", name = "x", default_enabled = "no" }') == nil)
+check("setting names are lowercase", manifest('return { code = "x", name = "x", settings = { Bad = {} } }') == nil)
+check("setting types are checked", manifest('return { code = "x", name = "x", settings = { a = { type = "json" } } }') == nil)
+check("a default must pass its own rules",
+    manifest('return { code = "x", name = "x", settings = { a = { type = "integer", min = 5, default = 1 } } }') == nil)
+check("secrets: text-like only, no default",
+    manifest('return { code = "x", name = "x", settings = { a = { type = "integer", secret = true } } }') == nil
+    and manifest('return { code = "x", name = "x", settings = { a = { secret = true, default = "x" } } }') == nil)
+check("url type validates", sdk.validate({ u = "https://hooks.example.com/x" }, { u = { type = "url" } }) ~= nil
+    and sdk.validate({ u = "javascript:alert(1)" }, { u = { type = "url" } }) == nil)
+
+local PluginJobs = require("helper.plugin-jobs")
+local def = PluginJobs.check({ every = "15m", run = function() end })
+check("job: every parsed", def and def.every == 900 and def.scope == "workspace")
+check("job: under a minute refused", PluginJobs.check({ every = "30s", run = function() end }) == nil)
+check("job: run function required", PluginJobs.check({ every = "1h" }) == nil)
+check("job: at needs whole days", PluginJobs.check({ every = "1h", at = "03:00", run = function() end }) == nil)
+check("job: bad at refused", PluginJobs.check({ every = "1d", at = "25:00", run = function() end }) == nil)
+check("job: bad scope refused", PluginJobs.check({ every = "1h", scope = "tenant", run = function() end }) == nil)
+local daily = PluginJobs.check({ every = "1d", at = "03:00", run = function() end })
+local day = 86400
+check("job: at runs at that time today when it's still ahead", PluginJobs.nextRun(daily, 2 * 3600) == 3 * 3600)
+check("job: ...else tomorrow", PluginJobs.nextRun(daily, 4 * 3600) == day + 3 * 3600)
+check("job: every 2d at keeps the time of day",
+    PluginJobs.nextRun(PluginJobs.check({ every = "2d", at = "03:00", run = function() end }), 4 * 3600)
+        == 2 * day + 3 * 3600)
+check("job: every is the gap after a run", PluginJobs.nextRun(def, 1000) == 1900)
+
+os.execute("mkdir -p " .. tmp .. "/jobs")
+local jf = assert(io.open(tmp .. "/jobs/good_job.lua", "w"))
+jf:write('return { every = "1h", run = function(job) end }')
+jf:close()
+jf = assert(io.open(tmp .. "/jobs/bad.lua", "w"))
+jf:write('return { every = "soon", run = function() end }')
+jf:close()
+local jobs, job_errors = PluginJobs.loadJobs({ code = "x", path = tmp })
+check("jobs files load as <code>.<file>", jobs["x.good_job"] ~= nil and jobs["x.good_job"].plugin == "x")
+check("a broken jobs file is reported", #job_errors == 1 and job_errors[1]:find("jobs/bad.lua", 1, true))
+
+-- "Off" must be a hard switch everywhere work happens for a workspace.
+local ns_mw, events_src = read_file("middleware/namespace.lua"), read_file("helper/plugin-events.lua")
+check("off: plugin routes 404 (requireNamespace gate)", ns_mw:find("handler = plugin_gate(handler)", 1, true)
+    and ns_mw:find("PLUGIN_DISABLED", 1, true))
+local _, trigger_checks = events_src:gsub("opsapi_plugin_enabled%(split_part%(subscriber", "")
+check("off: no event deliveries (trigger + emit)", trigger_checks >= 3, trigger_checks)
+check("off: no job runs (claim + seeding)", read_file("helper/plugin-jobs.lua"):find(
+    "AND (namespace_id IS NULL OR opsapi_plugin_enabled(split_part(job, '.', 1), namespace_id))", 1, true))
+check("off: pages + sidebar", read_file("routes/plugins.lua"):find("PluginWorkspaces.isEnabled(m.code", 1, true)
+    and read_file("queries/MenuQueries.lua"):find("plugins_off[plugin_code]", 1, true))
+check("settings: empty table stored as an object, not []",
+    read_file("helper/plugin-workspaces.lua"):find('next(sets) and cjson.encode(sets) or "{}"', 1, true))
+check("workspace API guarded by namespace.read / namespace.update",
+    read_file("routes/plugins.lua"):find('requirePermission("namespace", "read"', 1, true)
+    and read_file("routes/plugins.lua"):find('requirePermission("namespace", "update"', 1, true))
+check("sdk.http goes through the SSRF guard", read_file("helper/plugin-sdk.lua"):find(
+    'require("lib.outbound-webhooks").request(url', 1, true))
 
 os.execute("rm -rf " .. tmp)
 
