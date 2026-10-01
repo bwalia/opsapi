@@ -13,7 +13,7 @@ Each webhook has a **delivery log**: every request, your endpoint's HTTP status,
 
 ## Events
 
-`<entity>.created`, `<entity>.updated` and `<entity>.deleted`; tick **all** to receive `<entity>.*`.
+Every entity has `<entity>.created`, `<entity>.updated` and `<entity>.deleted`. Many also have **business events** that say what happened, such as `invoice.paid` or `crm.deal.won` (listed below). Tick **all** to receive every event of an entity (`<entity>.*`).
 
 | Area | Entities |
 |---|---|
@@ -22,6 +22,26 @@ Each webhook has a **delivery log**: every request, your endpoint's HTTP status,
 | People | `employee`, `timesheet`, `member` (workspace membership) |
 | Work | `kanban.project`, `kanban.task`, `fs.job`, `fs.visit` |
 | Plugins | Whatever installed plugins publish, e.g. `helpdesk.ticket` |
+
+Business events fire once, when a record *enters* the state. `invoice.paid` fires when an invoice is created as paid or changes to paid from any other status; saving it again doesn't repeat it. The payload is the same as `invoice.updated`, including `changes`.
+
+| Entity | Business events |
+|---|---|
+| `invoice` | `sent`, `paid`, `partially_paid`, `overdue`, `cancelled` (status cancelled or void) |
+| `order` | `confirmed`, `shipped`, `delivered`, `cancelled`, `paid` and `refunded` (financial status) |
+| `crm.deal` | `won`, `lost` |
+| `crm.lead` | `qualified`, `converted`, `lost` |
+| `crm.activity` | `completed` |
+| `customer` | `disabled` |
+| `employee` | `deactivated` |
+| `timesheet` | `submitted`, `approved`, `rejected` |
+| `kanban.project` | `completed`, `archived` |
+| `kanban.task` | `completed`, `blocked` |
+| `fs.job` | `scheduled`, `started` (in progress), `completed`, `cancelled` |
+| `fs.visit` | `arrived` (on site), `completed`, `cancelled`, `no_access` |
+| `member` | `joined` (became active), `suspended`, `left` |
+
+Plugins can add their own, such as `helpdesk.ticket.closed`.
 
 - Only entities enabled on your server are listed.
 - You can only subscribe to data your role can read. For example, invoice events need read access to invoices.

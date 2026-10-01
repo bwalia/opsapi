@@ -19,9 +19,8 @@ local function open_ticket(event, title, description)
 end
 
 return {
-    ["invoice.updated"] = function(event)
-        local status = event.changes and event.changes.status
-        if not (status and status.to == "paid") then return end
+    -- A business event: fires once when an invoice becomes paid.
+    ["invoice.paid"] = function(event)
         local invoice = event.data
         open_ticket(event,
             "Thank " .. (invoice.customer_name or "the customer") .. " for paying " .. (invoice.invoice_number or "their invoice"),

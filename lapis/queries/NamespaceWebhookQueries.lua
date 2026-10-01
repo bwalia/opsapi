@@ -54,11 +54,12 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Entities whose tables exist here, each marked `allowed` when the caller
--- may read its RBAC module (can_read(module) -> bool).
+-- may read its RBAC module (can_read(module) -> bool). `events` lists
+-- created/updated/deleted, then the entity's business events (invoice.paid).
 function NamespaceWebhookQueries.availableEvents(can_read)
     local out = {}
     for _, r in ipairs(db.query([[
-        SELECT entity, owner, module FROM plugin_event_sources
+        SELECT entity, owner, module, verbs::text AS verbs FROM plugin_event_sources
         WHERE to_regclass(table_name) IS NOT NULL
         ORDER BY owner <> 'core', entity
     ]])) do
@@ -66,7 +67,7 @@ function NamespaceWebhookQueries.availableEvents(can_read)
             entity = r.entity,
             owner = r.owner,
             allowed = r.module == nil or can_read(r.module),
-            events = array({ r.entity .. ".created", r.entity .. ".updated", r.entity .. ".deleted" }),
+            events = array(PluginEvents.entityEvents(r.entity, PluginEvents.decodeVerbs(r.verbs))),
         }
     end
     return array(out)
@@ -76,18 +77,18 @@ end
 local function check_events(events, can_read)
     if type(events) ~= "table" or #events == 0 then return nil, "choose at least one event" end
     if #events > MAX_EVENTS then return nil, "at most " .. MAX_EVENTS .. " events" end
-    local allowed = {}
+    -- event (and "<entity>.*") -> entity it belongs to, plus who may read it
+    local entity_of, allowed = {}, {}
     for _, a in ipairs(NamespaceWebhookQueries.availableEvents(can_read)) do
         allowed[a.entity] = a.allowed
+        entity_of[a.entity .. ".*"] = a.entity
+        for _, name in ipairs(a.events) do entity_of[name] = a.entity end
     end
     local clean, seen = {}, {}
     for _, event in ipairs(events) do
         if type(event) ~= "string" then return nil, "unknown event " .. tostring(event) end
-        local entity, action = event:match("^(.+)%.([%a*]+)$")
-        if not entity or not (action == "created" or action == "updated" or action == "deleted" or action == "*") then
-            return nil, "unknown event " .. tostring(event)
-        end
-        if allowed[entity] == nil then return nil, "unknown event " .. event end
+        local entity = entity_of[event]
+        if not entity then return nil, "unknown event " .. event end
         if allowed[entity] == false then
             return nil, "you don't have read access to " .. entity .. " data"
         end

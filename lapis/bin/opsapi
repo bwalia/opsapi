@@ -362,15 +362,15 @@ return {
 local function known_entities(root)
     local entities = {}
     for _, s in ipairs(PluginEvents.CATALOG) do
-        entities[s.entity] = { table = s.table, owner = "core" }
+        entities[s.entity] = { table = s.table, owner = "core", verbs = s.verbs or {} }
     end
     local codes = {}
     for _, p in ipairs(ProjectLoader.discover(root)) do
         local m = ProjectLoader.loadManifest(p.manifest_path, p.path)
         if m then
             codes[m.code] = true
-            for name, tbl in pairs(m.publishes) do
-                entities[m.code .. "." .. name] = { table = tbl, owner = m.code }
+            for name, spec in pairs(m.publishes) do
+                entities[m.code .. "." .. name] = { table = spec.table, owner = m.code, verbs = spec.verbs }
             end
         end
     end
@@ -383,8 +383,10 @@ local function event_warning(event, entities, codes)
     local entity, action = event:match("^(.*)%.([^.]+)$")
     local known = entities[entity]
     if known then
-        if known.owner == "core" and not (action == "created" or action == "updated" or action == "deleted" or action == "*") then
-            return event .. ": core entities only have created / updated / deleted"
+        if known.owner == "core" and not (action == "created" or action == "updated" or action == "deleted"
+            or action == "*" or known.verbs[action]) then
+            local list = table.concat(PluginEvents.entityEvents(entity, known.verbs), ", ")
+            return event .. ": " .. entity .. " has " .. list
         end
         return nil
     end
@@ -422,7 +424,8 @@ local function cmd_events(root)
         if ca ~= cb then return ca end
         return a < b
     end)
-    print("Table events (<entity>.created | .updated | .deleted, or <entity>.* for all):")
+    print("Table events: <entity>.created | .updated | .deleted, the business events after `+`")
+    print("(<entity>.paid fires when a row becomes paid), or <entity>.* for all of them.")
     local section
     for _, name in ipairs(names) do
         local e = entities[name]
@@ -432,7 +435,11 @@ local function cmd_events(root)
             print("")
             print("  " .. heading)
         end
-        print(("    %-28s %s"):format(name, e.table))
+        local verbs = {}
+        for verb in pairs(e.verbs or {}) do verbs[#verbs + 1] = verb end
+        table.sort(verbs)
+        print((("    %-24s %-22s%s"):format(name, e.table, #verbs > 0 and (" + " .. table.concat(verbs, " ")) or ""))
+            :gsub("%s+$", ""))
     end
     print("")
     print("Plugins can also emit custom events: sdk.emit(namespace_id, \"<plugin>.<entity>.<action>\", data)")

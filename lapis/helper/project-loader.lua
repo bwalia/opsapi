@@ -156,14 +156,26 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     end
 
     -- Tables whose changes this plugin publishes as events:
-    -- { ticket = "helpdesk_tickets" } → helpdesk.ticket.created/updated/deleted
-    manifest.publishes = manifest.publishes or {}
-    for name, table_name in pairs(manifest.publishes) do
-        if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$")
-            or type(table_name) ~= "string" or not table_name:match("^[a-z_][a-z0-9_]*$") then
-            return nil, manifest_path .. ": publishes entries look like ticket = \"helpdesk_tickets\""
+    --   ticket = "helpdesk_tickets"   → helpdesk.ticket.created / updated / deleted
+    --   ticket = { table = "helpdesk_tickets", verbs = { closed = { status = "closed" } } }
+    --                                 → the same, plus helpdesk.ticket.closed when
+    --                                   a ticket becomes closed (helper.plugin-events)
+    -- Normalised to { name = { table = ..., verbs = ... } }.
+    local publishes = {}
+    for name, spec in pairs(manifest.publishes or {}) do
+        if type(spec) == "string" then spec = { table = spec } end
+        if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$") or type(spec) ~= "table"
+            or type(spec.table) ~= "string" or not spec.table:match("^[a-z_][a-z0-9_]*$") then
+            return nil, manifest_path .. ": publishes entries look like ticket = \"helpdesk_tickets\" or "
+                .. "ticket = { table = \"helpdesk_tickets\", verbs = { closed = { status = \"closed\" } } }"
         end
+        local verbs_err = require("helper.plugin-events").checkVerbs(spec.verbs)
+        if verbs_err then
+            return nil, manifest_path .. ": publishes." .. name .. ": " .. verbs_err
+        end
+        publishes[name] = { table = spec.table, verbs = spec.verbs or {} }
     end
+    manifest.publishes = publishes
 
     manifest.path = project_path
     manifest.manifest_path = manifest_path

@@ -19,6 +19,13 @@
     custom ones ("helpdesk.ticket.escalated"). "<entity>.*" subscribes to all
     of an entity's events.
 
+    Business events: an entity's `verbs` name states a row can enter, e.g.
+    invoice `paid = { status = "paid" }` fires invoice.paid when an invoice is
+    created as paid or updated from any other status to paid (every listed
+    column must match; a list means any of those values). They come from the
+    same trigger and transaction as invoice.updated, so they are just as
+    reliable — subscribe to what happened instead of decoding `changes`.
+
     How it works
       * Table changes: one generic trigger (opsapi_plugin_event) on each
         source table writes the event plus a delivery row per subscriber in the
@@ -51,6 +58,7 @@ local cjson = require("cjson")
 local PluginEvents = {}
 
 PluginEvents.MAX_ATTEMPTS = 8
+PluginEvents.ACTIONS = { "created", "updated", "deleted" } -- every table entity has these
 PluginEvents.AUDIT_SUBSCRIBER = "core.audit" -- reserved: written by the trigger, never dispatched
 
 --- The audit trail is on unless OPSAPI_AUDIT_ENABLED=false.
@@ -71,30 +79,120 @@ local BATCH = 20
 -- event carries a namespace_id (`ns_sql` resolves it for tables without the
 -- column). `hide` = columns left out of payloads (comma-separated). `module`
 -- = the RBAC module that guards the data: a workspace webhook can only
--- subscribe to entities its creator may read.
+-- subscribe to entities its creator may read. `verbs` = business events
+-- (values are the tables' CHECK-constrained statuses).
 PluginEvents.CATALOG = {
-    { entity = "customer", table = "customers", module = "customers" },
-    { entity = "invoice", table = "invoices", module = "invoices" },
+    { entity = "customer", table = "customers", module = "customers", verbs = { disabled = { state = "disabled" } } },
+    {
+        entity = "invoice", table = "invoices", module = "invoices",
+        verbs = {
+            sent = { status = "sent" }, paid = { status = "paid" }, partially_paid = { status = "partially_paid" },
+            overdue = { status = "overdue" }, cancelled = { status = { "cancelled", "void" } },
+        },
+    },
     { entity = "invoice.payment", table = "invoice_payments", module = "invoices" },
     { entity = "crm.account", table = "crm_accounts", module = "crm_accounts" },
     { entity = "crm.contact", table = "crm_contacts", module = "crm_contacts" },
-    { entity = "crm.deal", table = "crm_deals", module = "crm_deals" },
-    { entity = "crm.lead", table = "crm_leads", module = "crm_leads" },
-    { entity = "crm.activity", table = "crm_activities", module = "crm_activities" },
-    { entity = "employee", table = "employees", module = "employees" },
-    { entity = "timesheet", table = "timesheets", module = "timesheets" },
-    { entity = "order", table = "orders", module = "orders" },
-    { entity = "kanban.project", table = "kanban_projects", module = "projects" },
+    { entity = "crm.deal", table = "crm_deals", module = "crm_deals", verbs = { won = { status = "won" }, lost = { status = "lost" } } },
+    {
+        entity = "crm.lead", table = "crm_leads", module = "crm_leads",
+        verbs = { qualified = { status = "qualified" }, converted = { status = "converted" }, lost = { status = "lost" } },
+    },
+    { entity = "crm.activity", table = "crm_activities", module = "crm_activities", verbs = { completed = { status = "completed" } } },
+    { entity = "employee", table = "employees", module = "employees", verbs = { deactivated = { is_active = false } } },
+    {
+        entity = "timesheet", table = "timesheets", module = "timesheets",
+        verbs = { submitted = { status = "submitted" }, approved = { status = "approved" }, rejected = { status = "rejected" } },
+    },
+    {
+        entity = "order", table = "orders", module = "orders",
+        verbs = {
+            confirmed = { status = "confirmed" }, shipped = { status = "shipped" }, delivered = { status = "delivered" },
+            cancelled = { status = "cancelled" }, paid = { financial_status = "paid" },
+            refunded = { financial_status = "refunded" },
+        },
+    },
+    {
+        entity = "kanban.project", table = "kanban_projects", module = "projects",
+        verbs = { completed = { status = "completed" }, archived = { status = "archived" } },
+    },
     {
         entity = "kanban.task", table = "kanban_tasks", module = "projects", hide = "search_vector", ns_key = "board_id",
         ns_sql = "SELECT p.namespace_id FROM kanban_boards b JOIN kanban_projects p ON p.id = b.project_id WHERE b.id = $1::int",
+        verbs = { completed = { status = "completed" }, blocked = { status = "blocked" } },
     },
-    { entity = "fs.job", table = "fs_jobs", module = "fs_jobs" },
-    { entity = "fs.visit", table = "fs_visits", module = "fs_visits" },
-    { entity = "member", table = "namespace_members", module = "users" },
+    {
+        entity = "fs.job", table = "fs_jobs", module = "fs_jobs",
+        verbs = {
+            scheduled = { status = "scheduled" }, started = { status = "in_progress" },
+            completed = { status = "completed" }, cancelled = { status = "cancelled" },
+        },
+    },
+    {
+        entity = "fs.visit", table = "fs_visits", module = "fs_visits",
+        verbs = {
+            arrived = { status = "on_site" }, completed = { status = "completed" },
+            cancelled = { status = "cancelled" }, no_access = { status = "no_access" },
+        },
+    },
+    {
+        entity = "member", table = "namespace_members", module = "users",
+        verbs = { joined = { status = "active" }, suspended = { status = "suspended" }, left = { status = "left" } },
+    },
 }
 
 local EVENT_KEY = "^[a-z][a-z0-9_]*[a-z0-9_.]*%.[a-z0-9_*]+$"
+local VERB = "^[a-z][a-z0-9_]*$"
+local COLUMN = "^[a-z_][a-z0-9_]*$"
+
+--- Validate a `verbs` table ({ paid = { status = "paid" } }).
+-- @return nil when valid, else a message
+function PluginEvents.checkVerbs(verbs)
+    if verbs == nil then return nil end
+    if type(verbs) ~= "table" then return "verbs must be a table like { closed = { status = \"closed\" } }" end
+    for verb, cond in pairs(verbs) do
+        if type(verb) ~= "string" or not verb:match(VERB) then
+            return "verb " .. tostring(verb) .. ": use lowercase letters, digits and _"
+        end
+        for _, action in ipairs(PluginEvents.ACTIONS) do
+            if verb == action then return "verb " .. verb .. " is reserved (every entity has it)" end
+        end
+        if type(cond) ~= "table" or next(cond) == nil then
+            return "verb " .. verb .. " needs a condition like { status = \"" .. verb .. "\" }"
+        end
+        for column, value in pairs(cond) do
+            if type(column) ~= "string" or not column:match(COLUMN) then
+                return "verb " .. verb .. ": " .. tostring(column) .. " is not a column name"
+            end
+            local values = type(value) == "table" and value or { value }
+            if #values == 0 then return "verb " .. verb .. ": " .. column .. " needs at least one value" end
+            for k, v in pairs(values) do
+                local t = type(v)
+                if type(k) ~= "number" or (t ~= "string" and t ~= "number" and t ~= "boolean") then
+                    return "verb " .. verb .. ": " .. column .. " must be a string, number, boolean or a list of them"
+                end
+            end
+        end
+    end
+    return nil
+end
+
+--- Every event of an entity: created/updated/deleted, then its verbs (sorted).
+function PluginEvents.entityEvents(entity, verbs)
+    local out = {}
+    for _, a in ipairs(PluginEvents.ACTIONS) do out[#out + 1] = entity .. "." .. a end
+    local names = {}
+    for verb in pairs(verbs or {}) do names[#names + 1] = verb end
+    table.sort(names)
+    for _, verb in ipairs(names) do out[#out + 1] = entity .. "." .. verb end
+    return out
+end
+
+-- Verbs from a database row (jsonb comes back as text or a decoded table).
+function PluginEvents.decodeVerbs(v)
+    if type(v) == "string" then return cjson.decode(v) end
+    return type(v) == "table" and v or {}
+end
 
 local function db()
     return require("lapis.db")
@@ -216,6 +314,7 @@ function PluginEvents.ensureSchema()
         ALTER TABLE plugin_event_subscriptions
         ADD COLUMN IF NOT EXISTS namespace_id INTEGER REFERENCES namespaces(id) ON DELETE CASCADE
     ]])
+    q("ALTER TABLE plugin_event_sources ADD COLUMN IF NOT EXISTS verbs JSONB NOT NULL DEFAULT '{}'::jsonb")
     q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS response_status INTEGER")
     q("ALTER TABLE plugin_event_deliveries ADD COLUMN IF NOT EXISTS duration_ms INTEGER")
 
@@ -257,7 +356,20 @@ function PluginEvents.ensureSchema()
         $fn$
     ]==])
 
-    -- args: entity, hidden columns, namespace SQL, namespace key column
+    -- Does row r satisfy a verb's condition? Every column must equal its value
+    -- (or be one of the values of an array).
+    q([==[
+        CREATE OR REPLACE FUNCTION opsapi_event_match(r jsonb, cond jsonb) RETURNS boolean
+        LANGUAGE sql IMMUTABLE AS $fn$
+            SELECT NOT EXISTS (
+                SELECT 1 FROM jsonb_each(cond) c(k, v)
+                WHERE NOT COALESCE(CASE jsonb_typeof(v)
+                    WHEN 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(v) x WHERE x = r -> k)
+                    ELSE v = r -> k END, false))
+        $fn$
+    ]==])
+
+    -- args: entity, hidden columns, namespace SQL, namespace key column, verbs
     q([==[
         CREATE OR REPLACE FUNCTION opsapi_plugin_event() RETURNS trigger LANGUAGE plpgsql AS $fn$
         DECLARE
@@ -265,7 +377,11 @@ function PluginEvents.ensureSchema()
             ev text := TG_ARGV[0] || '.' || CASE TG_OP WHEN 'INSERT' THEN 'created'
                                                       WHEN 'UPDATE' THEN 'updated' ELSE 'deleted' END;
             hide text[] := string_to_array(NULLIF(TG_ARGV[1], ''), ',');
+            verbs jsonb := COALESCE(NULLIF(TG_ARGV[4], ''), '{}')::jsonb;
+            names text[];
+            e_name text;
             d jsonb;
+            old_d jsonb;
             diff jsonb;
             ns bigint;
             ev_id bigint;
@@ -273,18 +389,31 @@ function PluginEvents.ensureSchema()
             -- Never let eventing fail the business write.
             BEGIN
                 IF NOT EXISTS (SELECT 1 FROM plugin_event_subscriptions
-                               WHERE event IN (ev, entity || '.*')) THEN
+                               WHERE event IN (ev, entity || '.*')
+                                  OR (TG_OP <> 'DELETE' AND left(event, length(entity) + 1) = entity || '.'
+                                      AND verbs ? substr(event, length(entity) + 2))) THEN
                     RETURN NULL;
                 END IF;
                 IF TG_OP = 'DELETE' THEN d := to_jsonb(OLD); ELSE d := to_jsonb(NEW); END IF;
                 -- (namespace resolved below; subscribers are re-checked against it)
                 IF TG_OP = 'UPDATE' THEN
+                    old_d := to_jsonb(OLD);
                     SELECT jsonb_object_agg(n.key, jsonb_build_object('from', o.value, 'to', n.value))
                     INTO diff
-                    FROM jsonb_each(d) n JOIN jsonb_each(to_jsonb(OLD)) o ON o.key = n.key
+                    FROM jsonb_each(d) n JOIN jsonb_each(old_d) o ON o.key = n.key
                     WHERE n.value IS DISTINCT FROM o.value AND n.key <> 'updated_at'
                       AND NOT (n.key = ANY (COALESCE(hide, '{}')));
                     IF diff IS NULL THEN RETURN NULL; END IF; -- only updated_at/hidden columns changed
+                END IF;
+                -- Business events: the row entered a verb's state (on UPDATE: it
+                -- wasn't in that state before).
+                names := ARRAY[ev];
+                IF TG_OP <> 'DELETE' AND verbs <> '{}'::jsonb THEN
+                    SELECT names || COALESCE(array_agg(entity || '.' || v.key ORDER BY v.key), '{}')
+                    INTO names
+                    FROM jsonb_each(verbs) v
+                    WHERE opsapi_event_match(d, v.value)
+                      AND (old_d IS NULL OR NOT opsapi_event_match(old_d, v.value));
                 END IF;
                 IF hide IS NOT NULL THEN d := d - hide; END IF;
                 IF COALESCE(TG_ARGV[2], '') <> '' THEN
@@ -293,7 +422,8 @@ function PluginEvents.ensureSchema()
                     ns := (d ->> 'namespace_id')::bigint;
                 END IF;
                 -- Audit trail: same transaction as the change. Updates keep only
-                -- the changed fields (before -> after).
+                -- the changed fields (before -> after). Business events aren't
+                -- audited separately: the update that caused them is.
                 PERFORM opsapi_audit(ev, entity, COALESCE(d ->> 'uuid', d ->> 'id'), ns,
                     CASE TG_OP WHEN 'INSERT' THEN NULL
                                WHEN 'UPDATE' THEN (SELECT jsonb_object_agg(k, v -> 'from') FROM jsonb_each(diff) x(k, v))
@@ -301,19 +431,21 @@ function PluginEvents.ensureSchema()
                     CASE TG_OP WHEN 'DELETE' THEN NULL
                                WHEN 'UPDATE' THEN (SELECT jsonb_object_agg(k, v -> 'to') FROM jsonb_each(diff) x(k, v))
                                ELSE d END);
-                -- Plugins (namespace_id NULL) hear every tenant; a webhook only its own.
-                IF NOT EXISTS (SELECT 1 FROM plugin_event_subscriptions
-                               WHERE event IN (ev, entity || '.*') AND subscriber <> 'core.audit'
+                -- One outbox row per event someone wants. Plugins (namespace_id
+                -- NULL) hear every tenant; a webhook only its own.
+                FOREACH e_name IN ARRAY names LOOP
+                    IF EXISTS (SELECT 1 FROM plugin_event_subscriptions
+                               WHERE event IN (e_name, entity || '.*') AND subscriber <> 'core.audit'
                                  AND (namespace_id IS NULL OR namespace_id = ns)) THEN
-                    RETURN NULL;
-                END IF;
-                INSERT INTO plugin_events (event, entity, entity_id, namespace_id, data, changes)
-                VALUES (ev, entity, COALESCE(d ->> 'uuid', d ->> 'id'), ns, d, diff)
-                RETURNING id INTO ev_id;
-                INSERT INTO plugin_event_deliveries (event_id, subscriber)
-                SELECT ev_id, subscriber FROM plugin_event_subscriptions
-                WHERE event IN (ev, entity || '.*') AND subscriber <> 'core.audit'
-                  AND (namespace_id IS NULL OR namespace_id = ns);
+                        INSERT INTO plugin_events (event, entity, entity_id, namespace_id, data, changes)
+                        VALUES (e_name, entity, COALESCE(d ->> 'uuid', d ->> 'id'), ns, d, diff)
+                        RETURNING id INTO ev_id;
+                        INSERT INTO plugin_event_deliveries (event_id, subscriber)
+                        SELECT ev_id, subscriber FROM plugin_event_subscriptions
+                        WHERE event IN (e_name, entity || '.*') AND subscriber <> 'core.audit'
+                          AND (namespace_id IS NULL OR namespace_id = ns);
+                    END IF;
+                END LOOP;
             EXCEPTION WHEN OTHERS THEN
                 RAISE WARNING 'opsapi_plugin_event(%): %', ev, SQLERRM;
             END;
@@ -325,20 +457,23 @@ function PluginEvents.ensureSchema()
     -- Core sources (catalog changes are picked up here).
     local keep = {}
     for _, s in ipairs(PluginEvents.CATALOG) do
-        PluginEvents.upsertSource(s.entity, s.table, "core", s.hide, s.ns_sql, s.ns_key, s.module)
+        PluginEvents.upsertSource(s.entity, s.table, "core", s.hide, s.ns_sql, s.ns_key, s.module, s.verbs)
         keep[#keep + 1] = db().escape_literal(s.entity)
     end
     q("DELETE FROM plugin_event_sources WHERE owner = 'core' AND entity NOT IN (" .. table.concat(keep, ", ") .. ")")
 end
 
-function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_key, module)
+function PluginEvents.upsertSource(entity, table_name, owner, hide, ns_sql, ns_key, module, verbs)
+    local err = PluginEvents.checkVerbs(verbs)
+    if err then error(entity .. ": " .. err, 0) end
     db().query([[
-        INSERT INTO plugin_event_sources (entity, table_name, owner, hide, ns_sql, ns_key, module)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO plugin_event_sources (entity, table_name, owner, hide, ns_sql, ns_key, module, verbs)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)
         ON CONFLICT (entity) DO UPDATE SET table_name = EXCLUDED.table_name, owner = EXCLUDED.owner,
             hide = EXCLUDED.hide, ns_sql = EXCLUDED.ns_sql, ns_key = EXCLUDED.ns_key,
-            module = EXCLUDED.module, updated_at = NOW()
-    ]], entity, table_name, owner, hide or "", ns_sql or "", ns_key or "", module or db().NULL)
+            module = EXCLUDED.module, verbs = EXCLUDED.verbs, updated_at = NOW()
+    ]], entity, table_name, owner, hide or "", ns_sql or "", ns_key or "", module or db().NULL,
+        next(verbs or {}) and cjson.encode(verbs) or "{}")
 end
 
 --- The "core.audit" subscriptions: every source (core and plugin) while the
@@ -371,10 +506,10 @@ function PluginEvents.syncPlugin(manifest)
     local modules = {}
     for _, m in ipairs(manifest.modules) do modules[m.machine_name] = true end
     local entities = {}
-    for name, table_name in pairs(manifest.publishes) do
+    for name, spec in pairs(manifest.publishes) do
         -- By convention (make:resource) a table's RBAC module shares its name.
-        PluginEvents.upsertSource(prefix .. name, table_name, manifest.code, nil, nil, nil,
-            modules[table_name] and table_name or nil)
+        PluginEvents.upsertSource(prefix .. name, spec.table, manifest.code, nil, nil, nil,
+            modules[spec.table] and spec.table or nil, spec.verbs)
         entities[#entities + 1] = d.escape_literal(prefix .. name)
     end
     d.query("DELETE FROM plugin_event_sources WHERE owner = " .. d.escape_literal(manifest.code)
@@ -414,10 +549,12 @@ end
 function PluginEvents.syncTriggers()
     local d = db()
     local sources = d.query([[
-        SELECT s.*, to_regclass(s.table_name) IS NOT NULL AS present,
+        SELECT s.*, s.verbs::text AS verbs_text, to_regclass(s.table_name) IS NOT NULL AS present,
                EXISTS (SELECT 1 FROM plugin_event_subscriptions sub
                        WHERE sub.event ~ ('^' || replace(s.entity, '.', '\.')
-                                          || '\.(created|updated|deleted|\*)$')) AS wanted,
+                                          || '\.(created|updated|deleted|\*)$')
+                          OR (left(sub.event, length(s.entity) + 1) = s.entity || '.'
+                              AND s.verbs ? substr(sub.event, length(s.entity) + 2))) AS wanted,
                (SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
                 WHERE t.tgname = 'opsapi_plugin_event' AND t.tgrelid = to_regclass(s.table_name)) AS current
         FROM plugin_event_sources s
@@ -427,6 +564,7 @@ function PluginEvents.syncTriggers()
         local current = s.current ~= d.NULL and s.current or nil
         local call = "opsapi_plugin_event(" .. table.concat({
             d.escape_literal(s.entity), d.escape_literal(s.hide), d.escape_literal(s.ns_sql), d.escape_literal(s.ns_key),
+            d.escape_literal(s.verbs_text),
         }, ", ") .. ")"
         local T = d.escape_identifier(s.table_name)
         if present and wanted then

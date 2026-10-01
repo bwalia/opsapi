@@ -12,7 +12,6 @@ import { Modal, Button, Input } from '@/components/ui';
 import { CheckboxField, apiError } from '@/components/field-service/shared';
 import { webhooksService, type Webhook, type WebhookEventGroup } from '@/services/webhooks.service';
 
-const ACTIONS = ['created', 'updated', 'deleted'] as const;
 
 interface WebhookFormModalProps {
   isOpen: boolean;
@@ -67,10 +66,10 @@ function WebhookForm({ webhook, onClose, onSaved }: WebhookFormModalProps) {
       const next = new Set(s);
       if (on) next.add(event);
       else next.delete(event);
-      // "all" replaces the individual actions of that entity
+      // "all" replaces the individual events of that entity
       if (on && event.endsWith('.*')) {
-        const entity = event.slice(0, -2);
-        ACTIONS.forEach((a) => next.delete(`${entity}.${a}`));
+        const group = groups?.find((g) => `${g.entity}.*` === event);
+        group?.events.forEach((name) => next.delete(name));
       }
       return next;
     });
@@ -166,16 +165,16 @@ function WebhookForm({ webhook, onClose, onSaved }: WebhookFormModalProps) {
                 </div>
                 {g.allowed ? (
                   <>
-                    {ACTIONS.map((a) => (
-                      <label key={a} className="flex items-center gap-1.5 text-sm text-secondary-700 cursor-pointer">
+                    {g.events.map((name) => (
+                      <label key={name} className="flex items-center gap-1.5 text-sm text-secondary-700 cursor-pointer">
                         <input
                           type="checkbox"
                           className="h-4 w-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
-                          checked={all || selected.has(`${g.entity}.${a}`)}
+                          checked={all || selected.has(name)}
                           disabled={all}
-                          onChange={(e) => toggle(`${g.entity}.${a}`, e.target.checked)}
+                          onChange={(e) => toggle(name, e.target.checked)}
                         />
-                        {a}
+                        {name.slice(g.entity.length + 1).replace(/_/g, ' ')}
                       </label>
                     ))}
                     <label className="flex items-center gap-1.5 text-sm text-secondary-700 cursor-pointer ml-auto">

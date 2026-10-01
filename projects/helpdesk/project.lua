@@ -14,9 +14,11 @@ return {
     },
 
     -- Tables whose changes are published as events (helpdesk.ticket.created /
-    -- updated / deleted) for this and other plugins to subscribe to.
+    -- updated / deleted) for this and other plugins to subscribe to. `verbs`
+    -- add business events: helpdesk.ticket.closed fires when a ticket becomes
+    -- closed (created closed, or changed from another status to closed).
     publishes = {
-        ticket = "helpdesk_tickets",
+        ticket = { table = "helpdesk_tickets", verbs = { closed = { status = "closed" } } },
         -- opsapi:publishes (make:resource adds entries above this line)
     },
 

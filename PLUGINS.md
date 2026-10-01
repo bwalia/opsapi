@@ -130,8 +130,11 @@ return {
 
     -- Tables whose changes are published as events other plugins can
     -- subscribe to: helpdesk.ticket.created / updated / deleted (§7).
+    -- `verbs` add business events: helpdesk.ticket.closed fires when a
+    -- ticket becomes closed. The short form `ticket = "helpdesk_tickets"`
+    -- publishes only created / updated / deleted.
     publishes = {
-        ticket = "helpdesk_tickets",
+        ticket = { table = "helpdesk_tickets", verbs = { closed = { status = "closed" } } },
         -- opsapi:publishes (make:resource adds entries above this line)
     },
 
@@ -145,6 +148,7 @@ Rules enforced at load time:
 - `api_prefix` must be under `/api/` and must not already be used by OpsAPI or another plugin.
 - A plugin needing a newer `sdk_version` than the running OpsAPI is refused. Upgrade OpsAPI first.
 - Every `menu` entry needs a `label`, a `resource` and a `module` that is one of the plugin's `modules`.
+- `publishes` names are lowercase. Each verb has a condition `{ column = value }` or `{ column = { value, value } }`, and can't be called `created`, `updated` or `deleted`.
 
 ---
 
@@ -328,7 +332,7 @@ Plugins can react when something changes in OpsAPI (an invoice is paid, a lead c
 
 ```bash
 opsapi events                                      # everything you can subscribe to
-opsapi make:listener helpdesk invoice.updated billing
+opsapi make:listener helpdesk invoice.paid billing
 ```
 
 ```lua
@@ -337,9 +341,7 @@ local sdk = require("helper.plugin-sdk")
 local tickets = sdk.resource("helpdesk_tickets")
 
 return {
-    ["invoice.updated"] = function(event)
-        local status = event.changes and event.changes.status
-        if not (status and status.to == "paid") then return end
+    ["invoice.paid"] = function(event)
         local row, code = tickets.create(event.namespace_id, {
             title = "Thank " .. (event.data.customer_name or "the customer") .. " for paying",
             status = "open",
@@ -354,7 +356,7 @@ Run `opsapi migrate`, which registers the subscription and the database trigger,
 
 ### Events you can subscribe to
 
-- **Core table events**, `<entity>.created` / `.updated` / `.deleted` (or `<entity>.*` for all three):
+- **Core table events**, `<entity>.created` / `.updated` / `.deleted` (or `<entity>.*` for all of an entity's events):
 
   | Area | Entities |
   |---|---|
@@ -364,7 +366,25 @@ Run `opsapi migrate`, which registers the subscription and the database trigger,
   | Work | `kanban.project`, `kanban.task`, `fs.job`, `fs.visit` |
 
   Entities whose module isn't enabled in your deployment never fire. `opsapi events` prints the list with each entity's table.
-- **Plugin table events**: every table in a manifest's `publishes` gives `<plugin>.<name>.created` / `.updated` / `.deleted`. `make:resource` adds its table.
+- **Business events**: what happened, not just "a row changed". `invoice.paid` fires once when an invoice *becomes* paid: it's created as paid, or updated from any other status to paid. Saving a paid invoice again doesn't repeat it. These come from the same trigger and transaction as `invoice.updated`, so they're just as reliable. `<entity>.*` includes them, so a change that pays an invoice delivers both `invoice.updated` and `invoice.paid` to such a subscriber.
+
+| Entity | Business events |
+|---|---|
+| `invoice` | `sent`, `paid`, `partially_paid`, `overdue`, `cancelled` (status cancelled or void) |
+| `order` | `confirmed`, `shipped`, `delivered`, `cancelled`, `paid` and `refunded` (financial status) |
+| `crm.deal` | `won`, `lost` |
+| `crm.lead` | `qualified`, `converted`, `lost` |
+| `crm.activity` | `completed` |
+| `customer` | `disabled` |
+| `employee` | `deactivated` |
+| `timesheet` | `submitted`, `approved`, `rejected` |
+| `kanban.project` | `completed`, `archived` |
+| `kanban.task` | `completed`, `blocked` |
+| `fs.job` | `scheduled`, `started` (in progress), `completed`, `cancelled` |
+| `fs.visit` | `arrived` (on site), `completed`, `cancelled`, `no_access` |
+| `member` | `joined` (became active), `suspended`, `left` |
+
+- **Plugin table events**: every table in a manifest's `publishes` gives `<plugin>.<name>.created` / `.updated` / `.deleted`, plus the `verbs` you declare (§3). `make:resource` adds its table.
 - **Custom events**: `sdk.emit(namespace_id, "helpdesk.ticket.escalated", { ... })` from any plugin code. Name them `<plugin>.<entity>.<action>`; core entity names are reserved.
 
 ### The event
@@ -376,7 +396,7 @@ Run `opsapi migrate`, which registers the subscription and the database trigger,
 | `entity_id` | The row's `uuid` (or `id`). |
 | `namespace_id` | The tenant. **Scope everything you read or write to it.** |
 | `data` | The row after the change (before it, for `*.deleted`); for custom events, what was emitted. NULL columns are absent. |
-| `changes` | `*.updated` only: `{ column = { from = …, to = … } }` for the columns that changed. An update that only touches `updated_at` isn't an event. |
+| `changes` | `*.updated` and business events caused by an update: `{ column = { from = …, to = … } }` for the columns that changed. An update that only touches `updated_at` isn't an event. |
 | `occurred_at`, `attempt` | When it happened; which delivery attempt this is (1, 2, …). |
 
 `data` mirrors the database row, so column names follow the table (see `opsapi events`). Read it defensively; columns can change between OpsAPI releases.
@@ -396,7 +416,7 @@ Run `opsapi migrate`, which registers the subscription and the database trigger,
 - Be idempotent (above), and keep handlers short. Call external services with timeouts (`httpc:set_timeouts(...)`). A delivery that runs longer than 5 minutes is handed to another worker.
 - Read secrets with `sdk.env` (§10).
 - Don't do work when the file loads: `lapis migrate` and `plugin:check` load it too.
-- For your own domain events, prefer table events (`publishes`), which are transactional. Use `sdk.emit` for things that aren't a row change ("escalated", "reminder due").
+- For your own domain events, prefer table events (`publishes`), which are transactional. When "what happened" is a state change, declare a verb rather than decoding `changes` in every handler. Use `sdk.emit` for things that aren't a row change ("escalated", "reminder due").
 
 ### Workspace webhooks use the same outbox
 
@@ -565,5 +585,5 @@ Plugins directory: `--dir <path>`, else `$OPSAPI_PROJECTS_DIR`, else `/app/proje
 
 - **Code changes need a restart.** OpsAPI caches compiled Lua per worker (`lua_code_cache on`), so restart the container or roll the deployment after changing a plugin.
 - **Dashboard pages are generic.** Plugins get list/form pages for their `sdk.crud` resources (§6), not custom screens. Build anything else in your own frontend against the plugin's API.
-- **Events are table-level.** Core events are row changes (`invoice.updated` with `changes`), not business verbs; derive "paid" from `changes.status`. The payload is the database row, not the API's JSON shape.
+- **Event payloads are database rows**, not the API's JSON shape. Business events cover status changes (`invoice.paid`); anything subtler can still be derived from `invoice.updated` and its `changes`.
 - Built-in modules (in `lapis/routes`) follow the same layering. See `CLAUDE.md` if you're contributing to OpsAPI itself rather than extending it.

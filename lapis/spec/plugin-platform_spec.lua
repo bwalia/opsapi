@@ -186,6 +186,35 @@ subs, errs = events_plugin({ bad = 'return 42' })
 check("events file must return a table", #errs == 1)
 check("manifest publishes validated",
     manifest('return { code = "x", name = "x", publishes = { ["Bad Name"] = "t" } }') == nil)
+
+print("business events (verbs)")
+local verbs_ok = true
+for _, src in ipairs(PluginEvents.CATALOG) do
+    if PluginEvents.checkVerbs(src.verbs) then verbs_ok = false end
+end
+check("every core verb is valid", verbs_ok)
+check("verb condition required", PluginEvents.checkVerbs({ closed = {} }) ~= nil)
+check("base actions can't be verbs", PluginEvents.checkVerbs({ updated = { status = "x" } }) ~= nil)
+check("verb values: scalars or a list", PluginEvents.checkVerbs({ done = { status = { "a", "b" }, flag = true } }) == nil
+    and PluginEvents.checkVerbs({ done = { status = { a = 1 } } }) ~= nil)
+check("bad verb column refused", PluginEvents.checkVerbs({ done = { ["status; drop"] = "x" } }) ~= nil)
+local em = manifest('return { code = "vb", name = "V", publishes = { ticket = { table = "vb_tickets", '
+    .. 'verbs = { closed = { status = "closed" } } }, note = "vb_notes" } }')
+check("publishes: long form with verbs", em and em.publishes.ticket.table == "vb_tickets"
+    and em.publishes.ticket.verbs.closed.status == "closed")
+check("publishes: short form normalised", em and em.publishes.note.table == "vb_notes" and next(em.publishes.note.verbs) == nil)
+check("publishes: bad verb refused", manifest('return { code = "vb", name = "V", publishes = { t = { table = "vb_t", '
+    .. 'verbs = { deleted = { status = "x" } } } } }') == nil)
+local evs = PluginEvents.entityEvents("invoice", { paid = {}, sent = {} })
+check("entityEvents: base actions then sorted verbs",
+    table.concat(evs, ",") == "invoice.created,invoice.updated,invoice.deleted,invoice.paid,invoice.sent")
+local trig = io.open("helper/plugin-events.lua"):read("*a")
+check("trigger fires a verb only when the row enters its state",
+    trig:find("WHERE opsapi_event_match(d, v.value)", 1, true)
+    and trig:find("AND (old_d IS NULL OR NOT opsapi_event_match(old_d, v.value))", 1, true))
+check("verbs are part of the trigger call (changes recreate it)", trig:find("d.escape_literal(s.verbs_text)", 1, true) ~= nil)
+check("a verb subscription installs the trigger", trig:find("AND s.verbs ? substr(sub.event, length(s.entity) + 2)", 1, true) ~= nil)
+
 check("sdk.emit refuses core events", not pcall(PluginEvents.emit, 1, "invoice.paid", {}))
 check("sdk.emit refuses nested core entities", not pcall(PluginEvents.emit, 1, "crm.lead.hot", {}))
 check("sdk.emit refuses wildcards", not pcall(PluginEvents.emit, 1, "evp.thing.*", {}))
@@ -255,7 +284,7 @@ check("no unfilled template placeholders", not api_src:find("{{", 1, true)
     and not io.open(mig):read("*a"):find("{{", 1, true))
 check("plugin:check passes", succeeded(run("plugin:check")))
 m = ProjectLoader.loadManifest(plugin .. "/project.lua", plugin)
-check("make:resource publishes the table's events", m and m.publishes.ticket == "help_desk_tickets")
+check("make:resource publishes the table's events", m and m.publishes.ticket.table == "help_desk_tickets")
 check("make:listener", succeeded(run("make:listener help-desk invoice.updated")))
 check("listener file compiles", loadfile(plugin .. "/events/on_invoice_updated.lua") ~= nil)
 check("listener registers its event",
