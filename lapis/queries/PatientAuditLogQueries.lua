@@ -9,27 +9,33 @@ function PatientAuditLogQueries.log(params)
 end
 
 function PatientAuditLogQueries.all(params)
-    local page = params.page or 1
-    local perPage = params.perPage or 50
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 50, 100)
 
-    local conditions = {}
+    local conditions, values = {}, {} -- values bind to the ? placeholders
     if params.patient_id then
-        table.insert(conditions, "patient_id = " .. tonumber(params.patient_id))
+        table.insert(conditions, "patient_id = ?")
+        table.insert(values, tonumber(params.patient_id) or -1) -- not a number: matches nothing
     end
     if params.user_id then
-        table.insert(conditions, "user_id = " .. tonumber(params.user_id))
+        table.insert(conditions, "user_id = ?")
+        table.insert(values, tonumber(params.user_id) or -1) -- not a number: matches nothing
     end
     if params.action then
-        table.insert(conditions, "action = '" .. params.action .. "'")
+        table.insert(conditions, "action = ?")
+        table.insert(values, tostring(params.action))
     end
     if params.resource_type then
-        table.insert(conditions, "resource_type = '" .. params.resource_type .. "'")
+        table.insert(conditions, "resource_type = ?")
+        table.insert(values, tostring(params.resource_type))
     end
     if params.date_from then
-        table.insert(conditions, "created_at >= '" .. params.date_from .. "'")
+        table.insert(conditions, "created_at >= ?")
+        table.insert(values, tostring(params.date_from))
     end
     if params.date_to then
-        table.insert(conditions, "created_at <= '" .. params.date_to .. "'")
+        table.insert(conditions, "created_at <= ?")
+        table.insert(values, tostring(params.date_to))
     end
 
     local where_clause = ""
@@ -41,7 +47,8 @@ function PatientAuditLogQueries.all(params)
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_order, "created_at", "desc")
     local order_clause = " order by " .. orderField .. " " .. orderDir
 
-    local paginated = PatientAuditLogModel:paginated(where_clause .. order_clause, { per_page = perPage })
+    values[#values + 1] = { per_page = perPage }
+    local paginated = PatientAuditLogModel:paginated(where_clause .. order_clause, unpack(values))
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()

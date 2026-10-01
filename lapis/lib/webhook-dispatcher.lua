@@ -42,24 +42,17 @@ function WebhookDispatcher.trigger(webhook, event, data)
     local signature = sign(webhook.secret, body)
     if not signature then return false, nil, "could not sign payload" end
 
-    local ok, http = pcall(require, "resty.http")
-    if not ok then return false, nil, "resty.http not available" end
-    local httpc = http.new()
-    httpc:set_timeouts(2000, 5000, 5000)
-    local res, err = httpc:request_uri(webhook.url, {
-        method = "POST",
-        headers = {
-            ["Content-Type"] = "application/json",
-            ["User-Agent"] = "opsapi-webhooks",
-            ["X-Opsapi-Event"] = event,
-            ["X-Opsapi-Signature-256"] = signature,
-        },
-        body = body,
-        ssl_verify = os.getenv("OPSAPI_SSL_VERIFY") ~= "false",
-    })
-    local status = res and res.status or 0
+    -- SSRF-guarded: a tenant's URL may not reach internal services or cloud
+    -- metadata (plain http stays allowed for existing CMS receivers).
+    local ok, err, status = require("lib.outbound-webhooks").send(webhook.url, {
+        ["Content-Type"] = "application/json",
+        ["User-Agent"] = "opsapi-webhooks",
+        ["X-Opsapi-Event"] = event,
+        ["X-Opsapi-Signature-256"] = signature,
+    }, body, { allow_http = true })
+    status = status or 0
     CmsWebhookQueries.recordDelivery(webhook.id, status)
-    if not res then
+    if not ok and status == 0 then
         ngx.log(ngx.ERR, "webhook: POST ", webhook.url, " failed: ", tostring(err))
         return false, nil, tostring(err)
     end

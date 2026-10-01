@@ -40,21 +40,25 @@ function PatientAccessControlQueries.create(params)
 end
 
 function PatientAccessControlQueries.all(params)
-    local page = params.page or 1
-    local perPage = params.perPage or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 100)
 
-    local conditions = {}
+    local conditions, values = {}, {} -- values bind to the ? placeholders
     if params.patient_id then
-        table.insert(conditions, "patient_id = " .. tonumber(params.patient_id))
+        table.insert(conditions, "patient_id = ?")
+        table.insert(values, tonumber(params.patient_id) or -1) -- not a number: matches nothing
     end
     if params.granted_to then
-        table.insert(conditions, "granted_to = '" .. params.granted_to .. "'")
+        table.insert(conditions, "granted_to = ?")
+        table.insert(values, tostring(params.granted_to))
     end
     if params.status then
-        table.insert(conditions, "status = '" .. params.status .. "'")
+        table.insert(conditions, "status = ?")
+        table.insert(values, tostring(params.status))
     end
     if params.role then
-        table.insert(conditions, "role = '" .. params.role .. "'")
+        table.insert(conditions, "role = ?")
+        table.insert(values, tostring(params.role))
     end
 
     local where_clause = ""
@@ -66,7 +70,8 @@ function PatientAccessControlQueries.all(params)
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_order, "created_at", "desc")
     local order_clause = " order by " .. orderField .. " " .. orderDir
 
-    local paginated = PatientAccessControlModel:paginated(where_clause .. order_clause, { per_page = perPage })
+    values[#values + 1] = { per_page = perPage }
+    local paginated = PatientAccessControlModel:paginated(where_clause .. order_clause, unpack(values))
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()

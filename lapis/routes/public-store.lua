@@ -1,5 +1,6 @@
 local respond_to = require("lapis.application").respond_to
 local db = require("lapis.db")
+local Global = require("helper.global")
 local cjson = require("cjson")
 
 return function(app)
@@ -64,9 +65,10 @@ return function(app)
     -- Get store products (public)
     app:match("public_store_products", "/api/v2/public/stores/:slug/products", respond_to({
         GET = function(self)
+            -- PUBLIC route (no login): every client value is a bound parameter.
             local store_slug = self.params.slug
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 20
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 20, 100)
             local category = self.params.category
             local search = self.params.search
             local sort = self.params.sort or "created_at" -- created_at, price_asc, price_desc, name
@@ -77,22 +79,21 @@ return function(app)
             if not store or #store == 0 then
                 return { json = { error = "Store not found" }, status = 404 }
             end
-            local store_id = store[1].id
 
-            -- Build query
-            local where_clause = "store_id = " .. store_id .. " AND is_active = true"
-
-            if category then
-                where_clause = where_clause .. " AND category = '" .. db.escape_literal(category) .. "'"
+            local where, values = { "store_id = ?", "is_active = true" }, { store[1].id }
+            if type(category) == "string" and category ~= "" then
+                where[#where + 1] = "category = ?"
+                values[#values + 1] = category
             end
-
-            if search and search ~= "" then
-                where_clause = where_clause ..
-                    " AND (name ILIKE '%" ..
-                    db.escape_literal(search) .. "%' OR description ILIKE '%" .. db.escape_literal(search) .. "%')"
+            if type(search) == "string" and search ~= "" then
+                local like = "%" .. search:gsub("[%%_\\]", "\\%0") .. "%"
+                where[#where + 1] = "(name ILIKE ? OR description ILIKE ?)"
+                values[#values + 1] = like
+                values[#values + 1] = like
             end
+            local where_clause = table.concat(where, " AND ")
 
-            -- Sort mapping
+            -- Sort mapping (fixed strings only)
             local order_by = "created_at DESC"
             if sort == "price_asc" then
                 order_by = "price ASC"
@@ -102,17 +103,13 @@ return function(app)
                 order_by = "name ASC"
             end
 
-            -- Get products
-            local products = db.query([[
-                SELECT * FROM storeproducts
-                WHERE ]] .. where_clause .. [[
-                ORDER BY ]] .. order_by .. [[
-                LIMIT ]] .. per_page .. [[ OFFSET ]] .. offset)
-
-            -- Get total count
-            local total_count = db.query([[
-                SELECT COUNT(*) as count FROM storeproducts
-                WHERE ]] .. where_clause)
+            local page_values = { unpack(values) }
+            page_values[#page_values + 1] = per_page
+            page_values[#page_values + 1] = offset
+            local products = db.query("SELECT * FROM storeproducts WHERE " .. where_clause
+                .. " ORDER BY " .. order_by .. " LIMIT ? OFFSET ?", unpack(page_values))
+            local total = db.query("SELECT COUNT(*)::int AS count FROM storeproducts WHERE " .. where_clause,
+                unpack(values))[1].count or 0
 
             return {
                 json = {
@@ -120,8 +117,8 @@ return function(app)
                     pagination = {
                         page = page,
                         per_page = per_page,
-                        total = total_count[1].count or 0,
-                        total_pages = math.ceil((total_count[1].count or 0) / per_page)
+                        total = total,
+                        total_pages = math.ceil(total / per_page)
                     }
                 }
             }
@@ -132,8 +129,8 @@ return function(app)
     app:match("public_store_reviews", "/api/v2/public/stores/:slug/reviews", respond_to({
         GET = function(self)
             local store_slug = self.params.slug
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 10
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 10, 100)
             local offset = (page - 1) * per_page
 
             -- Get store
@@ -212,7 +209,7 @@ return function(app)
                        s.uuid as store_uuid
                 FROM storeproducts sp
                 LEFT JOIN stores s ON sp.store_id = s.id
-                WHERE sp.uuid = ? AND s.slug = ? AND sp.status = 'active'
+                WHERE sp.uuid = ? AND s.slug = ? AND sp.is_active = true
             ]], product_uuid, store_slug)
 
             if not products or #products == 0 then

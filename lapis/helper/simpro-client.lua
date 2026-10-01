@@ -36,7 +36,6 @@
 ]]
 
 local cjson = require("cjson")
-local http = require("resty.http")
 
 local SimproClient = {}
 SimproClient.__index = SimproClient
@@ -98,14 +97,12 @@ function SimproClient:authenticate()
         table.insert(body, "refresh_token=" .. ngx.escape_uri(c.refresh_token))
     end
 
-    local httpc = http.new()
-    httpc:set_timeout(DEFAULT_TIMEOUT_MS)
-    local res, err = httpc:request_uri(self.base_url .. "/oauth2/token", {
+    -- The base URL is tenant-configured: SSRF-guarded (public hosts only).
+    local res, err = require("lib.outbound-webhooks").request(self.base_url .. "/oauth2/token", {
         method = "POST",
         body = table.concat(body, "&"),
         headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
-        ssl_verify = true,
-    })
+    }, { timeout_ms = DEFAULT_TIMEOUT_MS })
 
     if not res then return nil, "Simpro auth failed: " .. tostring(err) end
     if res.status ~= 200 then
@@ -148,10 +145,7 @@ function SimproClient:request(method, resource, opts)
         url = url .. "?" .. table.concat(parts, "&")
     end
 
-    local httpc = http.new()
-    httpc:set_timeout(opts.timeout_ms or DEFAULT_TIMEOUT_MS)
-
-    local res, req_err = httpc:request_uri(url, {
+    local res, req_err = require("lib.outbound-webhooks").request(url, {
         method = method,
         body = opts.body and cjson.encode(opts.body) or nil,
         headers = {
@@ -159,8 +153,7 @@ function SimproClient:request(method, resource, opts)
             ["Content-Type"] = "application/json",
             ["Accept"] = "application/json",
         },
-        ssl_verify = true,
-    })
+    }, { timeout_ms = opts.timeout_ms or DEFAULT_TIMEOUT_MS }) -- SSRF-guarded
 
     if not res then return nil, "Simpro request failed: " .. tostring(req_err) end
 

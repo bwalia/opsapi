@@ -7,10 +7,22 @@ local Global = require("helper.global")
 local Geocoding = require("lib.Geocoding")
 local cjson = require("cjson")
 
+-- Stripe diagnostics act with the PLATFORM's Stripe account: platform admins
+-- only, and a 503 (not a crash) when Stripe isn't configured.
+local function stripe_diagnostic(handler)
+    return AuthMiddleware.requireRole("administrative", function(self)
+        local key = Global.getEnvVar("STRIPE_SECRET_KEY")
+        if not key or key == "" then
+            return { json = { error = "Stripe is not configured" }, status = 503 }
+        end
+        return handler(self)
+    end)
+end
+
 return function(app)
     -- Test Stripe Connection
     app:match("test_stripe", "/api/v2/payments/test", respond_to({
-        GET = function(self)
+        GET = stripe_diagnostic(function(self)
             local success, result = pcall(function()
                 local stripe = Stripe.new()
 
@@ -22,16 +34,16 @@ return function(app)
 
             if not success then
                 ngx.log(ngx.ERR, "Stripe test failed: " .. tostring(result))
-                return { json = { error = "Stripe test failed", details = tostring(result) }, status = 500 }
+                return require("lib.errors").legacy(500, "Stripe test failed", result)
             end
 
             return { json = result, status = 200 }
-        end
+        end)
     }))
 
     -- Test Checkout Session Creation
     app:match("test_checkout_session", "/api/v2/payments/test-checkout", respond_to({
-        GET = function(self)
+        GET = stripe_diagnostic(function(self)
             local success, result = pcall(function()
                 local stripe = Stripe.new()
 
@@ -67,11 +79,11 @@ return function(app)
 
             if not success then
                 ngx.log(ngx.ERR, "Test checkout session failed: " .. tostring(result))
-                return { json = { error = "Test checkout session failed", details = tostring(result) }, status = 500 }
+                return require("lib.errors").legacy(500, "Test checkout session failed", result)
             end
 
             return { json = result, status = 200 }
-        end
+        end)
     }))
 
     -- Helper function to parse JSON body
@@ -340,7 +352,7 @@ return function(app)
 
             if not success then
                 ngx.log(ngx.ERR, "Checkout session creation failed: " .. tostring(result))
-                return { json = { error = "Checkout session creation failed", details = tostring(result) }, status = 500 }
+                return require("lib.errors").legacy(500, "Checkout session creation failed", result)
             end
 
             return { json = result, status = 200 }
@@ -430,7 +442,7 @@ return function(app)
 
             if not success then
                 ngx.log(ngx.ERR, "Payment intent creation failed: " .. tostring(result))
-                return { json = { error = "Payment intent creation failed", details = tostring(result) }, status = 500 }
+                return require("lib.errors").legacy(500, "Payment intent creation failed", result)
             end
 
             return { json = result, status = 200 }
@@ -789,7 +801,8 @@ return function(app)
             
             if not success then
                 ngx.log(ngx.ERR, "Payment confirmation failed: " .. tostring(result))
-                return { json = { error = "Order processing failed", details = tostring(result) }, status = 500 }
+                ngx.log(ngx.ERR, "Order processing failed", ": ", tostring(result))
+                return require("lib.errors").legacy(500, "Order processing failed", result)
             end
             
             return { json = result, status = 201 }
