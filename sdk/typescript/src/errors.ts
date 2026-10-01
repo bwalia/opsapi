@@ -7,6 +7,10 @@ export class OpsApiError extends Error {
   readonly body: unknown;
   /** Validation errors (422): field -> message. */
   readonly details?: Record<string, string>;
+  /** OpsAPI's error code, e.g. `VALIDATION_422`, `CONFLICT_409`, `NOT_FOUND_404`. */
+  readonly code?: string;
+  /** Machine-readable specifics, e.g. `{ reason: 'required', field: 'email' }`. */
+  readonly context?: Record<string, unknown>;
   readonly method?: string;
   readonly url?: string;
 
@@ -19,10 +23,12 @@ export class OpsApiError extends Error {
     this.body = init.body;
     this.method = init.method;
     this.url = init.url;
-    const details = (init.body as { details?: unknown } | undefined)?.details;
-    if (details && typeof details === 'object' && !Array.isArray(details)) {
-      this.details = details as Record<string, string>;
-    }
+    // Two shapes: { error: '…', code, context, details } and { error: { code, message, context } }.
+    const b = (init.body ?? {}) as { error?: unknown; code?: unknown; context?: unknown; details?: unknown };
+    const inner = (b.error && typeof b.error === 'object' ? b.error : b) as { code?: unknown; context?: unknown };
+    if (typeof inner.code === 'string') this.code = inner.code;
+    if (isRecord(inner.context)) this.context = inner.context;
+    if (isRecord(b.details)) this.details = b.details as Record<string, string>;
   }
 
   /** 401: no or invalid credentials. */
@@ -37,7 +43,11 @@ export class OpsApiError extends Error {
   get isNotFound() {
     return this.status === 404;
   }
-  /** 422: validation failed; see `details`. */
+  /** 409: duplicate, or still referenced by other records. */
+  get isConflict() {
+    return this.status === 409;
+  }
+  /** 422: validation failed; see `details` and `context`. */
   get isValidation() {
     return this.status === 422;
   }
@@ -53,4 +63,8 @@ export function messageOf(body: unknown): string | undefined {
     if (typeof m === 'string') return m;
   }
   return typeof b.message === 'string' ? b.message : undefined;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
