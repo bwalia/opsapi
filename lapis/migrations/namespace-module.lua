@@ -42,4 +42,16 @@ return {
         print(("[NamespaceModule] owner roles granted namespace.manage: %d, admin roles granted namespace.read: %d")
             :format(owners, admins))
     end,
+
+    -- Workspace -> Plugins: turn installed plugins on/off and fill in their
+    -- settings (routes/plugins.lua). Hidden while no plugin is installed.
+    [2] = function()
+        db.query([[
+            INSERT INTO menu_items (uuid, key, name, icon, path, module, required_action, priority,
+                                    is_active, is_admin_only, always_show, settings, created_at, updated_at)
+            VALUES (gen_random_uuid()::text, 'plugins', 'Plugins', 'Puzzle', '/dashboard/namespace/plugins',
+                    'namespace', 'read', 103, true, false, false, '{}', NOW(), NOW())
+            ON CONFLICT (key) DO NOTHING
+        ]])
+    end,
 }

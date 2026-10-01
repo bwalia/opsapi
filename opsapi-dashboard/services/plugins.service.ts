@@ -11,7 +11,7 @@ import apiClient, { buildQueryString } from '@/lib/api-client';
  */
 
 export type PluginFieldType =
-  'string' | 'text' | 'integer' | 'number' | 'boolean' | 'date' | 'datetime' | 'email' | 'uuid' | 'json';
+  'string' | 'text' | 'integer' | 'number' | 'boolean' | 'date' | 'datetime' | 'email' | 'url' | 'uuid' | 'json';
 
 export interface PluginField {
   name: string;
@@ -80,6 +80,39 @@ export interface PluginListParams {
   filters?: Record<string, string>;
 }
 
+/** One setting a plugin's manifest declares, as this workspace has it. */
+export interface WorkspacePluginSetting extends PluginField {
+  description?: string;
+  /** Write-only: the value is never sent back, only whether one is set. */
+  secret: boolean;
+  is_set?: boolean;
+  /** Used when no value is stored (not for secrets). */
+  default?: unknown;
+  value?: unknown;
+}
+
+export interface WorkspacePluginJob {
+  name: string;
+  every: string;
+  at?: string;
+  scope: 'workspace' | 'global';
+  next_run_at?: string;
+  last_run_at?: string;
+  last_status?: 'ok' | 'failed';
+}
+
+/** An installed plugin, on or off in this workspace, with its settings. */
+export interface WorkspacePlugin {
+  code: string;
+  name: string;
+  description?: string;
+  version: string;
+  enabled: boolean;
+  default_enabled: boolean;
+  settings: WorkspacePluginSetting[];
+  jobs: WorkspacePluginJob[];
+}
+
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 function unwrap<T>(response: { data: unknown }): T {
@@ -126,5 +159,24 @@ export const pluginService = {
 
   async remove(schema: PluginResourceSchema, uuid: string): Promise<void> {
     await apiClient.delete(`${schema.api_path}/${encodeURIComponent(uuid)}`);
+  },
+
+  /** Workspace -> Plugins: every installed plugin, on/off here, its settings and jobs. */
+  async listForWorkspace(): Promise<WorkspacePlugin[]> {
+    const plugins = unwrap<WorkspacePlugin[]>(await apiClient.get('/api/v2/namespace/plugins'));
+    return Array.isArray(plugins) ? plugins : [];
+  },
+
+  /**
+   * Turn a plugin on/off here and/or change settings. Settings are partial:
+   * only the names sent change; null clears one (back to its default).
+   */
+  async updateForWorkspace(
+    code: string,
+    change: { enabled?: boolean; settings?: Record<string, unknown> }
+  ): Promise<WorkspacePlugin> {
+    return unwrap<WorkspacePlugin>(
+      await apiClient.put(`/api/v2/namespace/plugins/${encodeURIComponent(code)}`, change, JSON_BODY)
+    );
   },
 };

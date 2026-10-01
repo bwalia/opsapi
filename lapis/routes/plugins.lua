@@ -5,6 +5,16 @@
       GET /api/v2/plugins/:code    platform admins: one plugin, plus its migration + event status
       POST /api/v2/plugins/:code/events/retry
                                    platform admins: re-queue the plugin's dead event deliveries
+      POST /api/v2/plugins/:code/jobs/:job/run
+                                   platform admins: run a job now (every workspace, or
+                                   ?namespace_id= one)
+      GET /api/v2/namespace/plugins
+                                   namespace.read: the installed plugins, on/off in this
+                                   workspace, their settings (secrets: only whether set)
+                                   and jobs
+      PUT /api/v2/namespace/plugins/:code
+                                   namespace.update: { enabled?, settings? } for this
+                                   workspace (helper/plugin-workspaces.lua)
       GET /api/v2/plugins/:code/resources/:resource
                                    namespace members with <module>.read: what
                                    /dashboard/plugins/<code>/<key> shows — an
@@ -26,6 +36,8 @@ local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local ProjectLoader = require("helper.project-loader")
+local PluginWorkspaces = require("helper.plugin-workspaces")
+local PluginJobs = require("helper.plugin-jobs")
 
 local function array(t)
     return setmetatable(t, cjson.array_mt)
@@ -116,8 +128,79 @@ return function(app)
             events.failures = array(events.failures)
         end
         data.events = events
+        data.jobs = PluginJobs.stats(m.code)
         return { status = 200, json = { success = true, data = data } }
     end))
+
+    app:post("/api/v2/plugins/:code/jobs/:job/run", AuthMiddleware.requireRole("administrative", function(self)
+        local m = ProjectLoader.getByCode(self.params.code)
+        local job = m and (m.code .. "." .. self.params.job)
+        local ns = self.params.namespace_id and tonumber(self.params.namespace_id)
+        if self.params.namespace_id and not ns then
+            return { status = 400, json = { success = false, error = "namespace_id must be a number" } }
+        end
+        local queued = job and PluginJobs.runNow(job, ns)
+        if not queued then
+            return { status = 404, json = { success = false, error = "Job not found" } }
+        end
+        return { status = 200, json = { success = true, data = { queued = queued } } }
+    end))
+
+    -- A workspace's plugins: on/off and settings (Workspace -> Plugins).
+    local function workspace_view(m, ns)
+        local data = PluginWorkspaces.describe(m, ns)
+        data.jobs = PluginJobs.forNamespace(m.code, ns)
+        return data
+    end
+
+    app:get("/api/v2/namespace/plugins", NamespaceMiddleware.requirePermission("namespace", "read", function(self)
+        local data = {}
+        for _, m in ipairs(ProjectLoader.getRegistered()) do
+            data[#data + 1] = workspace_view(m, self.namespace.id)
+        end
+        table.sort(data, function(a, b) return a.name:lower() < b.name:lower() end)
+        return { status = 200, json = { success = true, data = array(data) } }
+    end))
+
+    app:put("/api/v2/namespace/plugins/:code", NamespaceMiddleware.requirePermission("namespace", "update",
+        function(self)
+            local m = ProjectLoader.getByCode(self.params.code)
+            if not m then
+                return { status = 404, json = { success = false, error = "Plugin not found" } }
+            end
+            local body, body_err = require("helper.plugin-sdk").body(self)
+            if not body then return { status = 400, json = { success = false, error = body_err } } end
+
+            local user = self.current_user or {}
+            local after, before, message, details = PluginWorkspaces.update(m, self.namespace.id,
+                { enabled = body.enabled, settings = body.settings }, user.uuid)
+            if not after then
+                return { status = before, json = { success = false, error = message, details = details } }
+            end
+
+            -- Audit (never fails the change): what was turned on/off or set;
+            -- secrets only as set / not set.
+            local function snapshot(d)
+                local values = {}
+                for _, st in ipairs(d.settings) do
+                    if st.secret then values[st.name] = st.is_set and "(set)" or nil else values[st.name] = st.value end
+                end
+                return { enabled = d.enabled, settings = next(values) and values or nil }
+            end
+            local action = after.enabled ~= before.enabled and (after.enabled and "plugin.enabled" or "plugin.disabled")
+                or "plugin.settings_updated"
+            pcall(function()
+                local db = require("lapis.db")
+                local u = user.uuid and db.query("SELECT id FROM users WHERE uuid = ?", user.uuid)[1]
+                require("queries.NamespaceAuditLogQueries").log({
+                    namespace_id = self.namespace.id, user_id = u and u.id, action = action,
+                    entity_type = "plugin", entity_id = m.code,
+                    old_values = snapshot(before), new_values = snapshot(after),
+                    ip_address = ngx.var.remote_addr, user_agent = self.req.headers["user-agent"],
+                })
+            end)
+            return { status = 200, json = { success = true, data = workspace_view(m, self.namespace.id) } }
+        end))
 
     app:post("/api/v2/plugins/:code/events/retry", AuthMiddleware.requireRole("administrative", function(self)
         local m = ProjectLoader.getByCode(self.params.code)
@@ -137,6 +220,10 @@ return function(app)
         local page = resource or custom
         if not page then
             return { status = 404, json = { success = false, error = "Page not found" } }
+        end
+        if not PluginWorkspaces.isEnabled(m.code, self.namespace.id) then
+            return { status = 404, json = { success = false, error = m.name .. " is turned off for this workspace",
+                                            code = "PLUGIN_DISABLED" } }
         end
         local function can(action)
             return NamespaceMiddleware.hasPermission(self, page.module, action)

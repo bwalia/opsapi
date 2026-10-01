@@ -7379,6 +7379,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/namespace/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List plugins */
+        get: operations["get__api_v2_namespace_plugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/namespace/plugins/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update plugins */
+        put: operations["put__api_v2_namespace_plugins_code"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/namespace/roles": {
         parameters: {
             query?: never;
@@ -8432,6 +8466,23 @@ export interface paths {
         put?: never;
         /** Create retry */
         post: operations["post__api_v2_plugins_code_events_retry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/plugins/{code}/jobs/{job}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run run */
+        post: operations["post__api_v2_plugins_code_jobs_job_run"];
         delete?: never;
         options?: never;
         head?: never;
@@ -41382,6 +41433,101 @@ export interface operations {
             };
         };
     };
+    get__api_v2_namespace_plugins: {
+        parameters: {
+            query?: {
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put__api_v2_namespace_plugins_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Code */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get__api_v2_namespace_roles: {
         parameters: {
             query?: {
@@ -45924,6 +46070,57 @@ export interface operations {
             path: {
                 /** @description Code */
                 code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_plugins_code_jobs_job_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Code */
+                code: string;
+                /** @description Job */
+                job: string;
             };
             cookie?: never;
         };

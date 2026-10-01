@@ -163,12 +163,38 @@ function sdk.capture_env()
 end
 
 --- A deployment setting for a plugin: set PLUGIN_<CODE>_<NAME> (e.g.
--- PLUGIN_HELPDESK_SLACK_URL) on the OpsAPI container. Tenant-specific
--- settings belong in the database, not here.
+-- PLUGIN_HELPDESK_SLACK_URL) on the OpsAPI container. Settings that differ
+-- per workspace go in the manifest's `settings` (sdk.settings).
 function sdk.env(name, default)
     local value = captured_env[name] or os.getenv(name)
     if value == nil or value == "" then return default end
     return value
+end
+
+--- A workspace's settings for this plugin (manifest `settings`, filled in by
+-- the workspace under Workspace -> Plugins): stored values, else defaults;
+-- secrets decrypted. In a route: sdk.settings(self). Event handlers and jobs
+-- get theirs as event.settings / job.settings; elsewhere pass the plugin code
+-- and namespace id: sdk.settings("helpdesk", ns).
+function sdk.settings(self_or_code, namespace_id)
+    local manifest
+    if type(self_or_code) == "table" then
+        manifest, namespace_id = self_or_code.project, self_or_code.namespace and self_or_code.namespace.id
+    else
+        manifest = require("helper.project-loader").getByCode(self_or_code)
+    end
+    assert(manifest, "sdk.settings: call it from a plugin route, or pass the plugin's code")
+    return require("helper.plugin-workspaces").settings(manifest, namespace_id)
+end
+
+--- An HTTP request to a URL that came from a user (a setting, a form): the
+-- host is resolved once and must be public, so a workspace can't point it at
+-- internal services (SSRF). https only.
+--   local res, err = sdk.http(url, { method = "POST", headers = {...}, body = "...", timeout_ms = 5000 })
+-- @return { status, headers, body } or nil, error
+function sdk.http(url, params)
+    params = params or {}
+    return require("lib.outbound-webhooks").request(url, params, { timeout_ms = params.timeout_ms })
 end
 
 -- ---------------------------------------------------------------------------
@@ -199,6 +225,7 @@ local PATTERNS = {
     date = "^%d%d%d%d%-%d%d%-%d%d$",
     datetime = "^%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d",
     email = "^[^%s@]+@[^%s@]+%.[^%s@]+$",
+    url = "^https?://[^%s/?#]+[^%s]*$",
     uuid = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$",
 }
 local INT_MAX = 2147483647 -- Postgres INTEGER
@@ -249,7 +276,7 @@ end
 --             amount = { type = "number", min = 0 } }
 --
 -- Types: string (default, max 255) text integer number boolean date datetime
--- email uuid json. `partial` (updates) only checks the fields present.
+-- email url uuid json. `partial` (updates) only checks the fields present.
 -- JSON null clears an optional field. Returns clean, or nil + { field = msg }.
 function sdk.validate(input, rules, partial)
     input = input or {}

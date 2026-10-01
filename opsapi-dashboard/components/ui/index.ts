@@ -7,6 +7,7 @@ export { default as SearchableSelect } from './SearchableSelect';
 export type { SearchableSelectOption } from './SearchableSelect';
 export { default as Card, CardHeader, CardContent, CardFooter } from './Card';
 export { default as Badge } from './Badge';
+export { default as Switch } from './Switch';
 export { default as Table } from './Table';
 export { default as Modal, ConfirmDialog } from './Modal';
 export { default as Pagination } from './Pagination';

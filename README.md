@@ -240,7 +240,7 @@ The `start.sh` script handles the full setup: environment config, Docker build, 
 
 ## Extending OpsAPI (plugins)
 
-Need an API OpsAPI doesn't have? Write a plugin instead of forking. A plugin is a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules. It can also have generated or custom dashboard pages, and react to business events (invoice paid, deal won, …).
+Need an API OpsAPI doesn't have? Write a plugin instead of forking. A plugin is a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules. It can also have generated or custom dashboard pages, react to business events (invoice paid, deal won, …), run scheduled jobs, and ask each workspace for its own settings.
 
 ```bash
 docker exec opsapi opsapi plugin:new helpdesk
@@ -250,7 +250,10 @@ docker exec opsapi opsapi migrate
 #   and a Tickets page in the dashboard sidebar (/dashboard/plugins/helpdesk/tickets)
 docker exec opsapi opsapi make:page helpdesk overview "Support overview"   # your own dashboard page
 docker exec opsapi opsapi make:listener helpdesk invoice.paid             # react to business events
+docker exec opsapi opsapi make:job helpdesk close_stale 1h                # run every hour, per workspace
 ```
+
+Each workspace turns installed plugins on or off and fills in their settings under **Workspace → Plugins**. Off is a hard switch: the plugin's API answers 404 there, and its pages, events and jobs stop for that workspace.
 
 With `./start.sh -e local` the API reloads itself when you save a file: there's no restart step. Full guide: [PLUGINS.md](PLUGINS.md). Example: [`projects/helpdesk`](projects/helpdesk).
 

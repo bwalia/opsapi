@@ -8,6 +8,7 @@
     <plugin>/api/*.lua          route files: `return function(app) ... end`
     <plugin>/migrations/*.lua   run by helper.project-migrator on `lapis migrate`
     <plugin>/events/*.lua       event handlers (helper.plugin-events)
+    <plugin>/jobs/*.lua         scheduled jobs (helper.plugin-jobs)
     <plugin>/ui/                custom dashboard pages (manifest `pages`), served
                                 at /plugin-ui/<code>/... and shown in a sandboxed
                                 frame by the dashboard
@@ -234,6 +235,16 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     end
     manifest.publishes = publishes
 
+    -- Per-workspace on/off and settings (helper.plugin-workspaces).
+    if manifest.default_enabled ~= nil and type(manifest.default_enabled) ~= "boolean" then
+        return nil, manifest_path .. ": default_enabled must be true or false"
+    end
+    local settings_err = require("helper.plugin-workspaces").checkSettings(manifest.settings)
+    if settings_err then
+        return nil, manifest_path .. ": " .. settings_err
+    end
+    manifest.settings = manifest.settings or {}
+
     manifest.path = project_path
     manifest.manifest_path = manifest_path
     manifest.version = manifest.version or "0.1.0"
@@ -446,7 +457,7 @@ function ProjectLoader.getCount()
 end
 
 --- Plugins that failed to load (bad manifest, reserved code, route errors,
--- events/*.lua errors).
+-- events/*.lua or jobs/*.lua errors).
 -- @return table List of { code, errors = { message, ... } }
 function ProjectLoader.failures()
     local out = {}
@@ -454,6 +465,9 @@ function ProjectLoader.failures()
         out[#out + 1] = f
     end
     for _, f in ipairs(require("helper.plugin-events").failures()) do
+        out[#out + 1] = f
+    end
+    for _, f in ipairs(require("helper.plugin-jobs").failures()) do
         out[#out + 1] = f
     end
     for _, m in ipairs(_registered_list) do

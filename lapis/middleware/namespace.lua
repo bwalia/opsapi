@@ -71,7 +71,27 @@ end
 -- Wrapper that requires a namespace context
 -- @param handler function The route handler
 -- @return function Wrapped handler
+-- A plugin turned off for this workspace (helper/plugin-workspaces.lua)
+-- answers 404 on every route that resolves the namespace, whatever the
+-- caller's role. self.project is set by the plugin route wrapper
+-- (helper/project-loader.lua) before this middleware runs.
+local function plugin_gate(handler)
+    return function(self)
+        local plugin = self.project
+        if plugin and self.namespace
+            and not require("helper.plugin-workspaces").isEnabled(plugin.code, self.namespace.id) then
+            return {
+                status = 404,
+                json = { success = false, error = plugin.name .. " is turned off for this workspace",
+                         code = "PLUGIN_DISABLED" },
+            }
+        end
+        return handler(self)
+    end
+end
+
 function NamespaceMiddleware.requireNamespace(handler)
+    handler = plugin_gate(handler)
     return function(self)
         -- API-key principals are bound to exactly one namespace and have no
         -- namespace_members row: their namespace comes from the key itself and

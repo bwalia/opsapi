@@ -19,7 +19,7 @@ import {
   type PluginResourceSchema,
 } from '@/services/plugins.service';
 
-type FormValue = string | boolean;
+export type FormValue = string | boolean;
 type FormState = Record<string, FormValue>;
 
 /** "Tickets" → "Ticket", "Categories" → "Category" (UI copy only). */
@@ -76,7 +76,7 @@ export function renderValue(field: PluginField, value: unknown): React.ReactNode
   }
 }
 
-function toFormValue(field: PluginField, value: unknown): FormValue {
+export function toFormValue(field: PluginField, value: unknown): FormValue {
   if (field.type === 'boolean') return value === true;
   if (value === null || value === undefined) return '';
   switch (field.type) {
@@ -94,7 +94,7 @@ function toFormValue(field: PluginField, value: unknown): FormValue {
 }
 
 // Form value → API value. Returns an error message for bad input.
-function toPayloadValue(field: PluginField, value: FormValue): { value?: unknown; error?: string } {
+export function toPayloadValue(field: PluginField, value: FormValue): { value?: unknown; error?: string } {
   if (field.type === 'boolean') return { value };
   const text = String(value).trim();
   if (text === '') return { value: null };
@@ -121,16 +121,21 @@ function capitalize(message: string): string {
   return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
-function FieldInput({
+export function FieldInput({
   field,
   value,
   error,
   onChange,
+  placeholder,
+  secret,
 }: {
   field: PluginField;
   value: FormValue;
   error?: string;
   onChange: (value: FormValue) => void;
+  placeholder?: string;
+  /** A write-only value (a password or token): masked, never pre-filled. */
+  secret?: boolean;
 }) {
   const label = field.required ? `${field.label} *` : field.label;
   const text = typeof value === 'string' ? value : '';
@@ -188,7 +193,9 @@ function FieldInput({
     <Input
       id={id}
       label={label}
-      type={numeric ? 'number' : field.type === 'email' ? 'email' : 'text'}
+      type={secret ? 'password' : numeric ? 'number' : field.type === 'email' ? 'email' : field.type === 'url' ? 'url' : 'text'}
+      autoComplete={secret ? 'new-password' : undefined}
+      placeholder={placeholder}
       step={field.type === 'integer' ? 1 : numeric ? 'any' : undefined}
       min={numeric ? field.min : undefined}
       max={numeric ? field.max : undefined}
