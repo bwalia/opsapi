@@ -70,7 +70,10 @@ local function release(red)
 end
 
 local function css_key(namespace_id, project_code, version)
-    return string.format("theme:css:%s:%s:%s",
+    -- The renderer's output format is part of the key: a deploy that changes
+    -- the CSS shape must not serve 24h-old renders.
+    return string.format("theme:css:r%d:%s:%s:%s",
+        require("lib.theme-renderer").VERSION or 1,
         tostring(namespace_id or "default"),
         tostring(project_code or "default"),
         tostring(version or "0"))
