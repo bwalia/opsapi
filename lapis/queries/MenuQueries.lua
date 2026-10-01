@@ -257,6 +257,11 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
 
     local filtered_items = {}
 
+    -- Plugins turned off in this workspace (one query for the whole menu).
+    local plugin_codes = {}
+    for _, m in ipairs(ProjectLoader.getRegistered()) do plugin_codes[#plugin_codes + 1] = m.code end
+    local plugins_off = require("helper.plugin-workspaces").disabledIn(namespace_id, plugin_codes)
+
     for _, item in ipairs(items) do
         local should_include = false
 
@@ -266,10 +271,14 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
         end
 
         -- Plugin pages only while their plugin is loaded in this deployment
-        -- (its rows stay in menu_items if the plugin is removed).
+        -- (its rows stay in menu_items if the plugin is removed) and on in
+        -- this workspace; Workspace -> Plugins only when there are any.
         do
             local plugin_code = item.key and item.key:match("^plugin:([^:]+):")
-            if plugin_code and not ProjectLoader.getByCode(plugin_code) then
+            if plugin_code and (not ProjectLoader.getByCode(plugin_code) or plugins_off[plugin_code]) then
+                goto continue
+            end
+            if item.key == "plugins" and #plugin_codes == 0 then
                 goto continue
             end
         end

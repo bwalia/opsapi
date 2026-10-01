@@ -249,6 +249,8 @@ end
 -- ---------------------------------------------------------------------------
 
 function PluginEvents.ensureSchema()
+    -- opsapi_plugin_enabled(), used by the trigger below.
+    require("helper.plugin-workspaces").ensureSchema()
     local q = db().query
     q([[
         CREATE TABLE IF NOT EXISTS plugin_event_sources (
@@ -432,18 +434,22 @@ function PluginEvents.ensureSchema()
                                WHEN 'UPDATE' THEN (SELECT jsonb_object_agg(k, v -> 'to') FROM jsonb_each(diff) x(k, v))
                                ELSE d END);
                 -- One outbox row per event someone wants. Plugins (namespace_id
-                -- NULL) hear every tenant; a webhook only its own.
+                -- NULL) hear every tenant where they're on; a webhook only its own.
                 FOREACH e_name IN ARRAY names LOOP
                     IF EXISTS (SELECT 1 FROM plugin_event_subscriptions
                                WHERE event IN (e_name, entity || '.*') AND subscriber <> 'core.audit'
-                                 AND (namespace_id IS NULL OR namespace_id = ns)) THEN
+                                 AND (namespace_id IS NULL OR namespace_id = ns)
+                                 AND (ns IS NULL OR left(subscriber, 8) = 'webhook.'
+                                      OR opsapi_plugin_enabled(split_part(subscriber, '.', 1), ns))) THEN
                         INSERT INTO plugin_events (event, entity, entity_id, namespace_id, data, changes)
                         VALUES (e_name, entity, COALESCE(d ->> 'uuid', d ->> 'id'), ns, d, diff)
                         RETURNING id INTO ev_id;
                         INSERT INTO plugin_event_deliveries (event_id, subscriber)
                         SELECT ev_id, subscriber FROM plugin_event_subscriptions
                         WHERE event IN (e_name, entity || '.*') AND subscriber <> 'core.audit'
-                          AND (namespace_id IS NULL OR namespace_id = ns);
+                          AND (namespace_id IS NULL OR namespace_id = ns)
+                          AND (ns IS NULL OR left(subscriber, 8) = 'webhook.'
+                               OR opsapi_plugin_enabled(split_part(subscriber, '.', 1), ns));
                     END IF;
                 END LOOP;
             EXCEPTION WHEN OTHERS THEN
@@ -627,6 +633,8 @@ function PluginEvents.emit(namespace_id, name, data)
         WITH subs AS (
             SELECT subscriber FROM plugin_event_subscriptions
             WHERE event IN (?, ?) AND subscriber <> 'core.audit' AND (namespace_id IS NULL OR namespace_id = ?)
+              AND (?::bigint IS NULL OR left(subscriber, 8) = 'webhook.'
+                   OR opsapi_plugin_enabled(split_part(subscriber, '.', 1), ?::bigint))
         ), ev AS (
             INSERT INTO plugin_events (event, entity, namespace_id, data)
             SELECT ?, ?, ?, ?::jsonb WHERE EXISTS (SELECT 1 FROM subs)
@@ -634,8 +642,8 @@ function PluginEvents.emit(namespace_id, name, data)
         )
         INSERT INTO plugin_event_deliveries (event_id, subscriber)
         SELECT ev.id, subs.subscriber FROM ev, subs
-    ]], name, entity .. ".*", namespace_id or db().NULL, name, entity, namespace_id or db().NULL,
-        cjson.encode(data or {}))
+    ]], name, entity .. ".*", namespace_id or db().NULL, namespace_id or db().NULL, namespace_id or db().NULL,
+        name, entity, namespace_id or db().NULL, cjson.encode(data or {}))
     return res.affected_rows or 0
 end
 
@@ -644,6 +652,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local _handlers = {}  -- { [subscriber] = { [event] = fn } }
+local _manifests = {} -- { [plugin code] = manifest } (event.settings)
 local _failures = {}  -- { { code, errors } } events files that failed to load
 local _busy = false
 
@@ -756,6 +765,14 @@ local function process_batch()
                 occurred_at = e.created_at,
                 attempt = tonumber(c.attempts),
             }
+            -- event.settings: the workspace's settings for this plugin, read on first use.
+            local manifest = _manifests[c.subscriber:match("^([^.]+)")]
+            setmetatable(event, { __index = function(t, k)
+                if k ~= "settings" then return nil end
+                local v = manifest and require("helper.plugin-workspaces").settings(manifest, t.namespace_id) or {}
+                rawset(t, "settings", v)
+                return v
+            end })
             local ok, result, message = pcall(handler, event)
             if ok and result == false then
                 ok, result = false, message or "handler returned false"
@@ -764,12 +781,26 @@ local function process_batch()
                 ngx.log(ngx.WARN, "[plugin-events] ", c.subscriber, " ", e.event, " attempt ", c.attempts,
                     " failed: ", tostring(result))
             end
+            if PluginEvents.resetTransaction() and ok then
+                ok, result = false, "handler left a transaction open; it was rolled back"
+            end
             finish(c.id, ok, result)
         end
         end
         ::next_delivery::
     end
     return #claimed
+end
+
+--- Roll back a transaction a handler left open (or aborted by an error), so
+-- the statements after it - recording the result - can run.
+-- @return true when there was one to roll back
+function PluginEvents.resetTransaction()
+    local d = db()
+    local ok, rows = pcall(d.query, "SELECT now() <> statement_timestamp() AS open")
+    if ok and not rows[1].open then return false end
+    pcall(d.query, "ROLLBACK")
+    return true
 end
 
 -- Timers don't run lapis' after-dispatch hook, so hand the connection back
@@ -783,6 +814,8 @@ local function release_connection()
     end)
     pcall(require("lapis.nginx.context").run_after_dispatch)
 end
+
+PluginEvents.releaseConnection = release_connection
 
 local function tick(premature)
     if premature or _busy then return end
@@ -844,6 +877,7 @@ function PluginEvents.start(projects_root)
     for _, entry in ipairs(ProjectLoader.discover(projects_root)) do
         local manifest = ProjectLoader.loadManifest(entry.manifest_path, entry.path)
         if manifest and manifest.enabled and not ProjectLoader.isReservedCode(manifest.code) then
+            _manifests[manifest.code] = manifest
             local subscribers, errors = PluginEvents.loadSubscribers(manifest)
             for subscriber, handlers in pairs(subscribers) do
                 _handlers[subscriber] = handlers

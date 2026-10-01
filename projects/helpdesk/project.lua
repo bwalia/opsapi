@@ -37,4 +37,15 @@ return {
         { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },
         -- opsapi:menu (make:resource adds entries above this line)
     },
+
+    -- Settings each workspace fills in under Workspace -> Plugins. Read with
+    -- job.settings (jobs/close_stale.lua), event.settings (events/escalations.lua)
+    -- or sdk.settings(self) in a route.
+    settings = {
+        auto_close_days = { type = "integer", label = "Close pending tickets after (days)", default = 14,
+                            min = 1, max = 365,
+                            description = "Pending tickets nobody has touched for this long are closed." },
+        slack_webhook_url = { type = "url", label = "Slack webhook URL", secret = true,
+                              description = "An incoming-webhook URL; escalated tickets are posted there." },
+    },
 }

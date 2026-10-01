@@ -2436,6 +2436,7 @@ local _migrations = {
     ['zzwh4_audit_forget_user'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 2),
     -- Workspace settings module (namespace.manage) — owners lacked it entirely
     ['zzwh5_namespace_module'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_module_migrations, 1),
+    ['zzwh6_plugins_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_module_migrations, 2),
     -- User activity & login tracking (lib/user-activity.lua)
     ['zzua1_login_tracking'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 1),
     ['zzua2_user_activity'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 2),
