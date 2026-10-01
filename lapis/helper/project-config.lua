@@ -413,6 +413,9 @@ ProjectConfig.PROJECT_MODULES = {
     -- allowed_actions: which actions the UI should show. nil = full CRUD + manage (default).
     core = {
         { machine_name = "dashboard", name = "Admin Dashboard", description = "Admin panel access and analytics dashboard", category = "Core", is_system = true, allowed_actions = {"access"} },
+        -- Workspace settings, API keys and ownership (namespace.manage). Owners get
+        -- manage, admins read (NamespaceRoleQueries.getAdminPermissions).
+        { machine_name = "namespace", name = "Workspace", description = "Workspace settings, API keys and ownership", category = "Core", is_system = true },
         { machine_name = "users", name = "Users", description = "User management within namespace", category = "Core", is_system = true },
         { machine_name = "roles", name = "Roles", description = "Role management within namespace", category = "Core", is_system = true },
         { machine_name = "settings", name = "Settings", description = "Namespace settings", category = "Core", is_system = true },

@@ -117,8 +117,8 @@ function TaxStatementQueries.all(params, user)
         return { data = {}, total = 0 }
     end
 
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 500)
     local offset = (page - 1) * perPage
 
     -- Build WHERE clause
@@ -212,6 +212,11 @@ function TaxStatementQueries.all(params, user)
         dms_include = false
     end
     if params.tax_year then
+        dms_include = false
+    end
+    -- dms_documents belongs to diy-tax-return-uk's DMS: other deployments
+    -- don't have it, and their statement lists must still work.
+    if not require("helper.table-exists")("dms_documents") then
         dms_include = false
     end
     if params.search and params.search ~= "" then

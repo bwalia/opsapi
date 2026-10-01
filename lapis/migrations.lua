@@ -360,6 +360,7 @@ local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATU
 local employees_core_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.employees") or {}
 local outbound_webhooks_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.outbound-webhooks") or {}
 local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.audit-trail") or {}
+local namespace_module_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-module") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
@@ -2433,6 +2434,8 @@ local _migrations = {
     -- Audit trail of business-record changes (rides on the same event triggers)
     ['zzwh3_audit_trail'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 1),
     ['zzwh4_audit_forget_user'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 2),
+    -- Workspace settings module (namespace.manage) — owners lacked it entirely
+    ['zzwh5_namespace_module'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_module_migrations, 1),
     -- User activity & login tracking (lib/user-activity.lua)
     ['zzua1_login_tracking'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 1),
     ['zzua2_user_activity'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 2),
@@ -2556,6 +2559,10 @@ local _migrations = {
     end,
 
     ['zzx_run_project_migrations'] = function()
+        -- Repairs that must hold after every deploy (helper/schema-repair.lua).
+        local ok_sr, sr_err = pcall(function() require("helper.schema-repair").run() end)
+        if not ok_sr then print("[SchemaRepair] failed (deploy continues): " .. tostring(sr_err)) end
+
         local ok, ProjectMigrator = pcall(require, "helper.project-migrator")
         if ok then
             local projects_root = os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"
