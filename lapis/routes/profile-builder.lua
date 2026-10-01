@@ -3983,8 +3983,8 @@ return function(app)
             return { status = 200, json = { history = {}, total = 0 } }
         end
 
-        local page = tonumber(self.params.page) or 1
-        local per_page = tonumber(self.params.per_page) or 50
+        local page = Global.pageParam(self.params.page)
+        local per_page = Global.perPageParam(self.params.per_page, 50, 500)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 
@@ -4879,8 +4879,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local page = tonumber(self.params.page) or 1
-        local per_page = tonumber(self.params.per_page) or 25
+        local page = Global.pageParam(self.params.page)
+        local per_page = Global.perPageParam(self.params.per_page, 25, 500)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 
@@ -5007,8 +5007,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local page = tonumber(self.params.page) or 1
-        local per_page = tonumber(self.params.per_page) or 20
+        local page = Global.pageParam(self.params.page)
+        local per_page = Global.perPageParam(self.params.per_page, 20, 500)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 
@@ -5206,8 +5206,8 @@ return function(app)
             return { status = 404, json = { error = "User not found" } }
         end
 
-        local page = tonumber(self.params.page) or 1
-        local per_page = tonumber(self.params.per_page) or 50
+        local page = Global.pageParam(self.params.page)
+        local per_page = Global.perPageParam(self.params.per_page, 50, 500)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 
@@ -5243,8 +5243,8 @@ return function(app)
             return { status = 401, json = { error = "Authentication required" } }
         end
 
-        local page = tonumber(self.params.page) or 1
-        local per_page = tonumber(self.params.per_page) or 50
+        local page = Global.pageParam(self.params.page)
+        local per_page = Global.perPageParam(self.params.per_page, 50, 500)
         if per_page > 100 then per_page = 100 end
         local offset = (page - 1) * per_page
 

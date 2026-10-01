@@ -146,6 +146,119 @@ function Errors.raise(code, opts)
 end
 
 
+-- ---------------------------------------------------------------------------
+-- Client mistakes that surface as exceptions
+-- ---------------------------------------------------------------------------
+
+-- Postgres rejecting a value or a constraint, and lapis validations raised
+-- outside capture_errors, are the CLIENT's input, not a server fault. Only
+-- the text after "ERROR:" is examined (the SQL before it echoes user data
+-- and is never returned). Each entry: pattern, status, code, reason,
+-- message, and how to read the offending column (if any).
+local INPUT_ERRORS = {
+    { "invalid input syntax for type (%w+)", 400, "VALIDATION_400", "invalid_format",
+        "A value in the request has the wrong format." },
+    { "invalid input value for enum", 400, "VALIDATION_400", "invalid_value",
+        "A value in the request isn't one of the allowed values." },
+    { "out of range for type", 400, "VALIDATION_400", "out_of_range",
+        "A number in the request is out of range." },
+    { "value too long for type", 422, "VALIDATION_422", "too_long",
+        "A value in the request is too long." },
+    { "null value in column \"([%w_]+)\"[^\n]*violates not%-null constraint", 422, "VALIDATION_422", "required",
+        "A required field is missing." },
+    { "violates check constraint \"([%w_]+)\"", 422, "VALIDATION_422", "invalid_value",
+        "A value in the request isn't allowed." },
+    { "duplicate key value violates unique constraint", 409, "CONFLICT_409", "duplicate",
+        "A record with these values already exists." },
+    { "update or delete on table [^\n]*violates foreign key constraint", 409, "CONFLICT_409", "still_referenced",
+        "This record is still used by other records." },
+    { "violates foreign key constraint", 422, "VALIDATION_422", "reference_missing",
+        "The request refers to a record that doesn't exist." },
+}
+
+--- Raise from query/helper code when the client's input is invalid (422)
+-- or conflicts with existing data (409). The message is shown to the user.
+-- A plain string, so it survives the pcall + tostring() of older routes.
+function Errors.invalid(message)
+    error("VALIDATION: " .. tostring(message), 0)
+end
+
+function Errors.conflict(message)
+    error("CONFLICT: " .. tostring(message), 0)
+end
+
+--- Recognise an exception caused by the client's input.
+-- @param err any  the raised error (string from lapis/pgmoon, or table)
+-- @return nil, or { status, code, message, context }
+function Errors.classify(err)
+    if type(err) ~= "string" then return nil end
+    -- lapis.validate's assert_valid raised outside capture_errors: its
+    -- messages are written for users ("name must be provided").
+    local invalid = err:match("assert_valid was not captured: ([^\n]+)")
+    if invalid then
+        return { status = 422, code = "VALIDATION_422", message = "The request has invalid fields.",
+            context = { reason = "invalid", errors = invalid:sub(1, 500) } }
+    end
+    local raised = err:match("VALIDATION: ([^\n]+)")
+    if raised then
+        return { status = 422, code = "VALIDATION_422", message = raised:sub(1, 300), context = { reason = "invalid" } }
+    end
+    raised = err:match("CONFLICT: ([^\n]+)")
+    if raised then
+        return { status = 409, code = "CONFLICT_409", message = raised:sub(1, 300), context = { reason = "conflict" } }
+    end
+    local pg = err:match("ERROR:%s*([^\n]+)")
+    if not pg then return nil end
+    for _, rule in ipairs(INPUT_ERRORS) do
+        local found, _, capture = pg:find(rule[1])
+        if found then
+            local context = { reason = rule[4] }
+            if rule[4] == "required" then context.field = capture end
+            if rule[4] == "invalid_format" then context.type = capture end
+            if rule[4] == "invalid_value" and capture then context.constraint = capture end
+            if rule[4] == "duplicate" then context.field = pg:match("Key %(([%w_, ]+)%)") end
+            return { status = rule[2], code = rule[3], message = rule[5], context = context }
+        end
+    end
+    return nil
+end
+
+local function client_error(info)
+    return { status = info.status, json = { error = {
+        code = info.code, category = "error", message = info.message, context = info.context,
+    } } }
+end
+
+--- The `{ error = "<message>", details = ... }` body older routes return,
+-- made safe. A 5xx caused by the client's input becomes that 4xx (with
+-- `code` and `context`); otherwise the raw exception text — SQL with user
+-- data — is never sent back (callers log it). 4xx details written by the
+-- route itself are kept.
+function Errors.legacy(status, message, details)
+    if (tonumber(status) or 500) >= 500 then
+        local input = Errors.classify(details)
+        if input then
+            return { status = input.status, json = { error = input.message, code = input.code, context = input.context } }
+        end
+        return { status = status, json = { error = message } }
+    end
+    return { status = status, json = { error = message, details = type(details) == "string" and details or nil } }
+end
+
+--- For handlers that catch errors themselves: a 4xx for the client's
+-- mistakes (see classify), else a logged SYSTEM_500 envelope with a
+-- correlation id. Never echoes the raw error to the client.
+-- @param fallback_code string optional catalog code for the 500 (default SYSTEM_500)
+function Errors.fromException(self, err, fallback_code)
+    local info = Errors.classify(err)
+    if info then
+        ngx.log(ngx.NOTICE, "client error ", info.status, " ", info.code, ": ", info.context.reason)
+        return client_error(info)
+    end
+    ngx.log(ngx.ERR, "Unhandled error: ", tostring(err))
+    return Errors.response(self, fallback_code or "SYSTEM_500", { status = 500, cause = err })
+end
+
 --- Install the app-level error handler that catches raised AppErrors
 -- and unknown exceptions, renders a catalog envelope for both. Call
 -- once in app.lua.
@@ -186,6 +299,14 @@ function Errors.install_handler(app)
                     message = "This method is not allowed for the requested resource.",
                 } } }
             end
+        end
+
+        -- The client's input (malformed id, missing required field,
+        -- duplicate, ...): a 4xx naming the problem, not a 500.
+        local input = Errors.classify(err)
+        if input then
+            ngx.log(ngx.NOTICE, "client error ", input.status, " ", input.code, ": ", input.context.reason)
+            return client_error(input)
         end
 
         -- Genuine surprise: log fully, return SYSTEM_500 envelope with

@@ -39,18 +39,21 @@ function DementiaAssessmentQueries.create(params)
 end
 
 function DementiaAssessmentQueries.all(params)
-    local page = params.page or 1
-    local perPage = params.perPage or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 100)
 
-    local conditions = {}
+    local conditions, values = {}, {} -- values bind to the ? placeholders
     if params.patient_id then
-        table.insert(conditions, "patient_id = " .. tonumber(params.patient_id))
+        table.insert(conditions, "patient_id = ?")
+        table.insert(values, tonumber(params.patient_id) or -1) -- not a number: matches nothing
     end
     if params.assessment_type then
-        table.insert(conditions, "assessment_type = '" .. params.assessment_type .. "'")
+        table.insert(conditions, "assessment_type = ?")
+        table.insert(values, tostring(params.assessment_type))
     end
     if params.severity_level then
-        table.insert(conditions, "severity_level = '" .. params.severity_level .. "'")
+        table.insert(conditions, "severity_level = ?")
+        table.insert(values, tostring(params.severity_level))
     end
 
     local where_clause = ""
@@ -62,7 +65,8 @@ function DementiaAssessmentQueries.all(params)
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_order, "assessment_date", "desc")
     local order_clause = " order by " .. orderField .. " " .. orderDir
 
-    local paginated = DementiaAssessmentModel:paginated(where_clause .. order_clause, { per_page = perPage })
+    values[#values + 1] = { per_page = perPage }
+    local paginated = DementiaAssessmentModel:paginated(where_clause .. order_clause, unpack(values))
     return {
         data = paginated:get_page(page),
         total = paginated:total_items()

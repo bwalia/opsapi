@@ -286,8 +286,8 @@ end
 --- statuses unless filtered).
 function CmsPostQueries.list(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local perPage = math.min(math.max(tonumber(params.perPage) or 20, 1), 100)
+    local page = Global.pageParam(params.page)
+    local perPage = math.min(math.max(Global.perPageParam(params.perPage, 20, 500), 1), 100)
     local offset = (page - 1) * perPage
 
     local where = { "p.namespace_id = ?", "p.deleted_at IS NULL" }
@@ -409,8 +409,8 @@ end
 --- Published posts for the public site (namespace-scoped, paginated).
 function CmsPostQueries.listPublished(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local perPage = math.min(math.max(tonumber(params.perPage) or 12, 1), 50)
+    local page = Global.pageParam(params.page)
+    local perPage = math.min(math.max(Global.perPageParam(params.perPage, 12, 500), 1), 50)
     local offset = (page - 1) * perPage
 
     local where = { "p.namespace_id = ?", "p.deleted_at IS NULL",

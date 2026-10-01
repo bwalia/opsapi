@@ -52,8 +52,7 @@ return function(app)
         -- Get or create profile (pcall to catch DB errors)
         local ok, profile, err = pcall(TaxUserProfileQueries.getOrCreate, user_uuid)
         if not ok then
-            ngx.log(ngx.ERR, "[Tax Profile] getOrCreate failed: ", tostring(profile))
-            return { status = 500, json = { error = "Failed to load profile: " .. tostring(profile) } }
+            return require("lib.errors").fromException(self, profile)
         end
         if not profile then
             return { status = 500, json = { error = err or "Failed to create profile" } }

@@ -77,6 +77,18 @@ describe('requests', () => {
     const err = await createClient({ baseUrl: BASE, fetch }).GET('/api/v2/customers').catch((e) => e);
     expect(err.isNotFound).toBe(true);
     expect(err.message).toBe('Not here');
+    expect(err.code).toBe('NOT_FOUND_404');
+  });
+
+  it('exposes code and context on input errors', async () => {
+    const { fetch } = fakeFetch(() => json({ error: 'A record with this value already exists.',
+      code: 'CONFLICT_409', context: { reason: 'duplicate', field: 'email' } }, 409));
+    const err = await createClient({ baseUrl: BASE, fetch }).POST('/api/v2/customers', { body: {} as never })
+      .catch((e) => e);
+    expect(err.isConflict).toBe(true);
+    expect(err.code).toBe('CONFLICT_409');
+    expect(err.context).toEqual({ reason: 'duplicate', field: 'email' });
+    expect(err.details).toBeUndefined();
   });
 
   it('throwOnError: false returns { error } instead', async () => {

@@ -6,6 +6,10 @@ import { useBrand } from '@/components/brand/Logo';
 import { themesService } from '@/services/themes.service';
 
 const LINK_ID = 'ops-active-theme-css';
+// The server's theme CSS format (lapis/lib/theme-renderer.lua VERSION). The
+// stylesheet is cached as immutable for a year, so the URL must change when
+// the output does. 2: light-mode colours no longer override dark mode.
+const CSS_FORMAT = 2;
 const ACTIVATION_EVENT = 'theme:activated';
 
 function apiBase(): string {
@@ -17,7 +21,7 @@ function buildHref(slug: string | undefined, version: string): string {
     ? `${apiBase()}/api/v2/themes/active/styles.css?namespace=${encodeURIComponent(slug)}`
     : `${apiBase()}/api/v2/themes/active/styles.css`;
   const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}v=${encodeURIComponent(version)}`;
+  return `${base}${sep}v=${encodeURIComponent(version)}&f=${CSS_FORMAT}`;
 }
 
 export default function ThemeStyles() {

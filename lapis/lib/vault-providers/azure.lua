@@ -6,6 +6,14 @@
 
 local cjson = require("cjson")
 
+-- The vault URL is user-supplied: public hosts only, unless a self-hosted
+-- deployment opts in with OPSAPI_VAULT_ALLOW_PRIVATE=true (internal Vault).
+local VAULT_HTTP_OPTS = {
+    allow_private = os.getenv("OPSAPI_VAULT_ALLOW_PRIVATE") == "true",
+    allow_http = os.getenv("OPSAPI_VAULT_ALLOW_PRIVATE") == "true",
+    timeout_ms = 10000,
+}
+
 local AzureProvider = {}
 AzureProvider.__index = AzureProvider
 
@@ -22,16 +30,11 @@ function AzureProvider:new(config)
 end
 
 local function http_request(url, method, headers, body, timeout)
-    local ok, http = pcall(require, "resty.http")
-    if not ok then return nil, "resty.http not available" end
-
-    local httpc = http.new()
-    httpc:set_timeout(timeout or 10000)
 
     local params = { method = method, headers = headers }
     if body then params.body = body end
 
-    local res, err = httpc:request_uri(url, params)
+    local res, err = require("lib.outbound-webhooks").request(url, params, VAULT_HTTP_OPTS) -- SSRF-guarded
     if not res then return nil, err end
     if res.status >= 400 then
         local data = pcall(cjson.decode, res.body) and cjson.decode(res.body) or {}

@@ -18,15 +18,16 @@ end
 
 -- Get all channels for a business
 function ChatChannelQueries.getByBusiness(uuid_business_id, params)
-    local page = params.page or 1
-    local perPage = params.perPage or 20
-    local orderField = params.orderBy or "created_at"
-    local orderDir = params.orderDir or "desc"
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 100)
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir,
+        { created_at = true, updated_at = true, name = true, id = true }, "created_at", "desc")
 
+    -- Bound values first, options last (lapis reads a trailing table as options).
     local paginated = ChatChannelModel:paginated(
         "WHERE uuid_business_id = ? AND is_archived = false ORDER BY " .. orderField .. " " .. orderDir,
-        { per_page = perPage },
-        uuid_business_id
+        uuid_business_id,
+        { per_page = perPage }
     )
 
     return {

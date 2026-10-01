@@ -50,11 +50,11 @@ return function(app)
                 local store_ids_str = table.concat(store_ids, ",")
 
                 -- Get statistics
-                local product_count = db.select(
+                local product_count = db.query(
                     "SELECT COUNT(*) as count FROM storeproducts WHERE store_id IN (" .. store_ids_str .. ")"
                 )[1].count or 0
 
-                local order_stats = db.select([[
+                local order_stats = db.query([[
                     SELECT
                         COUNT(*) as total_orders,
                         COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
@@ -67,7 +67,7 @@ return function(app)
                 ]])[1]
 
                 -- Get recent orders (last 10)
-                local recent_orders = db.select([[
+                local recent_orders = db.query([[
                     SELECT
                         o.uuid,
                         o.order_number,
@@ -172,7 +172,7 @@ return function(app)
                     LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE ]] .. where_clause
 
-                local total_result = db.select(count_query, table.unpack(where_params))
+                local total_result = db.query(count_query, table.unpack(where_params))
                 local total = total_result[1].total or 0
 
                 -- Get orders
@@ -206,11 +206,11 @@ return function(app)
                 table.insert(where_params, limit)
                 table.insert(where_params, offset)
 
-                local orders = db.select(orders_query, table.unpack(where_params))
+                local orders = db.query(orders_query, table.unpack(where_params))
 
                 -- Get item counts for each order
                 for _, order in ipairs(orders) do
-                    local item_count = db.select([[
+                    local item_count = db.query([[
                         SELECT COUNT(*) as count
                         FROM orderitems
                         WHERE order_id = (SELECT id FROM orders WHERE uuid = ?)
@@ -256,7 +256,7 @@ return function(app)
                 local user_id = user_result[1].id
 
                 -- Get order with authorization check
-                local orders = db.select([[
+                local orders = db.query([[
                     SELECT
                         o.*,
                         s.uuid as store_uuid,
@@ -297,7 +297,7 @@ return function(app)
                 end
 
                 -- Get order items
-                local items = db.select([[
+                local items = db.query([[
                     SELECT
                         oi.*,
                         sp.uuid as product_uuid,
@@ -321,7 +321,7 @@ return function(app)
                 order.items = items
 
                 -- Get order history (if exists)
-                local history = db.select([[
+                local history = db.query([[
                     SELECT *
                     FROM order_history
                     WHERE order_id = ?
@@ -405,7 +405,7 @@ return function(app)
                 local user_id = user_result[1].id
 
                 -- Get order with current status and verify ownership
-                local orders = db.select([[
+                local orders = db.query([[
                     SELECT o.*, s.user_id as store_owner_id
                     FROM orders o
                     LEFT JOIN stores s ON o.store_id = s.id

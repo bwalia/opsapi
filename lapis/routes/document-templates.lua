@@ -34,6 +34,7 @@
 local cjson = require("cjson.safe")
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+local Global = require("helper.global")
 local DocumentTemplateQueries = require("queries.DocumentTemplateQueries")
 
 -- Configure cjson
@@ -251,8 +252,8 @@ return function(app)
     app:get("/api/v2/templates", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 20,
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 20, 500),
                 type = self.params.type,
                 is_active = self.params.is_active,
                 search = self.params.search or self.params.q
@@ -482,9 +483,9 @@ return function(app)
                 SELECT
                     i.id as internal_id, i.uuid, i.namespace_id, i.invoice_number,
                     i.status, i.customer_name, i.customer_email, i.customer_address,
-                    i.invoice_date, i.due_date, i.currency, i.subtotal, i.tax_amount,
+                    i.issue_date AS invoice_date, i.due_date, i.currency, i.subtotal, i.tax_amount,
                     i.discount_amount, i.total_amount, i.amount_paid, i.balance_due,
-                    i.notes, i.payment_terms
+                    i.notes, i.terms AS payment_terms
                 FROM invoices i
                 WHERE i.uuid = ? AND i.namespace_id = ? AND i.deleted_at IS NULL
                 LIMIT 1
@@ -748,8 +749,8 @@ return function(app)
     app:get("/api/v2/documents", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 20,
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 20, 500),
                 document_type = self.params.document_type,
                 entity_type = self.params.entity_type,
                 entity_id = self.params.entity_id

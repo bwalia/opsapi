@@ -38,6 +38,7 @@ local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
 local InvoiceQueries = require("queries.InvoiceQueries")
 local Mail = require("helper.mail")
+local Global = require("helper.global")
 
 -- Configure cjson
 cjson.encode_empty_table_as_object(false)
@@ -281,8 +282,8 @@ return function(app)
     app:get("/api/v2/invoices", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("invoices", "read", function(self)
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 20,
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 20, 500),
                 status = self.params.status,
                 search = self.params.search or self.params.q,
                 from_date = self.params.from_date,

@@ -22,33 +22,13 @@
 local cjson = require("cjson")
 local db = require("lapis.db")
 local AuthMiddleware = require("middleware.auth")
+local AdminCheck = require("helper.admin-check")
 local FormSectionQueries = require("queries.FormSectionQueries")
 
 -- Same admin gate as routes/tax-admin-income-types.lua.
+-- Platform roles allowed here (exact names; JWT, then the database).
 local function isAdmin(user)
-    if not user then return false end
-    local roles = user.roles or ""
-    if type(roles) == "string" then
-        for role in roles:gmatch("[^,]+") do
-            local trimmed = role:match("^%s*(.-)%s*$")
-            if trimmed == "administrative" or trimmed == "tax_admin" then return true end
-        end
-    end
-    if type(roles) == "table" then
-        for _, r in ipairs(roles) do
-            local name = r.role_name or r
-            if name == "administrative" or name == "tax_admin" then return true end
-        end
-    end
-    local user_uuid = user.uuid or user.id
-    local rows = db.query([[
-        SELECT r.name FROM roles r
-        JOIN user__roles ur ON ur.role_id = r.id
-        JOIN users u ON u.id = ur.user_id
-        WHERE u.uuid = ? AND r.name IN ('administrative', 'tax_admin')
-        LIMIT 1
-    ]], user_uuid)
-    return rows and #rows > 0
+    return AdminCheck.hasAnyRole(user, { "administrative", "tax_admin" })
 end
 
 -- JSON body parser with the spooled-body fallback (same as siblings).

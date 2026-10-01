@@ -10,28 +10,12 @@
 local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
+local Global = require("helper.global")
+local AdminCheck = require("helper.admin-check")
 
+-- Platform roles allowed here (exact names; JWT, then the database).
 local function isAdmin(user)
-    if not user then return false end
-    local roles = user.roles or ""
-    if type(roles) == "string" then
-        return roles:match("admin") ~= nil or roles:match("tax_admin") ~= nil
-    end
-    if type(roles) == "table" then
-        for _, r in ipairs(roles) do
-            local name = r.role_name or r
-            if name == "administrative" or name == "tax_admin" then return true end
-        end
-    end
-    local user_uuid = user.uuid or user.id
-    local rows = db.query([[
-        SELECT r.name FROM roles r
-        JOIN user__roles ur ON ur.role_id = r.id
-        JOIN users u ON u.id = ur.user_id
-        WHERE u.uuid = ? AND r.name IN ('administrative', 'tax_admin')
-        LIMIT 1
-    ]], user_uuid)
-    return rows and #rows > 0
+    return AdminCheck.hasAnyRole(user, { "administrative", "tax_admin" })
 end
 
 return function(app)
@@ -56,7 +40,7 @@ return function(app)
             local rows, total = TaxCategoryQueries.getAll(self.params)
             return {
                 status = 200,
-                json = { data = rows, total = total, page = tonumber(self.params.page) or 1 }
+                json = { data = rows, total = total, page = Global.pageParam(self.params.page) }
             }
         end)
     )

@@ -242,8 +242,8 @@ function Common.meta(total, page, per_page)
 end
 
 function Common.paging(params)
-    local page = math.max(tonumber(params.page) or 1, 1)
-    local per_page = math.min(math.max(tonumber(params.per_page) or 20, 1), 200)
+    local page = math.max(Global.pageParam(params.page), 1)
+    local per_page = math.min(math.max(Global.perPageParam(params.per_page, 20, 500), 1), 200)
     return page, per_page, (page - 1) * per_page
 end
 

@@ -236,8 +236,8 @@ function TimesheetQueries.lookupTasks(namespace_id, q)
 end
 
 function TimesheetQueries.list(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 10
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 10, 500)
     local offset = (page - 1) * per_page
 
     local where_clauses = { "t.namespace_id = ?" }
@@ -687,8 +687,8 @@ function TimesheetQueries.reopen(uuid, namespace_id)
 end
 
 function TimesheetQueries.getApprovalQueue(namespace_id, approver_uuid, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 10
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 10, 500)
     local offset = (page - 1) * per_page
 
     local count_result = db.query([[
@@ -740,8 +740,8 @@ function TimesheetQueries.getApprovalQueue(namespace_id, approver_uuid, params)
 end
 
 function TimesheetQueries.getMyTimesheets(namespace_id, user_uuid, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 10
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 10, 500)
     local offset = (page - 1) * per_page
 
     local where_clauses = { "t.namespace_id = ?", "t.user_uuid = ?", "t.deleted_at IS NULL" }

@@ -77,4 +77,46 @@ function AdminCheck.isPlatformAdmin(user)
     return false
 end
 
+--- Does the user hold any of these platform roles? Exact names, never
+-- substrings ("admin" must not match "sysadmin" or "administrative_viewer").
+-- JWT claims first, then the database (claims can be stale).
+-- @param user table   JWT user info (uuid for the DB fallback)
+-- @param names table  role names, e.g. { "administrative", "tax_admin" }
+-- @return boolean
+function AdminCheck.hasAnyRole(user, names)
+    if not user or type(names) ~= "table" or #names == 0 then return false end
+    local wanted, lowered = {}, {}
+    for i, n in ipairs(names) do
+        wanted[n:lower()] = true
+        lowered[i] = n:lower()
+    end
+    local function claims(v)
+        if type(v) == "string" then
+            for role in v:gmatch("[^,]+") do
+                if wanted[role:match("^%s*(.-)%s*$"):lower()] then return true end
+            end
+        elseif type(v) == "table" then
+            for _, role in ipairs(v) do
+                local name = type(role) == "string" and role or (type(role) == "table" and (role.role_name or role.name))
+                if type(name) == "string" and wanted[name:lower()] then return true end
+            end
+        end
+        return false
+    end
+    if claims(user.roles) or claims(user.user_roles) then return true end
+
+    local uuid = user.uuid
+    if type(uuid) ~= "string" or uuid == "" then return false end
+    local placeholders = {}
+    for i = 1, #lowered do placeholders[i] = "?" end
+    local ok, rows = pcall(db.query, [[
+        SELECT 1 FROM user__roles ur
+        JOIN roles r ON r.id = ur.role_id
+        JOIN users u ON u.id = ur.user_id
+        WHERE u.uuid = ? AND LOWER(r.role_name) IN (]] .. table.concat(placeholders, ", ") .. [[)
+        LIMIT 1
+    ]], uuid, unpack(lowered))
+    return ok and rows ~= nil and #rows > 0
+end
+
 return AdminCheck

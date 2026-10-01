@@ -271,6 +271,8 @@ end
 
 When you write SQL yourself, **always filter by `sdk.namespace_id(self)`**. That's the one rule the SDK can't enforce for you. Pass values as `?` placeholders, never by string concatenation.
 
+Database errors you don't catch become client errors, not 500s: a duplicate value answers `409`, a missing required column or a reference to a row that doesn't exist answers `422`, and a malformed value (text where a UUID or number belongs) answers `400`. The body is `{ error = { code, message, context } }`, never the SQL. Anything else is a logged `500` with a generic message. Catch errors yourself only when you want a different status or message.
+
 ### 5.3 Public (anonymous) routes
 
 Routes under `/api/v2/<code>/public/` skip login. For example, `/api/v2/helpdesk/public/status` or `/api/v2/helpdesk/public/forms/:id`. This only works with the default `api_prefix`: a nested custom prefix doesn't match OpsAPI's public-route rule. With `sdk.handler({}, fn)` the namespace then comes from the `X-Namespace-Id` / `X-Namespace-Slug` header (inactive namespaces are refused). Validate everything, and rate-limit or add CAPTCHAs where abuse matters.

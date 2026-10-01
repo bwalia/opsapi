@@ -89,12 +89,17 @@ try {
 |---|---|
 | `status` | The HTTP status, or `0` when the request failed (timeout, network). |
 | `message` | OpsAPI's error message. |
-| `details` | For 422 responses: which fields failed validation, as field → message. |
+| `code` | OpsAPI's error code, e.g. `VALIDATION_422`, `CONFLICT_409`, `NOT_FOUND_404`. |
+| `context` | Machine-readable specifics, e.g. `{ reason: 'required', field: 'email' }` or `{ reason: 'duplicate', field: 'email' }`. |
+| `details` | For some 422 responses: which fields failed validation, as field → message. |
 | `body` | The full error response. |
 | `isUnauthorized` | 401: missing or bad credentials. |
 | `isForbidden` | 403: the user's role doesn't allow it in this workspace. |
 | `isNotFound` | 404: doesn't exist, or belongs to another workspace. |
-| `isValidation` | 422: see `details`. |
+| `isConflict` | 409: a duplicate value, or the record is still referenced by others. |
+| `isValidation` | 422: see `details` and `context`. |
+
+A `503` means the server doesn't have an integration this endpoint needs (Stripe, Google, MinIO, …). `GET`, `PUT` and `DELETE` retry it, then throw.
 
 Prefer checking results instead of catching? Pass `throwOnError: false` and calls return `{ data, error, response }`.
 
@@ -197,4 +202,16 @@ npm run build
 
 `npm run generate` leaves out plugin routes (they're marked `x-opsapi-plugin` in the spec), so the published types cover OpsAPI itself. Run it against a server with `PROJECT_CODE=all` so every module is included.
 
-**Publishing.** The package is marked `"private": true` until it has a license and an npm scope. To publish: choose a license, remove `private`, then run `npm publish --access public`.
+### Releasing
+
+Releases are published to npm by CI ([`sdk-typescript-release.yml`](../../.github/workflows/sdk-typescript-release.yml)) with [provenance](https://docs.npmjs.com/generating-provenance-statements), so you don't run `npm publish` yourself.
+
+1. Bump `version` in `package.json` (`npm version minor --no-git-tag-version`) and add a section to [CHANGELOG.md](CHANGELOG.md).
+2. Merge to `main`.
+3. Tag the merge commit and push the tag: `git tag sdk-v0.2.0 && git push origin sdk-v0.2.0`.
+
+The workflow checks that the tag matches `package.json`, then type-checks, tests, builds and publishes. It needs the repository secret `NPM_TOKEN`: an npm automation token with publish rights on the `@opsapi` scope.
+
+## License
+
+[MIT](LICENSE)

@@ -81,8 +81,8 @@ end
 
 -- Get all transactions with document details
 function BankTransactionQueries.allWithDocuments(params, user_id)
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 10
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 10, 500)
     local offset = (page - 1) * perPage
 
     local valid_fields = { transaction_date = true, balance = true, money_in = true, money_out = true }

@@ -532,19 +532,21 @@ return function(app)
                 return { json = { error = "No body" }, status = 400 }
             end
 
-            -- Verify Stripe signature (commented out for development, enable in production)
-            local stripe_signature = ngx.var.http_stripe_signature
-            if not stripe_signature then
-                ngx.log(ngx.WARN, "Stripe webhook: No signature header (development mode)")
-                -- In production, uncomment this:
-                -- return { json = { error = "No signature" }, status = 401 }
+            -- Only events signed by Stripe are trusted: an unsigned or forged
+            -- payment_intent.succeeded would mark orders paid.
+            local cfg = require("lib.payment-provider").stripe_config()
+            if not cfg.webhook_secret or cfg.webhook_secret == "" then
+                ngx.log(ngx.ERR, "Stripe webhook: STRIPE_WEBHOOK_SECRET not configured")
+                return { json = { error = "Webhook not configured" }, status = 503 }
             end
-
-            -- Parse the event
-            local success, event = pcall(cjson.decode, body)
-            if not success then
-                ngx.log(ngx.ERR, "Stripe webhook: Invalid JSON - " .. tostring(event))
-                return { json = { error = "Invalid JSON" }, status = 400 }
+            local event, verr = require("lib.stripe").construct_event(body,
+                ngx.req.get_headers()["stripe-signature"], cfg.webhook_secret)
+            if not event then
+                ngx.log(ngx.WARN, "Stripe webhook: signature verification failed: " .. tostring(verr))
+                return { json = { error = "Invalid signature" }, status = 400 }
+            end
+            if type(event.type) ~= "string" or type(event.data) ~= "table" then
+                return { json = { error = "Invalid event" }, status = 400 }
             end
 
             ngx.log(ngx.INFO, "Stripe webhook received: " .. event.type)

@@ -31,6 +31,11 @@ local CssSanitizer = require("helper.css-sanitizer")
 
 local ThemeRenderer = {}
 
+-- Bump whenever the CSS this renders changes shape, so caches keyed on it
+-- (lib/theme-cache.lua, the dashboard's stylesheet URL) refetch at once.
+-- 2: light-mode surface colours scoped to :root:not(.dark).
+ThemeRenderer.VERSION = 2
+
 -- =============================================================================
 -- CSS var name mapping
 -- =============================================================================
@@ -75,12 +80,19 @@ end
 -- Per-group emission
 -- =============================================================================
 
-local function emit_colors(buf, colors)
+-- Light-mode surface colours: the ones the dashboard's dark theme redefines
+-- under `.dark`. They're emitted for light mode only, so a tenant theme never
+-- pins the UI to light colours when the user picks dark (brand colours —
+-- primary, accent, status — apply in both modes).
+local LIGHT_ONLY = { secondary = true, background = true, foreground = true, surface = true, surface_elevated = true }
+
+-- which: "brand" (everything else) or "light" (LIGHT_ONLY).
+local function emit_colors(buf, colors, which)
     if type(colors) ~= "table" then return end
     local schema = ThemeTokenSchema.SCHEMA.colors
     for key, def in pairs(schema) do
         local v = colors[key]
-        if v ~= nil then
+        if v ~= nil and (LIGHT_ONLY[key] == true) == (which == "light") then
             if def.type == "color_scale" or def.type == "color_scale_preset" then
                 emit_color_scale(buf, "--color-" .. slugify(key), v)
             else
@@ -126,13 +138,23 @@ function ThemeRenderer.render(resolved, opts)
     local tokens = resolved.tokens or {}
     local buf = {}
 
-    local selector = ":root"
+    local selector, light = ":root", ":root:not(.dark)"
     if opts.theme_uuid then
         selector = string.format(':root[data-theme-id="%s"], :root', opts.theme_uuid)
+        light = string.format(':root[data-theme-id="%s"]:not(.dark), :root:not(.dark)', opts.theme_uuid)
+    end
+
+    -- Surface colours for light mode only (see LIGHT_ONLY).
+    local surface = {}
+    emit_colors(surface, tokens.colors, "light")
+    if #surface > 0 then
+        buf[#buf + 1] = light .. " {"
+        for _, line in ipairs(surface) do buf[#buf + 1] = line end
+        buf[#buf + 1] = "}"
     end
 
     buf[#buf + 1] = selector .. " {"
-    emit_colors(buf, tokens.colors)
+    emit_colors(buf, tokens.colors, "brand")
     emit_typography(buf, tokens.typography)
     emit_simple_group(buf, tokens.radius,   "radius",   "--radius-")
     emit_simple_group(buf, tokens.spacing,  "spacing",  "--spacing-")

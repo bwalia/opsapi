@@ -35,13 +35,8 @@ local AuthMiddleware = require("middleware.auth")
 local function error_response(status, message, details)
     ngx.log(ngx.ERR, "[Custom Categories] ", message,
             details and (" | " .. tostring(details)) or "")
-    return {
-        status = status,
-        json = {
-            error = message,
-            details = type(details) == "string" and details or nil,
-        },
-    }
+    -- 5xx: never echo the raw error (SQL + user data); input errors become 4xx.
+    return require("lib.errors").legacy(status, message, details)
 end
 
 local function user_uuid(self)

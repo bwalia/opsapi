@@ -280,7 +280,9 @@ return function(app)
         )
 
         if not presigned_url then
-            return apiResponse(500, nil, "Failed to generate presigned URL: " .. (err or "Unknown error"))
+            -- Storage unavailable / not configured: a 503, and no internals in the message.
+            ngx.log(ngx.ERR, "presigned URL failed: ", tostring(err))
+            return apiResponse(503, nil, "File storage is unavailable right now")
         end
 
         return apiResponse(200, {

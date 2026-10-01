@@ -9,6 +9,7 @@ local Global = require("helper.global")
 local db = require("lapis.db")
 local Model = require("lapis.db.model").Model
 local cjson = require("cjson")
+local Errors = require("lib.errors")
 
 local NamespaceRoles = Model:extend("namespace_roles")
 local NamespaceRoleQueries = {}
@@ -79,7 +80,7 @@ function NamespaceRoleQueries.create(data)
     ]], namespace_id, data.role_name)
 
     if #existing > 0 then
-        error("Role name already exists in this namespace")
+        Errors.conflict("Role name already exists in this namespace")
     end
 
     -- Validate and encode permissions
@@ -456,8 +457,8 @@ end
 -- @return table { data, total }
 function NamespaceRoleQueries.getMembers(role_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.perPage) or 10
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.perPage, 10, 500)
     local offset = (page - 1) * per_page
 
     -- Get total count

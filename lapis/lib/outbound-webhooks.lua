@@ -64,12 +64,15 @@ function Webhooks.isPublicIPv4(ip)
 end
 
 --- Parse and vet a webhook URL. Returns { scheme, host, port, path } or nil, reason.
-function Webhooks.parseUrl(url)
+-- opts.allow_http: accept plain http too (still public hosts only).
+-- opts.allow_private: skip the public-host rule (self-hosted integrations).
+function Webhooks.parseUrl(url, opts)
+    local private_ok = allow_private() or (opts and opts.allow_private)
     if type(url) ~= "string" or #url > 2000 then return nil, "must be a URL of at most 2000 characters" end
     local scheme, authority, rest = url:match("^(%a+)://([^/?#]+)(.*)$")
     if not scheme then return nil, "must be an absolute URL (https://…)" end
     scheme = scheme:lower()
-    if scheme ~= "https" and not (scheme == "http" and allow_private()) then
+    if scheme ~= "https" and not (scheme == "http" and (private_ok or (opts and opts.allow_http))) then
         return nil, "must use https"
     end
     if authority:find("@", 1, true) then return nil, "must not contain credentials" end
@@ -79,7 +82,7 @@ function Webhooks.parseUrl(url)
     host = host:lower()
     port = tonumber(port) or (scheme == "https" and 443 or 80)
     if port < 1 or port > 65535 then return nil, "has an invalid port" end
-    if not allow_private() then
+    if not private_ok then
         if ipv4(host) and not Webhooks.isPublicIPv4(host) then return nil, "must not point to a private address" end
         if host == "localhost" or host:match("%.localhost$") or host:match("%.local$") or host:match("%.internal$")
             or host:match("%.svc$") or host:match("%.cluster%.local$") or not host:find(".", 1, true) then
@@ -147,65 +150,91 @@ function Webhooks.newSecret()
     return "whsec_" .. hex(bytes)
 end
 
---- POST a JSON body to a webhook URL (SSRF-guarded).
--- @return ok, error, response_status, duration_ms
-function Webhooks.post(url, secret, event_type, delivery_id, body)
-    local target, why = Webhooks.parseUrl(url)
-    if not target then return false, "URL " .. why end
+--- An HTTP request to a URL a user configured, without letting it reach
+-- internal services: the host is resolved once, every address must be
+-- public, and the connection goes to the address that was checked (no DNS
+-- rebinding). A drop-in for resty.http's request_uri.
+-- @param params table  { method, headers, body, query, ssl_verify }
+-- @param opts table    { allow_http, allow_private, timeout_ms }
+-- @return { status, headers, body } or nil, error
+function Webhooks.request(url, params, opts)
+    params, opts = params or {}, opts or {}
+    local target, why = Webhooks.parseUrl(url, opts)
+    if not target then return nil, "URL " .. why end
 
     local ips, err = resolve(target.host)
-    if not ips then return false, err end
-    if not allow_private() then
+    if not ips then return nil, err end
+    if not (allow_private() or opts.allow_private) then
         for _, ip in ipairs(ips) do
             if not Webhooks.isPublicIPv4(ip) then
-                return false, target.host .. " resolves to a private address (" .. ip .. "); refusing to send"
+                return nil, target.host .. " resolves to a private address (" .. ip .. "); refusing to connect"
             end
         end
     end
 
-    local timestamp = tostring(ngx.time())
+    local timeout = opts.timeout_ms or READ_MS
     local httpc = require("resty.http").new()
-    httpc:set_timeouts(CONNECT_MS, SEND_MS, READ_MS)
-    local started = ngx.now()
+    httpc:set_timeouts(math.min(timeout, CONNECT_MS), timeout, timeout)
     local ok, cerr = httpc:connect({
         scheme = target.scheme,
         host = ips[1],
         port = target.port,
         ssl_server_name = target.host,
-        ssl_verify = target.scheme == "https",
+        ssl_verify = target.scheme == "https" and params.ssl_verify ~= false,
     })
-    if not ok then
-        return false, "could not connect: " .. tostring(cerr), nil, math.floor((ngx.now() - started) * 1000)
-    end
+    if not ok then return nil, "could not connect: " .. tostring(cerr) end
+
     local default_port = target.port == (target.scheme == "https" and 443 or 80)
-    local res, rerr = httpc:request({
-        method = "POST",
-        path = target.path,
-        body = body,
-        headers = {
-            ["Host"] = default_port and target.host or (target.host .. ":" .. target.port),
-            ["Content-Type"] = "application/json",
-            ["User-Agent"] = "OpsAPI-Webhooks/1",
-            ["X-Opsapi-Event"] = event_type,
-            ["X-Opsapi-Delivery"] = tostring(delivery_id),
-            ["X-Opsapi-Timestamp"] = timestamp,
-            ["X-Opsapi-Signature-256"] = Webhooks.sign(secret, timestamp, body),
-        },
-    })
-    local ms
-    if res then
-        pcall(res.read_body, res) -- drain so the connection can be reused
-        ms = math.floor((ngx.now() - started) * 1000)
-        httpc:set_keepalive(10000, 16)
-    else
-        ms = math.floor((ngx.now() - started) * 1000)
-        httpc:close()
-        return false, "request failed: " .. tostring(rerr), nil, ms
+    local headers = { ["Host"] = default_port and target.host or (target.host .. ":" .. target.port) }
+    for k, v in pairs(params.headers or {}) do headers[k] = v end
+    local path = target.path
+    if params.query then
+        local q = type(params.query) == "table" and ngx.encode_args(params.query) or tostring(params.query)
+        if q ~= "" then path = path .. (path:find("?", 1, true) and "&" or "?") .. q end
     end
+    local res, rerr = httpc:request({ method = params.method or "GET", path = path, headers = headers, body = params.body })
+    if not res then
+        httpc:close()
+        return nil, "request failed: " .. tostring(rerr)
+    end
+    local body, berr = res:read_body()
+    if body == nil and berr then
+        httpc:close()
+        return nil, "could not read the response: " .. tostring(berr)
+    end
+    httpc:set_keepalive(10000, 16)
+    return { status = res.status, headers = res.headers, body = body }
+end
+
+--- POST a body to a user-configured URL (SSRF-guarded, see request).
+-- Used by workspace webhooks and CMS webhooks.
+-- @param headers table  request headers
+-- @param opts table     { allow_http = bool }
+-- @return ok, error, response_status, duration_ms
+function Webhooks.send(url, headers, body, opts)
+    local started = ngx.now()
+    local o = { allow_http = opts and opts.allow_http, timeout_ms = READ_MS }
+    local res, err = Webhooks.request(url, { method = "POST", headers = headers, body = body }, o)
+    local ms = math.floor((ngx.now() - started) * 1000)
+    if not res then return false, err, nil, ms end
     if res.status >= 200 and res.status < 300 then
         return true, nil, res.status, ms
     end
     return false, "receiver answered HTTP " .. res.status, res.status, ms
+end
+
+--- POST a workspace webhook delivery (signed, SSRF-guarded).
+-- @return ok, error, response_status, duration_ms
+function Webhooks.post(url, secret, event_type, delivery_id, body)
+    local timestamp = tostring(ngx.time())
+    return Webhooks.send(url, {
+        ["Content-Type"] = "application/json",
+        ["User-Agent"] = "OpsAPI-Webhooks/1",
+        ["X-Opsapi-Event"] = event_type,
+        ["X-Opsapi-Delivery"] = tostring(delivery_id),
+        ["X-Opsapi-Timestamp"] = timestamp,
+        ["X-Opsapi-Signature-256"] = Webhooks.sign(secret, timestamp, body),
+    }, body)
 end
 
 --- The JSON body for one event (the public, documented payload).

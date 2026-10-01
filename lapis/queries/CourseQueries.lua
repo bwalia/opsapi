@@ -57,8 +57,8 @@ end
 --- List courses in a namespace with optional filters + pagination.
 function CourseQueries.list(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 50
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 50, 500)
     local offset = (page - 1) * perPage
 
     local where = { "namespace_id = ?", "deleted_at IS NULL" }

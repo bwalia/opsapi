@@ -1,6 +1,7 @@
 local CategoryModel = require "models.CategoryModel"
 local StoreQueries = require "queries.StoreQueries"
 local Global = require "helper.global"
+local Errors = require("lib.errors")
 local db = require("lapis.db")
 
 local CategoryQueries = {}
@@ -26,7 +27,7 @@ function CategoryQueries.create(params)
             string.lower(params.name)
         )
         if existing and #existing > 0 then
-            error("Category with this name already exists in your store")
+            Errors.conflict("Category with this name already exists in your store")
         end
     end
 

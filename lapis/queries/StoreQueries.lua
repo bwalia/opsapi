@@ -1,12 +1,25 @@
 local StoreModel = require "models.StoreModel"
+local Errors = require("lib.errors")
+local db = require("lapis.db")
 local Global = require "helper.global"
 
 local StoreQueries = {}
 
+-- Columns a store create may set; anything else in the request is ignored
+-- (unknown fields used to reach the INSERT, and is_verified is an admin
+-- decision, not something a seller sets on their own store).
+local STORE_WRITABLE = {}
+for _, f in ipairs({ "uuid", "user_id", "namespace_id", "name", "description", "slug", "logo_url", "banner_url",
+    "contact_email", "contact_phone", "address", "city", "state", "country", "postal_code", "status", "settings",
+    "tax_rate", "currency", "timezone", "shipping_enabled", "shipping_flat_rate", "free_shipping_threshold",
+    "can_self_ship" }) do
+    STORE_WRITABLE[f] = true
+end
+
 function StoreQueries.create(params)
     -- Validate required fields
     if not params.name or params.name == "" then
-        error("Store name is required")
+        Errors.invalid("Store name is required")
     end
     if not params.user_id then
         error("User ID is required for store creation")
@@ -33,7 +46,7 @@ function StoreQueries.create(params)
     if params.tax_rate then
         local tax_rate = tonumber(params.tax_rate)
         if not tax_rate or tax_rate < 0 or tax_rate > 100 then
-            error("Tax rate must be a number between 0 and 100")
+            Errors.invalid("Tax rate must be a number between 0 and 100")
         end
         params.tax_rate = tax_rate / 100  -- Convert percentage to decimal (10% -> 0.1)
     else
@@ -50,7 +63,7 @@ function StoreQueries.create(params)
         if params.shipping_flat_rate then
             local shipping_rate = tonumber(params.shipping_flat_rate)
             if not shipping_rate or shipping_rate < 0 then
-                error("Shipping rate must be a positive number")
+                Errors.invalid("Shipping rate must be a positive number")
             end
             params.shipping_flat_rate = shipping_rate
         else
@@ -61,7 +74,7 @@ function StoreQueries.create(params)
         if params.free_shipping_threshold then
             local threshold = tonumber(params.free_shipping_threshold)
             if not threshold or threshold < 0 then
-                error("Free shipping threshold must be a positive number")
+                Errors.invalid("Free shipping threshold must be a positive number")
             end
             params.free_shipping_threshold = threshold
         else
@@ -73,7 +86,11 @@ function StoreQueries.create(params)
         params.free_shipping_threshold = 0
     end
 
-    return StoreModel:create(params, { returning = "*" })
+    local row = {}
+    for field in pairs(STORE_WRITABLE) do
+        if params[field] ~= nil then row[field] = params[field] end
+    end
+    return StoreModel:create(row, { returning = "*" })
 end
 
 -- Get stores by user (store owner)
@@ -146,10 +163,19 @@ function StoreQueries.showByOwner(id, user_id)
 end
 
 function StoreQueries.update(id, params)
-    local record = StoreModel:find({ uuid = id })
+    local record = StoreModel:find({ uuid = tostring(id) })
     if not record then return nil end
-    params.id = record.id
-    return record:update(params, { returning = "*" })
+    -- Same allow-list as create; the owner, workspace and uuid never change.
+    local changes = {}
+    for field in pairs(STORE_WRITABLE) do
+        if params[field] ~= nil and field ~= "uuid" and field ~= "user_id" and field ~= "namespace_id" then
+            changes[field] = params[field]
+        end
+    end
+    if next(changes) == nil then return record end
+    changes.updated_at = db.raw("NOW()")
+    record:update(changes)
+    return record
 end
 
 function StoreQueries.destroy(id)

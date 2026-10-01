@@ -13,6 +13,25 @@ local cjson = require("cjson")
 
 local TaxBankAccountQueries = {}
 
+-- Statements on a bank account across both upload pipelines. dms_documents
+-- is diy-tax-return-uk's DMS table; other deployments only have
+-- tax_statements, and must not fail on the missing table.
+local function statement_count(account_uuid)
+    local dms = require("helper.table-exists")("dms_documents") and [[
+              +
+              (SELECT COUNT(*) FROM dms_documents
+                 WHERE bank_account_uuid = ? AND doc_type_key = 'bank_statement')]] or ""
+    local values = { account_uuid }
+    if dms ~= "" then values[2] = account_uuid end
+    local rows = db.query([[
+            SELECT
+              (SELECT COUNT(*) FROM tax_statements
+                 WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?))]] .. dms .. [[
+              AS count
+        ]], unpack(values))
+    return rows[1] and rows[1].count or 0
+end
+
 -- Resolve user's default namespace_id (returns 0 if not found)
 local function resolveNamespaceId(user_id)
     local ok, rows = pcall(db.query, [[
@@ -182,8 +201,8 @@ function TaxBankAccountQueries.all(params, user)
     end
     local user_id = user_record[1].id
 
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 500)
 
     -- Resolve namespace for scoped queries
     local ns_id = resolveNamespaceId(user_id)
@@ -218,16 +237,7 @@ function TaxBankAccountQueries.all(params, user)
     -- Same UNION rationale as TaxStatementQueries.all — see the comment
     -- there for the full picture.
     for _, account in ipairs(accounts) do
-        local count_result = db.query([[
-            SELECT
-              (SELECT COUNT(*) FROM tax_statements
-                 WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?))
-              +
-              (SELECT COUNT(*) FROM dms_documents
-                 WHERE bank_account_uuid = ? AND doc_type_key = 'bank_statement')
-              AS count
-        ]], account.id, account.id)
-        account.statement_count = count_result[1] and count_result[1].count or 0
+        account.statement_count = statement_count(account.id)
     end
 
     return {
@@ -267,16 +277,7 @@ function TaxBankAccountQueries.show(uuid, user)
         local account = result[1]
         -- Add statement count. Counts both pipelines — see the loop
         -- in .all for the full rationale.
-        local count_result = db.query([[
-            SELECT
-              (SELECT COUNT(*) FROM tax_statements
-                 WHERE bank_account_id = (SELECT id FROM tax_bank_accounts WHERE uuid = ?))
-              +
-              (SELECT COUNT(*) FROM dms_documents
-                 WHERE bank_account_uuid = ? AND doc_type_key = 'bank_statement')
-              AS count
-        ]], uuid, uuid)
-        account.statement_count = count_result[1] and count_result[1].count or 0
+        account.statement_count = statement_count(uuid)
         return account
     end
 

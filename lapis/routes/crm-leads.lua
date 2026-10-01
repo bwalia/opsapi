@@ -261,11 +261,11 @@ return function(app)
             )
 
             if not result then
-                local status_code = 500
-                if err == "Lead not found" then status_code = 404 end
-                if err == "Access denied" then status_code = 403 end
-                if err == "Lead is already converted" then status_code = 409 end
-                return api_response(status_code, nil, err)
+                local status_code = ({ ["Lead not found"] = 404, ["Access denied"] = 403,
+                    ["Lead is already converted"] = 409 })[err]
+                if status_code then return api_response(status_code, nil, err) end
+                -- Unexpected: log it, never send the internals to the client.
+                return require("lib.errors").fromException(self, err)
             end
 
             return api_response(200, result)

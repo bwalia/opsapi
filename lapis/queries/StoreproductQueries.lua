@@ -1,6 +1,7 @@
 local db = require "lapis.db"
 local StoreproductModel = require "models.StoreproductModel"
 local StoreModel = require "models.StoreModel"
+local Errors = require("lib.errors")
 local Global = require "helper.global"
 
 local StoreproductQueries = {}
@@ -31,13 +32,25 @@ local function ensure_namespace_store(namespace_id)
     return ok and store or nil
 end
 
+-- Columns a product create may set. Everything else in the request is
+-- ignored: unknown fields used to reach the INSERT (a 500), and ratings /
+-- inventory totals must not be client-controlled.
+local PRODUCT_WRITABLE = {}
+for _, f in ipairs({ "uuid", "store_id", "category_id", "namespace_id", "name", "description", "short_description",
+    "slug", "sku", "barcode", "price", "compare_price", "cost_price", "track_inventory", "inventory_quantity",
+    "low_stock_threshold", "weight", "dimensions", "images", "variants", "tags", "is_active", "is_featured",
+    "is_digital", "requires_shipping", "seo_title", "seo_description", "sort_order", "meta_title",
+    "meta_description", "vendor", "product_type", "published_at" }) do
+    PRODUCT_WRITABLE[f] = true
+end
+
 function StoreproductQueries.create(params)
     -- Validate required fields
     if not params.name or params.name == "" then
-        error("Product name is required")
+        Errors.invalid("Product name is required")
     end
-    if not params.price or tonumber(params.price) <= 0 then
-        error("Valid product price is required")
+    if not tonumber(params.price) or tonumber(params.price) <= 0 then
+        Errors.invalid("Valid product price is required")
     end
 
     -- Generate UUID if not provided
@@ -99,7 +112,12 @@ function StoreproductQueries.create(params)
     -- ponytail: picks the namespace's first store; fine while a tenant has one.
     local store
     if params.store_id and params.store_id ~= "" and params.store_id ~= "null" then
-        store = StoreModel:find({ uuid = params.store_id })
+        store = StoreModel:find({ uuid = tostring(params.store_id) })
+        -- Only this workspace's own stores (a uuid from another tenant must
+        -- not let you add products to their catalog).
+        if store and params.namespace_id and tostring(store.namespace_id) ~= tostring(params.namespace_id) then
+            Errors.invalid("Store not found in this workspace")
+        end
     elseif params.namespace_id then
         store = StoreModel:find({ namespace_id = params.namespace_id })
         -- Fresh tenant with no store yet: provision a default one so adding a
@@ -135,7 +153,11 @@ function StoreproductQueries.create(params)
         params.category_id = nil
     end
 
-    return StoreproductModel:create(params, { returning = "*" })
+    local row = {}
+    for field in pairs(PRODUCT_WRITABLE) do
+        if params[field] ~= nil then row[field] = params[field] end
+    end
+    return StoreproductModel:create(row, { returning = "*" })
 end
 
 -- Set (or change) the catalog currency for a namespace. Currency lives on the
@@ -197,9 +219,13 @@ function StoreproductQueries.checkInventory(product_uuid, required_quantity, var
     return true, nil
 end
 
+-- Columns a client may sort product lists by (ORDER BY can't be a bound value).
+local PRODUCT_SORT = { id = true, name = true, sku = true, price = true, quantity = true, status = true,
+    created_at = true, updated_at = true, inventory_quantity = true }
+
 function StoreproductQueries.all(params)
-    local page = params.page or 1
-    local perPage = params.perPage or 10
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 10, 100)
 
     -- Validate ORDER BY to prevent SQL injection
     local valid_fields = { id = true, name = true, sku = true, price = true, quantity = true, status = true, created_at = true, updated_at = true }
@@ -227,16 +253,16 @@ function StoreproductQueries.all(params)
     }
 end
 
--- Get products by store
+-- Get products by store. Returns nil when the store doesn't exist.
 function StoreproductQueries.getByStore(store_id, params)
     local store = StoreModel:find({ uuid = store_id })
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    if not store then return nil end
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 10, 100)
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, PRODUCT_SORT, "id", "desc")
 
     local paginated = StoreproductModel:paginated(
-        "WHERE store_id = " .. store.id .. " ORDER BY " .. orderField .. " " .. orderDir, {
-            per_page = perPage
-        })
+        "WHERE store_id = ? ORDER BY " .. orderField .. " " .. orderDir, store.id, { per_page = perPage })
 
     local products = paginated:get_page(page)
     for i, product in ipairs(products) do
@@ -251,13 +277,14 @@ end
 
 -- Get products by store and category
 function StoreproductQueries.getByStoreAndCategory(store_id, category_id, params)
-    local page, perPage, orderField, orderDir =
-        params.page or 1, params.perPage or 10, params.orderBy or 'id', params.orderDir or 'desc'
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 10, 100)
+    local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, PRODUCT_SORT, "id", "desc")
 
+    -- Bound values first, options last (lapis reads a trailing table as options).
     local paginated = StoreproductModel:paginated(
-        "WHERE store_id = ? AND category_id = ? ORDER BY " .. orderField .. " " .. orderDir, {
-            per_page = perPage
-        }, store_id, category_id)
+        "WHERE store_id = ? AND category_id = ? ORDER BY " .. orderField .. " " .. orderDir,
+        store_id, category_id, { per_page = perPage })
 
     return {
         data = paginated:get_page(page),
@@ -335,16 +362,15 @@ end
 
 -- Enhanced product search with filters
 function StoreproductQueries.searchProducts(params)
-    local page = params.page or 1
-    local perPage = params.perPage or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 100)
     local search = params.search
     local category_id = params.category_id
     local store_id = params.store_id
     local min_price = params.min_price
     local max_price = params.max_price
     local is_featured = params.is_featured
-    local orderBy = params.orderBy or 'created_at'
-    local orderDir = params.orderDir or 'desc'
+    local orderBy, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, PRODUCT_SORT, "created_at", "desc")
 
     local where_conditions = { "is_active = true" }
     local where_params = {}
@@ -361,7 +387,7 @@ function StoreproductQueries.searchProducts(params)
 
     if search and search ~= "" then
         table.insert(where_conditions, "(name ILIKE ? OR description ILIKE ? OR tags ILIKE ?)")
-        local search_term = "%" .. search .. "%"
+        local search_term = "%" .. tostring(search):gsub("[%%_\\]", "\\%0") .. "%"
         table.insert(where_params, search_term)
         table.insert(where_params, search_term)
         table.insert(where_params, search_term)
@@ -380,12 +406,12 @@ function StoreproductQueries.searchProducts(params)
         table.insert(where_params, category_id)
     end
 
-    if min_price and tonumber(min_price) > 0 then
+    if tonumber(min_price) and tonumber(min_price) > 0 then
         table.insert(where_conditions, "price >= ?")
         table.insert(where_params, tonumber(min_price))
     end
 
-    if max_price and tonumber(max_price) > 0 then
+    if tonumber(max_price) and tonumber(max_price) > 0 then
         table.insert(where_conditions, "price <= ?")
         table.insert(where_params, tonumber(max_price))
     end

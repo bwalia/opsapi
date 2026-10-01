@@ -12,27 +12,36 @@ local TaxCategoryQueries = {}
 
 function TaxCategoryQueries.getAll(params)
     params = params or {}
-    local where_clauses = { "1=1" }
+    -- Bound values only (a "?" typed into search can't shift the placeholders).
+    local where_clauses, values = { "1=1" }, {}
 
     if params.type then
-        table.insert(where_clauses, "type = " .. db.escape_literal(params.type))
+        table.insert(where_clauses, "type = ?")
+        table.insert(values, tostring(params.type))
     end
     if params.is_active ~= nil then
-        table.insert(where_clauses, "is_active = " .. db.escape_literal(params.is_active))
+        table.insert(where_clauses, "is_active = ?")
+        table.insert(values, params.is_active == true or params.is_active == "true")
     end
-    if params.search and #params.search > 0 then
-        local search = db.escape_literal("%" .. params.search .. "%")
-        table.insert(where_clauses, "(name ILIKE " .. search .. " OR description ILIKE " .. search .. ")")
+    if params.search and #tostring(params.search) > 0 then
+        local like = "%" .. tostring(params.search):gsub("[%%_\\]", "\\%0") .. "%"
+        table.insert(where_clauses, "(label ILIKE ? OR key ILIKE ? OR description ILIKE ?)")
+        table.insert(values, like)
+        table.insert(values, like)
+        table.insert(values, like)
     end
 
     local where = table.concat(where_clauses, " AND ")
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 100
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 100, 500)
     local offset = (page - 1) * per_page
 
-    local rows = db.select("* FROM tax_categories WHERE " .. where .. " ORDER BY type, name LIMIT ? OFFSET ?",
-        per_page, offset)
-    local count = db.select("COUNT(*) as total FROM tax_categories WHERE " .. where)
+    local page_values = { unpack(values) }
+    page_values[#page_values + 1] = per_page
+    page_values[#page_values + 1] = offset
+    local rows = db.select("* FROM tax_categories WHERE " .. where .. " ORDER BY type, label LIMIT ? OFFSET ?",
+        unpack(page_values))
+    local count = db.select("COUNT(*) as total FROM tax_categories WHERE " .. where, unpack(values))
     return rows, count and count[1] and count[1].total or 0
 end
 
@@ -68,7 +77,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function TaxCategoryQueries.getHmrcCategories()
-    return db.select("* FROM tax_hmrc_categories ORDER BY box_number, key")
+    return db.select("* FROM tax_hmrc_categories ORDER BY box, key")
 end
 
 function TaxCategoryQueries.getHmrcByUuid(uuid)

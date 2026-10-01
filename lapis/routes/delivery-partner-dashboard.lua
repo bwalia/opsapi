@@ -669,8 +669,7 @@ return function(app)
             end)
 
             if not success then
-                ngx.log(ngx.ERR, "Error creating delivery request: " .. tostring(result))
-                return { status = 500, json = { error = "Failed to create delivery request: " .. tostring(result) } }
+                return require("lib.errors").fromException(self, result)
             end
 
             return { json = {

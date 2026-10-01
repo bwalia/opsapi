@@ -8,6 +8,7 @@
 local PermissionQueries = require "queries.PermissionQueries"
 local RequestParser = require "helper.request_parser"
 local AuthMiddleware = require("middleware.auth")
+local Global = require("helper.global")
 local cjson = require "cjson"
 
 -- Configure cjson to encode empty tables as arrays
@@ -17,13 +18,8 @@ return function(app)
     -- Helper function for error responses
     local function error_response(status, message, details)
         ngx.log(ngx.ERR, "Permissions API error: ", message, " | Details: ", tostring(details))
-        return {
-            status = status,
-            json = {
-                error = message,
-                details = type(details) == "string" and details or nil
-            }
-        }
+        -- 5xx: never echo the raw error (SQL + user data); input errors become 4xx.
+        return require("lib.errors").legacy(status, message, details)
     end
 
     -- Helper to check if user is admin (platform-level administrative role)
@@ -41,8 +37,8 @@ return function(app)
 
         local params = self.params or {}
 
-        local perPage = tonumber(params.limit) or tonumber(params.perPage) or 100
-        local page = tonumber(params.page) or 1
+        local perPage = tonumber(params.limit) or Global.perPageParam(params.perPage, 100, 500)
+        local page = Global.pageParam(params.page)
         local offset = tonumber(params.offset)
 
         -- Calculate page from offset if provided

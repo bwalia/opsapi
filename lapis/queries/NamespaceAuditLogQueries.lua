@@ -51,8 +51,8 @@ end
 -- @return table { data, total, page, per_page }
 function NamespaceAuditLogQueries.getByNamespace(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = math.max(tonumber(params.per_page) or 50, 1)
+    local page = Global.pageParam(params.page)
+    local per_page = math.max(Global.perPageParam(params.per_page, 50, 500), 1)
     local offset = (page - 1) * per_page
 
     -- Build dynamic WHERE clause
@@ -145,8 +145,8 @@ end
 -- @return table { data, total, page, per_page }
 function NamespaceAuditLogQueries.getByEntity(entity_type, entity_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = math.max(tonumber(params.per_page) or 50, 1)
+    local page = Global.pageParam(params.page)
+    local per_page = math.max(Global.perPageParam(params.per_page, 50, 500), 1)
     local offset = (page - 1) * per_page
 
     local count_result = db.query(

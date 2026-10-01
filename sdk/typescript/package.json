@@ -1,8 +1,10 @@
 {
   "name": "@opsapi/client",
   "version": "0.1.0",
-  "private": true,
   "description": "Typed client for the OpsAPI REST API: auth (incl. 2FA), workspaces, typed requests for every endpoint, pagination, retries, webhook verification.",
+  "license": "MIT",
+  "homepage": "https://github.com/bwalia/opsapi/tree/main/sdk/typescript#readme",
+  "bugs": { "url": "https://github.com/bwalia/opsapi/issues" },
   "keywords": ["opsapi", "api-client", "openapi", "typescript", "webhooks"],
   "repository": { "type": "git", "url": "https://github.com/bwalia/opsapi.git", "directory": "sdk/typescript" },
   "type": "module",
@@ -15,7 +17,7 @@
       "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
     }
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "CHANGELOG.md", "LICENSE"],
   "sideEffects": false,
   "engines": { "node": ">=20" },
   "scripts": {
@@ -25,6 +27,7 @@
     "generate": "node scripts/generate.mjs --core ${OPSAPI_OPENAPI_URL:-http://127.0.0.1:4010/openapi.json} -o src/generated/opsapi.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
+  "publishConfig": { "access": "public", "provenance": true },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
   },

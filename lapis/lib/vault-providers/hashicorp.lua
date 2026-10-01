@@ -7,6 +7,14 @@
 
 local cjson = require("cjson")
 
+-- The vault URL is user-supplied: public hosts only, unless a self-hosted
+-- deployment opts in with OPSAPI_VAULT_ALLOW_PRIVATE=true (internal Vault).
+local VAULT_HTTP_OPTS = {
+    allow_private = os.getenv("OPSAPI_VAULT_ALLOW_PRIVATE") == "true",
+    allow_http = os.getenv("OPSAPI_VAULT_ALLOW_PRIVATE") == "true",
+    timeout_ms = 10000,
+}
+
 local HashicorpProvider = {}
 HashicorpProvider.__index = HashicorpProvider
 
@@ -24,11 +32,6 @@ function HashicorpProvider:new(config)
 end
 
 local function http_request(self, method, path, body)
-    local ok, http = pcall(require, "resty.http")
-    if not ok then return nil, "resty.http not available" end
-
-    local httpc = http.new()
-    httpc:set_timeout(self.timeout)
 
     local headers = {
         ["Content-Type"] = "application/json",
@@ -45,7 +48,7 @@ local function http_request(self, method, path, body)
     if body then params.body = cjson.encode(body) end
 
     local url = self.vault_url .. path
-    local res, err = httpc:request_uri(url, params)
+    local res, err = require("lib.outbound-webhooks").request(url, params, VAULT_HTTP_OPTS) -- SSRF-guarded
     if not res then return nil, err end
 
     if res.status >= 400 then

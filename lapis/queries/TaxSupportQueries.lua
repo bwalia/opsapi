@@ -21,8 +21,8 @@ end
 
 function TaxSupportQueries.getConversationsForUser(user_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 25
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 25, 500)
     local offset = (page - 1) * per_page
 
     local where = "user_id = " .. db.escape_literal(user_id)
@@ -77,8 +77,8 @@ end
 
 function TaxSupportQueries.getMessages(conversation_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 50
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 50, 500)
     local offset = (page - 1) * per_page
 
     local rows = db.select("* FROM tax_support_messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
@@ -110,8 +110,8 @@ end
 
 function TaxSupportQueries.getAllConversations(params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 25
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 25, 500)
     local offset = (page - 1) * per_page
 
     local where_clauses = { "1=1" }

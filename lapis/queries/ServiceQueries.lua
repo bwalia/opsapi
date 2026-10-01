@@ -511,8 +511,8 @@ end
 -- @return table { data, total }
 function ServiceQueries.all(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.perPage) or tonumber(params.per_page) or 10
+    local page = Global.pageParam(params.page)
+    local per_page = tonumber(params.perPage) or Global.perPageParam(params.per_page, 10, 500)
     local order_by = params.orderBy or params.order_by or "created_at"
     local order_dir = params.orderDir or params.order_dir or "desc"
 
@@ -921,8 +921,8 @@ end
 -- @return table { data, total }
 function ServiceQueries.getDeployments(service_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.perPage, 20, 500)
 
     local conditions = { "d.service_id = ?" }
     local values = { service_id }

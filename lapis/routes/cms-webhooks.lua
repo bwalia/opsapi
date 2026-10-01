@@ -57,8 +57,10 @@ return function(app)
     app:post("/api/v2/cms/webhooks", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("cms", "create", function(self)
             local body = parse_body()
-            if type(body.url) ~= "string" or not body.url:match("^https?://") then
-                return api_response(400, nil, "url must be a valid http(s) URL")
+            -- Public hosts only: a webhook may not target internal services.
+            local target, why = require("lib.outbound-webhooks").parseUrl(body.url, { allow_http = true })
+            if not target then
+                return api_response(400, nil, "url " .. why)
             end
             local webhook = CmsWebhookQueries.create(self.namespace.id, {
                 name = body.name,
@@ -80,8 +82,11 @@ return function(app)
     app:put("/api/v2/cms/webhooks/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("cms", "update", function(self)
             local body = parse_body()
-            if body.url ~= nil and (type(body.url) ~= "string" or not body.url:match("^https?://")) then
-                return api_response(400, nil, "url must be a valid http(s) URL")
+            if body.url ~= nil then
+                local target, why = require("lib.outbound-webhooks").parseUrl(body.url, { allow_http = true })
+                if not target then
+                    return api_response(400, nil, "url " .. why)
+                end
             end
             local fields = {}
             for _, k in ipairs({ "name", "url", "secret", "events" }) do

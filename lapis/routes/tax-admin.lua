@@ -14,28 +14,12 @@
 local db = require("lapis.db")
 local cjson = require("cjson")
 local AuthMiddleware = require("middleware.auth")
+local Global = require("helper.global")
+local AdminCheck = require("helper.admin-check")
 
+-- Platform roles allowed here (exact names; JWT, then the database).
 local function isAdmin(user)
-    if not user then return false end
-    local roles = user.roles or ""
-    if type(roles) == "string" then
-        return roles:match("admin") ~= nil or roles:match("tax_admin") ~= nil
-    end
-    if type(roles) == "table" then
-        for _, r in ipairs(roles) do
-            local name = r.role_name or r
-            if name == "administrative" or name == "tax_admin" then return true end
-        end
-    end
-    local user_uuid = user.uuid or user.id
-    local rows = db.query([[
-        SELECT r.name FROM roles r
-        JOIN user__roles ur ON ur.role_id = r.id
-        JOIN users u ON u.id = ur.user_id
-        WHERE u.uuid = ? AND r.name IN ('administrative', 'tax_admin')
-        LIMIT 1
-    ]], user_uuid)
-    return rows and #rows > 0
+    return AdminCheck.hasAnyRole(user, { "administrative", "tax_admin" })
 end
 
 return function(app)
@@ -50,7 +34,7 @@ return function(app)
             local stats = {}
 
             -- User counts
-            local user_rows = db.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE is_active = true OR is_active IS NULL) as active FROM users")
+            local user_rows = db.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE active = true OR active IS NULL) as active FROM users")
             stats.users = user_rows and user_rows[1] or { total = 0, active = 0 }
 
             -- Statement counts
@@ -100,8 +84,8 @@ return function(app)
                 return { status = 403, json = { error = "Admin access required" } }
             end
 
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 25
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 25, 200)
             local offset = (page - 1) * per_page
 
             local rows = db.query(string.format([[
@@ -133,36 +117,39 @@ return function(app)
                 return { status = 403, json = { error = "Admin access required" } }
             end
 
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 25
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 25, 200)
             local offset = (page - 1) * per_page
 
-            local where_clauses = { "1=1" }
+            -- Bound values only; bank details come from the statement's account.
+            local where_clauses, values = { "1=1" }, {}
             if self.params.workflow_step then
-                table.insert(where_clauses, "s.workflow_step = " .. db.escape_literal(self.params.workflow_step))
+                table.insert(where_clauses, "s.workflow_step = ?")
+                table.insert(values, tostring(self.params.workflow_step))
             end
             if self.params.tax_year then
-                table.insert(where_clauses, "s.tax_year = " .. db.escape_literal(self.params.tax_year))
+                table.insert(where_clauses, "s.tax_year = ?")
+                table.insert(values, tostring(self.params.tax_year))
             end
-            if self.params.search then
-                local search = db.escape_literal("%" .. self.params.search .. "%")
-                table.insert(where_clauses, "(u.email ILIKE " .. search .. " OR s.bank_name ILIKE " .. search .. ")")
+            if self.params.search and self.params.search ~= "" then
+                local like = "%" .. tostring(self.params.search):gsub("[%%_\\]", "\\%0") .. "%"
+                table.insert(where_clauses, "(u.email ILIKE ? OR ba.bank_name ILIKE ?)")
+                table.insert(values, like)
+                table.insert(values, like)
             end
 
             local where = table.concat(where_clauses, " AND ")
-
-            local rows = db.query(string.format([[
-                SELECT s.*, u.email as user_email, u.first_name, u.last_name
+            local from = [[
                 FROM tax_statements s
                 LEFT JOIN users u ON u.id = s.user_id
-                WHERE %s
-                ORDER BY s.created_at DESC
-                LIMIT %d OFFSET %d
-            ]], where, per_page, offset))
-
-            local count = db.query(string.format(
-                "SELECT COUNT(*) as total FROM tax_statements s LEFT JOIN users u ON u.id = s.user_id WHERE %s", where
-            ))
+                LEFT JOIN tax_bank_accounts ba ON ba.id = s.bank_account_id
+                WHERE ]] .. where
+            local page_values = { unpack(values) }
+            page_values[#page_values + 1] = per_page
+            page_values[#page_values + 1] = offset
+            local rows = db.query("SELECT s.*, ba.bank_name, u.email as user_email, u.first_name, u.last_name "
+                .. from .. " ORDER BY s.uploaded_at DESC LIMIT ? OFFSET ?", unpack(page_values))
+            local count = db.query("SELECT COUNT(*) as total " .. from, unpack(values))
 
             return {
                 status = 200,
@@ -183,15 +170,16 @@ return function(app)
                 return { status = 403, json = { error = "Admin access required" } }
             end
 
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 50
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 50, 200)
             local offset = (page - 1) * per_page
             local threshold = tonumber(self.params.threshold) or 0.7
 
             local rows = db.query(string.format([[
-                SELECT t.*, s.bank_name, u.email as user_email
+                SELECT t.*, ba.bank_name, u.email as user_email
                 FROM tax_transactions t
                 LEFT JOIN tax_statements s ON s.id = t.statement_id
+                LEFT JOIN tax_bank_accounts ba ON ba.id = s.bank_account_id
                 LEFT JOIN users u ON u.id = t.user_id
                 WHERE t.confidence_score IS NOT NULL
                 AND t.confidence_score < %f

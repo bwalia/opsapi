@@ -256,6 +256,19 @@ With `./start.sh -e local` the API reloads itself when you save a file: there's 
 
 **Calling OpsAPI from your own app?** [`@opsapi/client`](sdk/typescript) is a typed TypeScript client covering every endpoint, your plugins included. It handles sign-in with 2FA, workspaces, retries, pagination and webhook verification.
 
+```bash
+npm install @opsapi/client
+```
+
+```ts
+import { createClient } from '@opsapi/client';
+
+const opsapi = createClient({ baseUrl: 'https://api.example.com', token: process.env.OPSAPI_KEY, namespace: 'acme' });
+const { data } = await opsapi.GET('/api/v2/customers', { params: { query: { page: 1 } } });
+```
+
+Its [README](sdk/typescript/README.md) covers sign-in, errors, pagination, typed plugins and webhooks.
+
 Tenants who just need integrations don't need a plugin. Under **Dashboard → Webhooks** each workspace can send its events (invoice paid, lead created, …) to its own URLs, signed and retried. See [WEBHOOKS.md](WEBHOOKS.md).
 
 ## Environment Variables
@@ -296,6 +309,8 @@ All environment variables are in `lapis/.env`. The `.sample.env` file has workin
 | `SMTP_FROM_EMAIL` / `SMTP_FROM_NAME` | Default sender for outbound email |
 | `APP_NAME` | Display name used in email subject lines (default `OpsAPI`) |
 | `FRONTEND_URL` | **Bootstrap-only**: seeds `namespaces.allowed_redirect_origins` on first run of migration 489. Auto-set by `start.sh`. After migration, the source of truth is the DB column — see [Password Reset Flow](#password-reset-flow). |
+| `OPSAPI_WEBHOOKS_ALLOW_PRIVATE` | `true` lets workspace webhooks call `http://` and private addresses. **Local development only.** See [WEBHOOKS.md](WEBHOOKS.md). |
+| `OPSAPI_VAULT_ALLOW_PRIVATE` | `true` lets the secret vault reach a HashiCorp Vault, Azure Key Vault or Kubernetes API on a private network or over `http://`. Off by default: vault URLs must be public `https://`. Set it when your Vault runs inside the cluster. |
 | `PASSWORD_RESET_ALLOWED_ORIGINS` | **Bootstrap-only**: comma-separated extra origins for the same migration 489 bootstrap. Used when one tenant has multiple frontends (e.g. staging + prod). |
 
 **Note:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If changed after initial build, rebuild with:
@@ -330,6 +345,8 @@ cd lapis && docker compose restart lapis
 ```bash
 docker exec -e "PROJECT_CODE=all" -it opsapi lapis migrate
 ```
+
+Migrating is safe to repeat. Each run also repairs schema drift from older releases: column defaults that were stored with extra quotes (a `status` of `'active'` instead of `active`, including rows that already took the bad value) and columns that older databases are missing.
 
 ### Test login from inside the container
 
@@ -381,6 +398,28 @@ docker exec -e "PROJECT_CODE=all" -it opsapi lapis migrate
 
 - **Swagger UI:** http://127.0.0.1:4010/swagger
 - **OpenAPI JSON:** http://127.0.0.1:4010/openapi.json
+
+### Status codes and errors
+
+| Status | Meaning |
+|---|---|
+| `400` | Malformed request: a missing `X-Namespace-*` header, or a value of the wrong type (a non-UUID id, text where a number belongs). |
+| `401` | Missing or invalid credentials. |
+| `403` | Signed in, but your role in this workspace doesn't allow it (or you aren't a member). |
+| `404` | Doesn't exist, belongs to another workspace, or the module isn't deployed (`PROJECT_CODE`). |
+| `409` | Conflict: a duplicate value, or the record is still referenced by others. |
+| `422` | Validation failed: a required field is missing, a value is out of range, or a referenced record doesn't exist. |
+| `503` | An integration this endpoint needs (Stripe, Google, MinIO, HMRC, …) isn't configured on this server. |
+| `500` | A bug on our side. The body never contains SQL or internal details; check the API logs. |
+
+Errors carry a human message and, where it helps, a machine-readable `code` and `context`:
+
+```json
+{ "error": "A record with this value already exists.", "code": "CONFLICT_409",
+  "context": { "reason": "duplicate", "field": "email" } }
+```
+
+Newer endpoints nest the same fields: `{ "error": { "code", "message", "context" } }`. Some validation errors add `details`, a map of field → message. [`@opsapi/client`](sdk/typescript) reads both shapes into `OpsApiError`.
 
 ### Public Endpoints (No Auth)
 

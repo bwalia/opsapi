@@ -808,6 +808,12 @@ function SyncQueries.saveConnection(namespace_id, actor_uuid, body)
     if mode ~= "mock" and (not base_url or base_url == "") then
         return nil, "A base URL is required for a sandbox or live connection"
     end
+    if mode ~= "mock" then
+        -- Requests go to this URL with the tenant's Simpro credentials: a
+        -- public https host only (no internal services or cloud metadata).
+        local target, why = require("lib.outbound-webhooks").parseUrl(base_url)
+        if not target then return nil, "Base URL " .. why end
+    end
 
     local patch = {
         name = body.name or (existing and existing.name) or "Simpro",
