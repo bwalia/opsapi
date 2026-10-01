@@ -67,10 +67,16 @@ docker exec opsapi opsapi plugin:new helpdesk
 docker exec opsapi opsapi make:resource helpdesk ticket \
     title:string:required description:text status:string:required due_on:date
 docker exec opsapi opsapi migrate        # creates the table, registers RBAC module + sidebar entry
-docker restart opsapi                    # loads the new routes
 ```
 
 Then open the dashboard: **Tickets** is in the sidebar, at `/dashboard/plugins/helpdesk/tickets`.
+
+**Hot reload.** `./start.sh -e local` runs the API with `OPSAPI_DEV_RELOAD=true`, so there's no restart step:
+
+- **Save any `.lua` file** (a route, a handler, the manifest, or core code) and the server reloads itself within about 3 seconds. In-flight requests finish on the old code.
+- **A file that doesn't compile** is reported in the log (`[dev-reload] not reloading — fix this first`), and the old code keeps running.
+- **Saving `project.lua` or an `events/` file** also re-syncs the plugin's RBAC modules, sidebar menu and event subscriptions.
+- **New migration files** don't run by themselves, because a half-written one would be marked as applied. Run `opsapi migrate`.
 
 ### With only the Docker image
 
@@ -82,8 +88,10 @@ opsapi-cli make:resource helpdesk ticket title:string:required status:string:req
 
 # run OpsAPI with the plugins mounted (plus your usual env / database settings)
 docker run -d --name opsapi -v "$PWD/plugins:/app/projects" --env-file .env -p 4010:80 bwalia/opsapi
-docker exec opsapi opsapi migrate && docker restart opsapi
+docker exec opsapi opsapi migrate && docker exec opsapi opsapi reload
 ```
+
+Outside `./start.sh`, `opsapi reload` picks up code changes without downtime. Or set `OPSAPI_DEV_RELOAD=true` on a development container to reload on save; never set it in production.
 
 ### Try it
 
@@ -352,7 +360,7 @@ return {
 }
 ```
 
-Run `opsapi migrate`, which registers the subscription and the database trigger, then restart OpsAPI. The full example is [`projects/helpdesk/events`](projects/helpdesk/events).
+Run `opsapi migrate`, which registers the subscription and the database trigger. With hot reload the handler is live as soon as you save it; otherwise run `opsapi reload`. The full example is [`projects/helpdesk/events`](projects/helpdesk/events).
 
 ### Events you can subscribe to
 
@@ -516,7 +524,7 @@ RUN opsapi plugin:check             # fail the build on a broken plugin
 | `GET /api/v2/plugins/:code` | The above plus migration status (executed, pending, drift) and events (subscriptions, delivery counts, recent failures). |
 | `POST /api/v2/plugins/:code/events/retry` | Re-queue the plugin's dead event deliveries. |
 | `GET /ready` | 503 with `"Plugin failed to load: <codes>"` while any plugin is broken. |
-| Logs | `[Plugin:<code>] …` lines at startup, and `[ProjectMigrator] …` lines on migrate. |
+| Logs | `[Plugin:<code>] …` lines at startup, `[ProjectMigrator] …` lines on migrate, and `[dev-reload] …` lines when hot reload is on. |
 
 Common load failures:
 
@@ -576,6 +584,7 @@ Resource methods (the first argument is always the caller's namespace id):
 | `opsapi events` | List the events you can subscribe to: core tables and every plugin's `publishes`. |
 | `opsapi plugin:check` | Validate every manifest, events file and the Lua syntax of every file. Exit 1 on problems; warns about events nothing publishes. Use it in CI. |
 | `opsapi migrate` | `lapis migrate`: core, then plugins. |
+| `opsapi reload` | `plugin:check`, then a graceful reload of the running server. New workers load the new code while the old ones finish their requests. Refuses to reload into a broken plugin. |
 
 Plugins directory: `--dir <path>`, else `$OPSAPI_PROJECTS_DIR`, else `/app/projects`.
 
@@ -583,7 +592,7 @@ Plugins directory: `--dir <path>`, else `$OPSAPI_PROJECTS_DIR`, else `/app/proje
 
 ## 15. Limits and roadmap
 
-- **Code changes need a restart.** OpsAPI caches compiled Lua per worker (`lua_code_cache on`), so restart the container or roll the deployment after changing a plugin.
+- **Code is cached per worker** (`lua_code_cache on`). Development reloads on save (`OPSAPI_DEV_RELOAD=true`). Elsewhere, run `opsapi reload` or roll the deployment. Deleting a file isn't noticed by hot reload; run `opsapi reload`.
 - **Dashboard pages are generic.** Plugins get list/form pages for their `sdk.crud` resources (§6), not custom screens. Build anything else in your own frontend against the plugin's API.
 - **Event payloads are database rows**, not the API's JSON shape. Business events cover status changes (`invoice.paid`); anything subtler can still be derived from `invoice.updated` and its `changes`.
 - Built-in modules (in `lapis/routes`) follow the same layering. See `CLAUDE.md` if you're contributing to OpsAPI itself rather than extending it.

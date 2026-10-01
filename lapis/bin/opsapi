@@ -9,6 +9,7 @@
     opsapi events                                  list the events you can subscribe to
     opsapi plugin:check                            validate every plugin (CI-friendly)
     opsapi migrate                                 run core + plugin migrations
+    opsapi reload                                  check, then reload the server (no downtime)
 
   Plugins live in $OPSAPI_PROJECTS_DIR (default /app/projects); --dir overrides.
   Guide: PLUGINS.md in the opsapi repo.
@@ -62,6 +63,11 @@ Usage: opsapi <command> [args] [--dir <plugins-dir>]
 
   migrate
       Run `lapis migrate` (core + all plugin migrations).
+
+  reload
+      Run plugin:check, then reload the running server gracefully: new
+      workers load the new code while the old ones finish their requests.
+      (Local development reloads by itself: OPSAPI_DEV_RELOAD=true.)
 
 Plugins dir: --dir, else $OPSAPI_PROJECTS_DIR, else /app/projects.
 ]]
@@ -445,6 +451,18 @@ local function cmd_events(root)
     print("Plugins can also emit custom events: sdk.emit(namespace_id, \"<plugin>.<entity>.<action>\", data)")
 end
 
+-- The nginx master: its pid file under the app prefix, else the process list.
+local function master_pid()
+    local f = io.open(APP .. "/logs/nginx.pid")
+    local pid = f and tonumber(f:read("*l"))
+    if f then f:close() end
+    if pid then return pid end
+    local h = io.popen("pgrep -f 'nginx: master' 2>/dev/null")
+    pid = h and tonumber(h:read("*l"))
+    if h then h:close() end
+    return pid
+end
+
 local function cmd_check(root)
     local plugins = ProjectLoader.discover(root)
     if #plugins == 0 then
@@ -492,6 +510,14 @@ local function cmd_check(root)
     if failed > 0 then os.exit(1) end
 end
 
+local function cmd_reload(root)
+    cmd_check(root) -- exits 1 on problems: never reload into a broken plugin
+    local pid = master_pid()
+    if not pid then die("no running OpsAPI server found (looked for " .. APP .. "/logs/nginx.pid)") end
+    if not sh("kill -HUP " .. pid) then die("could not signal the server (pid " .. pid .. ")") end
+    print("Reloading OpsAPI (pid " .. pid .. "): new workers start with the new code.")
+end
+
 -- ---------------------------------------------------------------------------
 -- main
 -- ---------------------------------------------------------------------------
@@ -521,6 +547,8 @@ elseif command == "events" then
     cmd_events(root)
 elseif command == "plugin:check" then
     cmd_check(root)
+elseif command == "reload" then
+    cmd_reload(root)
 elseif command == "migrate" then
     os.exit(sh("cd " .. quote(APP) .. " && lapis migrate") and 0 or 1)
 else
