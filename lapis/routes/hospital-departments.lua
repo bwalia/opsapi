@@ -20,7 +20,8 @@ local db = require("lapis.db")
 return function(app)
     local function error_response(status, message, details)
         ngx.log(ngx.ERR, "Departments API error: ", message)
-        return { status = status, json = { error = message, details = type(details) == "string" and details or nil } }
+        -- 5xx: never echo the raw error (SQL + user data); input errors become 4xx.
+        return require("lib.errors").legacy(status, message, details)
     end
 
     local function resolve_hospital_id(hospital_uuid)

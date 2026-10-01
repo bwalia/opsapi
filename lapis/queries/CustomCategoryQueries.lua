@@ -61,8 +61,8 @@ function CustomCategoryQueries.list(params)
     end
 
     local where_sql = table.concat(where, " AND ")
-    local page = tonumber(params.page) or 1
-    local per_page = math.min(tonumber(params.per_page) or 25, 100)
+    local page = Global.pageParam(params.page)
+    local per_page = math.min(Global.perPageParam(params.per_page, 25, 500), 100)
     local offset = (page - 1) * per_page
 
     local rows = db.query([[

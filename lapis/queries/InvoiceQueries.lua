@@ -111,8 +111,8 @@ end
 -- @param params table { page, perPage, status, search, from_date, to_date, owner_user_uuid }
 -- @return table { data, total, page, perPage }
 function InvoiceQueries.list(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 500)
     local offset = (page - 1) * perPage
 
     local conditions = { "i.namespace_id = " .. db.escape_literal(namespace_id) }

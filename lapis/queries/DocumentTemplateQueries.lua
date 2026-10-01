@@ -97,8 +97,8 @@ end
 -- @param params table { page, perPage, type, is_active, search }
 -- @return table { data, total, page, perPage }
 function DocumentTemplateQueries.list(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 500)
     local offset = (page - 1) * perPage
 
     local conditions = { "dt.namespace_id = " .. db.escape_literal(namespace_id) }
@@ -570,8 +570,8 @@ end
 -- @param params table { page, perPage, document_type, entity_type, entity_id }
 -- @return table { data, total, page, perPage }
 function DocumentTemplateQueries.getGeneratedDocuments(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local perPage = tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local perPage = Global.perPageParam(params.perPage, 20, 500)
     local offset = (page - 1) * perPage
 
     local conditions = { "gd.namespace_id = " .. db.escape_literal(namespace_id) }

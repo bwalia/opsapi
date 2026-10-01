@@ -113,7 +113,7 @@ return function(app)
 
             local base = BillingUrls.opsapi_base()
             if not base then
-                return api_response(500, nil, "Server public URL not configured (set OPSAPI_PUBLIC_URL)")
+                return api_response(503, nil, "Server public URL not configured (set OPSAPI_PUBLIC_URL)")
             end
             local ns_ref = ngx.escape_uri(self.namespace.uuid or tostring(self.namespace.id))
             -- Stripe substitutes {CHECKOUT_SESSION_ID}; keep it un-escaped.

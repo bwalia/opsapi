@@ -8,6 +8,7 @@
 ]]
 
 local db = require("lapis.db")
+local Global = require("helper.global")
 
 local function isAdmin(user)
     local user_uuid = user.uuid or user.id
@@ -213,7 +214,7 @@ return function(app)
         end
 
         -- Pagination
-        local page = math.max(tonumber(self.params.page) or 1, 1)
+        local page = math.max(Global.pageParam(self.params.page), 1)
         local limit = clamp(tonumber(self.params.limit) or 25, 1, 100)
         local offset = (page - 1) * limit
 

@@ -58,8 +58,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20, 500)
         }
 
         -- Namespace gate: only channels of the caller's current namespace.
@@ -88,8 +88,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20, 500)
         }
 
         local result = ChatChannelQueries.getByBusiness(user.uuid_business_id, params)
@@ -331,8 +331,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 50
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 50, 500)
         }
 
         local result = ChatChannelQueries.getMembers(channel_uuid, params)
@@ -630,8 +630,8 @@ return function(app)
         end
 
         local params = {
-            page = tonumber(self.params.page) or 1,
-            perPage = tonumber(self.params.perPage) or 20
+            page = Global.pageParam(self.params.page),
+            perPage = Global.perPageParam(self.params.perPage, 20, 500)
         }
 
         local result = ChatChannelQueries.search(user.uuid_business_id, search_term, params)

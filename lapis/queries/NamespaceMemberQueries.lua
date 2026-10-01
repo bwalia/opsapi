@@ -82,8 +82,8 @@ end
 -- @return table { data, total }
 function NamespaceMemberQueries.all(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.perPage) or tonumber(params.per_page) or 10
+    local page = Global.pageParam(params.page)
+    local per_page = tonumber(params.perPage) or Global.perPageParam(params.per_page, 10, 500)
     local offset = (page - 1) * per_page
 
     -- Get numeric namespace ID

@@ -38,8 +38,8 @@ end
 -- @param params table Pagination params (page, per_page)
 -- @return table Pipelines list with meta
 function CrmQueries.getPipelines(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
 
     local offset = (page - 1) * per_page
 
@@ -126,8 +126,8 @@ end
 -- @param params table Filter/pagination params
 -- @return table Accounts list with meta
 function CrmQueries.getAccounts(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "namespace_id = ? AND deleted_at IS NULL" }
@@ -244,8 +244,8 @@ end
 -- @param params table Filter/pagination params
 -- @return table Contacts list with meta
 function CrmQueries.getContacts(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "c.namespace_id = ? AND c.deleted_at IS NULL" }
@@ -363,8 +363,8 @@ end
 -- @param params table Filter/pagination params
 -- @return table Deals list with meta
 function CrmQueries.getDeals(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "d.namespace_id = ? AND d.deleted_at IS NULL" }
@@ -641,8 +641,8 @@ end
 -- @param params table Filter/pagination params
 -- @return table Activities list with meta
 function CrmQueries.getActivities(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "act.namespace_id = ? AND act.deleted_at IS NULL" }

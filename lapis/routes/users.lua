@@ -66,13 +66,8 @@ local SHARED_ACCOUNT = "This person also belongs to other workspaces (or is a pl
 return function(app)
     local function error_response(status, message, details)
         ngx.log(ngx.ERR, "Users API error: ", message, " | Details: ", tostring(details))
-        return {
-            status = status,
-            json = {
-                error = message,
-                details = type(details) == "string" and details or nil
-            }
-        }
+        -- 5xx: never echo the raw error (SQL + user data); input errors become 4xx.
+        return require("lib.errors").legacy(status, message, details)
     end
 
     -- Helper to get user permissions for response
@@ -144,8 +139,8 @@ return function(app)
         NamespaceMiddleware.requirePermission("users", "read", function(self)
             local params = self.params or {}
 
-            local page = tonumber(params.page) or 1
-            local perPage = tonumber(params.limit) or tonumber(params.per_page) or 10
+            local page = Global.pageParam(params.page)
+            local perPage = tonumber(params.limit) or Global.perPageParam(params.per_page, 10, 500)
 
             -- Handle offset-based pagination
             local offset = tonumber(params.offset) or 0

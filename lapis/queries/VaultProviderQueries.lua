@@ -229,8 +229,8 @@ end
 
 function VaultProviderQueries.getSyncLogs(provider_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local count_result = db.query("SELECT COUNT(*) as total FROM vault_sync_logs WHERE provider_id = ?", provider_id)

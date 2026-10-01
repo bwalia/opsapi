@@ -5,11 +5,22 @@ local DeliveryPartnerQueries = require("queries.DeliveryPartnerQueries")
 local cjson = require("cjson")
 local db = require("lapis.db")
 
+-- The caller's numeric users.id (stores.user_id references it). The JWT only
+-- carries the uuid.
+local function current_user_id(self)
+    local user = self.current_user
+    local uuid = user and (user.uuid or user.sub)
+    if not uuid then return nil end
+    local row = db.select("id FROM users WHERE uuid = ? LIMIT 1", tostring(uuid))[1]
+    return row and row.id
+end
+
 return function(app)
     -- Link delivery partner to store
     app:match("/api/v2/stores/:slug/delivery-partners", respond_to({
         POST = AuthMiddleware.requireAuth(function(self)
-            local user_id = self.authenticated_user.id
+            local user_id = current_user_id(self)
+            if not user_id then return { status = 401, json = { error = "Authentication required" } } end
             local store_slug = self.params.slug
             local params = self.params
 
@@ -79,7 +90,8 @@ return function(app)
 
         -- Get all delivery partners linked to store
         GET = AuthMiddleware.requireAuth(function(self)
-            local user_id = self.authenticated_user.id
+            local user_id = current_user_id(self)
+            if not user_id then return { status = 401, json = { error = "Authentication required" } } end
             local store_slug = self.params.slug
 
             -- Get store and verify ownership
@@ -129,7 +141,8 @@ return function(app)
     -- Remove delivery partner from store
     app:match("/api/v2/stores/:slug/delivery-partners/:partner_uuid", respond_to({
         DELETE = AuthMiddleware.requireAuth(function(self)
-            local user_id = self.authenticated_user.id
+            local user_id = current_user_id(self)
+            if not user_id then return { status = 401, json = { error = "Authentication required" } } end
             local store_slug = self.params.slug
             local partner_uuid = self.params.partner_uuid
 
@@ -187,7 +200,8 @@ return function(app)
     -- Set preferred delivery partner for store
     app:match("/api/v2/stores/:slug/delivery-partners/:partner_uuid/prefer", respond_to({
         PUT = AuthMiddleware.requireAuth(function(self)
-            local user_id = self.authenticated_user.id
+            local user_id = current_user_id(self)
+            if not user_id then return { status = 401, json = { error = "Authentication required" } } end
             local store_slug = self.params.slug
             local partner_uuid = self.params.partner_uuid
 
@@ -234,7 +248,8 @@ return function(app)
     -- Toggle active status of delivery partner link
     app:match("/api/v2/stores/:slug/delivery-partners/:partner_uuid/toggle", respond_to({
         PUT = AuthMiddleware.requireAuth(function(self)
-            local user_id = self.authenticated_user.id
+            local user_id = current_user_id(self)
+            if not user_id then return { status = 401, json = { error = "Authentication required" } } end
             local store_slug = self.params.slug
             local partner_uuid = self.params.partner_uuid
 

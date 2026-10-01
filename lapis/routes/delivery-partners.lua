@@ -198,7 +198,8 @@ return function(app)
 
             if not success then
                 ngx.log(ngx.ERR, "Error registering delivery partner: " .. tostring(result))
-                return { json = { error = "Registration failed", details = tostring(result) }, status = 500 }
+                ngx.log(ngx.ERR, "Registration failed", ": ", tostring(result))
+                return require("lib.errors").legacy(500, "Registration failed", result)
             end
 
             return result

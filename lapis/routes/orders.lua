@@ -2,6 +2,7 @@ local respond_to = require("lapis.application").respond_to
 local OrderQueries = require "queries.OrderQueries"
 local AuthMiddleware = require "middleware.auth"
 local db = require("lapis.db")
+local Global = require("helper.global")
 local cjson = require("cjson")
 
 -- Configure cjson to encode empty tables as arrays
@@ -105,7 +106,7 @@ return function(app)
             local user_stores = getUserStores(user_uuid)
 
             -- Pagination params
-            local page = tonumber(self.params.page) or 1
+            local page = Global.pageParam(self.params.page)
             local per_page = tonumber(self.params.per_page) or tonumber(self.params.limit) or 10
             local offset = (page - 1) * per_page
 
@@ -358,8 +359,8 @@ return function(app)
             end
 
             -- Pagination
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 10
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 10, 500)
             local offset = (page - 1) * per_page
 
             -- Get total count

@@ -829,7 +829,7 @@ return function(app)
 
         if not google_client_id or not google_redirect_uri then
             return {
-                status = 500,
+                status = 503,
                 json = {
                     error = "Google OAuth not configured"
                 }

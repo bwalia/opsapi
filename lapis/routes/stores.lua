@@ -31,13 +31,8 @@ local RequestParser = require "helper.request_parser"
 return function(app)
     local function error_response(status, message, details)
         ngx.log(ngx.ERR, "Stores API error: ", message, " | Details: ", tostring(details))
-        return {
-            status = status,
-            json = {
-                error = message,
-                details = type(details) == "string" and details or nil
-            }
-        }
+        -- 5xx: never echo the raw error (SQL + user data); input errors become 4xx.
+        return require("lib.errors").legacy(status, message, details)
     end
 
     -- Helper to get store permissions for response
@@ -295,7 +290,10 @@ return function(app)
         local ok, result = pcall(StoreproductQueries.getByStore, self.params.store_id, self.params)
 
         if not ok then
-            return error_response(500, "Failed to list products", tostring(result))
+            return require("lib.errors").fromException(self, result)
+        end
+        if not result then
+            return error_response(404, "Store not found")
         end
 
         return {

@@ -76,7 +76,8 @@ return function(app)
                     ORDER BY type, label
                 ]], ns_id)
                 if not ok then
-                    return { status = 500, json = { error = "Failed to list categories", details = tostring(rows) } }
+                    ngx.log(ngx.ERR, "Failed to list categories", ": ", tostring(rows))
+                    return require("lib.errors").legacy(500, "Failed to list categories", rows)
                 end
                 local data = {}
                 for _, r in ipairs(rows or {}) do data[#data + 1] = map_row(r) end
@@ -116,7 +117,8 @@ return function(app)
                     }, db.raw("*"))
                 end)
                 if not ok then
-                    return { status = 500, json = { error = "Failed to create category", details = tostring(row) } }
+                    ngx.log(ngx.ERR, "Failed to create category", ": ", tostring(row))
+                    return require("lib.errors").legacy(500, "Failed to create category", row)
                 end
                 local created = (type(row) == "table" and row[1]) or row
                 return { status = 201, json = { data = map_row(created) } }
@@ -156,7 +158,8 @@ return function(app)
                     db.update("tax_categories", updates, { uuid = self.params.uuid, namespace_id = ns_id })
                 end)
                 if not ok then
-                    return { status = 500, json = { error = "Failed to update category", details = tostring(err) } }
+                    ngx.log(ngx.ERR, "Failed to update category", ": ", tostring(err))
+                    return require("lib.errors").legacy(500, "Failed to update category", err)
                 end
                 local row = db.select("* FROM tax_categories WHERE uuid = ? LIMIT 1", self.params.uuid)
                 return { status = 200, json = { data = row[1] and map_row(row[1]) or nil } }
@@ -177,7 +180,8 @@ return function(app)
                     db.delete("tax_categories", { uuid = self.params.uuid, namespace_id = ns_id })
                 end)
                 if not ok then
-                    return { status = 500, json = { error = "Failed to delete category", details = tostring(err) } }
+                    ngx.log(ngx.ERR, "Failed to delete category", ": ", tostring(err))
+                    return require("lib.errors").legacy(500, "Failed to delete category", err)
                 end
                 return { status = 200, json = { message = "Category deleted" } }
             end)))

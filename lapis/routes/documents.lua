@@ -522,8 +522,8 @@ return function(app)
         -- GET /api/v2/documents - List documents with pagination
         GET = function(self)
             local params = {
-                page = tonumber(self.params.page) or 1,
-                perPage = tonumber(self.params.perPage) or 10,
+                page = Global.pageParam(self.params.page),
+                perPage = Global.perPageParam(self.params.perPage, 10, 500),
                 orderBy = self.params.orderBy or "id",
                 orderDir = self.params.orderDir or "desc"
             }
@@ -877,7 +877,9 @@ return function(app)
         local presigned_url, err = minio:getPresignedUrl(object_key, expires_in, bucket)
 
         if not presigned_url then
-            return apiResponse(500, nil, "Failed to generate presigned URL: " .. (err or "Unknown error"))
+            -- Storage unavailable / not configured: a 503, and no internals in the message.
+            ngx.log(ngx.ERR, "presigned URL failed: ", tostring(err))
+            return apiResponse(503, nil, "File storage is unavailable right now")
         end
 
         return apiResponse(200, {

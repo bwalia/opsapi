@@ -887,8 +887,8 @@ end
 -- @return table { data, total, page, per_page, total_pages }
 function SecretVaultQueries.getSecrets(vault_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or tonumber(params.perPage) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = tonumber(params.per_page) or Global.perPageParam(params.perPage, 20, 500)
 
     local conditions = { "vault_id = ?" }
     local values = { vault_id }
@@ -1484,8 +1484,8 @@ end
 -- @return table { data, total, page, per_page, total_pages }
 function SecretVaultQueries.getAccessLogs(vault_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or tonumber(params.perPage) or 50
+    local page = Global.pageParam(params.page)
+    local per_page = tonumber(params.per_page) or Global.perPageParam(params.perPage, 50, 500)
 
     -- Use table alias prefix to avoid ambiguity with JOINed tables
     local conditions = { "l.vault_id = ?" }

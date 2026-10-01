@@ -51,8 +51,8 @@ end
 
 function TaxFilingQueries.getAll(user_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 25
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 25, 500)
     local offset = (page - 1) * per_page
 
     local rows = db.select(

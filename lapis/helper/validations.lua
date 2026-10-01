@@ -1,5 +1,6 @@
 local Validation = {}
 local validate = require("lapis.validate")
+local Errors = require("lib.errors")
 
 -- Minimum length lifted from 8 → 12 to match NIST 800-63B's
 -- "memorised secret" guidance and to clear zxcvbn score ≥ 3 on
@@ -11,7 +12,7 @@ local MIN_PASSWORD_LENGTH = 12
 -- Password strength validation
 function Validation.validatePasswordStrength(password)
     if not password or #password < MIN_PASSWORD_LENGTH then
-        error("Password must be at least " .. MIN_PASSWORD_LENGTH .. " characters long")
+        Errors.invalid("Password must be at least " .. MIN_PASSWORD_LENGTH .. " characters long")
     end
 
     if not string.match(password, "%u") then

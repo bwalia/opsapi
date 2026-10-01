@@ -977,7 +977,8 @@ return function(app)
             end)
 
             if not ok then
-                return api_response(503, nil, "AI service unavailable: " .. tostring(result_or_err))
+                ngx.log(ngx.ERR, "AI service unavailable: ", tostring(result_or_err))
+                return api_response(503, nil, "AI service unavailable")
             end
 
             local result, err = result_or_err, nil
@@ -1012,7 +1013,8 @@ return function(app)
             end)
 
             if not ok then
-                return api_response(503, nil, "AI service unavailable: " .. tostring(result_or_err))
+                ngx.log(ngx.ERR, "AI service unavailable: ", tostring(result_or_err))
+                return api_response(503, nil, "AI service unavailable")
             end
 
             if not result_or_err then
@@ -1044,7 +1046,8 @@ return function(app)
             end)
 
             if not ok then
-                return api_response(503, nil, "AI service unavailable: " .. tostring(result_or_err))
+                ngx.log(ngx.ERR, "AI service unavailable: ", tostring(result_or_err))
+                return api_response(503, nil, "AI service unavailable")
             end
 
             if not result_or_err then
@@ -1109,7 +1112,7 @@ return function(app)
     -- PUT /api/v2/accounting/bank-transactions/:uuid/categorize - Set HMRC category and tags
     app:put("/api/v2/accounting/bank-transactions/:uuid/categorize", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local data = parse_request_body()
+            local data = parse_json_body()
             local uuid = self.params.uuid
 
             local txn = db.query("SELECT * FROM accounting_bank_transactions WHERE uuid = ? AND deleted_at IS NULL", uuid)

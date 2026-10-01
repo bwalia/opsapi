@@ -87,7 +87,7 @@ return function(app)
                 -- Download from MinIO
                 local minio = MinioClient.getDefault()
                 if not minio then
-                    return { status = 500, json = { error = "MinIO not configured" } }
+                    return { status = 503, json = { error = "MinIO not configured" } }
                 end
 
                 local presigned_url = minio:getPresignedUrl(file_key, 300)
@@ -195,7 +195,7 @@ return function(app)
                 -- Download from MinIO
                 local minio = MinioClient.getDefault()
                 if not minio then
-                    return { status = 500, json = { error = "MinIO not configured" } }
+                    return { status = 503, json = { error = "MinIO not configured" } }
                 end
 
                 local presigned_url = minio:getPresignedUrl(file_key, 300)
@@ -392,8 +392,8 @@ return function(app)
             end
             local statement_pk = statements[1].id
 
-            local page = tonumber(self.params.page) or 1
-            local per_page = tonumber(self.params.per_page) or 100
+            local page = Global.pageParam(self.params.page)
+            local per_page = Global.perPageParam(self.params.per_page, 100, 500)
             local offset = (page - 1) * per_page
 
             local transactions = db.select(

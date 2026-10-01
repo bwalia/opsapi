@@ -27,8 +27,8 @@ local AccountingQueries = {}
 -- @param params table Filter params (type, is_active, page, per_page)
 -- @return table Accounts list with meta
 function AccountingQueries.getAccounts(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 50
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 50, 500)
 
     local offset = (page - 1) * per_page
 
@@ -151,8 +151,8 @@ end
 -- @param params table Filter/pagination params (page, per_page, status, start_date, end_date)
 -- @return table Journal entries with meta
 function AccountingQueries.getJournalEntries(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "namespace_id = ?" }
@@ -406,8 +406,8 @@ end
 -- @param params table Filter params (page, per_page, is_reconciled, start_date, end_date, search)
 -- @return table Transactions with meta
 function AccountingQueries.getBankTransactions(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "namespace_id = ?" }
@@ -580,8 +580,8 @@ end
 -- @param params table Filter params (page, per_page, category, status, start_date, end_date, submitted_by)
 -- @return table Expenses with meta
 function AccountingQueries.getExpenses(namespace_id, params)
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     local offset = (page - 1) * per_page
 
     local where_parts = { "namespace_id = ? AND deleted_at IS NULL" }

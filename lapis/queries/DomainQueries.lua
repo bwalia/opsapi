@@ -123,8 +123,8 @@ end
 --------------------------------------------------------------------------------
 function DomainQueries.getDomains(namespace_id, params)
     params = params or {}
-    local page = tonumber(params.page) or 1
-    local per_page = tonumber(params.per_page) or 20
+    local page = Global.pageParam(params.page)
+    local per_page = Global.perPageParam(params.per_page, 20, 500)
     if per_page > 200 then per_page = 200 end
     local offset = (page - 1) * per_page
 
