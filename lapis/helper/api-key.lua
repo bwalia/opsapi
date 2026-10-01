@@ -51,7 +51,23 @@ function ApiKey.permits_uri(principal, uri)
     local module_name = uri:match("^/api/v2/([^/]+)/")
     if not module_name then return false end
     local scopes = principal and principal.scopes or {}
-    return scopes[module_name] ~= nil
+    if scopes[module_name] ~= nil then return true end
+    -- A plugin's routes live under its api_prefix (/api/v2/helpdesk/...) while
+    -- its RBAC modules are named per resource (helpdesk_tickets): a key scoped
+    -- for one of the plugin's modules may reach the plugin's prefix. The
+    -- route's own permission check (sdk.crud / sdk.handler) still decides.
+    local ok, ProjectLoader = pcall(require, "helper.project-loader")
+    if not ok then return false end
+    for _, plugin in ipairs(ProjectLoader.getRegistered()) do
+        local prefix = plugin.api_prefix
+        if uri:sub(1, #prefix + 1) == prefix .. "/" then
+            for _, m in ipairs(plugin.modules) do
+                if scopes[m.machine_name] ~= nil then return true end
+            end
+            return false
+        end
+    end
+    return false
 end
 
 --- Hash a raw key with SHA-256 for storage/lookup.

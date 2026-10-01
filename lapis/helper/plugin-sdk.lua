@@ -369,8 +369,9 @@ function sdk.resource(tbl, opts)
 
         local order_by = "id DESC"
         if sortable[params.sort] then
+            -- Empty values last either way (Postgres puts NULLs first in DESC).
             order_by = db.escape_identifier(params.sort)
-                .. (tostring(params.order):lower() == "asc" and " ASC" or " DESC")
+                .. (tostring(params.order):lower() == "asc" and " ASC" or " DESC") .. " NULLS LAST, id DESC"
         end
 
         -- No "?" placeholders here: lapis would also substitute any "?"
@@ -483,6 +484,8 @@ local function page_schema(path, opts, only)
         filters = array(filters),
         searchable = opts.searchable ~= nil and #opts.searchable > 0,
         sortable = array(opts.sortable or {}),
+        filterable = array(opts.filterable or {}), -- (all of them: the OpenAPI spec lists them)
+        id_column = opts.key or "uuid",
         actions = {
             create = not only or only.create == true,
             update = not only or only.update == true,

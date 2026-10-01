@@ -329,6 +329,20 @@ check("ui route only serves the plugin's ui/ folder through the path guard",
 check("page bridge files ship with the image", src_of("static/plugin-ui/opsapi-ui.js"):find("OpsAPI", 1, true)
     and src_of("static/plugin-ui/opsapi-ui.css"):find("--ops-primary", 1, true)
     and src_of("Dockerfile"):find("\nCOPY static /app/static\n", 1, true))
+-- API keys: a key scoped for a plugin's module may reach the plugin's prefix.
+local ApiKey = require("helper.api-key")
+local real_registered = ProjectLoader.getRegistered
+ProjectLoader.getRegistered = function()
+    return { { code = "helpdesk", api_prefix = "/api/v2/helpdesk", modules = { { machine_name = "helpdesk_tickets" } } } }
+end
+local key = { scopes = { helpdesk_tickets = { "read" } } }
+check("api key: plugin module scope opens the plugin's prefix", ApiKey.permits_uri(key, "/api/v2/helpdesk/tickets"))
+check("api key: ...not other plugins or core modules", not ApiKey.permits_uri(key, "/api/v2/helpdesk-x/tickets")
+    and not ApiKey.permits_uri(key, "/api/v2/customers/1"))
+check("api key: core scopes still match the URL segment", ApiKey.permits_uri({ scopes = { customers = { "read" } } }, "/api/v2/customers/1"))
+check("api key: no scope, no access", not ApiKey.permits_uri({ scopes = {} }, "/api/v2/helpdesk/tickets"))
+ProjectLoader.getRegistered = real_registered
+
 local safe = ProjectLoader.safeUiPath
 check("ui paths: nested files allowed", safe("assets/app.js") == "assets/app.js")
 check("ui paths: traversal, hidden, absolute and odd characters refused",

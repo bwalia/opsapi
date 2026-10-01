@@ -240,18 +240,21 @@ The `start.sh` script handles the full setup: environment config, Docker build, 
 
 ## Extending OpsAPI (plugins)
 
-Need an API OpsAPI doesn't have? Write a plugin instead of forking: a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules, plus generated dashboard pages and hooks into core events (invoice paid, lead created, …).
+Need an API OpsAPI doesn't have? Write a plugin instead of forking. A plugin is a folder of Lua files that gets the same auth, multi-tenancy, RBAC, migrations and Swagger docs as the built-in modules. It can also have generated or custom dashboard pages, and react to business events (invoice paid, deal won, …).
 
 ```bash
 docker exec opsapi opsapi plugin:new helpdesk
 docker exec opsapi opsapi make:resource helpdesk ticket title:string:required status:string
-docker exec opsapi opsapi migrate && docker restart opsapi
+docker exec opsapi opsapi migrate
 # → /api/v2/helpdesk/tickets (list/show/create/update/delete, tenant-scoped)
 #   and a Tickets page in the dashboard sidebar (/dashboard/plugins/helpdesk/tickets)
-docker exec opsapi opsapi make:listener helpdesk invoice.updated   # react to core events
+docker exec opsapi opsapi make:page helpdesk overview "Support overview"   # your own dashboard page
+docker exec opsapi opsapi make:listener helpdesk invoice.paid             # react to business events
 ```
 
-Full guide: [PLUGINS.md](PLUGINS.md). Example: [`projects/helpdesk`](projects/helpdesk).
+With `./start.sh -e local` the API reloads itself when you save a file: there's no restart step. Full guide: [PLUGINS.md](PLUGINS.md). Example: [`projects/helpdesk`](projects/helpdesk).
+
+**Calling OpsAPI from your own app?** [`@opsapi/client`](sdk/typescript) is a typed TypeScript client covering every endpoint, your plugins included. It handles sign-in with 2FA, workspaces, retries, pagination and webhook verification.
 
 Tenants who just need integrations don't need a plugin. Under **Dashboard → Webhooks** each workspace can send its events (invoice paid, lead created, …) to its own URLs, signed and retried. See [WEBHOOKS.md](WEBHOOKS.md).
 

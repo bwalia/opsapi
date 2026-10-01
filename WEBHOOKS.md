@@ -73,8 +73,8 @@ X-Opsapi-Signature-256: sha256=5f2c…
 ```
 
 - `data.object` is the record after the change (before it, for `*.deleted`).
-- `data.changes` appears on `*.updated` only and lists just the fields that changed. An update that only touches the timestamp sends no event.
-- "Invoice paid" is `invoice.updated` with `changes.status.to == "paid"`.
+- `data.changes` appears on `*.updated` and on business events caused by an update. It lists just the fields that changed. An update that only touches the timestamp sends no event.
+- "Invoice paid": subscribe to `invoice.paid`. It's sent once, when the invoice becomes paid.
 - `data.object` mirrors OpsAPI's database record, so read it defensively. New fields can appear, and fields can change between OpsAPI versions.
 
 ## Verifying requests
@@ -104,6 +104,13 @@ def verify(headers, raw_body: str) -> bool:
                                     (ts + "." + raw_body).encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, headers.get("X-Opsapi-Signature-256", "")) \
         and abs(time.time() - int(ts)) < 300
+```
+
+In TypeScript and JavaScript (Node, Next.js, edge runtimes), [`@opsapi/client`](sdk/typescript) does all of this, timestamp check included:
+
+```ts
+import { verifyWebhook } from '@opsapi/client';
+const event = await verifyWebhook(rawBody, req.headers, { secret: process.env.OPSAPI_WEBHOOK_SECRET! });
 ```
 
 ## Responding, retries and ordering

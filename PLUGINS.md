@@ -548,7 +548,18 @@ Every table in `publishes` and every `sdk.emit` is also recorded in the workspac
 - Each `modules` entry in your manifest is added to OpsAPI's RBAC catalogue on migrate. **On first install, every namespace's `admin` and `owner` roles get `manage` on it.** Other roles get nothing until someone grants it in the dashboard's role editor. Later deploys never re-grant a permission an admin removed.
 - A plugin is installed for the whole deployment, so its modules are grantable in every namespace. To offer a plugin to some tenants only, grant its module to their roles only.
 - Platform admins pass every permission check but are still scoped to the namespace in their header.
-- API keys work too: a key is bound to one namespace and its scopes act as permissions.
+- API keys work too: a key is bound to one namespace and its scopes act as permissions. Scope a key to one of your plugin's modules (e.g. `helpdesk_tickets: ["read"]`) and it can call your plugin's API, within those actions.
+
+**Calling your plugin from other apps.** Your plugin's routes are in the server's `/openapi.json`, with exact types for every `sdk.crud` resource: fields, required fields, enums, filters and sort options. Pair it with the TypeScript client, [`@opsapi/client`](sdk/typescript), for a typed SDK of your deployment:
+
+```bash
+npx openapi-typescript https://api.example.com/openapi.json -o src/opsapi.d.ts
+```
+
+```ts
+const opsapi = createClient<paths>({ baseUrl, token: process.env.OPSAPI_KEY, namespace: 'acme' });
+await opsapi.POST('/api/v2/helpdesk/tickets', { body: { title: 'Printer on fire', status: 'open' } });
+```
 
 ---
 
