@@ -208,17 +208,34 @@ jobs:
           [ -n "$MC_USER" ] && [ -n "$MC_PASS" ] || { echo "::error::Could not read MinIO creds."; exit 1; }
           echo "::add-mask::$MC_PASS"
 
-          kubectl -n "$NS" port-forward "svc/diytaxreturn-minio" 9000:9000 >/tmp/mpf.log 2>&1 &
-          MPF_PID=$!
+          # The tunnel rides the same flaky apiserver -> kubelet hop: if it never
+          # comes up (or drops mid-upload), tear it down and retry the whole
+          # upload. One local port per env, so acc and prod jobs sharing a
+          # runner don't collide.
+          LPORT=$([ "$NS" = prod ] && echo 19101 || echo 19100)
+          MPF_PID=""
           trap 'kill "$MPF_PID" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 30); do
-            (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null && { exec 3>&-; break; }
-            sleep 1
+          upload() {
+            kubectl -n "$NS" port-forward "svc/diytaxreturn-minio" "$LPORT:9000" >/tmp/mpf.log 2>&1 &
+            MPF_PID=$!
+            local up=""
+            for _ in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:$LPORT/minio/health/live" >/dev/null 2>&1; then up=1; break; fi
+              sleep 1
+            done
+            [ -n "$up" ] || { echo "port-forward did not come up: $(tail -1 /tmp/mpf.log)"; return 1; }
+            mc alias set backup "http://127.0.0.1:$LPORT" "$MC_USER" "$MC_PASS" >/dev/null &&
+              mc mb --ignore-existing "backup/$BUCKET" >/dev/null &&
+              mc cp "$BACKUP_FILE" "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE" &&
+              mc stat "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE" >/dev/null
+          }
+          done=""
+          for attempt in 1 2 3 4 5; do
+            if upload; then done=1; break; fi
+            kill "$MPF_PID" 2>/dev/null || true; wait "$MPF_PID" 2>/dev/null || true
+            echo "upload attempt $attempt failed, retrying in $((attempt * 10))s..."; sleep $((attempt * 10))
           done
-
-          mc alias set backup "http://127.0.0.1:9000" "$MC_USER" "$MC_PASS"
-          mc mb --ignore-existing "backup/$BUCKET"
-          mc cp "$BACKUP_FILE" "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE"
+          [ -n "$done" ] || { echo "::error::Upload to $NS MinIO failed after 5 attempts."; exit 1; }
           echo "Uploaded to $BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE (in-cluster $NS MinIO)"
 
       - name: Cleanup
