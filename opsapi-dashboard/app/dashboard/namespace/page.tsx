@@ -13,9 +13,11 @@ import {
   StarOff,
   Loader2,
   Key,
+  Activity,
 } from "lucide-react";
 import { Card, Badge, Button } from "@/components/ui";
 import { useNamespace } from "@/contexts/NamespaceContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { namespaceService } from "@/services";
 import { formatDate } from "@/lib/utils";
 import type { NamespaceStats } from "@/types";
@@ -32,6 +34,8 @@ export default function NamespacePage() {
     hasPermission,
   } = useNamespace();
   const canManageKeys = isNamespaceOwner || hasPermission("api_keys", "manage");
+  // Same check as the Activity page's own guard, so the card never leads to "Cannot access".
+  const canViewActivity = usePermissions().hasPermission("activity", "read");
   const [stats, setStats] = useState<NamespaceStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
@@ -283,6 +287,27 @@ export default function NamespacePage() {
                     <h3 className="font-semibold text-secondary-900">API Keys</h3>
                     <p className="text-sm text-secondary-500">
                       Machine credentials for scripts &amp; services
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-secondary-400 group-hover:text-primary-500 transition-colors" />
+              </div>
+            </Card>
+          </Link>
+        )}
+
+        {canViewActivity && (
+          <Link href="/dashboard/namespace/activity">
+            <Card className="p-5 hover:shadow-md transition-shadow cursor-pointer group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-success-500/10 flex items-center justify-center group-hover:bg-success-500/20 transition-colors">
+                    <Activity className="w-5 h-5 text-success-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-secondary-900">Activity</h3>
+                    <p className="text-sm text-secondary-500">
+                      Who signed in and what they did
                     </p>
                   </div>
                 </div>

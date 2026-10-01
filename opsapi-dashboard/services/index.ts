@@ -118,6 +118,8 @@ export {
   dementiaService,
 } from './familyAccess.service';
 export { apiKeysService } from './apiKeys.service';
+export { activityService } from './activity.service';
+export type { ActivitySummary, ActivityMember, ActivityEntry } from './activity.service';
 
 // Field Service (service jobs, job phases, engineer site visits)
 export {

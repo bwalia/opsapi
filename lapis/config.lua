@@ -42,6 +42,15 @@ config("production", {
   server = "nginx",
   code_cache = "on",
   num_workers = "1",
+  -- Lapis logs every SQL statement by default, fully interpolated — emails,
+  -- IPs, names and token hashes all ended up in the production logs (and in
+  -- whatever ships them). Off in production; request lines stay on. To debug
+  -- a deployment, set LAPIS_SHOW_QUERIES=1 (no code change or rebuild).
+  logging = {
+    queries = false,
+    requests = true,
+    server = true
+  },
   session_name = "opsapi_session",
   secret = os.getenv("JWT_SECRET_KEY") or "change-me-in-production",
   postgres = {

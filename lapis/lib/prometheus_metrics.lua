@@ -72,6 +72,19 @@ function _M.init()
     -- Upstream / External service metrics
     package.loaded._metric_upstream_requests = prometheus:counter("nginx_upstream_requests_total", "Upstream service requests", {"upstream", "status"})
     package.loaded._metric_upstream_latency = prometheus:histogram("nginx_upstream_response_time_seconds", "Upstream response time", {"upstream"})
+
+    -- User activity & login tracking (lib/user-activity.lua). Bounded labels
+    -- only: who-did-what lives in Postgres (user_activity / auth_events).
+    package.loaded._metric_auth_events = prometheus:counter("opsapi_auth_events_total",
+        "Authentication events (login, 2fa_challenge, token_refresh, logout, password_*)", {"event", "result", "method"})
+    package.loaded._metric_active_users = prometheus:gauge("opsapi_active_users",
+        "Distinct users active within the window (same value on every pod: use max())", {"window"})
+    package.loaded._metric_activity_rows = prometheus:counter("opsapi_activity_rows_written_total",
+        "User activity rows written to Postgres")
+    package.loaded._metric_activity_dropped = prometheus:counter("opsapi_activity_dropped_total",
+        "User activity entries dropped instead of written", {"reason"})
+    package.loaded._metric_activity_flush = prometheus:histogram("opsapi_activity_flush_duration_seconds",
+        "Time to write one batch of user activity")
     
     ngx.log(ngx.NOTICE, "Prometheus metrics initialized successfully with enhanced monitoring")
     return true
@@ -186,6 +199,40 @@ end
 
 function _M.get_metric_upstream_latency()
     return package.loaded._metric_upstream_latency
+end
+
+-- Per-client-IP request counter with BOUNDED cardinality. Labelling every
+-- address lets a botnet (or simply many users) create unbounded series and
+-- fill the metrics dict — taking every other metric down with it. An address
+-- only gets its own series once it exceeds HEAVY_HITTER_RPM requests within
+-- a minute, and at most MAX_TRACKED_IPS addresses do; all other traffic is
+-- counted as ip="other". The DDoS alerts on this metric keep working for
+-- the addresses that matter.
+local HEAVY_HITTER_RPM, MAX_TRACKED_IPS = 60, 500
+
+function _M.count_request_ip(ip, host)
+    local metric = package.loaded._metric_requests_per_ip
+    local window = ngx.shared.metrics_ip_window
+    if not metric or not ip then return end
+    local label = "other"
+    if window then
+        if window:get("tracked:" .. ip) then
+            label = ip
+        else
+            local per_minute = window:incr("rpm:" .. ip, 1, 0, 60)
+            if per_minute and per_minute > HEAVY_HITTER_RPM
+                and (window:incr("tracked_count", 1, 0) or math.huge) <= MAX_TRACKED_IPS then
+                window:set("tracked:" .. ip, true)
+                label = ip
+            end
+        end
+    end
+    metric:inc(1, { label, host })
+end
+
+--- Metric by short name (e.g. "auth_events" → opsapi_auth_events_total), or nil.
+function _M.metric(name)
+    return package.loaded["_metric_" .. name]
 end
 
 function _M.is_initialized()

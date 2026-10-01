@@ -2,38 +2,19 @@ local bcrypt = require("bcrypt")
 local Json = require("cjson")
 local base64 = require 'base64'
 
+local Uuid = require("helper.uuid")
+
 local saltRounds = 10
 local Global = {}
 
+--- A random (version 4) UUID. See helper/uuid.lua for why this no longer hashes
+-- math.random(): that produced duplicate, guessable ids across processes.
 function Global.generateUUID()
-    -- `ngx` only exists inside an OpenResty request/worker context. When this
-    -- runs from the `lapis migrate` CLI (e.g. the k8s bootstrap postStart hook),
-    -- ngx is nil and `ngx.md5` would throw "attempt to index global 'ngx'",
-    -- crashing seed migrations and crash-looping the pod. Fall back to the
-    -- ngx-free generator at migrate time; request-context behaviour is unchanged.
-    if not ngx or not ngx.md5 then
-        return Global.generateStaticUUID()
-    end
-    local random = math.random(1000000000)
-    local timestamp = os.time()
-    local hash = ngx.md5(tostring(random) .. tostring(timestamp))
-    local uuid = string.format("%s-%s-%s-%s-%s", string.sub(hash, 1, 8), string.sub(hash, 9, 12),
-        string.sub(hash, 13, 16), string.sub(hash, 17, 20), string.sub(hash, 21, 32))
-    return uuid
+    return Uuid.generate()
 end
 
-function Global.generateStaticUUID()
-    local random = math.random
-    local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
-
-    -- Replace each 'x' and 'y' with random hex digits.
-    -- 'x' can be any hex digit (0-9, a-f)
-    -- 'y' is one of 8, 9, A, or B (for UUID v4 compliance)
-    return string.gsub(template, "[xy]", function(c)
-        local v = (c == "x") and random(0, 15) or random(8, 11)
-        return string.format("%x", v)
-    end)
-end
+-- Kept for its callers; same generator (it used to differ only in not needing ngx).
+Global.generateStaticUUID = Global.generateUUID
 
 function Global.getCurrentTimestamp()
     return os.date("%Y-%m-%d %H:%M:%S")

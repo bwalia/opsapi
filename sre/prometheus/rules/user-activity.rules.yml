@@ -1,0 +1,38 @@
+# User activity & login tracking (lib/user-activity.lua, USER_ACTIVITY.md).
+# Aggregates only — per-user detail lives in Postgres (Grafana "OpsAPI · User Activity").
+groups:
+  - name: user_activity
+    interval: 60s
+    rules:
+      - alert: OpsapiActivityDropped
+        expr: sum by (namespace) (increase(opsapi_activity_dropped_total[10m])) > 0
+        labels:
+          severity: ticket
+          priority: P3
+          category: observability
+        annotations:
+          summary: "User activity is not being stored"
+          description: "{{ $value | humanize }} activity entries were dropped in the last 10 minutes (database unavailable or a worker buffer full). Requests are unaffected; the audit trail has a gap."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/USER_ACTIVITY.md#runbook-activity-is-being-dropped"
+
+      - alert: OpsapiLoginFailureSpike
+        expr: sum by (namespace) (increase(opsapi_auth_events_total{event="login", result="failure"}[10m])) > 50
+        labels:
+          severity: page
+          priority: P2
+          category: security
+        annotations:
+          summary: "Unusual number of failed sign-ins"
+          description: "{{ $value | humanize }} failed sign-ins in 10 minutes — possible credential stuffing or brute force. See the Security row of the User Activity dashboard (failed sign-ins by IP / account)."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/USER_ACTIVITY.md#grafana-per-environment-admins-only"
+
+      - alert: OpsapiAuthRateLimiting
+        expr: sum by (namespace) (increase(opsapi_auth_events_total{result="rate_limited"}[10m])) > 100
+        labels:
+          severity: ticket
+          priority: P3
+          category: security
+        annotations:
+          summary: "Sign-in endpoints are rate limiting heavily"
+          description: "{{ $value | humanize }} auth requests were rate limited in 10 minutes — an automated attack is likely being throttled."
+          runbook_url: "https://github.com/bwalia/opsapi/blob/main/USER_ACTIVITY.md#metrics"

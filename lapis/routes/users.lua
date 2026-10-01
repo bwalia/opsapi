@@ -27,6 +27,41 @@ local Global = require "helper.global"
 local cjson = require "cjson"
 local AuthMiddleware = require("middleware.auth")
 local NamespaceMiddleware = require("middleware.namespace")
+local AdminCheck = require("helper.admin-check")
+local db = require("lapis.db")
+
+-- Target of a /api/v2/users/:id call, as seen from the caller's workspace.
+-- Accounts are global (one person can belong to several workspaces), so a
+-- workspace's users.* permissions only reach its OWN members, and only a
+-- member who belongs to no other workspace can have their account-wide
+-- identity (email, username, active) changed or be deleted by that workspace —
+-- otherwise one tenant's admin could take over another tenant's user (change
+-- the email, then reset the password). Platform admins manage every account.
+-- Returns { id, email, username, active, exclusive } or nil when out of reach.
+local function target_user(self, user_uuid)
+    if type(user_uuid) ~= "string" or user_uuid == "" then return nil end
+    local row
+    if self.is_platform_admin then
+        row = db.query("SELECT id, email, username, active FROM users WHERE uuid = ?", user_uuid)[1]
+    else
+        row = db.query([[
+            SELECT u.id, u.email, u.username, u.active
+            FROM users u JOIN namespace_members nm ON nm.user_id = u.id
+            WHERE u.uuid = ? AND nm.namespace_id = ?
+            LIMIT 1
+        ]], user_uuid, self.namespace.id)[1]
+    end
+    if not row then return nil end
+    local others = db.query([[
+        SELECT COUNT(*)::int AS n FROM namespace_members WHERE user_id = ? AND namespace_id <> ?
+    ]], row.id, self.namespace.id)[1].n
+    row.exclusive = others == 0 and not AdminCheck.isPlatformAdmin({ uuid = user_uuid })
+    return row
+end
+
+local SHARED_ACCOUNT = "This person also belongs to other workspaces (or is a platform admin), so only they "
+    .. "or a platform admin can change their email, username or active status, or delete the account. "
+    .. "To take away their access here, remove them from this workspace instead."
 
 return function(app)
     local function error_response(status, message, details)
@@ -146,6 +181,9 @@ return function(app)
     app:get("/api/v2/users/:id", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requirePermission("users", "read", function(self)
             local user_id = self.params.id
+            if not target_user(self, user_id) then
+                return error_response(404, "User not found")
+            end
             local include_details = self.params.include_details == "true" or
                                     self.params.include_details == "1" or
                                     self.params.detailed == "true"
@@ -249,6 +287,18 @@ return function(app)
                 return error_response(400, "No data provided for update")
             end
 
+            local target = target_user(self, user_id)
+            if not target then
+                return error_response(404, "User not found")
+            end
+            local changes_identity = (update_data.email ~= nil and update_data.email ~= target.email)
+                or (update_data.username ~= nil and update_data.username ~= target.username)
+                or (update_data.active ~= nil and update_data.active ~= target.active)
+            if changes_identity and not self.is_platform_admin and not target.exclusive
+                and user_id ~= self.current_user.uuid then
+                return error_response(403, SHARED_ACCOUNT)
+            end
+
             local ok, result = pcall(UserQueries.update, user_id, update_data)
 
             if not ok then
@@ -285,6 +335,14 @@ return function(app)
             -- Prevent self-deletion
             if user_id == self.current_user.uuid then
                 return error_response(400, "Cannot delete your own account")
+            end
+
+            local target = target_user(self, user_id)
+            if not target then
+                return error_response(404, "User not found")
+            end
+            if not self.is_platform_admin and not target.exclusive then
+                return error_response(403, SHARED_ACCOUNT)
             end
 
             local ok, result = pcall(UserQueries.destroy, user_id)
