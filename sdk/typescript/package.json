@@ -1,0 +1,38 @@
+{
+  "name": "@opsapi/client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed client for the OpsAPI REST API: auth (incl. 2FA), workspaces, typed requests for every endpoint, pagination, retries, webhook verification.",
+  "keywords": ["opsapi", "api-client", "openapi", "typescript", "webhooks"],
+  "repository": { "type": "git", "url": "https://github.com/bwalia/opsapi.git", "directory": "sdk/typescript" },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist", "README.md"],
+  "sideEffects": false,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "generate": "node scripts/generate.mjs --core ${OPSAPI_OPENAPI_URL:-http://127.0.0.1:4010/openapi.json} -o src/generated/opsapi.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openapi-typescript": "^7.13.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

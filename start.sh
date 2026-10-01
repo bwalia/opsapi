@@ -1115,6 +1115,12 @@ fi
 # This ensures nginx workers have PROJECT_CODE for feature-gated route loading
 export PROJECT_CODE
 
+# Local development: the API reloads itself when a .lua file (core or plugin)
+# is saved (lapis/helper/dev-reload.lua). Set OPSAPI_DEV_RELOAD=false to opt out.
+if [ "$TARGET_ENV" = "local" ] && ! $CI_MODE; then
+    export OPSAPI_DEV_RELOAD="${OPSAPI_DEV_RELOAD:-true}"
+fi
+
 # Decide build strategy. `--build` re-resolves the base image (FROM
 # openresty/openresty:alpine) against Docker Hub on every run, which can fail
 # with HTTP 429 "Too Many Requests" (anonymous pull rate limit). To stay

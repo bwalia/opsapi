@@ -66,7 +66,7 @@ end
 local routes = read("lapis/routes/namespace-activity.lua")
 local _, guarded = routes:gsub('Http%.guard%("activity", "read"', "")
 local _, mounted = routes:gsub("app:get%(", "")
-check("every activity endpoint requires activity.read", mounted == 3 and guarded == 3, mounted .. "/" .. guarded)
+check("every activity endpoint requires activity.read", mounted == 4 and guarded == 4, mounted .. "/" .. guarded)
 check("route file loaded for every deployment",
     read("lapis/app.lua"):find('safe_load_routes%("routes%.namespace%-activity"%)') ~= nil)
 check("activity is a core RBAC module (menu gate)",

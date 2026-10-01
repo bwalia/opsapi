@@ -97,13 +97,16 @@ COPY migrations /app/migrations
 COPY migrations.lua /app/migrations.lua
 COPY schema-updates.lua production-schema-upgrade.lua ecommerce-migrations.lua /app/
 
-# 8. Plugin projects (`projects/hospital-patient-manager`, etc.) are
-#    NOT COPY'd here — they live at the opsapi repo root, outside this
-#    Dockerfile's build context (lapis/). Consumer products
-#    (diy-tax-return-uk) supply /app/projects/<code>/ at deploy time
-#    via bind-mount or a wrapping image layer. Same behaviour as the
-#    original `COPY . /app` (which built from lapis/, so projects/ was
-#    also excluded there).
+# 8. Plugins (repo-root projects/, see PLUGINS.md) are NOT COPY'd here —
+#    they're outside this build context (lapis/). Users add theirs at
+#    /app/projects/<plugin>/ via a bind mount (dev) or an image that is
+#    `FROM bwalia/opsapi` (prod), as consumer products (diy-tax-return-uk)
+#    already do. The `opsapi` CLI (bin/) scaffolds and checks them.
+COPY bin /app/bin
+ENV PATH="/app/bin:${PATH}"
+# The page bridge plugin pages load (/plugin-ui/_sdk/opsapi-ui.js + .css,
+# served by routes/plugins.lua; PLUGINS.md §6.2).
+COPY static /app/static
 
 # 9. Routes — the MOST volatile. Every feature change touches these.
 #    Isolated as the last content layer so day-to-day route edits

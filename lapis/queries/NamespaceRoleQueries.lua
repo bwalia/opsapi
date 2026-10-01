@@ -563,6 +563,14 @@ function NamespaceRoleQueries.getAvailableModules(project_code)
         end
     end
 
+    -- Plugin modules: a plugin is installed for the whole deployment, so
+    -- every namespace can grant its modules.
+    for _, plugin in ipairs(require("helper.project-loader").getRegistered()) do
+        for _, m in ipairs(plugin.modules) do
+            allowed[m.machine_name] = true
+        end
+    end
+
     -- Filter results to only allowed modules
     local filtered = {}
     for _, mod in ipairs(results) do

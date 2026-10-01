@@ -33,6 +33,8 @@ services:
     env_file: ".env"
     environment:
       - PROJECT_CODE=${PROJECT_CODE:-all}
+      # Reload on .lua changes (helper/dev-reload.lua); ./start.sh -e local sets it.
+      - OPSAPI_DEV_RELOAD=${OPSAPI_DEV_RELOAD:-false}
       - KAFKA_BROKERS=${KAFKA_BROKERS:-kafka:29092}
       # The opsapi-ollama container was removed — Ollama runs natively on the
       # host Mac. Reach it via host.docker.internal (mapped in extra_hosts below).

@@ -1,0 +1,692 @@
+#!/usr/bin/env luajit
+--[[
+  opsapi — plugin developer CLI (on PATH in the bwalia/opsapi image)
+
+    opsapi plugin:new <name>                       scaffold a plugin
+    opsapi make:resource <plugin> <resource> <field:type[:required]>...
+                                                   migration + CRUD API + RBAC module
+    opsapi make:listener <plugin> <event> [file]   react to an event (events/*.lua)
+    opsapi make:page <plugin> <page> [label]       a custom dashboard page (ui/<page>.html)
+    opsapi events                                  list the events you can subscribe to
+    opsapi plugin:check                            validate every plugin (CI-friendly)
+    opsapi migrate                                 run core + plugin migrations
+    opsapi reload                                  check, then reload the server (no downtime)
+
+  Plugins live in $OPSAPI_PROJECTS_DIR (default /app/projects); --dir overrides.
+  Guide: PLUGINS.md in the opsapi repo.
+]]
+
+local APP = arg[0]:match("^(.*)/bin/[^/]+$") or "/app"
+package.path = APP .. "/?.lua;" .. APP .. "/?/init.lua;" .. package.path
+
+local ProjectLoader = require("helper.project-loader")
+local PluginEvents = require("helper.plugin-events")
+
+local FIELD_TYPES = {
+    string = "VARCHAR(255)",
+    text = "TEXT",
+    integer = "INTEGER",
+    number = "NUMERIC(14,2)",
+    boolean = "BOOLEAN",
+    date = "DATE",
+    datetime = "TIMESTAMPTZ",
+    email = "VARCHAR(255)",
+    uuid = "UUID",
+    json = "JSONB",
+}
+local RESERVED_COLUMNS = { id = true, uuid = true, namespace_id = true, created_at = true, updated_at = true }
+
+local USAGE = [[
+Usage: opsapi <command> [args] [--dir <plugins-dir>]
+
+  plugin:new <name>
+      Create <plugins-dir>/<name>/ with a manifest and empty api/ + migrations/.
+
+  make:resource <plugin> <resource> <field:type[:required]>...
+      Add a tenant-scoped REST resource to a plugin: a migration creating
+      <plugin>_<resources>, api/<resources>.lua (list/show/create/update/delete
+      via helper.plugin-sdk), plus an RBAC module, a dashboard page and
+      published events (<plugin>.<resource>.created/updated/deleted).
+      Types: string text integer number boolean date datetime email uuid json
+      e.g.  opsapi make:resource helpdesk ticket title:string:required body:text
+
+  make:listener <plugin> <event> [file]
+      Create events/<file>.lua with a handler for <event> (e.g. invoice.updated,
+      crm.lead.created, helpdesk.ticket.*). See `opsapi events`.
+
+  make:page <plugin> <page> [label]
+      Create ui/<page>.html — your own dashboard page (any HTML/JS/framework),
+      shown in a sandboxed frame and calling the plugin's API through the page
+      bridge — plus its `pages` and sidebar entries in project.lua.
+      e.g.  opsapi make:page helpdesk overview "Support overview"
+
+  events
+      List the events plugins can subscribe to: core tables and every
+      plugin's published tables.
+
+  plugin:check
+      Validate every plugin's manifest, event handlers and Lua syntax.
+      Exits 1 on problems; warns about events nothing publishes.
+
+  migrate
+      Run `lapis migrate` (core + all plugin migrations).
+
+  reload
+      Run plugin:check, then reload the running server gracefully: new
+      workers load the new code while the old ones finish their requests.
+      (Local development reloads by itself: OPSAPI_DEV_RELOAD=true.)
+
+Plugins dir: --dir, else $OPSAPI_PROJECTS_DIR, else /app/projects.
+]]
+
+-- ---------------------------------------------------------------------------
+-- helpers
+-- ---------------------------------------------------------------------------
+
+local function die(msg)
+    io.stderr:write("error: ", msg, "\n")
+    os.exit(1)
+end
+
+local function exists(path)
+    local f = io.open(path, "r")
+    if f then f:close() end
+    return f ~= nil
+end
+
+local function read(path)
+    local f = assert(io.open(path, "r"))
+    local s = f:read("*a")
+    f:close()
+    return s
+end
+
+local function write(path, content, overwrite)
+    if not overwrite and exists(path) then die(path .. " already exists — not overwriting it") end
+    local f = assert(io.open(path, "w"))
+    f:write(content)
+    f:close()
+end
+
+local function sh(cmd)
+    local r = os.execute(cmd)
+    return r == 0 or r == true
+end
+
+local function quote(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+-- Fill {{name}} placeholders.
+local function render(tpl, vars)
+    return (tpl:gsub("{{([%w_]+)}}", function(k)
+        return assert(vars[k], "template variable " .. k)
+    end))
+end
+
+local function snake(s)
+    return (s:lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", ""))
+end
+
+local function title(s)
+    return (s:gsub("_", " "):gsub("(%a)(%w*)", function(a, b) return a:upper() .. b end))
+end
+
+local function plural(w)
+    if w:match("s$") then return w end
+    if w:match("[^aeiou]y$") then return w:sub(1, -2) .. "ies" end
+    if w:match("x$") or w:match("ch$") or w:match("sh$") then return w .. "es" end
+    return w .. "s"
+end
+
+local function lua_list(items)
+    local out = {}
+    for i, v in ipairs(items) do out[i] = '"' .. v .. '"' end
+    return table.concat(out, ", ")
+end
+
+-- ---------------------------------------------------------------------------
+-- templates
+-- ---------------------------------------------------------------------------
+
+local MANIFEST = [==[
+-- {{title}} — OpsAPI plugin manifest (guide: PLUGINS.md in the opsapi repo)
+return {
+    code = "{{code}}",          -- stable id: keys migrations + RBAC; never rename
+    name = "{{title}}",
+    version = "0.1.0",
+    description = "",
+    sdk_version = 1,            -- helper.plugin-sdk version this plugin targets
+
+    -- RBAC modules. On first install admin/owner roles get "manage"; grant
+    -- them to other roles from the dashboard's role settings.
+    modules = {
+        -- opsapi:modules (make:resource adds entries above this line)
+    },
+
+    -- Custom dashboard pages (ui/*.html), shown in a sandboxed frame and
+    -- calling this plugin's API through the page bridge (PLUGINS.md §6.2).
+    pages = {
+        -- opsapi:pages (make:page adds entries above this line)
+    },
+
+    -- Dashboard sidebar: each entry opens a generated list/form page for an
+    -- sdk.crud resource, or a custom page. icon = a Lucide icon name (see PLUGINS.md).
+    menu = {
+        -- opsapi:menu (make:resource adds entries above this line)
+    },
+
+    -- Tables whose changes are published as events (<code>.<name>.created /
+    -- updated / deleted) that any plugin can subscribe to.
+    publishes = {
+        -- opsapi:publishes (make:resource adds entries above this line)
+    },
+}
+]==]
+
+local MIGRATION = [==[
+-- {{table}}: tenant-scoped rows behind {{route}} (generated by `opsapi make:resource`).
+-- Runs once, inside a transaction. Never edit it after it has been applied —
+-- add a new migration file instead.
+return function(schema, db)
+    db.query([[
+        CREATE TABLE IF NOT EXISTS {{table}} (
+            id BIGSERIAL PRIMARY KEY,
+            uuid UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+            namespace_id INTEGER NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+{{columns}}
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    ]])
+    db.query("CREATE INDEX IF NOT EXISTS idx_{{table}}_namespace ON {{table}} (namespace_id, id DESC)")
+end
+]==]
+
+local API = [==[
+-- {{title}}: {{prefix}}{{route}}  (generated by `opsapi make:resource`; edit freely)
+--
+--   GET    {{route}}       list    ?page=&per_page=&q=&sort=&order=asc|desc&<filter>=
+--   GET    {{route}}/:id   show
+--   POST   {{route}}       create
+--   PUT    {{route}}/:id   update (only the fields sent)
+--   DELETE {{route}}/:id   delete
+--
+-- Every route needs a namespace (X-Namespace-Id header) and the permission
+-- {{module}}.read|create|update|delete; rows are always scoped to the caller's
+-- namespace. Add custom routes in this file or a new api/*.lua — see PLUGINS.md.
+local sdk = require("helper.plugin-sdk")
+
+return function(app)
+    sdk.crud(app, "{{route}}", {
+        table = "{{table}}",
+        module = "{{module}}",
+        fields = {
+{{fields}}
+        },
+        searchable = { {{searchable}} },
+        filterable = { {{filterable}} },
+        sortable = { {{sortable}} },
+        -- Dashboard page (/dashboard/plugins/{{slug}}{{route}}): title, table columns, form order
+        ui = {
+            label = "{{title}}",
+            columns = { {{cols}} },
+            form = { {{form}} },
+        },
+    })
+end
+]==]
+
+-- ---------------------------------------------------------------------------
+-- commands
+-- ---------------------------------------------------------------------------
+
+local function plugin_dir(root, name)
+    return root .. "/" .. snake(name):gsub("_", "-")
+end
+
+local function cmd_new(root, name)
+    if not name then die("usage: opsapi plugin:new <name>") end
+    local code = snake(name)
+    if not code:match("^[a-z][a-z0-9_]*$") then die("plugin name must start with a letter") end
+    if ProjectLoader.isReservedCode(code) then die("'" .. code .. "' is a built-in OpsAPI module — pick another name") end
+
+    local dir = plugin_dir(root, name)
+    if exists(dir .. "/project.lua") then die(dir .. " already exists") end
+    if not sh("mkdir -p " .. quote(dir .. "/api") .. " " .. quote(dir .. "/migrations")) then
+        die("could not create " .. dir)
+    end
+    write(dir .. "/project.lua", render(MANIFEST, { code = code, title = title(code) }))
+
+    print("Created plugin " .. code .. " in " .. dir)
+    print("  API prefix: /api/v2/" .. code:gsub("_", "-"))
+    print("")
+    print("Next: opsapi make:resource " .. code .. " <resource> title:string:required ...")
+end
+
+local function cmd_resource(root, plugin, resource, specs)
+    if not plugin or not resource or #specs == 0 then
+        die("usage: opsapi make:resource <plugin> <resource> <field:type[:required]>...")
+    end
+    local dir = plugin_dir(root, plugin)
+    local manifest_path = dir .. "/project.lua"
+    local manifest, err = ProjectLoader.loadManifest(manifest_path, dir)
+    if not manifest then
+        if not exists(manifest_path) then die("no plugin at " .. dir .. " (create it: opsapi plugin:new " .. plugin .. ")") end
+        die(err)
+    end
+
+    local name = plural(snake(resource))
+    if not name:match("^[a-z][a-z0-9_]*$") then die("resource name must start with a letter") end
+    local tbl = manifest.code .. "_" .. name
+    if #tbl > 49 then die("table name " .. tbl .. " is too long (max 49 chars) — use a shorter resource name") end
+    local route = "/" .. name:gsub("_", "-")
+
+    local columns, rules, searchable, filterable = {}, {}, {}, {}
+    local sortable, form, columns_ui = {}, {}, {}
+    for _, spec in ipairs(specs) do
+        local field, ftype, flag = spec:match("^([%w_]+):(%a+):?(%a*)$")
+        if not field then die("bad field '" .. spec .. "' — use name:type or name:type:required") end
+        if not field:match("^[a-z][a-z0-9_]*$") then die("field name '" .. field .. "' must be lowercase snake_case") end
+        if RESERVED_COLUMNS[field] then die("'" .. field .. "' is added automatically — remove it") end
+        if not FIELD_TYPES[ftype] then die("unknown type '" .. ftype .. "' for " .. field) end
+        if flag ~= "" and flag ~= "required" then die("unknown flag '" .. flag .. "' for " .. field) end
+        local required = flag == "required"
+
+        table.insert(columns, ("            %s %s%s,"):format(field, FIELD_TYPES[ftype], required and " NOT NULL" or ""))
+        table.insert(rules, ('            %s = { type = "%s"%s },'):format(field, ftype, required and ", required = true" or ""))
+        table.insert(form, field)
+        if #columns_ui < 5 and ftype ~= "text" and ftype ~= "json" then table.insert(columns_ui, field) end
+        if ftype == "string" or ftype == "text" or ftype == "email" then table.insert(searchable, field) end
+        if ftype ~= "text" and ftype ~= "json" then
+            table.insert(filterable, field)
+            table.insert(sortable, field)
+        end
+    end
+    table.insert(sortable, "created_at")
+    table.insert(sortable, "updated_at")
+
+    local vars = {
+        table = tbl, module = tbl, route = route, prefix = manifest.api_prefix, title = title(name),
+        columns = table.concat(columns, "\n"), fields = table.concat(rules, "\n"),
+        searchable = lua_list(searchable), filterable = lua_list(filterable), sortable = lua_list(sortable),
+        form = lua_list(form), cols = lua_list(columns_ui), slug = (manifest.code:gsub("_", "-")),
+    }
+
+    local api_path = dir .. "/api/" .. name .. ".lua"
+    if exists(api_path) then die(api_path .. " already exists") end
+    local migration_path = dir .. "/migrations/" .. os.date("!%Y%m%d%H%M%S") .. "_create_" .. tbl .. ".lua"
+    sh("mkdir -p " .. quote(dir .. "/api") .. " " .. quote(dir .. "/migrations"))
+    write(migration_path, render(MIGRATION, vars))
+    write(api_path, render(API, vars))
+    print("  created " .. migration_path)
+    print("  created " .. api_path)
+
+    -- Register the RBAC module and the sidebar entry in the manifest.
+    local src = read(manifest_path)
+    local function add(marker, already, entry, what)
+        if src:find(already, 1, true) then
+            print("  project.lua already has " .. what)
+            return
+        end
+        local at = src:find("\n[ \t]*%-%- opsapi:" .. marker)
+        if at then
+            src = src:sub(1, at) .. entry .. src:sub(at + 1)
+            print("  added " .. what .. " to project.lua")
+        else
+            print("  ! add " .. what .. " to the " .. marker .. " list in project.lua:")
+            print(entry)
+        end
+    end
+    add("modules", 'machine_name = "' .. tbl .. '"',
+        ('        { machine_name = "%s", name = "%s", category = "%s" },\n'):format(tbl, title(name), manifest.name),
+        "RBAC module " .. tbl)
+    add("menu", 'resource = "' .. route:sub(2) .. '"',
+        ('        { label = "%s", resource = "%s", module = "%s", icon = "Puzzle" },\n'):format(title(name), route:sub(2), tbl),
+        "menu entry " .. title(name))
+    local entity = snake(resource)
+    add("publishes", entity .. ' = "' .. tbl .. '"',
+        ('        %s = "%s",\n'):format(entity, tbl),
+        "events " .. manifest.code .. "." .. entity .. ".*")
+    write(manifest_path, src, true)
+
+    print("")
+    print("Next: run `opsapi migrate`, restart OpsAPI, then open /dashboard/plugins/"
+        .. vars.slug .. route .. " (API: " .. manifest.api_prefix .. route .. ")")
+end
+
+
+local LISTENER = [==[
+-- Handles {{event}} (generated by `opsapi make:listener`). Runs in the
+-- background after the change commits, at least once per event:
+--   * return normally  -> done
+--   * raise an error (or return false, "why") -> retried with backoff, then dead
+-- Make it idempotent: event.id is the same on every retry.
+--
+-- event = { id, name, entity, entity_id, namespace_id, data, changes, occurred_at, attempt }
+--   data     the row after the change (before it, for *.deleted)
+--   changes  on *.updated: { column = { from = ..., to = ... } } for changed columns
+local sdk = require("helper.plugin-sdk")
+
+return {
+    ["{{event}}"] = function(event)
+        -- Scope every query to event.namespace_id, e.g.:
+        -- local tickets = sdk.resource("{{code}}_tickets")
+        -- tickets.create(event.namespace_id, { title = "..." })
+        ngx.log(ngx.NOTICE, "[{{code}}] ", event.name, " in namespace ", tostring(event.namespace_id))
+    end,
+}
+]==]
+
+local PAGE = [==[
+<!doctype html>
+<!-- {{label}}: a custom dashboard page (generated by `opsapi make:page`; edit freely).
+     Plain HTML + JS — or build it with any framework (PLUGINS.md §6.2). The page
+     runs in a sandboxed frame; ops.api calls go through the dashboard as the
+     signed-in user, to this plugin's API ({{prefix}}). -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{label}}</title>
+  <link rel="stylesheet" href="/plugin-ui/_sdk/opsapi-ui.css">
+</head>
+<body>
+  <main class="ops-page">
+    <div id="error" class="ops-alert ops-alert-error" role="alert" hidden></div>
+    <section class="ops-card">
+      <h2 id="greeting">{{label}}</h2>
+      <p class="ops-muted" id="where"></p>
+    </section>
+    <section id="list" hidden>
+      <div class="ops-row" style="margin-bottom:0.75rem">
+        <h2 style="margin:0">Latest {{resource_label}}</h2>
+        <span class="ops-spacer"></span>
+        <button class="ops-btn ops-btn-sm" type="button" id="open-all">Open {{resource_label}}</button>
+      </div>
+      <div class="ops-table-wrap">
+        <table class="ops-table"><thead id="head"></thead><tbody id="rows"></tbody></table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/plugin-ui/_sdk/opsapi-ui.js"></script>
+  <script>
+    (async function () {
+      const $ = (id) => document.getElementById(id);
+      const RESOURCE = '{{resource}}'; // an sdk.crud path of this plugin ('' if none yet)
+      try {
+        const ops = await OpsAPI.connect();
+        const { user, namespace } = ops.context;
+        $('greeting').textContent = 'Hello ' + (user && user.name ? user.name : 'there');
+        $('where').textContent = 'Workspace: ' + (namespace ? namespace.name : '—');
+        if (!RESOURCE) return;
+
+        const { data } = await ops.api.get('/' + RESOURCE, { per_page: 10 });
+        const hidden = ['id', 'uuid', 'namespace_id', 'updated_at'];
+        const columns = data.length ? Object.keys(data[0]).filter((k) => !hidden.includes(k)).slice(0, 5) : [];
+        const row = (cells, tag) => {
+          const tr = document.createElement('tr');
+          cells.forEach((c) => { const td = document.createElement(tag); td.textContent = c; tr.append(td); });
+          return tr;
+        };
+        $('head').replaceChildren(row(columns.map((c) => c.replace(/_/g, ' ')), 'th'));
+        $('rows').replaceChildren(...(data.length
+          ? data.map((r) => row(columns.map((c) => (r[c] === null || r[c] === undefined ? '—' : String(r[c]))), 'td'))
+          : [row(['Nothing here yet.'], 'td')]));
+        $('open-all').addEventListener('click', () => ops.navigate('/dashboard/plugins/{{slug}}/' + RESOURCE));
+        $('list').hidden = false;
+      } catch (err) {
+        $('error').textContent = err.message;
+        $('error').hidden = false;
+      }
+    })();
+  </script>
+</body>
+</html>
+]==]
+
+local function cmd_page(root, plugin, key, label)
+    if not plugin or not key then die("usage: opsapi make:page <plugin> <page> [label]") end
+    local dir = plugin_dir(root, plugin)
+    local manifest_path = dir .. "/project.lua"
+    local manifest, err = ProjectLoader.loadManifest(manifest_path, dir)
+    if not manifest then die(err) end
+    key = key:lower():gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+    if not key:match("^[a-z][a-z0-9%-]*$") then die("page name must start with a letter") end
+    if manifest.pages[key] then die("project.lua already has a page '" .. key .. "'") end
+    local module = manifest.modules[1] and manifest.modules[1].machine_name
+    if not module then
+        die("the page needs an RBAC module to guard it — add a resource first (opsapi make:resource) "
+            .. "or a modules entry in project.lua")
+    end
+    label = label or title(key:gsub("%-", "_"))
+
+    local resource = ""
+    for _, e in ipairs(manifest.menu) do
+        if e.resource then resource = e.resource break end
+    end
+    local vars = {
+        label = label, prefix = manifest.api_prefix, resource = resource,
+        resource_label = resource ~= "" and title(resource:gsub("%-", "_")):lower() or "records",
+        slug = (manifest.code:gsub("_", "-")),
+    }
+    sh("mkdir -p " .. quote(dir .. "/ui"))
+    local path = dir .. "/ui/" .. key .. ".html"
+    write(path, render(PAGE, vars))
+    print("  created " .. path)
+
+    local src = read(manifest_path)
+    local function add(marker, entry, what)
+        local at = src:find("\n[ \t]*%-%- opsapi:" .. marker)
+        if at then
+            src = src:sub(1, at) .. entry .. src:sub(at + 1)
+            print("  added " .. what .. " to project.lua")
+        else
+            print("  ! add " .. what .. " to the " .. marker .. " list in project.lua:")
+            print(entry)
+        end
+    end
+    add("pages", ('        { key = "%s", label = "%s", entry = "ui/%s.html", module = "%s" },\n')
+        :format(key, label, key, module), "page " .. key)
+    add("menu", ('        { label = "%s", page = "%s", module = "%s", icon = "LayoutDashboard" },\n')
+        :format(label, key, module), "menu entry " .. label)
+    write(manifest_path, src, true)
+
+    print("")
+    print("Next: run `opsapi migrate` (adds the sidebar entry), then open /dashboard/plugins/"
+        .. vars.slug .. "/" .. key)
+end
+
+local function known_entities(root)
+    local entities = {}
+    for _, s in ipairs(PluginEvents.CATALOG) do
+        entities[s.entity] = { table = s.table, owner = "core", verbs = s.verbs or {} }
+    end
+    local codes = {}
+    for _, p in ipairs(ProjectLoader.discover(root)) do
+        local m = ProjectLoader.loadManifest(p.manifest_path, p.path)
+        if m then
+            codes[m.code] = true
+            for name, spec in pairs(m.publishes) do
+                entities[m.code .. "." .. name] = { table = spec.table, owner = m.code, verbs = spec.verbs }
+            end
+        end
+    end
+    return entities, codes
+end
+
+-- nil if fine, else a warning: a table event nobody publishes, or a custom
+-- event outside any plugin's namespace (usually a typo).
+local function event_warning(event, entities, codes)
+    local entity, action = event:match("^(.*)%.([^.]+)$")
+    local known = entities[entity]
+    if known then
+        if known.owner == "core" and not (action == "created" or action == "updated" or action == "deleted"
+            or action == "*" or known.verbs[action]) then
+            local list = table.concat(PluginEvents.entityEvents(entity, known.verbs), ", ")
+            return event .. ": " .. entity .. " has " .. list
+        end
+        return nil
+    end
+    if codes[event:match("^([^.]+)")] then return nil end -- a plugin's custom event
+    return event .. ": nothing publishes this event (see `opsapi events`)"
+end
+
+local function cmd_listener(root, plugin, event, file)
+    if not plugin or not event then die("usage: opsapi make:listener <plugin> <event> [file]") end
+    local dir = plugin_dir(root, plugin)
+    local manifest, err = ProjectLoader.loadManifest(dir .. "/project.lua", dir)
+    if not manifest then die(err) end
+    if not event:match("^[a-z][a-z0-9_]*[a-z0-9_.]*%.[a-z0-9_*]+$") then
+        die("event must look like entity.action, e.g. invoice.updated")
+    end
+    local entities, codes = known_entities(root)
+    local warning = event_warning(event, entities, codes)
+    if warning then print("  ! " .. warning) end
+
+    file = file and snake(file) or ("on_" .. event:gsub("%*", "all"):gsub("[^%w]+", "_"))
+    sh("mkdir -p " .. quote(dir .. "/events"))
+    local path = dir .. "/events/" .. file .. ".lua"
+    write(path, render(LISTENER, { event = event, code = manifest.code }))
+    print("  created " .. path)
+    print("")
+    print("Next: write the handler, run `opsapi migrate` (registers the subscription), restart OpsAPI")
+end
+
+local function cmd_events(root)
+    local entities = known_entities(root)
+    local names = {}
+    for name in pairs(entities) do names[#names + 1] = name end
+    table.sort(names, function(a, b)
+        local ca, cb = entities[a].owner == "core", entities[b].owner == "core"
+        if ca ~= cb then return ca end
+        return a < b
+    end)
+    print("Table events: <entity>.created | .updated | .deleted, the business events after `+`")
+    print("(<entity>.paid fires when a row becomes paid), or <entity>.* for all of them.")
+    local section
+    for _, name in ipairs(names) do
+        local e = entities[name]
+        local heading = e.owner == "core" and "core" or ("plugin " .. e.owner)
+        if heading ~= section then
+            section = heading
+            print("")
+            print("  " .. heading)
+        end
+        local verbs = {}
+        for verb in pairs(e.verbs or {}) do verbs[#verbs + 1] = verb end
+        table.sort(verbs)
+        print((("    %-24s %-22s%s"):format(name, e.table, #verbs > 0 and (" + " .. table.concat(verbs, " ")) or ""))
+            :gsub("%s+$", ""))
+    end
+    print("")
+    print("Plugins can also emit custom events: sdk.emit(namespace_id, \"<plugin>.<entity>.<action>\", data)")
+end
+
+-- The nginx master: its pid file under the app prefix, else the process list.
+local function master_pid()
+    local f = io.open(APP .. "/logs/nginx.pid")
+    local pid = f and tonumber(f:read("*l"))
+    if f then f:close() end
+    if pid then return pid end
+    local h = io.popen("pgrep -f 'nginx: master' 2>/dev/null")
+    pid = h and tonumber(h:read("*l"))
+    if h then h:close() end
+    return pid
+end
+
+local function cmd_check(root)
+    local plugins = ProjectLoader.discover(root)
+    if #plugins == 0 then
+        print("No plugins in " .. root)
+        return
+    end
+    local failed = 0
+    for _, p in ipairs(plugins) do
+        local problems = {}
+        local manifest, err = ProjectLoader.loadManifest(p.manifest_path, p.path)
+        if not manifest then
+            table.insert(problems, err)
+        elseif ProjectLoader.isReservedCode(manifest.code) then
+            table.insert(problems, "code '" .. manifest.code .. "' is reserved by a built-in OpsAPI module")
+        end
+        local warnings = {}
+        if manifest then
+            local subscribers, errors = PluginEvents.loadSubscribers(manifest)
+            for _, e in ipairs(errors) do table.insert(problems, e) end
+            local entities, codes = known_entities(root)
+            for _, handlers in pairs(subscribers) do
+                for event in pairs(handlers) do
+                    local w = event_warning(event, entities, codes)
+                    if w then table.insert(warnings, w) end
+                end
+            end
+        end
+        for _, sub in ipairs({ "api", "migrations" }) do
+            for _, file in ipairs(ProjectLoader.listDir(p.path .. "/" .. sub)) do
+                if file:match("%.lua$") then
+                    local ok, syntax_err = loadfile(p.path .. "/" .. sub .. "/" .. file)
+                    if not ok then table.insert(problems, syntax_err) end
+                end
+            end
+        end
+        if #problems == 0 then
+            print(("ok    %s (%s v%s)"):format(manifest.code, manifest.name, manifest.version))
+            for _, w in ipairs(warnings) do print("      warning: " .. w) end
+        else
+            failed = failed + 1
+            print("FAIL  " .. p.dir_name)
+            for _, msg in ipairs(problems) do print("      " .. msg) end
+        end
+    end
+    if failed > 0 then os.exit(1) end
+end
+
+local function cmd_reload(root)
+    cmd_check(root) -- exits 1 on problems: never reload into a broken plugin
+    local pid = master_pid()
+    if not pid then die("no running OpsAPI server found (looked for " .. APP .. "/logs/nginx.pid)") end
+    if not sh("kill -HUP " .. pid) then die("could not signal the server (pid " .. pid .. ")") end
+    print("Reloading OpsAPI (pid " .. pid .. "): new workers start with the new code.")
+end
+
+-- ---------------------------------------------------------------------------
+-- main
+-- ---------------------------------------------------------------------------
+
+local args, root = {}, nil
+local i = 1
+while arg[i] do
+    if arg[i] == "--dir" then
+        root = arg[i + 1] or die("--dir needs a path")
+        i = i + 1
+    else
+        table.insert(args, arg[i])
+    end
+    i = i + 1
+end
+root = (root or os.getenv("OPSAPI_PROJECTS_DIR") or "/app/projects"):gsub("/+$", "")
+
+local command = table.remove(args, 1)
+if command == "plugin:new" then
+    cmd_new(root, args[1])
+elseif command == "make:resource" then
+    local plugin, resource = table.remove(args, 1), table.remove(args, 1)
+    cmd_resource(root, plugin, resource, args)
+elseif command == "make:page" then
+    cmd_page(root, args[1], args[2], args[3])
+elseif command == "make:listener" then
+    cmd_listener(root, args[1], args[2], args[3])
+elseif command == "events" then
+    cmd_events(root)
+elseif command == "plugin:check" then
+    cmd_check(root)
+elseif command == "reload" then
+    cmd_reload(root)
+elseif command == "migrate" then
+    os.exit(sh("cd " .. quote(APP) .. " && lapis migrate") and 0 or 1)
+else
+    io.write(USAGE)
+    os.exit(command and command ~= "help" and command ~= "--help" and command ~= "-h" and 1 or 0)
+end

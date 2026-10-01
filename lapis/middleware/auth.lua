@@ -29,6 +29,7 @@ function AuthMiddleware.authenticate(self)
             return nil, { error = err_msg or "Invalid API key", status = err_status or 401 }
         end
         ngx.ctx.user = principal
+        require("helper.request-context").refresh()
         ngx.ctx.api_key_auth = true
         return principal, nil
     end

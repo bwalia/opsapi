@@ -358,6 +358,8 @@ local field_service_assets_menu_migrations = load_if_enabled(ProjectConfig.FEATU
 -- Employees is a CORE module (generic staff directory): the table/module/menu/grants
 -- install for every deployment, including those without field service.
 local employees_core_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.employees") or {}
+local outbound_webhooks_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.outbound-webhooks") or {}
+local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.audit-trail") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
@@ -1982,77 +1984,6 @@ local _migrations = {
     ['456_grant_hospital_permissions'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_menu_items_migrations, 3),
     ['457_enable_hospital_menu_per_namespace'] = conditional_array(ProjectConfig.FEATURES.HOSPITAL, hospital_menu_items_migrations, 4),
 
-    -- Custom migrations (supports per-project directories)
-    ['custom_migrations'] = function()
-        local custom_migrations_dir = os.getenv("OPSAPI_CUSTOM_MIGRATIONS_DIR")
-        local project_code = ProjectConfig.getProjectCode()
-        local is_dry_run = MigrationTracker.isDryRun()
-
-        if custom_migrations_dir then
-            local lfs = require("lfs")
-
-            -- 1. Run shared custom migrations from root dir (backward compatible)
-            local root_exists = lfs.attributes(custom_migrations_dir, "mode") == "directory"
-            if root_exists then
-                local files = {}
-                for file in lfs.dir(custom_migrations_dir) do
-                    if file:match("%.lua$") then
-                        table.insert(files, file)
-                    end
-                end
-                table.sort(files)
-
-                for _, file in ipairs(files) do
-                    local migration_path = custom_migrations_dir .. "/" .. file
-                    if is_dry_run then
-                        print("[Migration] DRY-RUN: Would execute custom migration " .. file)
-                        MigrationTracker.recordRan("custom:" .. file, "custom")
-                    else
-                        local migration_func = dofile(migration_path)
-                        if type(migration_func) == "function" then
-                            migration_func(schema, db, MigrationUtils)
-                            MigrationTracker.recordRan("custom:" .. file, "custom")
-                        end
-                    end
-                end
-            end
-
-            -- 2. Run project-specific custom migrations from subdirectories
-            --    Supports comma-separated PROJECT_CODE (e.g. "tax_copilot,ecommerce")
-            local project_codes = ProjectConfig.parseProjectCodes()
-            for _, code in ipairs(project_codes) do
-                if code ~= "all" then
-                    local project_dir = custom_migrations_dir .. "/" .. code
-                    local dir_exists = lfs.attributes(project_dir, "mode") == "directory"
-                    if dir_exists then
-                        local files = {}
-                        for file in lfs.dir(project_dir) do
-                            if file:match("%.lua$") then
-                                table.insert(files, file)
-                            end
-                        end
-                        table.sort(files)
-
-                        for _, file in ipairs(files) do
-                            local migration_path = project_dir .. "/" .. file
-                            if is_dry_run then
-                                print("[Migration] DRY-RUN: Would execute project migration " .. code .. "/" .. file)
-                                MigrationTracker.recordRan("custom:" .. code .. "/" .. file, "custom:" .. code)
-                            else
-                                local migration_func = dofile(migration_path)
-                                if type(migration_func) == "function" then
-                                    migration_func(schema, db, MigrationUtils)
-                                    MigrationTracker.recordRan("custom:" .. code .. "/" .. file, "custom:" .. code)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-    end,
-
     -- =========================================================================
     -- PROJECT MIGRATIONS SYSTEM
     -- Creates the tracking table and runs migrations for all /projects/
@@ -2496,6 +2427,12 @@ local _migrations = {
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
     ['zzemp3_employees_core_grants'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 3),
 
+    -- Workspace (outbound) webhooks — core; rides on the plugin-events outbox
+    ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
+    ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),
+    -- Audit trail of business-record changes (rides on the same event triggers)
+    ['zzwh3_audit_trail'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 1),
+    ['zzwh4_audit_forget_user'] = conditional_array(ProjectConfig.FEATURES.CORE, audit_trail_migrations, 2),
     -- User activity & login tracking (lib/user-activity.lua)
     ['zzua1_login_tracking'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 1),
     ['zzua2_user_activity'] = conditional_array(ProjectConfig.FEATURES.CORE, user_activity_migrations, 2),

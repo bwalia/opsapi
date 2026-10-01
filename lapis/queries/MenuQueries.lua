@@ -179,6 +179,7 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
     -- Menu items must pass BOTH checks — an item whose route isn't loaded must not appear
     local allowed_modules = nil
     local ProjectConfig = require("helper.project-config")
+    local ProjectLoader = require("helper.project-loader")
 
     -- Determine the effective project_code for filtering
     -- If the namespace has "all" or no project_code, fall back to the environment PROJECT_CODE
@@ -220,6 +221,14 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
             end
         end
 
+        -- Plugins are installed for the whole deployment: their modules count
+        -- for every project code.
+        for _, plugin in ipairs(ProjectLoader.getRegistered()) do
+            for _, m in ipairs(plugin.modules) do
+                allowed_modules[m.machine_name] = true
+            end
+        end
+
         -- Feature-only codes (e.g. "services") are deployment-wide add-ons
         -- layered onto EVERY namespace of this deployment (see project-config
         -- FEATURE_ONLY_CODES) — the namespace's own project_code never lists
@@ -254,6 +263,15 @@ function MenuQueries.getForNamespace(namespace_id, namespace_permissions, is_nam
         -- Skip if disabled for this namespace
         if not item.ns_enabled then
             goto continue
+        end
+
+        -- Plugin pages only while their plugin is loaded in this deployment
+        -- (its rows stay in menu_items if the plugin is removed).
+        do
+            local plugin_code = item.key and item.key:match("^plugin:([^:]+):")
+            if plugin_code and not ProjectLoader.getByCode(plugin_code) then
+                goto continue
+            end
         end
 
         -- Skip items whose module is not relevant to this project

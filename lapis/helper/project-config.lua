@@ -422,6 +422,8 @@ ProjectConfig.PROJECT_MODULES = {
         -- workspace logins, roles and skills) any namespace can use. It is NOT
         -- field-service-specific; field service simply builds engineer profiles on top.
         { machine_name = "employees", name = "Employees", description = "Staff directory: team members, their workspace logins, roles and skills", category = "Team" },
+        -- Workspace webhooks: send this namespace's events to its own URLs.
+        { machine_name = "webhooks", name = "Webhooks", description = "Send this workspace's events (invoice paid, lead created, ...) to your own URLs", category = "Integrations" },
         { machine_name = "activity", name = "Activity", description = "Who signed in and what they did in this workspace", category = "Core", allowed_actions = {"read"} },
     },
 

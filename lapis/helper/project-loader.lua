@@ -1,88 +1,120 @@
 --[[
-  Project Loader Engine
+  Plugin (project) loader
+  =======================
 
-  Scans /projects/*/ directories for project.lua manifests,
-  registers them into the ProjectConfig system, and loads their routes.
+  A plugin is a folder under $OPSAPI_PROJECTS_DIR (default /app/projects):
 
-  Each project is a self-contained module with its own:
-    - project.lua   (manifest)
-    - api/*.lua      (route handlers)
-    - migrations/*   (database migrations)
-    - dashboards/*   (dashboard definitions)
-    - themes/*       (visual themes)
+    <plugin>/project.lua        manifest: code, name, version, sdk_version, modules
+    <plugin>/api/*.lua          route files: `return function(app) ... end`
+    <plugin>/migrations/*.lua   run by helper.project-migrator on `lapis migrate`
+    <plugin>/events/*.lua       event handlers (helper.plugin-events)
+    <plugin>/ui/                custom dashboard pages (manifest `pages`), served
+                                at /plugin-ui/<code>/... and shown in a sandboxed
+                                frame by the dashboard
 
-  Usage:
-    local ProjectLoader = require("helper.project-loader")
-    local projects = ProjectLoader.init("/app/projects")
-    for _, manifest in ipairs(projects) do
-        ProjectLoader.loadRoutes(app, manifest)
-    end
+  app.lua calls init() + loadRoutes() after every core route is registered.
+  A plugin's routes are mounted under its api_prefix (/api/v2/<code-with-
+  hyphens>), may not replace a route that already exists (core or another
+  plugin), and its before_filters only run for its own prefix. Failures are
+  recorded rather than swallowed: /ready answers 503 while any plugin failed
+  to load (a broken plugin fails the rollout instead of silently 404-ing),
+  and GET /api/v2/plugins lists them.
+
+  Developer guide: PLUGINS.md. Stable helpers for plugin code: helper.plugin-sdk.
 ]]
 
 local ProjectLoader = {}
 
--- Registry of loaded projects (keyed by project code)
+-- Version of the helper.plugin-sdk API. Manifests declare the version they
+-- target (sdk_version, default 1); a plugin written for a newer SDK than this
+-- OpsAPI provides is refused instead of failing at request time.
+ProjectLoader.SDK_VERSION = 1
+
 local _registered = {}
 local _registered_list = {}
+local _failures = {}
+
+local function logger(level)
+    return function(...)
+        if ngx and ngx.log then
+            ngx.log(ngx[level], ...)
+        else
+            local parts = { ... }
+            for i = 1, select("#", ...) do parts[i] = tostring(parts[i]) end
+            print(table.concat(parts))
+        end
+    end
+end
+local notice, log_err = logger("NOTICE"), logger("ERR")
+
+--- Sorted entries of a directory ({} if it doesn't exist). lfs isn't in the
+-- image, so this falls back to ls; paths come from operator config, never
+-- from requests.
+function ProjectLoader.listDir(path)
+    local out = {}
+    local ok, lfs = pcall(require, "lfs")
+    if ok then
+        if lfs.attributes(path, "mode") ~= "directory" then return out end
+        for entry in lfs.dir(path) do
+            if entry ~= "." and entry ~= ".." then out[#out + 1] = entry end
+        end
+    else
+        local handle = io.popen("ls -1 '" .. (path:gsub("'", "'\\''")) .. "' 2>/dev/null")
+        if handle then
+            for line in handle:lines() do out[#out + 1] = line end
+            handle:close()
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+--- A file path under a plugin's ui/ folder, relative to it, or nil when it
+-- could escape the folder (.., absolute, hidden files, odd characters).
+function ProjectLoader.safeUiPath(rel)
+    if type(rel) ~= "string" or rel == "" or #rel > 200 or not rel:match("^[%w_%-%./]+$") then return nil end
+    for segment in rel:gmatch("[^/]+") do
+        if segment:sub(1, 1) == "." then return nil end -- "..", ".env", ".git"
+    end
+    if rel:sub(1, 1) == "/" or rel:find("//", 1, true) or rel:sub(-1) == "/" then return nil end
+    return rel
+end
+
+local function is_file(path)
+    local f = io.open(path, "r")
+    if f then f:close() end
+    return f ~= nil
+end
+
+--- A plugin may not take a built-in feature's code: its RBAC modules and
+-- feature flag would silently replace core's.
+function ProjectLoader.isReservedCode(code)
+    -- Event subscribers are "<code>.<file>"; "webhook.<uuid>" are workspace webhooks.
+    if code == "webhook" or code == "core" then return true end
+    local ok, ProjectConfig = pcall(require, "helper.project-config")
+    if not ok then return false end
+    return ProjectConfig.PROJECT_FEATURES[code] ~= nil
+        or ProjectConfig.FEATURES[code:upper()] ~= nil
+end
 
 -- ---------------------------------------------------------------------------
 -- Discovery
 -- ---------------------------------------------------------------------------
 
---- Scan a directory for subdirectories containing project.lua
--- @param projects_root string Absolute path to /projects/ directory
--- @return table List of { code, path, manifest } entries
+--- Plugin folders (those with a project.lua) under projects_root, by name.
+-- @return table List of { dir_name, path, manifest_path }
 function ProjectLoader.discover(projects_root)
-    local discovered = {}
-
-    -- Use lfs if available, fall back to io.popen
-    local ok_lfs, lfs = pcall(require, "lfs")
-    if ok_lfs then
-        for entry in lfs.dir(projects_root) do
-            if entry ~= "." and entry ~= ".." and entry ~= ".gitkeep" then
-                local full_path = projects_root .. "/" .. entry
-                local attr = lfs.attributes(full_path)
-                if attr and attr.mode == "directory" then
-                    local manifest_path = full_path .. "/project.lua"
-                    local mattr = lfs.attributes(manifest_path)
-                    if mattr then
-                        table.insert(discovered, {
-                            dir_name = entry,
-                            path = full_path,
-                            manifest_path = manifest_path,
-                        })
-                    end
-                end
-            end
-        end
-    else
-        -- Fallback: use ls
-        local handle = io.popen("ls -d " .. projects_root .. "/*/project.lua 2>/dev/null")
-        if handle then
-            for line in handle:lines() do
-                local dir_path = line:match("^(.+)/project%.lua$")
-                if dir_path then
-                    local dir_name = dir_path:match("([^/]+)$")
-                    table.insert(discovered, {
-                        dir_name = dir_name,
-                        path = dir_path,
-                        manifest_path = line,
-                    })
-                end
-            end
-            handle:close()
+    local found = {}
+    for _, entry in ipairs(ProjectLoader.listDir(projects_root)) do
+        local path = projects_root .. "/" .. entry
+        if entry:sub(1, 1) ~= "." and is_file(path .. "/project.lua") then
+            found[#found + 1] = { dir_name = entry, path = path, manifest_path = path .. "/project.lua" }
         end
     end
-
-    -- Sort by directory name for deterministic ordering
-    table.sort(discovered, function(a, b) return a.dir_name < b.dir_name end)
-
-    return discovered
+    return found
 end
 
---- Load and validate a project.lua manifest
--- @param manifest_path string Absolute path to project.lua
--- @param project_path string Absolute path to project directory
+--- Load and validate a project.lua manifest.
 -- @return table|nil manifest, string|nil error
 function ProjectLoader.loadManifest(manifest_path, project_path)
     local chunk, err = loadfile(manifest_path)
@@ -94,39 +126,129 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
     if not ok then
         return nil, "Failed to execute " .. manifest_path .. ": " .. tostring(manifest)
     end
-
     if type(manifest) ~= "table" then
         return nil, manifest_path .. " must return a table"
     end
-
-    -- Validate required fields
-    if not manifest.code or type(manifest.code) ~= "string" then
+    if type(manifest.code) ~= "string" then
         return nil, manifest_path .. " missing required field: code"
     end
-    if not manifest.name or type(manifest.name) ~= "string" then
+    if type(manifest.name) ~= "string" then
         return nil, manifest_path .. " missing required field: name"
     end
 
-    -- Normalise code (lowercase, underscores)
     manifest.code = manifest.code:lower():gsub("-", "_")
+    if not manifest.code:match("^[a-z][a-z0-9_]*$") then
+        return nil, manifest_path .. ": code must start with a letter and use only letters, digits and _"
+    end
 
-    -- Attach path info
+    manifest.sdk_version = tonumber(manifest.sdk_version) or 1
+    if manifest.sdk_version > ProjectLoader.SDK_VERSION then
+        return nil, ("%s targets plugin SDK v%d but this OpsAPI provides v%d — upgrade OpsAPI"):format(
+            manifest_path, manifest.sdk_version, ProjectLoader.SDK_VERSION)
+    end
+
+    manifest.modules = manifest.modules or {}
+    local declared = {}
+    for _, m in ipairs(manifest.modules) do
+        if type(m) ~= "table" or type(m.machine_name) ~= "string"
+            or not m.machine_name:match("^[a-z][a-z0-9_]*$") then
+            return nil, manifest_path .. ": every modules entry needs a machine_name (lowercase letters, digits, _)"
+        end
+        declared[m.machine_name] = true
+    end
+
+    -- Custom dashboard pages: HTML (any framework) under ui/, shown by the
+    -- dashboard in a sandboxed frame at /dashboard/plugins/<plugin>/<key>;
+    -- they reach the API through the frame bridge (PLUGINS.md §6.2).
+    --   { key = "overview", label = "Overview", entry = "ui/overview.html",
+    --     module = "helpdesk_tickets",    -- needs <module>.read to open it
+    --     api = { "/api/v2/customers" } } -- other APIs it may call (its own always)
+    local pages = {}
+    for _, pg in ipairs(manifest.pages or {}) do
+        if type(pg) ~= "table" or type(pg.key) ~= "string" or not pg.key:match("^[a-z][a-z0-9_%-]*$")
+            or type(pg.label) ~= "string" then
+            return nil, manifest_path .. ": every pages entry needs a key (lowercase, - or _) and a label"
+        end
+        if pages[pg.key] then
+            return nil, manifest_path .. ": page key '" .. pg.key .. "' is used twice"
+        end
+        if not ProjectLoader.safeUiPath(type(pg.entry) == "string" and pg.entry:match("^ui/(.+)$") or nil)
+            or not pg.entry:match("%.html?$") then
+            return nil, manifest_path .. ": page '" .. pg.key .. "' needs entry = \"ui/<file>.html\""
+        end
+        if not declared[pg.module] then
+            return nil, manifest_path .. ": page '" .. pg.key .. "' needs module = one of the plugin's modules"
+        end
+        local api = {}
+        for _, prefix in ipairs(pg.api or {}) do
+            if type(prefix) ~= "string" or not prefix:match("^/api/[%w_%-/]*[%w_%-]$") then
+                return nil, manifest_path .. ": page '" .. pg.key .. "': api entries look like \"/api/v2/customers\""
+            end
+            api[#api + 1] = prefix
+        end
+        pages[pg.key] = {
+            key = pg.key, label = pg.label, entry = pg.entry, module = pg.module, api = api,
+            description = type(pg.description) == "string" and pg.description or nil,
+        }
+    end
+    manifest.pages = pages
+
+    -- Dashboard sidebar entries, each opening the generated page of one
+    -- sdk.crud resource or one custom page (/dashboard/plugins/<plugin>/<key>).
+    manifest.menu = manifest.menu or {}
+    for _, e in ipairs(manifest.menu) do
+        local target = type(e) == "table" and (e.page or e.resource)
+        if type(e) ~= "table" or type(e.label) ~= "string" or (e.page and e.resource)
+            or type(target) ~= "string" or not target:match("^[%w_%-]+$") then
+            return nil, manifest_path .. ": every menu entry needs a label and either a resource "
+                .. "(the sdk.crud path without /) or a page (a pages key)"
+        end
+        if e.page and not pages[e.page] then
+            return nil, manifest_path .. ": menu entry '" .. e.label .. "' links to page '" .. e.page
+                .. "', which isn't in pages"
+        end
+        if not declared[e.module] then
+            return nil, manifest_path .. ": menu entry '" .. e.label .. "' needs module = one of the plugin's modules"
+        end
+    end
+
+    -- Tables whose changes this plugin publishes as events:
+    --   ticket = "helpdesk_tickets"   → helpdesk.ticket.created / updated / deleted
+    --   ticket = { table = "helpdesk_tickets", verbs = { closed = { status = "closed" } } }
+    --                                 → the same, plus helpdesk.ticket.closed when
+    --                                   a ticket becomes closed (helper.plugin-events)
+    -- Normalised to { name = { table = ..., verbs = ... } }.
+    local publishes = {}
+    for name, spec in pairs(manifest.publishes or {}) do
+        if type(spec) == "string" then spec = { table = spec } end
+        if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$") or type(spec) ~= "table"
+            or type(spec.table) ~= "string" or not spec.table:match("^[a-z_][a-z0-9_]*$") then
+            return nil, manifest_path .. ": publishes entries look like ticket = \"helpdesk_tickets\" or "
+                .. "ticket = { table = \"helpdesk_tickets\", verbs = { closed = { status = \"closed\" } } }"
+        end
+        local verbs_err = require("helper.plugin-events").checkVerbs(spec.verbs)
+        if verbs_err then
+            return nil, manifest_path .. ": publishes." .. name .. ": " .. verbs_err
+        end
+        publishes[name] = { table = spec.table, verbs = spec.verbs or {} }
+    end
+    manifest.publishes = publishes
+
     manifest.path = project_path
     manifest.manifest_path = manifest_path
-
-    -- Defaults
     manifest.version = manifest.version or "0.1.0"
-    manifest.enabled = manifest.enabled ~= false -- default true
+    manifest.enabled = manifest.enabled ~= false
     manifest.depends = manifest.depends or { "core" }
     manifest.feature = manifest.feature or manifest.code
-    manifest.modules = manifest.modules or {}
     manifest.dashboard = manifest.dashboard or {}
     manifest.theme = manifest.theme or "default"
-
-    -- Build API prefix from code (use hyphens in URLs)
-    if not manifest.api_prefix then
-        manifest.api_prefix = "/api/v2/" .. manifest.code:gsub("_", "-")
+    manifest.api_prefix = manifest.api_prefix or ("/api/v2/" .. manifest.code:gsub("_", "-"))
+    if type(manifest.api_prefix) ~= "string" or not manifest.api_prefix:match("^/api/[%w_/%-]*[%w_%-]$") then
+        return nil, manifest_path .. ": api_prefix must look like /api/v2/<name>"
     end
+    manifest.routes = {}
+    manifest.errors = {}
+    manifest.resources = {} -- filled by sdk.crud: key -> dashboard page schema
 
     return manifest, nil
 end
@@ -135,238 +257,172 @@ end
 -- Registration
 -- ---------------------------------------------------------------------------
 
---- Register a project manifest into ProjectConfig
--- @param manifest table Validated project manifest
+--- Register a manifest into ProjectConfig (feature flag + RBAC modules).
+-- @return boolean ok, string|nil error
 function ProjectLoader.register(manifest)
     if _registered[manifest.code] then
-        return -- already registered
+        return true
+    end
+    if ProjectLoader.isReservedCode(manifest.code) then
+        return false, "code '" .. manifest.code .. "' is reserved by a built-in OpsAPI module"
     end
 
-    -- Register into ProjectConfig for feature-gating compatibility
     local ok_pc, ProjectConfig = pcall(require, "helper.project-config")
     if ok_pc and ProjectConfig.registerFeature then
-        -- Build feature list: project's own feature + dependencies
         local feature_list = {}
         for _, dep in ipairs(manifest.depends) do
             table.insert(feature_list, dep)
         end
-        -- Add the project's own feature code
         table.insert(feature_list, manifest.feature)
-
         ProjectConfig.registerFeature(manifest.code, feature_list, manifest.modules)
     end
 
     _registered[manifest.code] = manifest
     table.insert(_registered_list, manifest)
+    return true
 end
 
 -- ---------------------------------------------------------------------------
 -- Route Loading
 -- ---------------------------------------------------------------------------
 
---- Create a prefixed app proxy that prepends project prefix to all routes
--- and injects project context into request handlers
--- @param app table Lapis application
--- @param prefix string URL prefix (e.g. /api/v2/hospital-patient-manager)
--- @param manifest table Project manifest
--- @return table Proxy app object
+local VERBS = { "get", "post", "put", "delete", "match" }
+
+--- An app proxy that mounts every route under `prefix`, refuses to replace
+-- existing routes, records what it registered (manifest.routes — used by
+-- /api/v2/plugins and the OpenAPI spec) and injects self.project.
 function ProjectLoader.createPrefixedApp(app, prefix, manifest)
-    local proxy = {}
-    local mt = {
-        __index = function(_, key)
-            return app[key]
-        end
-    }
-    setmetatable(proxy, mt)
+    local proxy = setmetatable({ plugin = manifest }, { __index = app })
 
-    local methods = { "get", "post", "put", "delete", "match" }
-
-    for _, method in ipairs(methods) do
-        proxy[method] = function(_, path, handler, ...)
+    for _, verb in ipairs(VERBS) do
+        proxy[verb] = function(_, a, b, c)
+            local name, path, handler
+            if c ~= nil then
+                name, path, handler = a, b, c
+            else
+                path, handler = a, b
+            end
             local full_path = prefix .. path
+            local method = verb == "match" and "ANY" or verb:upper()
 
-            -- Wrap handler to inject project context
-            local original_handler = handler
+            -- Lapis merges verbs per path, so registering an existing
+            -- path+verb silently REPLACES that handler — a plugin could
+            -- hijack a core route. Refuse instead.
+            local existing = (rawget(app, "responders") or {})[full_path]
+            if rawget(app, full_path) ~= nil
+                and (method == "ANY" or not existing or existing.respond_to[method]) then
+                error(method .. " " .. full_path .. " is already registered", 0)
+            end
+
             if type(handler) == "function" then
+                local fn = handler
                 handler = function(self)
                     self.project = manifest
                     self.project_code = manifest.code
-                    return original_handler(self)
+                    return fn(self)
                 end
-            elseif type(handler) == "table" then
-                -- respond_to style: { GET = fn, POST = fn }
-                local wrapped = {}
-                for verb, fn in pairs(handler) do
-                    if type(fn) == "function" then
-                        wrapped[verb] = function(self)
-                            self.project = manifest
-                            self.project_code = manifest.code
-                            return fn(self)
-                        end
-                    else
-                        wrapped[verb] = fn
-                    end
-                end
-                handler = wrapped
             end
 
-            local log = ngx and ngx.log or print
-            local notice = ngx and ngx.NOTICE or nil
-            if log and notice then
-                log(notice, "[Project:", manifest.code, "] Registering: ", method:upper(), " ", full_path)
+            table.insert(manifest.routes, { method = method, path = full_path })
+            if name then
+                return app[verb](app, name, full_path, handler)
             end
-
-            return app[method](app, full_path, handler, ...)
+            return app[verb](app, full_path, handler)
         end
+    end
+
+    -- A plugin's before_filter only runs for its own routes, not core's.
+    proxy.before_filter = function(_, fn)
+        app:before_filter(function(self)
+            local uri = ngx.var.uri or ""
+            if uri == prefix or uri:sub(1, #prefix + 1) == prefix .. "/" then
+                return fn(self)
+            end
+        end)
     end
 
     return proxy
 end
 
---- Load routes for a single project
--- @param app table Lapis application
--- @param manifest table Project manifest
+--- Load every api/*.lua route file of a plugin. Errors are recorded on
+-- manifest.errors (and reported by failures()), never raised.
 function ProjectLoader.loadRoutes(app, manifest)
     if not manifest.enabled then
         return
     end
 
+    -- The prefix must be the plugin's own: otherwise its before_filters would
+    -- run on (and its routes interleave with) core's or another plugin's.
     local prefix = manifest.api_prefix
-    local routes_dir = manifest.path .. "/api"
-
-    -- Check if api/ directory exists
-    local ok_lfs, lfs = pcall(require, "lfs")
-    local dir_exists = false
-
-    if ok_lfs then
-        local attr = lfs.attributes(routes_dir)
-        dir_exists = attr and attr.mode == "directory"
-    else
-        local handle = io.popen("test -d " .. routes_dir .. " && echo yes")
-        if handle then
-            dir_exists = handle:read("*l") == "yes"
-            handle:close()
+    for _, key in ipairs(rawget(app, "ordered_routes") or {}) do
+        local path = type(key) == "table" and select(2, next(key)) or key
+        if path == prefix or path:sub(1, #prefix + 1) == prefix .. "/" then
+            table.insert(manifest.errors, "api_prefix " .. prefix .. " is already used by " .. path)
+            log_err("[Plugin:", manifest.code, "] api_prefix ", prefix, " is already used by ", path)
+            return
         end
     end
 
-    if not dir_exists then
-        return
-    end
+    local api_dir = manifest.path .. "/api"
+    local proxy = ProjectLoader.createPrefixedApp(app, prefix, manifest)
 
-    local prefixed_app = ProjectLoader.createPrefixedApp(app, prefix, manifest)
-
-    -- Scan api/ directory for .lua files
-    local route_files = {}
-    if ok_lfs then
-        for file in lfs.dir(routes_dir) do
-            if file:match("%.lua$") then
-                table.insert(route_files, file)
+    for _, file in ipairs(ProjectLoader.listDir(api_dir)) do
+        if file:match("%.lua$") then
+            local chunk, err = loadfile(api_dir .. "/" .. file)
+            local ok, mod = chunk ~= nil, err
+            if chunk then ok, mod = pcall(chunk) end
+            if ok and type(mod) ~= "function" then
+                ok, mod = false, "must return function(app)"
             end
-        end
-    else
-        local handle = io.popen("ls " .. routes_dir .. "/*.lua 2>/dev/null")
-        if handle then
-            for line in handle:lines() do
-                local file = line:match("([^/]+)$")
-                if file then
-                    table.insert(route_files, file)
-                end
-            end
-            handle:close()
-        end
-    end
-
-    -- Sort for deterministic loading order
-    table.sort(route_files)
-
-    -- Load each route file
-    for _, file in ipairs(route_files) do
-        local file_path = routes_dir .. "/" .. file
-        local chunk, err = loadfile(file_path)
-        if chunk then
-            local ok_exec, route_module = pcall(chunk)
-            if ok_exec and type(route_module) == "function" then
-                local ok_init, init_err = pcall(route_module, prefixed_app)
-                if not ok_init then
-                    local log = ngx and ngx.log or print
-                    local err_level = ngx and ngx.ERR or nil
-                    if log and err_level then
-                        log(err_level, "[Project:", manifest.code, "] Failed to init route ", file, ": ", tostring(init_err))
-                    else
-                        print("[Project:" .. manifest.code .. "] Failed to init route " .. file .. ": " .. tostring(init_err))
-                    end
-                end
-            elseif not ok_exec then
-                local log = ngx and ngx.log or print
-                local err_level = ngx and ngx.ERR or nil
-                if log and err_level then
-                    log(err_level, "[Project:", manifest.code, "] Failed to execute route ", file, ": ", tostring(route_module))
-                else
-                    print("[Project:" .. manifest.code .. "] Failed to execute route " .. file .. ": " .. tostring(route_module))
-                end
-            end
-        else
-            local log = ngx and ngx.log or print
-            local err_level = ngx and ngx.ERR or nil
-            if log and err_level then
-                log(err_level, "[Project:", manifest.code, "] Failed to load route ", file, ": ", tostring(err))
-            else
-                print("[Project:" .. manifest.code .. "] Failed to load route " .. file .. ": " .. tostring(err))
+            if ok then ok, mod = pcall(mod, proxy) end
+            if not ok then
+                table.insert(manifest.errors, file .. ": " .. tostring(mod))
+                log_err("[Plugin:", manifest.code, "] ", file, ": ", tostring(mod))
             end
         end
     end
+
+    for _, e in ipairs(manifest.menu) do
+        if e.resource and not manifest.resources[e.resource] then
+            log_err("[Plugin:", manifest.code, "] menu entry '", e.label, "' links to resource '", e.resource,
+                "', but no sdk.crud registers it — the page will say it isn't available")
+        end
+    end
+    for key, pg in pairs(manifest.pages) do
+        if manifest.resources[key] then
+            table.insert(manifest.errors, "page '" .. key .. "' has the same key as an sdk.crud resource")
+        end
+        if not is_file(manifest.path .. "/" .. pg.entry) then
+            log_err("[Plugin:", manifest.code, "] page '", key, "': ", pg.entry, " doesn't exist")
+        end
+    end
+
+    notice("[Plugin:", manifest.code, "] ", #manifest.routes, " route(s) under ", manifest.api_prefix)
 end
 
 -- ---------------------------------------------------------------------------
 -- Main Entry Point
 -- ---------------------------------------------------------------------------
 
---- Initialize the project loader: discover, validate, and register all projects
--- @param projects_root string Absolute path to /projects/ directory
--- @return table List of registered project manifests
+--- Discover, validate and register every plugin under projects_root.
+-- @return table List of registered manifests
 function ProjectLoader.init(projects_root)
-    local log = ngx and ngx.log or print
-    local notice = ngx and ngx.NOTICE or nil
-
-    if log and notice then
-        log(notice, "=== Project Loader: Scanning ", projects_root, " ===")
-    else
-        print("=== Project Loader: Scanning " .. projects_root .. " ===")
-    end
-
-    local discovered = ProjectLoader.discover(projects_root)
-
-    for _, entry in ipairs(discovered) do
+    for _, entry in ipairs(ProjectLoader.discover(projects_root)) do
         local manifest, err = ProjectLoader.loadManifest(entry.manifest_path, entry.path)
-        if manifest then
-            if manifest.enabled then
-                ProjectLoader.register(manifest)
-                if log and notice then
-                    log(notice, "[Project Loader] Registered: ", manifest.code, " (", manifest.name, ") v", manifest.version)
-                else
-                    print("[Project Loader] Registered: " .. manifest.code .. " (" .. manifest.name .. ") v" .. manifest.version)
-                end
-            else
-                if log and notice then
-                    log(notice, "[Project Loader] Skipped (disabled): ", entry.dir_name)
-                end
+        if manifest and manifest.enabled then
+            local ok, reg_err = ProjectLoader.register(manifest)
+            if ok then
+                notice("[Plugin] registered ", manifest.code, " (", manifest.name, ") v", manifest.version)
             end
-        else
-            local err_level = ngx and ngx.ERR or nil
-            if log and err_level then
-                log(err_level, "[Project Loader] Error loading ", entry.dir_name, ": ", err)
-            else
-                print("[Project Loader] Error loading " .. entry.dir_name .. ": " .. tostring(err))
-            end
+            err = reg_err
+        elseif manifest then
+            notice("[Plugin] skipped (enabled = false): ", entry.dir_name)
+        end
+        if err then
+            table.insert(_failures, { code = manifest and manifest.code or entry.dir_name, errors = { err } })
+            log_err("[Plugin] ", entry.dir_name, ": ", err)
         end
     end
-
-    if log and notice then
-        log(notice, "=== Project Loader: ", #_registered_list, " project(s) registered ===")
-    else
-        print("=== Project Loader: " .. #_registered_list .. " project(s) registered ===")
-    end
-
     return _registered_list
 end
 
@@ -374,15 +430,10 @@ end
 -- Lookups
 -- ---------------------------------------------------------------------------
 
---- Get all registered projects
--- @return table List of project manifests
 function ProjectLoader.getRegistered()
     return _registered_list
 end
 
---- Get a project by its code
--- @param code string Project code
--- @return table|nil manifest
 function ProjectLoader.getByCode(code)
     if code then
         code = code:lower():gsub("-", "_")
@@ -390,16 +441,34 @@ function ProjectLoader.getByCode(code)
     return _registered[code]
 end
 
---- Get project count
--- @return number
 function ProjectLoader.getCount()
     return #_registered_list
 end
 
---- Reset registry (useful for testing)
+--- Plugins that failed to load (bad manifest, reserved code, route errors,
+-- events/*.lua errors).
+-- @return table List of { code, errors = { message, ... } }
+function ProjectLoader.failures()
+    local out = {}
+    for _, f in ipairs(_failures) do
+        out[#out + 1] = f
+    end
+    for _, f in ipairs(require("helper.plugin-events").failures()) do
+        out[#out + 1] = f
+    end
+    for _, m in ipairs(_registered_list) do
+        if #m.errors > 0 then
+            out[#out + 1] = { code = m.code, errors = m.errors }
+        end
+    end
+    return out
+end
+
+--- Reset registry (tests)
 function ProjectLoader.reset()
     _registered = {}
     _registered_list = {}
+    _failures = {}
 end
 
 return ProjectLoader

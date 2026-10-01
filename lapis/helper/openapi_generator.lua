@@ -1617,6 +1617,195 @@ local function build_tags(discovered_tags)
 end
 
 -- ============================================================
+-- PLUGIN RESOURCES (sdk.crud): exact schemas from the field rules
+-- ============================================================
+
+local function pascal(s)
+    return (s:gsub("[^%w]+", " "):gsub("(%w)(%w*)", function(a, b) return a:upper() .. b end):gsub("%s+", ""))
+end
+
+local function singular(w)
+    if w:match("ies$") then return w:sub(1, -4) .. "y" end
+    if w:match("sses$") or w:match("xes$") or w:match("ches$") or w:match("shes$") then return w:sub(1, -3) end
+    if w:match("s$") and not w:match("ss$") then return w:sub(1, -2) end
+    return w
+end
+
+-- JSON schema of one sdk.validate field rule.
+local FIELD_TYPES = {
+    string = { type = "string" }, text = { type = "string" }, email = { type = "string", format = "email" },
+    uuid = { type = "string", format = "uuid" }, date = { type = "string", format = "date" },
+    datetime = { type = "string", format = "date-time" }, integer = { type = "integer" },
+    number = { type = "number" }, boolean = { type = "boolean" },
+}
+local function field_schema(f, nullable)
+    local s = { description = f.label }
+    for k, v in pairs(FIELD_TYPES[f.type] or {}) do s[k] = v end
+    if f.type == "json" then s.description = (f.label or "") .. " (any JSON object or array)" end
+    if f.enum and #f.enum > 0 then s.enum = f.enum end
+    if s.type == "string" then
+        s.maxLength = f.max or (f.type ~= "text" and 255 or nil)
+        s.minLength = f.min
+    elseif s.type == "integer" or s.type == "number" then
+        s.minimum, s.maximum = f.min, f.max
+    end
+    if nullable then s.nullable = true end
+    return s
+end
+
+local function envelope(data, with_meta)
+    local props = { success = { type = "boolean", example = true }, data = data }
+    if with_meta then props.meta = { ["$ref"] = "#/components/schemas/PluginPageMeta" } end
+    return { type = "object", required = { "success", "data" }, properties = props }
+end
+
+local function json_response(description, schema)
+    return { description = description, content = { ["application/json"] = { schema = schema } } }
+end
+
+local PLUGIN_ERRORS = {
+    ["401"] = json_response("Missing or invalid credentials", { ["$ref"] = "#/components/schemas/PluginError" }),
+    ["403"] = json_response("No permission in this namespace", { ["$ref"] = "#/components/schemas/PluginError" }),
+}
+
+local NAMESPACE_HEADER = {
+    ["in"] = "header", name = "X-Namespace-Id", required = false,
+    description = "Workspace UUID (or send X-Namespace-Slug). Defaults to the token's workspace.",
+    schema = { type = "string", format = "uuid" },
+}
+
+--- Typed operations for every sdk.crud resource of a plugin.
+-- @return { [openapi_path] = { [method] = operation } }, { [schema_name] = schema }
+local function plugin_resource_ops(plugin)
+    local paths, schemas = {}, {}
+    local registered = {}
+    for _, r in ipairs(plugin.routes) do registered[r.method .. " " .. r.path] = true end
+
+    for key, page in pairs(plugin.resources or {}) do
+        local name = pascal(plugin.code) .. pascal(singular(key))
+        local tag = plugin.name
+        local base = page.api_path
+        local item = base .. "/{id}"
+        local ref = { ["$ref"] = "#/components/schemas/" .. name }
+        local op_prefix = plugin.code .. "_" .. key:gsub("%-", "_")
+
+        -- The stored record, and the create / update bodies.
+        local props = {
+            id = { type = "integer" },
+            uuid = { type = "string", format = "uuid" },
+            namespace_id = { type = "integer" },
+            created_at = { type = "string", format = "date-time" },
+            updated_at = { type = "string", format = "date-time" },
+        }
+        local required = { "id", "namespace_id", "created_at", "updated_at" }
+        local create_props, create_required, update_props = {}, {}, {}
+        for _, f in ipairs(page.fields) do
+            props[f.name] = field_schema(f, not f.required)
+            create_props[f.name] = field_schema(f, not f.required)
+            update_props[f.name] = field_schema(f, not f.required)
+            if f.required then
+                required[#required + 1] = f.name
+                create_required[#create_required + 1] = f.name
+            end
+        end
+        if page.id_column == "uuid" then required[#required + 1] = "uuid" end
+        schemas[name] = { type = "object", description = page.label .. " (" .. plugin.name .. " plugin)",
+            required = required, properties = props }
+        schemas[name .. "Create"] = { type = "object", required = #create_required > 0 and create_required or nil,
+            properties = create_props, additionalProperties = false }
+        schemas[name .. "Update"] = { type = "object", properties = update_props, additionalProperties = false,
+            description = "Only the fields sent are changed; null clears an optional field." }
+
+        local id_param = { ["in"] = "path", name = "id", required = true, description = page.label .. " " .. page.id_column,
+            schema = page.id_column == "uuid" and { type = "string", format = "uuid" } or { type = "string" } }
+        local function op(method, summary, suffix, extra)
+            local o = {
+                ["x-opsapi-plugin"] = plugin.code,
+                tags = { tag }, summary = summary, operationId = op_prefix .. "_" .. suffix,
+                security = { { BearerAuth = {} } },
+                description = "Needs " .. page.module .. "." .. (method == "get" and "read" or (
+                    method == "post" and "create" or method == "put" and "update" or "delete")) .. " in the workspace.",
+                parameters = { NAMESPACE_HEADER },
+                responses = {},
+            }
+            for code, r in pairs(PLUGIN_ERRORS) do o.responses[code] = r end
+            for k, v in pairs(extra) do
+                if k == "parameters" then
+                    for _, prm in ipairs(v) do o.parameters[#o.parameters + 1] = prm end
+                elseif k == "responses" then
+                    for code, r in pairs(v) do o.responses[code] = r end
+                else
+                    o[k] = v
+                end
+            end
+            return o
+        end
+        local not_found = json_response("Not found in this workspace", { ["$ref"] = "#/components/schemas/PluginError" })
+        local invalid = json_response("Validation failed (details: field -> message)", { ["$ref"] = "#/components/schemas/PluginError" })
+        local conflict = json_response("Conflicts with an existing record", { ["$ref"] = "#/components/schemas/PluginError" })
+        local function body(schema_name)
+            return { required = true, content = { ["application/json"] = { schema = { ["$ref"] = "#/components/schemas/" .. schema_name } } } }
+        end
+
+        paths[base], paths[item] = {}, {}
+        if registered["GET " .. base] then
+            local query = {
+                { ["in"] = "query", name = "page", schema = { type = "integer", minimum = 1, default = 1 } },
+                { ["in"] = "query", name = "per_page", schema = { type = "integer", minimum = 1, maximum = 100, default = 20 } },
+            }
+            if page.searchable then
+                query[#query + 1] = { ["in"] = "query", name = "q", description = "Search text", schema = { type = "string" } }
+            end
+            if #page.sortable > 0 then
+                query[#query + 1] = { ["in"] = "query", name = "sort", schema = { type = "string", enum = page.sortable } }
+                query[#query + 1] = { ["in"] = "query", name = "order", schema = { type = "string", enum = { "asc", "desc" }, default = "desc" } }
+            end
+            local by_name = {}
+            for _, f in ipairs(page.fields) do by_name[f.name] = f end
+            for _, col in ipairs(page.filterable or {}) do
+                if by_name[col] then
+                    local fs = field_schema(by_name[col], false)
+                    fs.description = "Only records whose " .. col .. " equals this"
+                    query[#query + 1] = { ["in"] = "query", name = col, schema = fs }
+                end
+            end
+            paths[base].get = op("get", "List " .. page.label:lower(), "list", {
+                parameters = query,
+                responses = { ["200"] = json_response("A page of " .. page.label:lower(), envelope({ type = "array", items = ref }, true)),
+                    ["400"] = json_response("Bad filter value", { ["$ref"] = "#/components/schemas/PluginError" }) },
+            })
+        end
+        if registered["POST " .. base] then
+            paths[base].post = op("post", "Create a " .. singular(page.label):lower(), "create", {
+                requestBody = body(name .. "Create"),
+                responses = { ["201"] = json_response("Created", envelope(ref)), ["409"] = conflict, ["422"] = invalid },
+            })
+        end
+        if registered["GET " .. base .. "/:id"] then
+            paths[item].get = op("get", "Get a " .. singular(page.label):lower(), "get", {
+                parameters = { id_param }, responses = { ["200"] = json_response("The record", envelope(ref)), ["404"] = not_found },
+            })
+        end
+        if registered["PUT " .. base .. "/:id"] then
+            paths[item].put = op("put", "Update a " .. singular(page.label):lower(), "update", {
+                parameters = { id_param }, requestBody = body(name .. "Update"),
+                responses = { ["200"] = json_response("Updated", envelope(ref)), ["404"] = not_found, ["409"] = conflict, ["422"] = invalid },
+            })
+        end
+        if registered["DELETE " .. base .. "/:id"] then
+            paths[item].delete = op("delete", "Delete a " .. singular(page.label):lower(), "delete", {
+                parameters = { id_param },
+                responses = {
+                    ["200"] = json_response("Deleted", { type = "object", properties = { success = { type = "boolean" } } }),
+                    ["404"] = not_found, ["409"] = json_response("Still referenced by other records", { ["$ref"] = "#/components/schemas/PluginError" }),
+                },
+            })
+        end
+    end
+    return paths, schemas
+end
+
+-- ============================================================
 -- MAIN GENERATE FUNCTION
 -- ============================================================
 
@@ -1670,6 +1859,53 @@ function _M.generate()
         for method, operation in pairs(methods) do
             if not spec.paths[path][method] then
                 spec.paths[path][method] = operation
+            end
+        end
+    end
+
+    -- 6b. Plugin routes (recorded by helper.project-loader at boot), one tag
+    -- per plugin. sdk.crud resources get exact schemas; other plugin routes
+    -- the generic shape.
+    local plugins = require("helper.project-loader").getRegistered()
+    if #plugins > 0 then
+        spec.components.schemas.PluginPageMeta = {
+            type = "object", required = { "page", "per_page", "total", "total_pages" },
+            properties = {
+                page = { type = "integer" }, per_page = { type = "integer" },
+                total = { type = "integer" }, total_pages = { type = "integer" },
+            },
+        }
+        spec.components.schemas.PluginError = {
+            type = "object", required = { "success", "error" },
+            properties = {
+                success = { type = "boolean", example = false },
+                error = { type = "string" },
+                details = { type = "object", additionalProperties = { type = "string" },
+                    description = "Validation errors: field -> message" },
+            },
+        }
+    end
+    for _, plugin in ipairs(plugins) do
+        local typed, schemas = plugin_resource_ops(plugin)
+        for name, schema in pairs(schemas) do spec.components.schemas[name] = schema end
+        for path, methods in pairs(typed) do
+            for method, operation in pairs(methods) do
+                spec.paths[path] = spec.paths[path] or {}
+                spec.paths[path][method] = operation
+            end
+        end
+        if next(typed) then discovered_tags[plugin.name] = true end
+        for _, route in ipairs(plugin.routes) do
+            local method = route.method:lower()
+            if method ~= "any" then
+                local openapi_path = lapis_to_openapi_path(route.path)
+                spec.paths[openapi_path] = spec.paths[openapi_path] or {}
+                if not spec.paths[openapi_path][method] then
+                    local operation = build_operation(method, route.path, plugin.name)
+                    operation["x-opsapi-plugin"] = plugin.code -- lets tools tell plugin routes from core
+                    spec.paths[openapi_path][method] = operation
+                end
+                discovered_tags[plugin.name] = true
             end
         end
     end

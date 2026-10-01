@@ -13,6 +13,7 @@
 ]]
 
 local db = require("lapis.db")
+local cjson = require("cjson")
 local Global = require("helper.global")
 
 local ActivityQueries = {}
@@ -193,6 +194,92 @@ function ActivityQueries.log(ns_id, params)
         next_cursor = rows[#rows].cursor
     end
     return rows, { next_cursor = next_cursor, limit = limit }
+end
+
+local CHANGE_ACTIONS = { created = true, updated = true, deleted = true }
+
+local function json_field(v)
+    if type(v) == "string" then
+        local ok, decoded = pcall(cjson.decode, v)
+        return ok and decoded or nil
+    end
+    return v ~= db.NULL and v or nil
+end
+
+--- Record changes (the audit trail, helper/plugin-events.lua): who created,
+-- changed or deleted which record, with the fields before and after. Newest
+-- first, keyset-paginated like log(). Filters: days, user_uuid (who),
+-- entity ("invoice", "crm.deal", ...), entity_id (one record's history),
+-- action (created | updated | deleted).
+function ActivityQueries.changes(ns_id, params)
+    local limit = Global.perPageParam(params.limit, 50, 200)
+    local max_days = require("helper.plugin-events").auditRetentionDays()
+    local days = math.floor(tonumber(params.days) or 30)
+    days = days < 1 and 1 or (days > max_days and max_days or days)
+
+    local where = {
+        "a.namespace_id = ?",
+        "a.metadata ->> 'source' = 'db'",
+        "a.created_at >= (NOW() AT TIME ZONE 'UTC') - (?::int * interval '1 day')",
+    }
+    local args = { ns_id, days }
+    if type(params.user_uuid) == "string" and params.user_uuid ~= "" then
+        where[#where + 1] = "a.actor_user_uuid = ?"
+        args[#args + 1] = params.user_uuid
+    end
+    if type(params.entity) == "string" and params.entity:match("^[%w_.]+$") then
+        where[#where + 1] = "a.entity_type = ?"
+        args[#args + 1] = params.entity
+    end
+    if type(params.entity_id) == "string" and params.entity_id ~= "" and #params.entity_id <= 100 then
+        where[#where + 1] = "a.entity_id = ?"
+        args[#args + 1] = params.entity_id
+    end
+    if CHANGE_ACTIONS[params.action] then
+        where[#where + 1] = "a.event_type LIKE ?"
+        args[#args + 1] = "%." .. params.action
+    end
+    if type(params.cursor) == "string" then
+        local at, id = params.cursor:match("^(.+)~(%d+)$")
+        if at then
+            where[#where + 1] = "(a.created_at, a.id) < (?::timestamp, ?::bigint)"
+            args[#args + 1], args[#args + 2] = at, id
+        end
+    end
+    args[#args + 1] = limit + 1
+
+    -- audit_events.created_at is a UTC timestamp without time zone.
+    local rows = db.query([[
+        SELECT a.created_at::text || '~' || a.id AS cursor,
+               to_char(a.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS occurred_at,
+               a.event_type AS event, a.entity_type AS entity, a.entity_id,
+               a.actor_user_uuid AS user_uuid, u.email, ]] .. NAME .. [[ AS name,
+               a.metadata ->> 'via' AS via, a.metadata ->> 'request_id' AS request_id, a.actor_ip AS ip,
+               a.old_values, a.new_values
+        FROM audit_events a LEFT JOIN users u ON u.uuid = a.actor_user_uuid
+        WHERE ]] .. table.concat(where, " AND ") .. [[
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT ?
+    ]], unpack(args))
+
+    local next_cursor
+    if #rows > limit then
+        rows[#rows] = nil
+        next_cursor = rows[#rows].cursor
+    end
+    for _, r in ipairs(rows) do
+        r.old_values, r.new_values = json_field(r.old_values), json_field(r.new_values)
+    end
+    local meta = { next_cursor = next_cursor, limit = limit, days = days }
+    if not params.cursor then
+        -- Every auditable entity, for the filter (cheap: one row per source).
+        local entities = {}
+        for _, e in ipairs(db.query("SELECT entity FROM plugin_event_sources ORDER BY entity")) do
+            entities[#entities + 1] = e.entity
+        end
+        meta.entities = entities
+    end
+    return rows, meta
 end
 
 return ActivityQueries

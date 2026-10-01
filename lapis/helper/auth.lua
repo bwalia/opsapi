@@ -120,6 +120,7 @@ function _M.authenticate()
         end
 
         ngx.ctx.user = principal
+        require("helper.request-context").refresh()
         ngx.ctx.api_key_auth = true
         ngx.log(ngx.NOTICE, "API key authentication successful: ", principal.key_uuid,
             " (namespace ", tostring(principal.namespace.slug), ")")
@@ -148,6 +149,7 @@ function _M.authenticate()
 
     -- Store user info in ngx.ctx
     ngx.ctx.user = jwt_obj.payload.userinfo
+    require("helper.request-context").refresh()
     ngx.log(ngx.NOTICE, "Authentication successful for user: ", tostring(ngx.ctx.user and ngx.ctx.user.uuid or "unknown"))
 end
 
