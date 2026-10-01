@@ -174,14 +174,14 @@ local function sync_menu(manifest)
     local slug = manifest.code:gsub("_", "-")
     local keys = {}
     for i, e in ipairs(manifest.menu) do
-        local key = prefix .. e.resource
+        local key = prefix .. (e.page or e.resource)
         db.query([[
             INSERT INTO menu_items (uuid, key, name, icon, path, module, required_action, priority,
                                     is_active, is_admin_only, always_show, settings, created_at, updated_at)
             VALUES (gen_random_uuid()::text, ?, ?, ?, ?, ?, 'read', ?, true, false, false, '{}', NOW(), NOW())
             ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, icon = EXCLUDED.icon, path = EXCLUDED.path,
                 module = EXCLUDED.module, priority = EXCLUDED.priority, is_active = true, updated_at = NOW()
-        ]], key, e.label, e.icon or "Puzzle", "/dashboard/plugins/" .. slug .. "/" .. e.resource,
+        ]], key, e.label, e.icon or "Puzzle", "/dashboard/plugins/" .. slug .. "/" .. (e.page or e.resource),
             e.module, tonumber(e.priority) or 90 + i)
         keys[#keys + 1] = db.escape_literal(key)
     end

@@ -1,11 +1,13 @@
 import apiClient, { buildQueryString } from '@/lib/api-client';
 
 /**
- * Plugin pages client. A backend plugin (projects/<plugin>/, see PLUGINS.md)
- * that declares a resource with `sdk.crud` gets a generic list/form page at
- * /dashboard/plugins/<plugin>/<resource>. The page is driven by the resource's
- * schema (fields, columns, filters, the caller's rights), so new plugins need
- * no dashboard rebuild. Backed by lapis/routes/plugins.lua + helper/plugin-sdk.lua.
+ * Plugin pages client. /dashboard/plugins/<plugin>/<key> shows either
+ *  - a resource: a plugin's `sdk.crud` table gets a generic list/form page,
+ *    driven by its schema (fields, columns, filters, the caller's rights), or
+ *  - a custom page: the plugin's own HTML (manifest `pages`), shown in a
+ *    sandboxed frame (components/plugins/PluginPageFrame).
+ * New plugins need no dashboard rebuild. Backed by lapis/routes/plugins.lua +
+ * helper/plugin-sdk.lua; guide: PLUGINS.md §6.
  */
 
 export type PluginFieldType =
@@ -21,8 +23,15 @@ export interface PluginField {
   max?: number;
 }
 
+export interface PluginRef {
+  code: string;
+  name: string;
+  api_prefix: string;
+}
+
 export interface PluginResourceSchema {
-  plugin: { code: string; name: string };
+  kind: 'resource';
+  plugin: PluginRef;
   key: string;
   label: string;
   module: string;
@@ -34,6 +43,23 @@ export interface PluginResourceSchema {
   sortable: string[];
   can: { create: boolean; update: boolean; delete: boolean };
 }
+
+/** A plugin's own page (manifest `pages`), shown in a sandboxed frame. */
+export interface PluginPageSchema {
+  kind: 'page';
+  plugin: PluginRef;
+  key: string;
+  label: string;
+  description?: string;
+  module: string;
+  /** Path of the page's HTML on the API server (/plugin-ui/<code>/...). */
+  url: string;
+  /** API prefixes the page may call: the plugin's own, then its manifest's. */
+  api: string[];
+  can: { read: boolean; create: boolean; update: boolean; delete: boolean };
+}
+
+export type PluginScreen = PluginResourceSchema | PluginPageSchema;
 
 export type PluginRecord = Record<string, unknown> & { uuid: string };
 
@@ -62,11 +88,13 @@ function unwrap<T>(response: { data: unknown }): T {
 }
 
 export const pluginService = {
-  async getResource(plugin: string, resource: string): Promise<PluginResourceSchema> {
+  async getResource(plugin: string, resource: string): Promise<PluginScreen> {
     const res = await apiClient.get(
       `/api/v2/plugins/${encodeURIComponent(plugin)}/resources/${encodeURIComponent(resource)}`
     );
-    return unwrap<PluginResourceSchema>(res);
+    const screen = unwrap<PluginScreen>(res);
+    // Servers from before custom pages don't send `kind`.
+    return screen.kind === 'page' ? screen : { ...screen, kind: 'resource' };
   },
 
   async list(

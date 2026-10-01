@@ -291,6 +291,50 @@ check("listener registers its event",
     (PluginEvents.loadSubscribers(m))["help_desk.on_invoice_updated"] ~= nil)
 check("make:listener refuses a malformed event", not succeeded(run("make:listener help-desk Invoice")))
 
+print("custom pages")
+check("make:page", succeeded(run('make:page help-desk overview "Desk overview"')))
+m = ProjectLoader.loadManifest(plugin .. "/project.lua", plugin)
+local pg = m and m.pages.overview
+check("page registered in the manifest", pg and pg.entry == "ui/overview.html" and pg.module == "help_desk_tickets"
+    and pg.label == "Desk overview")
+local page_menu
+for _, e in ipairs(m and m.menu or {}) do if e.page == "overview" then page_menu = e end end
+check("page has a sidebar entry", page_menu ~= nil)
+local html = io.open(plugin .. "/ui/overview.html"):read("*a")
+check("page loads the bridge", html:find("/plugin-ui/_sdk/opsapi-ui.js", 1, true) and html:find("OpsAPI.connect()", 1, true))
+check("page lists the plugin's first resource", html:find("const RESOURCE = 'tickets'", 1, true) ~= nil)
+check("no unfilled page placeholders", not html:find("{{", 1, true))
+check("make:page refuses a duplicate", not succeeded(run("make:page help-desk overview")))
+check("plugin:check passes with a page", succeeded(run("plugin:check")))
+check("page needs an existing entry path",
+    manifest('return { code = "pg", name = "P", modules = { { machine_name = "pg_x" } }, '
+        .. 'pages = { { key = "a", label = "A", entry = "ui/../secret.html", module = "pg_x" } } }') == nil)
+check("page needs a declared module",
+    manifest('return { code = "pg", name = "P", pages = { { key = "a", label = "A", entry = "ui/a.html", module = "nope" } } }') == nil)
+check("page api prefixes must be /api/...",
+    manifest('return { code = "pg", name = "P", modules = { { machine_name = "pg_x" } }, pages = { { key = "a", label = "A", '
+        .. 'entry = "ui/a.html", module = "pg_x", api = { "https://evil.example" } } } }') == nil)
+check("menu can't link to an unknown page",
+    manifest('return { code = "pg", name = "P", modules = { { machine_name = "pg_x" } }, '
+        .. 'menu = { { label = "A", page = "nope", module = "pg_x" } } }') == nil)
+check("menu entry is a resource or a page, not both",
+    manifest('return { code = "pg", name = "P", modules = { { machine_name = "pg_x" } }, pages = { { key = "a", '
+        .. 'label = "A", entry = "ui/a.html", module = "pg_x" } }, menu = { { label = "A", page = "a", resource = "a", module = "pg_x" } } }') == nil)
+local function src_of(path) local f = io.open(path); local t = f and f:read("*a"); if f then f:close() end; return t or "" end
+check("ui files are public (no JWT), the API isn't", src_of("app.lua"):find('uri:match("^/plugin%-ui/")', 1, true) ~= nil)
+local routes_src = src_of("routes/plugins.lua")
+check("ui route only serves the plugin's ui/ folder through the path guard",
+    routes_src:find("ProjectLoader.safeUiPath(self.params.splat)", 1, true)
+    and routes_src:find('m.path .. "/ui/" .. rel', 1, true))
+check("page bridge files ship with the image", src_of("static/plugin-ui/opsapi-ui.js"):find("OpsAPI", 1, true)
+    and src_of("static/plugin-ui/opsapi-ui.css"):find("--ops-primary", 1, true)
+    and src_of("Dockerfile"):find("\nCOPY static /app/static\n", 1, true))
+local safe = ProjectLoader.safeUiPath
+check("ui paths: nested files allowed", safe("assets/app.js") == "assets/app.js")
+check("ui paths: traversal, hidden, absolute and odd characters refused",
+    not safe("../project.lua") and not safe("a/../../x") and not safe(".env") and not safe("a/.git/x")
+    and not safe("/etc/passwd") and not safe("a//b") and not safe("a b.html") and not safe("a%2e%2e") and not safe(""))
+
 os.execute("rm -rf " .. tmp)
 
 print(failures == 0 and "\nall passed" or ("\n" .. failures .. " failure(s)"))

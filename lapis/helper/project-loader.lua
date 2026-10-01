@@ -7,6 +7,10 @@
     <plugin>/project.lua        manifest: code, name, version, sdk_version, modules
     <plugin>/api/*.lua          route files: `return function(app) ... end`
     <plugin>/migrations/*.lua   run by helper.project-migrator on `lapis migrate`
+    <plugin>/events/*.lua       event handlers (helper.plugin-events)
+    <plugin>/ui/                custom dashboard pages (manifest `pages`), served
+                                at /plugin-ui/<code>/... and shown in a sandboxed
+                                frame by the dashboard
 
   app.lua calls init() + loadRoutes() after every core route is registered.
   A plugin's routes are mounted under its api_prefix (/api/v2/<code-with-
@@ -63,6 +67,17 @@ function ProjectLoader.listDir(path)
     end
     table.sort(out)
     return out
+end
+
+--- A file path under a plugin's ui/ folder, relative to it, or nil when it
+-- could escape the folder (.., absolute, hidden files, odd characters).
+function ProjectLoader.safeUiPath(rel)
+    if type(rel) ~= "string" or rel == "" or #rel > 200 or not rel:match("^[%w_%-%./]+$") then return nil end
+    for segment in rel:gmatch("[^/]+") do
+        if segment:sub(1, 1) == "." then return nil end -- "..", ".env", ".git"
+    end
+    if rel:sub(1, 1) == "/" or rel:find("//", 1, true) or rel:sub(-1) == "/" then return nil end
+    return rel
 end
 
 local function is_file(path)
@@ -142,13 +157,55 @@ function ProjectLoader.loadManifest(manifest_path, project_path)
         declared[m.machine_name] = true
     end
 
+    -- Custom dashboard pages: HTML (any framework) under ui/, shown by the
+    -- dashboard in a sandboxed frame at /dashboard/plugins/<plugin>/<key>;
+    -- they reach the API through the frame bridge (PLUGINS.md §6.2).
+    --   { key = "overview", label = "Overview", entry = "ui/overview.html",
+    --     module = "helpdesk_tickets",    -- needs <module>.read to open it
+    --     api = { "/api/v2/customers" } } -- other APIs it may call (its own always)
+    local pages = {}
+    for _, pg in ipairs(manifest.pages or {}) do
+        if type(pg) ~= "table" or type(pg.key) ~= "string" or not pg.key:match("^[a-z][a-z0-9_%-]*$")
+            or type(pg.label) ~= "string" then
+            return nil, manifest_path .. ": every pages entry needs a key (lowercase, - or _) and a label"
+        end
+        if pages[pg.key] then
+            return nil, manifest_path .. ": page key '" .. pg.key .. "' is used twice"
+        end
+        if not ProjectLoader.safeUiPath(type(pg.entry) == "string" and pg.entry:match("^ui/(.+)$") or nil)
+            or not pg.entry:match("%.html?$") then
+            return nil, manifest_path .. ": page '" .. pg.key .. "' needs entry = \"ui/<file>.html\""
+        end
+        if not declared[pg.module] then
+            return nil, manifest_path .. ": page '" .. pg.key .. "' needs module = one of the plugin's modules"
+        end
+        local api = {}
+        for _, prefix in ipairs(pg.api or {}) do
+            if type(prefix) ~= "string" or not prefix:match("^/api/[%w_%-/]*[%w_%-]$") then
+                return nil, manifest_path .. ": page '" .. pg.key .. "': api entries look like \"/api/v2/customers\""
+            end
+            api[#api + 1] = prefix
+        end
+        pages[pg.key] = {
+            key = pg.key, label = pg.label, entry = pg.entry, module = pg.module, api = api,
+            description = type(pg.description) == "string" and pg.description or nil,
+        }
+    end
+    manifest.pages = pages
+
     -- Dashboard sidebar entries, each opening the generated page of one
-    -- sdk.crud resource (/dashboard/plugins/<plugin>/<resource>).
+    -- sdk.crud resource or one custom page (/dashboard/plugins/<plugin>/<key>).
     manifest.menu = manifest.menu or {}
     for _, e in ipairs(manifest.menu) do
-        if type(e) ~= "table" or type(e.label) ~= "string"
-            or type(e.resource) ~= "string" or not e.resource:match("^[%w_%-]+$") then
-            return nil, manifest_path .. ": every menu entry needs a label and a resource (the sdk.crud path without /)"
+        local target = type(e) == "table" and (e.page or e.resource)
+        if type(e) ~= "table" or type(e.label) ~= "string" or (e.page and e.resource)
+            or type(target) ~= "string" or not target:match("^[%w_%-]+$") then
+            return nil, manifest_path .. ": every menu entry needs a label and either a resource "
+                .. "(the sdk.crud path without /) or a page (a pages key)"
+        end
+        if e.page and not pages[e.page] then
+            return nil, manifest_path .. ": menu entry '" .. e.label .. "' links to page '" .. e.page
+                .. "', which isn't in pages"
         end
         if not declared[e.module] then
             return nil, manifest_path .. ": menu entry '" .. e.label .. "' needs module = one of the plugin's modules"
@@ -326,9 +383,17 @@ function ProjectLoader.loadRoutes(app, manifest)
     end
 
     for _, e in ipairs(manifest.menu) do
-        if not manifest.resources[e.resource] then
+        if e.resource and not manifest.resources[e.resource] then
             log_err("[Plugin:", manifest.code, "] menu entry '", e.label, "' links to resource '", e.resource,
                 "', but no sdk.crud registers it — the page will say it isn't available")
+        end
+    end
+    for key, pg in pairs(manifest.pages) do
+        if manifest.resources[key] then
+            table.insert(manifest.errors, "page '" .. key .. "' has the same key as an sdk.crud resource")
+        end
+        if not is_file(manifest.path .. "/" .. pg.entry) then
+            log_err("[Plugin:", manifest.code, "] page '", key, "': ", pg.entry, " doesn't exist")
         end
     end
 

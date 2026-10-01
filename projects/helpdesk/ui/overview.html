@@ -1,0 +1,189 @@
+<!doctype html>
+<!--
+  Helpdesk overview — a custom dashboard page (manifest `pages`, PLUGINS.md §6.2).
+  Plain HTML + JS, no build step. Any framework works the same way: load the
+  bridge, call OpsAPI.connect(), use ops.api for data.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helpdesk overview</title>
+  <link rel="stylesheet" href="/plugin-ui/_sdk/opsapi-ui.css">
+  <style>
+    .priority { font-variant-numeric: tabular-nums; }
+    .title-link { font: inherit; font-weight: 600; color: var(--ops-text); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+    .title-link:hover { color: var(--ops-primary); }
+    .detail-desc { white-space: pre-wrap; color: var(--ops-text-2); }
+    .new-ticket { display: grid; gap: 0.75rem; grid-template-columns: 1fr 9rem auto; align-items: end; }
+    @media (max-width: 640px) { .new-ticket { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="ops-page">
+    <div id="error" class="ops-alert ops-alert-error" role="alert" hidden></div>
+
+    <section class="ops-grid" aria-label="Tickets by status" id="stats">
+      <div class="ops-card ops-stat"><span class="ops-skeleton" style="height:3.25rem"></span></div>
+      <div class="ops-card ops-stat"><span class="ops-skeleton" style="height:3.25rem"></span></div>
+      <div class="ops-card ops-stat"><span class="ops-skeleton" style="height:3.25rem"></span></div>
+    </section>
+
+    <section class="ops-card" id="detail" hidden aria-live="polite"></section>
+
+    <section class="ops-card" id="create" hidden>
+      <h2>New ticket</h2>
+      <form class="new-ticket" id="create-form">
+        <div class="ops-field">
+          <label class="ops-label" for="new-title">Title</label>
+          <input class="ops-input" id="new-title" name="title" required maxlength="255" autocomplete="off">
+        </div>
+        <div class="ops-field">
+          <label class="ops-label" for="new-priority">Priority</label>
+          <select class="ops-select" id="new-priority" name="priority">
+            <option value="1">1 · low</option><option value="2">2</option><option value="3" selected>3</option>
+            <option value="4">4</option><option value="5">5 · urgent</option>
+          </select>
+        </div>
+        <button class="ops-btn ops-btn-primary" type="submit">Open ticket</button>
+      </form>
+    </section>
+
+    <section>
+      <div class="ops-row" style="margin-bottom:0.75rem">
+        <h2 style="margin:0">Needs attention</h2>
+        <span class="ops-muted" id="count"></span>
+        <span class="ops-spacer"></span>
+        <button class="ops-btn ops-btn-sm" type="button" id="all">All tickets</button>
+      </div>
+      <div class="ops-table-wrap">
+        <table class="ops-table">
+          <thead><tr><th>Ticket</th><th>Priority</th><th>Requester</th><th>Due</th><th><span hidden>Actions</span></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5"><div class="ops-skeleton" style="height:6rem"></div></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/plugin-ui/_sdk/opsapi-ui.js"></script>
+  <script>
+    (async function () {
+      const $ = (id) => document.getElementById(id);
+      const el = (tag, props, ...children) => {
+        const node = Object.assign(document.createElement(tag), props || {});
+        node.append(...children.filter((c) => c !== null && c !== undefined && c !== false));
+        return node;
+      };
+      const showError = (err) => {
+        $('error').textContent = err && err.message ? err.message : String(err);
+        $('error').hidden = false;
+      };
+
+      let ops;
+      try {
+        ops = await OpsAPI.connect();
+      } catch (err) {
+        return showError(err);
+      }
+
+      $('all').addEventListener('click', () => ops.navigate('/dashboard/plugins/helpdesk/tickets'));
+
+      async function loadStats() {
+        const { data } = await ops.api.get('/stats');
+        const counts = Object.fromEntries(data.map((r) => [r.status, r.count]));
+        $('stats').replaceChildren(...['open', 'pending', 'closed'].map((status) =>
+          el('div', { className: 'ops-card ops-stat' },
+            el('span', { className: 'ops-stat-label', textContent: status }),
+            el('span', { className: 'ops-stat-value', textContent: String(counts[status] || 0) }))));
+      }
+
+      async function escalate(ticket) {
+        const ok = await ops.confirm({
+          title: 'Escalate ticket',
+          message: `Raise "${ticket.title}" to priority 5 and alert the team?`,
+          confirmLabel: 'Escalate',
+          danger: true,
+        });
+        if (!ok) return;
+        await ops.api.post(`/tickets/${ticket.uuid}/escalate`);
+        ops.toast('Ticket escalated');
+        await refresh();
+      }
+
+      async function loadRows() {
+        const { data, meta } = await ops.api.get('/tickets', { status: 'open', sort: 'priority', order: 'desc', per_page: 10 });
+        $('count').textContent = meta.total ? `${meta.total} open` : '';
+        if (data.length === 0) {
+          $('rows').replaceChildren(el('tr', {}, el('td', { colSpan: 5, className: 'ops-empty', textContent: 'No open tickets. Nice work.' })));
+          return;
+        }
+        $('rows').replaceChildren(...data.map((t) => el('tr', {},
+          el('td', {}, el('button', { className: 'title-link', type: 'button', textContent: t.title,
+            onclick: () => { ops.setParams({ ticket: t.uuid }); showTicket(t.uuid).catch(showError); } })),
+          el('td', {}, el('span', {
+            className: 'ops-badge priority ' + (t.priority >= 4 ? 'ops-badge-error' : t.priority >= 3 ? 'ops-badge-warning' : ''),
+            textContent: t.priority ? `P${t.priority}` : '—' })),
+          el('td', { className: 'ops-muted', textContent: t.requester_email || '—' }),
+          el('td', { className: 'ops-muted', textContent: t.due_on || '—' }),
+          el('td', { style: 'text-align:right' }, ops.can('update') && t.priority !== 5 &&
+            el('button', { className: 'ops-btn ops-btn-sm', type: 'button', textContent: 'Escalate',
+              onclick: () => escalate(t).catch(showError) })))));
+      }
+
+      // Detail view, deep-linked through the dashboard URL (?ticket=<uuid>).
+      async function showTicket(uuid) {
+        if (!uuid) {
+          $('detail').hidden = true;
+          return;
+        }
+        const { data: t } = await ops.api.get(`/tickets/${uuid}`);
+        const close = ops.can('update') && t.status !== 'closed' && el('button', {
+          className: 'ops-btn ops-btn-primary ops-btn-sm', type: 'button', textContent: 'Close ticket',
+          onclick: async () => {
+            await ops.api.put(`/tickets/${uuid}`, { status: 'closed' }); // fires helpdesk.ticket.closed
+            ops.toast('Ticket closed');
+            await refresh();
+            await showTicket(uuid);
+          },
+        });
+        $('detail').replaceChildren(
+          el('div', { className: 'ops-row' },
+            el('h2', { style: 'margin:0', textContent: t.title }),
+            el('span', { className: 'ops-badge', textContent: t.status }),
+            el('span', { className: 'ops-spacer' }),
+            close,
+            el('button', { className: 'ops-btn ops-btn-ghost ops-btn-sm', type: 'button', textContent: 'Close',
+              onclick: () => { ops.setParams({}); showTicket(null); } })),
+          el('p', { className: 'detail-desc', textContent: t.description || 'No description.' }));
+        $('detail').hidden = false;
+      }
+
+      $('create').hidden = !ops.can('create');
+      $('create-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        try {
+          await ops.api.post('/tickets', { title: form.title.value, priority: Number(form.priority.value), status: 'open' });
+          form.reset();
+          ops.toast('Ticket opened');
+          await refresh();
+        } catch (err) {
+          ops.toast(err.message, 'error');
+        }
+      });
+
+      async function refresh() {
+        await Promise.all([loadStats(), loadRows()]);
+      }
+
+      ops.on('params', (params) => showTicket(params.ticket).catch(showError));
+      try {
+        await refresh();
+        await showTicket(ops.context.params.ticket);
+      } catch (err) {
+        showError(err);
+      }
+    })();
+  </script>
+</body>
+</html>

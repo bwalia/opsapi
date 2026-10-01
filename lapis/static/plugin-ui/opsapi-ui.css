@@ -1,0 +1,144 @@
+/*!
+ * OpsAPI page styles v1 — makes a plugin page look like the dashboard.
+ * The dashboard sends its live colours (tenant branding, light/dark) as the
+ * --ops-* variables below; use them in your own CSS too. Guide: PLUGINS.md §6.2.
+ */
+:root {
+  --ops-primary: #ff004e;
+  --ops-primary-hover: #e6003f;
+  --ops-primary-soft: #fff0f3;
+  --ops-on-primary: #ffffff;
+  --ops-surface: #ffffff;
+  --ops-surface-2: #f8fafc;
+  --ops-subtle: #f1f5f9;
+  --ops-border: #e2e8f0;
+  --ops-text: #0f172a;
+  --ops-text-2: #475569;
+  --ops-muted: #64748b;
+  --ops-success: #16a34a;
+  --ops-warning: #d97706;
+  --ops-error: #dc2626;
+  --ops-info: #2563eb;
+  --ops-radius: 0.75rem;
+  --ops-radius-sm: 0.5rem;
+  --ops-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --ops-font: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  --ops-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root.dark {
+  --ops-primary-soft: #2a0f1a;
+  --ops-surface: #131a2b;
+  --ops-surface-2: #1b2439;
+  --ops-subtle: #151d2f;
+  --ops-border: #243044;
+  --ops-text: #f8fafc;
+  --ops-text-2: #cbd5e1;
+  --ops-muted: #93a2b8;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: transparent; }
+body {
+  font-family: var(--ops-font);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ops-text);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { margin: 0 0 0.5rem; line-height: 1.25; color: var(--ops-text); }
+h1 { font-size: 1.5rem; font-weight: 700; }
+h2 { font-size: 1.125rem; font-weight: 600; }
+h3 { font-size: 0.9375rem; font-weight: 600; }
+p { margin: 0 0 0.75rem; }
+a { color: var(--ops-primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--ops-primary); outline-offset: 2px; }
+
+/* layout */
+.ops-page { display: flex; flex-direction: column; gap: 1.5rem; padding: 2px; }
+.ops-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.ops-spacer { flex: 1; }
+.ops-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+.ops-muted { color: var(--ops-muted); }
+.ops-mono { font-family: var(--ops-mono); font-size: 0.8125rem; }
+
+/* surfaces */
+.ops-card {
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius);
+  box-shadow: var(--ops-shadow);
+  padding: 1.25rem;
+}
+.ops-card > h2:first-child, .ops-card > h3:first-child { margin-bottom: 0.75rem; }
+.ops-stat { display: flex; flex-direction: column; gap: 0.25rem; }
+.ops-stat-label { font-size: 0.75rem; font-weight: 500; color: var(--ops-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.ops-stat-value { font-size: 1.75rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* buttons */
+.ops-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  min-height: 2.5rem; padding: 0.5rem 1rem;
+  font: inherit; font-weight: 600; line-height: 1;
+  color: var(--ops-text); background: var(--ops-surface);
+  border: 1px solid var(--ops-border); border-radius: var(--ops-radius-sm);
+  cursor: pointer; transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+.ops-btn:hover { background: var(--ops-subtle); }
+.ops-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ops-btn-primary { color: var(--ops-on-primary); background: var(--ops-primary); border-color: var(--ops-primary); }
+.ops-btn-primary:hover { background: var(--ops-primary-hover); border-color: var(--ops-primary-hover); }
+.ops-btn-danger { color: #fff; background: var(--ops-error); border-color: var(--ops-error); }
+.ops-btn-danger:hover { filter: brightness(0.92); background: var(--ops-error); }
+.ops-btn-ghost { background: transparent; border-color: transparent; }
+.ops-btn-sm { min-height: 2rem; padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+
+/* forms */
+.ops-field { display: flex; flex-direction: column; gap: 0.375rem; }
+.ops-label { font-size: 0.8125rem; font-weight: 500; color: var(--ops-text-2); }
+.ops-input, .ops-select, .ops-textarea {
+  width: 100%; min-height: 2.5rem; padding: 0.5rem 0.75rem;
+  font: inherit; font-size: 1rem; color: var(--ops-text);
+  background: var(--ops-surface); border: 1px solid var(--ops-border); border-radius: var(--ops-radius-sm);
+}
+@media (min-width: 640px) { .ops-input, .ops-select, .ops-textarea { font-size: 0.875rem; } }
+.ops-input:focus, .ops-select:focus, .ops-textarea:focus {
+  outline: none; border-color: var(--ops-primary); box-shadow: 0 0 0 3px var(--ops-primary-soft);
+}
+.ops-error-text { font-size: 0.8125rem; color: var(--ops-error); }
+
+/* tables */
+.ops-table-wrap { overflow-x: auto; border: 1px solid var(--ops-border); border-radius: var(--ops-radius); background: var(--ops-surface); }
+.ops-table { width: 100%; border-collapse: collapse; }
+.ops-table th {
+  text-align: left; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ops-muted); background: var(--ops-surface-2); padding: 0.75rem 1rem; border-bottom: 1px solid var(--ops-border);
+}
+.ops-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--ops-border); vertical-align: middle; }
+.ops-table tr:last-child td { border-bottom: 0; }
+.ops-table tbody tr:hover td { background: var(--ops-surface-2); }
+
+/* badges */
+.ops-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.125rem 0.5rem;
+  font-size: 0.75rem; font-weight: 600; line-height: 1.25rem; border-radius: 999px;
+  color: var(--ops-text-2); background: var(--ops-subtle);
+}
+.ops-badge-success { color: var(--ops-success); background: color-mix(in srgb, var(--ops-success) 12%, transparent); }
+.ops-badge-warning { color: var(--ops-warning); background: color-mix(in srgb, var(--ops-warning) 12%, transparent); }
+.ops-badge-error { color: var(--ops-error); background: color-mix(in srgb, var(--ops-error) 12%, transparent); }
+.ops-badge-info { color: var(--ops-info); background: color-mix(in srgb, var(--ops-info) 12%, transparent); }
+
+/* states */
+.ops-empty { padding: 2.5rem 1rem; text-align: center; color: var(--ops-muted); }
+.ops-alert { padding: 0.75rem 1rem; border-radius: var(--ops-radius-sm); border: 1px solid var(--ops-border); background: var(--ops-surface-2); }
+.ops-alert-error { color: var(--ops-error); border-color: color-mix(in srgb, var(--ops-error) 35%, transparent); background: color-mix(in srgb, var(--ops-error) 8%, transparent); }
+.ops-skeleton {
+  border-radius: var(--ops-radius-sm);
+  background: linear-gradient(90deg, var(--ops-subtle) 25%, var(--ops-surface-2) 50%, var(--ops-subtle) 75%);
+  background-size: 200% 100%; animation: ops-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes ops-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .ops-skeleton { animation: none; } * { transition: none !important; } }

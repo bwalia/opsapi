@@ -1,16 +1,17 @@
 'use client';
 
 /**
- * Plugin resource page — /dashboard/plugins/<plugin>/<resource>
+ * Plugin page — /dashboard/plugins/<plugin>/<key>
  *
- * One generic list + form page for every plugin resource declared with
- * `sdk.crud` (see PLUGINS.md). The backend describes the fields, columns,
- * filters and what the caller may do, so a newly installed plugin appears here
- * (via its sidebar entry) without rebuilding the dashboard. The API enforces
- * the namespace and permissions; this page only mirrors them.
+ * Either one generic list + form page for a plugin resource declared with
+ * `sdk.crud`, or a plugin's own custom page (manifest `pages`) in a sandboxed
+ * frame — see PLUGINS.md §6. The backend describes the screen and what the
+ * caller may do, so a newly installed plugin appears here (via its sidebar
+ * entry) without rebuilding the dashboard. The API enforces the namespace and
+ * permissions; this page only mirrors them.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { AlertTriangle, Pencil, Plus, Puzzle, Search, ShieldOff, Trash2 } from 'lucide-react';
@@ -18,11 +19,13 @@ import { Input, Table, Pagination, Card, Button, ConfirmDialog } from '@/compone
 import { PageHeader } from '@/components/layout/PageHeader';
 import { FilterSelect, apiError, apiStatus } from '@/components/field-service/shared';
 import { PluginRecordModal, renderValue, singular } from '@/components/plugins/PluginRecordModal';
+import { PluginPageFrame } from '@/components/plugins/PluginPageFrame';
 import {
   pluginService,
   type PluginField,
   type PluginRecord,
   type PluginResourceSchema,
+  type PluginScreen,
 } from '@/services/plugins.service';
 import type { TableColumn } from '@/types';
 
@@ -71,10 +74,91 @@ function Notice({
   );
 }
 
-function PluginResource({ plugin, resource }: { plugin: string; resource: string }) {
-  const [schema, setSchema] = useState<PluginResourceSchema | null>(null);
+/** Loads what /dashboard/plugins/<plugin>/<key> shows, then renders it. */
+function PluginScreenLoader({ plugin, resource }: { plugin: string; resource: string }) {
+  const [screen, setScreen] = useState<PluginScreen | null>(null);
   const [state, setState] = useState<LoadState>('loading');
   const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    pluginService
+      .getResource(plugin, resource)
+      .then((s) => {
+        setScreen(s);
+        setState('ready');
+      })
+      .catch((err) => {
+        const status = apiStatus(err);
+        setState(status === 403 ? 'forbidden' : status === 404 ? 'missing' : 'error');
+      });
+  }, [plugin, resource, reload]);
+
+  if (state === 'loading') {
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <div className="h-12 w-64 rounded-lg bg-secondary-100 animate-pulse" />
+        <div className="h-16 rounded-xl bg-secondary-100 animate-pulse" />
+        <div className="h-72 rounded-xl bg-secondary-100 animate-pulse" />
+      </div>
+    );
+  }
+  if (state === 'forbidden') {
+    return (
+      <Notice
+        icon={<ShieldOff className="w-6 h-6" />}
+        title="You don't have access to this page"
+        message="Ask a workspace admin to grant your role read access to it in role settings."
+      />
+    );
+  }
+  if (state === 'error') {
+    return (
+      <Notice
+        icon={<AlertTriangle className="w-6 h-6" />}
+        title="Couldn't load this page"
+        message="The server didn't respond as expected. Check your connection and try again."
+        action={
+          <Button
+            variant="outline"
+            onClick={() => {
+              setState('loading');
+              setReload((n) => n + 1);
+            }}
+          >
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+  if (state === 'missing' || !screen) {
+    return (
+      <Notice
+        icon={<Puzzle className="w-6 h-6" />}
+        title="This page isn't available"
+        message="The plugin that provides it isn't installed on this server, or no longer offers this page."
+      />
+    );
+  }
+
+  if (screen.kind === 'page') {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={screen.label}
+          description={screen.description || screen.plugin.name}
+          icon={<Puzzle className="w-5 h-5" />}
+        />
+        <Suspense fallback={null}>
+          <PluginPageFrame schema={screen} />
+        </Suspense>
+      </div>
+    );
+  }
+  return <PluginResource schema={screen} />;
+}
+
+function PluginResource({ schema }: { schema: PluginResourceSchema }) {
   const [rows, setRows] = useState<PluginRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,19 +176,6 @@ function PluginResource({ plugin, resource }: { plugin: string; resource: string
   const fetchIdRef = useRef(0);
 
   useEffect(() => {
-    pluginService
-      .getResource(plugin, resource)
-      .then((s) => {
-        setSchema(s);
-        setState('ready');
-      })
-      .catch((err) => {
-        const status = apiStatus(err);
-        setState(status === 403 ? 'forbidden' : status === 404 ? 'missing' : 'error');
-      });
-  }, [plugin, resource, reload]);
-
-  useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(searchQuery.trim());
       setCurrentPage(1);
@@ -113,7 +184,6 @@ function PluginResource({ plugin, resource }: { plugin: string; resource: string
   }, [searchQuery]);
 
   const fetchRows = useCallback(async () => {
-    if (!schema) return;
     const id = ++fetchIdRef.current;
     setIsLoading(true);
     try {
@@ -142,7 +212,7 @@ function PluginResource({ plugin, resource }: { plugin: string; resource: string
   }, [fetchRows]);
 
   const remove = async () => {
-    if (!schema || !deleteTarget) return;
+    if (!deleteTarget) return;
     setDeleting(true);
     try {
       await pluginService.remove(schema, deleteTarget.uuid);
@@ -157,7 +227,6 @@ function PluginResource({ plugin, resource }: { plugin: string; resource: string
   };
 
   const columns = useMemo<TableColumn<PluginRecord>[]>(() => {
-    if (!schema) return [];
     const byName = new Map(schema.fields.map((f) => [f.name, f]));
     const cols: TableColumn<PluginRecord>[] = [];
     schema.columns.forEach((name, i) => {
@@ -223,54 +292,6 @@ function PluginResource({ plugin, resource }: { plugin: string; resource: string
     }
     return cols;
   }, [schema]);
-
-  if (state === 'loading') {
-    return (
-      <div className="space-y-6" aria-busy="true">
-        <div className="h-12 w-64 rounded-lg bg-secondary-100 animate-pulse" />
-        <div className="h-16 rounded-xl bg-secondary-100 animate-pulse" />
-        <div className="h-72 rounded-xl bg-secondary-100 animate-pulse" />
-      </div>
-    );
-  }
-  if (state === 'forbidden') {
-    return (
-      <Notice
-        icon={<ShieldOff className="w-6 h-6" />}
-        title="You don't have access to this page"
-        message="Ask a workspace admin to grant your role read access to it in role settings."
-      />
-    );
-  }
-  if (state === 'error') {
-    return (
-      <Notice
-        icon={<AlertTriangle className="w-6 h-6" />}
-        title="Couldn't load this page"
-        message="The server didn't respond as expected. Check your connection and try again."
-        action={
-          <Button
-            variant="outline"
-            onClick={() => {
-              setState('loading');
-              setReload((n) => n + 1);
-            }}
-          >
-            Try again
-          </Button>
-        }
-      />
-    );
-  }
-  if (state === 'missing' || !schema) {
-    return (
-      <Notice
-        icon={<Puzzle className="w-6 h-6" />}
-        title="This page isn't available"
-        message="The plugin that provides it isn't installed on this server, or no longer offers this page."
-      />
-    );
-  }
 
   const name = singular(schema.label).toLowerCase();
   const filtered = !!debouncedSearch || Object.values(filters).some(Boolean);
@@ -393,5 +414,5 @@ export default function PluginResourcePage() {
     resource: string;
   }>();
   // Keyed so navigating between plugin pages starts from a clean state.
-  return <PluginResource key={`${plugin}/${resource}`} plugin={plugin} resource={resource} />;
+  return <PluginScreenLoader key={`${plugin}/${resource}`} plugin={plugin} resource={resource} />;
 }

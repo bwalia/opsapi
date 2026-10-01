@@ -22,9 +22,18 @@ return {
         -- opsapi:publishes (make:resource adds entries above this line)
     },
 
+    -- Custom dashboard pages: our own HTML under ui/, shown in a sandboxed
+    -- frame; it calls this plugin's API through the page bridge (PLUGINS.md §6.2).
+    pages = {
+        { key = "overview", label = "Support overview", entry = "ui/overview.html", module = "helpdesk_tickets",
+          description = "Open tickets by priority, escalations and quick actions" },
+        -- opsapi:pages (make:page adds entries above this line)
+    },
+
     -- Dashboard sidebar: each entry opens a generated list/form page for an
-    -- sdk.crud resource. icon = a Lucide icon name (see PLUGINS.md).
+    -- sdk.crud resource, or a custom page. icon = a Lucide icon name (see PLUGINS.md).
     menu = {
+        { label = "Support overview", page = "overview", module = "helpdesk_tickets", icon = "LayoutDashboard" },
         { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },
         -- opsapi:menu (make:resource adds entries above this line)
     },

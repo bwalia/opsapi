@@ -104,6 +104,9 @@ COPY schema-updates.lua production-schema-upgrade.lua ecommerce-migrations.lua /
 #    already do. The `opsapi` CLI (bin/) scaffolds and checks them.
 COPY bin /app/bin
 ENV PATH="/app/bin:${PATH}"
+# The page bridge plugin pages load (/plugin-ui/_sdk/opsapi-ui.js + .css,
+# served by routes/plugins.lua; PLUGINS.md §6.2).
+COPY static /app/static
 
 # 9. Routes — the MOST volatile. Every feature change touches these.
 #    Isolated as the last content layer so day-to-day route edits

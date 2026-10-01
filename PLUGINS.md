@@ -53,6 +53,7 @@ The same mechanism powers real products built on OpsAPI (for example diy-tax-ret
   - A plugin can't replace a built-in route or use a built-in module's code or URL prefix.
   - A plugin's `before_filter` only runs for its own routes.
   - A plugin that fails to load takes the pod out of rotation (`/ready` → 503) instead of silently serving 404s.
+- Custom dashboard pages (§6.2) run in a sandboxed frame with no access to the dashboard's session, storage or DOM. They reach the API only through the dashboard, as the signed-in user, and only the plugin's own API plus the prefixes its manifest lists.
 
 ---
 
@@ -129,9 +130,16 @@ return {
         -- opsapi:modules (make:resource adds entries above this line)
     },
 
+    -- Custom dashboard pages: your own HTML under ui/ (§6.2).
+    pages = {
+        { key = "overview", label = "Support overview", entry = "ui/overview.html", module = "helpdesk_tickets" },
+        -- opsapi:pages (make:page adds entries above this line)
+    },
+
     -- Dashboard sidebar entries: each opens the generated page of an sdk.crud
-    -- resource (§6).
+    -- resource, or a custom page (§6).
     menu = {
+        { label = "Support overview", page = "overview", module = "helpdesk_tickets", icon = "LayoutDashboard" },
         { label = "Tickets", resource = "tickets", module = "helpdesk_tickets", icon = "LifeBuoy" },
         -- opsapi:menu (make:resource adds entries above this line)
     },
@@ -155,7 +163,8 @@ Rules enforced at load time:
 - `code` is lowercase letters, digits and `_`, and must not be a built-in module's code (`crm`, `hospital`, …).
 - `api_prefix` must be under `/api/` and must not already be used by OpsAPI or another plugin.
 - A plugin needing a newer `sdk_version` than the running OpsAPI is refused. Upgrade OpsAPI first.
-- Every `menu` entry needs a `label`, a `resource` and a `module` that is one of the plugin's `modules`.
+- Every `menu` entry needs a `label`, either a `resource` or a `page`, and a `module` that is one of the plugin's `modules`.
+- Every `pages` entry needs a unique `key`, a `label`, an `entry` under `ui/` ending in `.html`, and a `module`. Its optional `api` lists must start with `/api/`.
 - `publishes` names are lowercase. Each verb has a condition `{ column = value }` or `{ column = { value, value } }`, and can't be called `created`, `updated` or `deleted`.
 
 ---
@@ -285,6 +294,13 @@ return sdk.error(409, "Ticket already closed")
 
 ## 6. Dashboard pages
 
+Plugins add pages to the admin dashboard in two ways, and neither needs a dashboard rebuild:
+
+- **Generated pages (§6.1).** A full list/form page for any `sdk.crud` resource, from its definition. No frontend code.
+- **Custom pages (§6.2).** Your own HTML (plain JS, React, Vue, Svelte…) for anything else: dashboards, charts, workflows, wizards.
+
+### 6.1 Generated pages
+
 Every `sdk.crud` resource can have a page in the admin dashboard: a searchable, sortable, filterable table with create, edit and delete forms. The dashboard builds the page at runtime from the resource's definition, so installing or changing a plugin needs **no dashboard rebuild**.
 
 To show a page, list it in the manifest's `menu` (`make:resource` does this) and run `opsapi migrate`:
@@ -328,9 +344,72 @@ How the page behaves:
 - **Buttons follow permissions.** New, Edit and Delete only appear when the user holds `<module>.create` / `.update` / `.delete` and the action isn't excluded with `only`. Without update rights, clicking a row opens a read-only view.
 - Users without `<module>.read` see an access notice and no sidebar item. If the plugin is removed from the deployment, its sidebar items disappear.
 
-The API stays the security boundary; the page only mirrors what the server allows. Custom screens (charts, workflows, hand-written routes like `/stats`) aren't generated: build those in your own frontend against the plugin's API.
+The API stays the security boundary; the page only mirrors what the server allows. For charts, workflows or hand-written routes like `/stats`, write a custom page (§6.2).
 
-`opsapi migrate` upserts the menu entries (key `plugin:<code>:<resource>`) and hides entries removed from the manifest. Per-namespace menu customisations are kept.
+`opsapi migrate` upserts the menu entries (key `plugin:<code>:<resource or page>`) and hides entries removed from the manifest. Per-namespace menu customisations are kept.
+
+### 6.2 Custom pages
+
+A custom page is an HTML file in your plugin's `ui/` folder. The dashboard shows it inside its own layout, under the plugin's sidebar entry, and it looks native: the dashboard's colours, tenant branding included, are applied to it. [`projects/helpdesk/ui/overview.html`](projects/helpdesk/ui/overview.html) is a complete example: stats, a prioritised list, escalation with a confirm dialog, a create form and a deep-linked detail view.
+
+```bash
+opsapi make:page helpdesk overview "Support overview"   # ui/overview.html + pages + menu entries
+opsapi migrate                                          # adds the sidebar item
+```
+
+```lua
+-- project.lua
+pages = {
+    { key = "overview", label = "Support overview", entry = "ui/overview.html",
+      module = "helpdesk_tickets",            -- users need helpdesk_tickets.read to open it
+      description = "Open tickets by priority", -- optional: subtitle under the page title
+      api = { "/api/v2/customers" } },        -- optional: other APIs the page may call
+},
+menu = {
+    { label = "Support overview", page = "overview", module = "helpdesk_tickets", icon = "LayoutDashboard" },
+},
+```
+
+The page itself:
+
+```html
+<link rel="stylesheet" href="/plugin-ui/_sdk/opsapi-ui.css">   <!-- dashboard look: cards, tables, buttons, forms -->
+<script src="/plugin-ui/_sdk/opsapi-ui.js"></script>             <!-- the page bridge -->
+<script>
+  OpsAPI.connect().then(async (ops) => {
+    const { data, meta } = await ops.api.get('/tickets', { status: 'open', per_page: 10 });  // this plugin's API
+    if (ops.can('create')) { /* show the form */ }
+    ...
+  });
+</script>
+```
+
+**The bridge (`ops`).** Your page gets no token and never talks to the API directly. Every call goes through the dashboard, which adds the user's session and the current workspace.
+
+| | |
+|---|---|
+| `ops.api.get(path, query)`, `.post(path, body)`, `.put`, `.patch`, `.delete(path)` | Resolves with the JSON body (`{ success, data, meta }`). Rejects with an `OpsAPIError` that has `status`, `message` and `body`. Relative paths (`/tickets`) are this plugin's API; absolute ones (`/api/v2/customers/…`) must be listed in the page's `api`. |
+| `ops.context` | `{ plugin, page, user: { uuid, email, name }, namespace: { uuid, name, slug }, params, theme, can, permissions, isAdmin }` |
+| `ops.can(action)`, `ops.can(module, action)` | Whether the user may do it: for the page's module as the API decided, otherwise from the user's role. Use it to hide buttons; the API still enforces everything. |
+| `ops.navigate('/dashboard/…')` | Open another dashboard page. |
+| `ops.toast(message, 'success' \| 'error' \| 'info')` | A dashboard notification. |
+| `ops.confirm({ title, message, confirmLabel, danger })` | The dashboard's confirm dialog. Resolves `true` or `false`. |
+| `ops.setParams({ ticket: id })`, `ops.on('params', fn)` | Keep page state in the dashboard URL, so links can be shared and the back button works. `ops.context.params` has the values the page opened with. |
+| `ops.on('theme', fn)` | The user switched light/dark or the branding changed. `opsapi-ui.css` follows by itself. |
+
+**Height.** The frame grows and shrinks with your content, so the dashboard scrolls, not the frame. Don't set `height: 100%` on `html` or `body`.
+
+**Styling.** `opsapi-ui.css` provides `ops-page`, `ops-grid`, `ops-card`, `ops-stat`, `ops-btn` (`-primary`, `-danger`, `-ghost`, `-sm`), `ops-input`/`ops-select`/`ops-textarea` with `ops-label`, `ops-table` inside `ops-table-wrap`, `ops-badge` (`-success`, `-warning`, `-error`, `-info`), `ops-alert`, `ops-empty`, `ops-skeleton` and `ops-muted`. Use the `--ops-*` colour variables in your own CSS (`var(--ops-primary)`, `var(--ops-border)`, …) and it follows the tenant's branding and dark mode too.
+
+**Frameworks and build tools.** Any static output works. Put the build in `ui/` and point `entry` at its HTML. Build with relative asset URLs; for Vite that's `base: './'`. Files are served from `/plugin-ui/<code>/…` with an ETag, so a redeployed page shows at once without stale caches. Only web asset types are served (html, js, css, json, images, fonts, source maps), never anything outside `ui/` or starting with a dot.
+
+**Security.**
+
+- **The frame is sandboxed without same-origin access.** Your page can't read the dashboard's session, storage or DOM.
+- **The bridge only answers its own frame.** Each page load gets a random token. A document the frame navigates to never learns it, so it can't use the bridge.
+- **API calls are limited** to your plugin's API prefix plus the page's `api` list. Encoded or `..` paths are refused.
+- **Requests run as the signed-in user.** The API's RBAC and tenant scoping apply exactly as they do for the dashboard.
+- **`ui/` files are public static assets**, like any web app's bundles. Never put secrets in them; keep secrets server-side and read them with `sdk.env`.
 
 ---
 
@@ -581,6 +660,7 @@ Resource methods (the first argument is always the caller's namespace id):
 | `opsapi plugin:new <name>` | Scaffold `<dir>/<name>/`. |
 | `opsapi make:resource <plugin> <resource> <field:type[:required]>...` | Migration, CRUD API, RBAC module, dashboard page and published events (§4, §6, §7). |
 | `opsapi make:listener <plugin> <event> [file]` | `events/<file>.lua` with a handler for `<event>` (§7). |
+| `opsapi make:page <plugin> <page> [label]` | `ui/<page>.html`, a working custom page, plus its `pages` and sidebar entries (§6.2). |
 | `opsapi events` | List the events you can subscribe to: core tables and every plugin's `publishes`. |
 | `opsapi plugin:check` | Validate every manifest, events file and the Lua syntax of every file. Exit 1 on problems; warns about events nothing publishes. Use it in CI. |
 | `opsapi migrate` | `lapis migrate`: core, then plugins. |
@@ -593,6 +673,6 @@ Plugins directory: `--dir <path>`, else `$OPSAPI_PROJECTS_DIR`, else `/app/proje
 ## 15. Limits and roadmap
 
 - **Code is cached per worker** (`lua_code_cache on`). Development reloads on save (`OPSAPI_DEV_RELOAD=true`). Elsewhere, run `opsapi reload` or roll the deployment. Deleting a file isn't noticed by hot reload; run `opsapi reload`.
-- **Dashboard pages are generic.** Plugins get list/form pages for their `sdk.crud` resources (§6), not custom screens. Build anything else in your own frontend against the plugin's API.
+- **Custom pages are static.** A page is HTML/JS served from `ui/` and talks to your API through the bridge; there's no server-side rendering of plugin pages.
 - **Event payloads are database rows**, not the API's JSON shape. Business events cover status changes (`invoice.paid`); anything subtler can still be derived from `invoice.updated` and its `changes`.
 - Built-in modules (in `lapis/routes`) follow the same layering. See `CLAUDE.md` if you're contributing to OpsAPI itself rather than extending it.
