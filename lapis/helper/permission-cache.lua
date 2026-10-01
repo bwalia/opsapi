@@ -133,10 +133,12 @@ end
 -- @param role_id number Namespace role id
 function PermissionCache.invalidateRole(role_id)
     if role_id == nil then return end
-    local db = require("lapis.db")
-    local ok_rows, rows = pcall(db.query,
-        "SELECT namespace_member_id FROM namespace_user_roles WHERE namespace_role_id = ?",
-        role_id)
+    -- Never throws (callers invalidate after their write committed): the
+    -- database module itself is loaded under the guard too.
+    local ok_rows, rows = pcall(function()
+        return require("lapis.db").query(
+            "SELECT namespace_member_id FROM namespace_user_roles WHERE namespace_role_id = ?", role_id)
+    end)
     if not ok_rows or not rows or #rows == 0 then return end
 
     local red = connect()
