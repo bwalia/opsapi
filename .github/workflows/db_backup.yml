@@ -107,8 +107,7 @@ jobs:
           # managed by the operator), so it can't be port-forwarded, and the
           # ClusterIP isn't routable from this off-cluster runner. So the dump
           # runs INSIDE the master pod (below) — found via the Zalando spilo
-          # labels, which follow failover. Its pg_dump matches the server
-          # version, so no pg client is needed on the runner.
+          # labels, which follow failover, so no pg client is needed on the runner.
           POD="$(kubectl -n "$NS" get pod \
             -l "application=spilo,cluster-name=$PG_SERVICE,spilo-role=master" \
             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
@@ -135,18 +134,25 @@ jobs:
           TS="$(date -u +'%Y-%m-%d_%H-%M-%S')"
           BACKUP_FILE="opsapi_${TARGET_ENV}_${TS}.dump"
 
-          # Dump inside the master pod (server-version pg_dump), custom format
-          # (-Fc: compressed, restorable with pg_restore), streamed to the runner
-          # over the exec channel. Retry transient kubelet 502s (flaky on this
-          # cluster); a real pg_dump error is printed and fails the step.
+          # Dump inside the master pod, custom format (-Fc: compressed,
+          # restorable with pg_restore), streamed to the runner over the exec
+          # channel. With the SERVER's major version of pg_dump: the Spilo image
+          # puts its newest tools (17) on PATH but the cluster runs 15, and a
+          # pg_dump 17 archive (format 1.16) can't be read by pg_restore 15 while
+          # pg_restore 17 fails against a 15 server (transaction_timeout).
+          # Retry transient apiserver -> kubelet errors (flaky on this cluster);
+          # a real pg_dump error is printed and fails the step.
+          SERVER_PG_DUMP='b="/usr/lib/postgresql/$(( $(psql -U "$1" -d "$2" -Atc "show server_version_num") / 10000 ))/bin"
+          [ -x "$b/pg_dump" ] || b="$(dirname "$(command -v pg_dump)")"
+          exec "$b/pg_dump" -U "$1" -d "$2" -Fc'
           ok=""
           for attempt in 1 2 3 4 5; do
             if kubectl -n "$TARGET_ENV" exec "$DB_POD" -c postgres -- \
-                 pg_dump -U "$PGUSER" -d "$PGDATABASE" -Fc > "$BACKUP_FILE" 2>/tmp/dumperr.log; then
+                 sh -c "$SERVER_PG_DUMP" sh "$PGUSER" "$PGDATABASE" > "$BACKUP_FILE" 2>/tmp/dumperr.log; then
               ok=1; break
             fi
-            if grep -q '502 Bad Gateway' /tmp/dumperr.log; then
-              echo "exec attempt $attempt hit a transient 502, retrying..."; sleep 5; continue
+            if grep -qE '502 Bad Gateway|error dialing backend|close 1006|unexpected EOF' /tmp/dumperr.log; then
+              echo "exec attempt $attempt hit a transient tunnel error, retrying..."; sleep $((attempt * 10)); continue
             fi
             break
           done
