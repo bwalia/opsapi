@@ -107,8 +107,7 @@ jobs:
           # managed by the operator), so it can't be port-forwarded, and the
           # ClusterIP isn't routable from this off-cluster runner. So the dump
           # runs INSIDE the master pod (below) — found via the Zalando spilo
-          # labels, which follow failover. Its pg_dump matches the server
-          # version, so no pg client is needed on the runner.
+          # labels, which follow failover, so no pg client is needed on the runner.
           POD="$(kubectl -n "$NS" get pod \
             -l "application=spilo,cluster-name=$PG_SERVICE,spilo-role=master" \
             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
@@ -135,18 +134,25 @@ jobs:
           TS="$(date -u +'%Y-%m-%d_%H-%M-%S')"
           BACKUP_FILE="opsapi_${TARGET_ENV}_${TS}.dump"
 
-          # Dump inside the master pod (server-version pg_dump), custom format
-          # (-Fc: compressed, restorable with pg_restore), streamed to the runner
-          # over the exec channel. Retry transient kubelet 502s (flaky on this
-          # cluster); a real pg_dump error is printed and fails the step.
+          # Dump inside the master pod, custom format (-Fc: compressed,
+          # restorable with pg_restore), streamed to the runner over the exec
+          # channel. With the SERVER's major version of pg_dump: the Spilo image
+          # puts its newest tools (17) on PATH but the cluster runs 15, and a
+          # pg_dump 17 archive (format 1.16) can't be read by pg_restore 15 while
+          # pg_restore 17 fails against a 15 server (transaction_timeout).
+          # Retry transient apiserver -> kubelet errors (flaky on this cluster);
+          # a real pg_dump error is printed and fails the step.
+          SERVER_PG_DUMP='b="/usr/lib/postgresql/$(( $(psql -U "$1" -d "$2" -Atc "show server_version_num") / 10000 ))/bin"
+          [ -x "$b/pg_dump" ] || b="$(dirname "$(command -v pg_dump)")"
+          exec "$b/pg_dump" -U "$1" -d "$2" -Fc'
           ok=""
           for attempt in 1 2 3 4 5; do
             if kubectl -n "$TARGET_ENV" exec "$DB_POD" -c postgres -- \
-                 pg_dump -U "$PGUSER" -d "$PGDATABASE" -Fc > "$BACKUP_FILE" 2>/tmp/dumperr.log; then
+                 sh -c "$SERVER_PG_DUMP" sh "$PGUSER" "$PGDATABASE" > "$BACKUP_FILE" 2>/tmp/dumperr.log; then
               ok=1; break
             fi
-            if grep -q '502 Bad Gateway' /tmp/dumperr.log; then
-              echo "exec attempt $attempt hit a transient 502, retrying..."; sleep 5; continue
+            if grep -qE '502 Bad Gateway|error dialing backend|close 1006|unexpected EOF' /tmp/dumperr.log; then
+              echo "exec attempt $attempt hit a transient tunnel error, retrying..."; sleep $((attempt * 10)); continue
             fi
             break
           done
@@ -202,17 +208,34 @@ jobs:
           [ -n "$MC_USER" ] && [ -n "$MC_PASS" ] || { echo "::error::Could not read MinIO creds."; exit 1; }
           echo "::add-mask::$MC_PASS"
 
-          kubectl -n "$NS" port-forward "svc/diytaxreturn-minio" 9000:9000 >/tmp/mpf.log 2>&1 &
-          MPF_PID=$!
+          # The tunnel rides the same flaky apiserver -> kubelet hop: if it never
+          # comes up (or drops mid-upload), tear it down and retry the whole
+          # upload. One local port per env, so acc and prod jobs sharing a
+          # runner don't collide.
+          LPORT=$([ "$NS" = prod ] && echo 19101 || echo 19100)
+          MPF_PID=""
           trap 'kill "$MPF_PID" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 30); do
-            (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null && { exec 3>&-; break; }
-            sleep 1
+          upload() {
+            kubectl -n "$NS" port-forward "svc/diytaxreturn-minio" "$LPORT:9000" >/tmp/mpf.log 2>&1 &
+            MPF_PID=$!
+            local up=""
+            for _ in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:$LPORT/minio/health/live" >/dev/null 2>&1; then up=1; break; fi
+              sleep 1
+            done
+            [ -n "$up" ] || { echo "port-forward did not come up: $(tail -1 /tmp/mpf.log)"; return 1; }
+            mc alias set backup "http://127.0.0.1:$LPORT" "$MC_USER" "$MC_PASS" >/dev/null &&
+              mc mb --ignore-existing "backup/$BUCKET" >/dev/null &&
+              mc cp "$BACKUP_FILE" "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE" &&
+              mc stat "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE" >/dev/null
+          }
+          done=""
+          for attempt in 1 2 3 4 5; do
+            if upload; then done=1; break; fi
+            kill "$MPF_PID" 2>/dev/null || true; wait "$MPF_PID" 2>/dev/null || true
+            echo "upload attempt $attempt failed, retrying in $((attempt * 10))s..."; sleep $((attempt * 10))
           done
-
-          mc alias set backup "http://127.0.0.1:9000" "$MC_USER" "$MC_PASS"
-          mc mb --ignore-existing "backup/$BUCKET"
-          mc cp "$BACKUP_FILE" "backup/$BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE"
+          [ -n "$done" ] || { echo "::error::Upload to $NS MinIO failed after 5 attempts."; exit 1; }
           echo "Uploaded to $BUCKET/postgres/${TARGET_ENV}/$BACKUP_FILE (in-cluster $NS MinIO)"
 
       - name: Cleanup
