@@ -10,6 +10,7 @@
       GET    /api/chat/agent/conversation  latest conversation + run status
       POST   /api/chat/agent               {message} -> 202, starts a run
       DELETE /api/chat/agent/conversation  "New chat" (archives the old one)
+      GET    /api/chat/agent/status        the model and how it's answering (footer)
 
     Each run: tool-calling loop (lib/agent/ollama-agent) against the workspace
     Ollama model, executing opsapi actions (lib/agent/tools) WITH the user's
@@ -236,6 +237,12 @@ return function(app)
         if not user or not user.uuid then return nil end
         return user
     end
+
+    -- The model behind the agent and how it's answering (dashboard footer).
+    -- Any signed-in user; no workspace needed.
+    app:get("/api/chat/agent/status", AuthMiddleware.requireAuth(function()
+        return { status = 200, json = { success = true, data = Agent.status() } }
+    end))
 
     app:get(
         "/api/chat/agent/conversation",

@@ -12,6 +12,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import apiClient from '@/lib/api-client';
 import { formatRelativeTime } from '@/lib/utils';
 
 const VERSION = process.env.NEXT_PUBLIC_BUILD_VERSION || 'dev';
@@ -36,6 +37,82 @@ function envBadge(): { label: string; cls: string } {
   if (h.startsWith('acc-')) return { label: 'ACC', cls: 'bg-amber-100 text-amber-700' };
   if (h.startsWith('test-')) return { label: 'TEST', cls: 'bg-purple-100 text-purple-700' };
   return { label: 'PROD', cls: 'bg-green-100 text-green-700' };
+}
+
+interface AiStatus {
+  model: string;
+  status: 'ok' | 'slow' | 'down' | 'checking' | 'off';
+  latency_ms?: number;
+  reason?: string;
+  checked_at?: number;
+}
+
+const AI_DOT: Record<AiStatus['status'], string> = {
+  ok: 'bg-success-500',
+  slow: 'bg-amber-500',
+  down: 'bg-error-500',
+  checking: 'bg-secondary-300 animate-pulse',
+  off: 'bg-secondary-300',
+};
+
+function aiLabel(ai: AiStatus): string {
+  if (ai.status === 'ok' || ai.status === 'slow') {
+    const ms = ai.latency_ms ?? 0;
+    return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`;
+  }
+  return ai.status === 'checking' ? '…' : ai.status;
+}
+
+/**
+ * The model behind the chat assistant and how it's answering right now:
+ * green under 3s, amber when slower, red when down. The backend measures one
+ * real request a minute, shared by all users (lapis/lib/agent/ollama-agent).
+ * Hidden where the chat module isn't deployed.
+ */
+function AiStatusBadge() {
+  const [ai, setAi] = useState<AiStatus | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      if (document.visibilityState !== 'visible') return;
+      apiClient
+        .get('/api/chat/agent/status')
+        .then((res) => alive && setAi((res.data as { data: AiStatus }).data))
+        .catch(() => alive && setAi(null));
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    document.addEventListener('visibilitychange', load);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', load);
+    };
+  }, []);
+
+  if (!ai) return null;
+  const up = ai.status === 'ok' || ai.status === 'slow';
+  const detail = up ? `answered in ${ai.latency_ms} ms` : (ai.reason ?? ai.status);
+  const checked = ai.checked_at ? ` · checked ${formatRelativeTime(new Date(ai.checked_at * 1000))}` : '';
+
+  return (
+    <>
+      <span className="text-secondary-300" aria-hidden>|</span>
+      <span
+        className="inline-flex items-center gap-1.5"
+        title={`AI assistant model ${ai.model}: ${detail}${checked}`}
+        aria-label={`AI model ${ai.model}: ${ai.status === 'ok' ? 'healthy' : ai.status}, ${detail}`}
+      >
+        <span className={`h-2 w-2 rounded-full ${AI_DOT[ai.status]}`} aria-hidden />
+        <span className="text-secondary-400">AI</span>
+        <span className="font-mono text-secondary-700">{ai.model}</span>
+        <span className={ai.status === 'down' ? 'font-medium text-error-600' : 'font-mono text-secondary-500'}>
+          {aiLabel(ai)}
+        </span>
+      </span>
+    </>
+  );
 }
 
 export function BuildFooter() {
@@ -102,6 +179,8 @@ export function BuildFooter() {
             </span>
           </>
         )}
+
+        <AiStatusBadge />
 
         <span className="ml-auto hidden text-secondary-400 md:inline">
           © {new Date().getFullYear()} Workstation
