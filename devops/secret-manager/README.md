@@ -140,7 +140,10 @@ These will show a warning if missing but won't fail:
 
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 - `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_SHOP_WEBHOOK_SECRET` (Workstation shop webhook `whsec_…`; unset = shop payments disabled), `SHOP_BFF_KEY` (shop BFF `X-Shop-Key`, ≥32 chars, same value as the shop app's vault entry)
 - `NEXT_PUBLIC_API_URL`
+
+Non-secret shop config (`SHOP_ALLOWED_ORIGINS`, `SHOP_PUBLIC_URL`) is NOT stored here — it is set per env in `helm-charts/diytaxreturn-lapis/values-workstation-*.yaml` (`shop:` block).
 
 ## Output
 

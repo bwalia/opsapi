@@ -57,6 +57,17 @@ setup:
 # workstation.co.uk covers the opsapi admin UI. Additive; matches int.
 corsAllowedDomains: "workstation.co.uk,workstation.academy"
 
+# Workstation AI Shop (shop.workstation.co.uk, workstation-website/shop).
+# Plain config → SHOP_ALLOWED_ORIGINS / SHOP_PUBLIC_URL container env (see
+# templates/deployment.yaml). allowedOrigins gates /checkout success/cancel URLs.
+# Secrets are NOT here — add them to Vault secret/diytaxreturnuk/opsapi/test/config
+# (both optional; shop payments stay disabled until set):
+#   STRIPE_SHOP_WEBHOOK_SECRET  whsec_… for https://test-opsapi.workstation.co.uk/api/v2/public/shop/stripe/webhook
+#   SHOP_BFF_KEY                random ≥32-byte key; same value in workstation-shop/test/config
+shop:
+  allowedOrigins: "https://test-shop.workstation.co.uk,http://localhost:3200"
+  publicUrl: "https://test-shop.workstation.co.uk"
+
 autoscaling:
   enabled: false
   minReplicas: 1

@@ -147,3 +147,7 @@ export {
   type PhaseStatus,
   type VisitStatus,
 } from './field-service.service';
+
+// Workstation AI Shop (back office: catalogue, stock, orders, quotes, chats, knowledge)
+export { shopService } from './shop.service';
+export type { ShopOrderListParams, ShopQuoteListParams, ShopPageParams } from './shop.service';

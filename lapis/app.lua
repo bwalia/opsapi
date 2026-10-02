@@ -658,6 +658,14 @@ load_if("cms", "routes.cms-taxonomy")
 load_if("cms", "routes.cms-webhooks")
 
 -- ============================================
+-- SHOP (Workstation AI Shop: catalogue, pricing engine, carts, quotes,
+-- Stripe checkout + signed webhook, RAG search, back office)
+-- ============================================
+load_if("shop", "routes.shop-stripe-webhook")
+load_if("shop", "routes.shop-public")
+load_if("shop", "routes.shop-admin")
+
+-- ============================================
 -- PLUGINS (projects/<plugin>/ — see PLUGINS.md)
 -- Loaded after every core route: the loader refuses a plugin route that
 -- would replace an existing one, and /ready reports 503 while any plugin

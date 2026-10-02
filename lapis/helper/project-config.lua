@@ -42,6 +42,7 @@ ProjectConfig.FEATURES = {
     ACADEMY = "academy",               -- LMS: courses, lessons, rich (WYSIWYG) content
     CMS = "cms",                       -- Content: website pages + blog (articles, categories, tags)
     FIELD_SERVICE = "field_service",   -- Service jobs, job phases, engineer site visits
+    SHOP = "shop",                     -- AI hardware shop: configurable catalogue, carts, quotes, Stripe checkout, RAG
 
     -- Platform-level features (always-on for every preset)
     THEMES = "themes",                 -- Multi-tenant theme system (WordPress-style)
@@ -71,6 +72,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.ACADEMY,
         ProjectConfig.FEATURES.CMS,
         ProjectConfig.FEATURES.FIELD_SERVICE,
+        ProjectConfig.FEATURES.SHOP,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -129,6 +131,7 @@ ProjectConfig.PROJECT_FEATURES = {
         ProjectConfig.FEATURES.NOTIFICATIONS,
         ProjectConfig.FEATURES.REVIEWS,
         ProjectConfig.FEATURES.MENU,
+        ProjectConfig.FEATURES.SHOP,
         ProjectConfig.FEATURES.THEMES,
     },
 
@@ -516,6 +519,11 @@ ProjectConfig.PROJECT_MODULES = {
     -- CMS modules — RBAC module the routes/cms-*.lua gate on ("cms")
     cms = {
         { machine_name = "cms", name = "Content", description = "Website pages, blog articles, categories and tags (rich WYSIWYG)", category = "Content" },
+    },
+
+    -- Shop modules — RBAC module the routes/shop-admin.lua gates on ("shop")
+    shop = {
+        { machine_name = "shop", name = "Shop", description = "AI hardware shop: catalogue, stock, orders, quotes, chats and knowledge", category = "Commerce" },
     },
 
     -- Field service modules — RBAC modules the routes/field-service-*.lua gate on
