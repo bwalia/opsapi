@@ -59,6 +59,83 @@ local function resolve_api_key()
     return key -- fall back to sending it raw
 end
 
+-- ---------------------------------------------------------------------------
+-- Health, for the dashboard footer (GET /api/chat/agent/status)
+-- ---------------------------------------------------------------------------
+
+local STATUS_KEY, STATUS_LOCK = "ai:status", "ai:status:probe"
+local PROBE_TIMEOUT_MS = 20000
+local SLOW_MS = 3000
+
+-- One real 1-token request to the configured model: the latency users of the
+-- agent actually get (gateway + queue + model). It also keeps the model loaded.
+local function probe()
+    local httpc = http.new()
+    httpc:set_timeout(PROBE_TIMEOUT_MS)
+    local headers = { ["Content-Type"] = "application/json" }
+    local api_key = resolve_api_key()
+    if api_key then headers["x-api-key"] = api_key end
+    ngx.update_time()
+    local started = ngx.now()
+    local res, err = httpc:request_uri(OLLAMA_URL .. "/api/chat", {
+        method = "POST",
+        headers = headers,
+        ssl_verify = false,
+        body = cjson.encode({
+            model = OLLAMA_MODEL, stream = false, think = false,
+            messages = { { role = "user", content = "ping" } },
+            options = { num_predict = 1 },
+        }),
+    })
+    ngx.update_time()
+    local ms = math.floor((ngx.now() - started) * 1000)
+    if not res then
+        return { status = "down", reason = err == "timeout"
+            and ("No answer within " .. PROBE_TIMEOUT_MS / 1000 .. "s: the model server is busy or unreachable")
+            or ("Unreachable: " .. tostring(err)) }
+    end
+    if res.status == 401 or res.status == 403 then
+        return { status = "down", reason = "The Ollama gateway rejected the credentials (OLLAMA_API_KEY)" }
+    end
+    if res.status == 404 then
+        return { status = "down", reason = OLLAMA_MODEL .. " isn't installed on the model server" }
+    end
+    if res.status >= 400 then
+        return { status = "down", reason = "The model server answered HTTP " .. res.status }
+    end
+    return { status = ms > SLOW_MS and "slow" or "ok", latency_ms = ms }
+end
+
+--- The model's health: { provider, model, status = ok|slow|down|checking|off,
+-- latency_ms?, reason?, checked_at? }. Shared by every worker and refreshed
+-- every 60s (30s while down); one worker probes at a time and the rest return
+-- the last result, so dashboards polling it never pile load onto the model.
+function Agent.status()
+    local base = { provider = "ollama", model = OLLAMA_MODEL }
+    if not os.getenv("OLLAMA_URL") and not OLLAMA_API_KEY then
+        base.status, base.reason = "off", "OLLAMA_URL / OLLAMA_API_KEY aren't set on this server"
+        return base
+    end
+    local cache, locks = ngx.shared.cache, ngx.shared.locks
+    local last = cache and cache:get(STATUS_KEY)
+    last = last and cjson.decode(last)
+    if last and ngx.time() - (last.checked_at or 0) < (last.status == "down" and 30 or 60) then
+        return last
+    end
+    if locks and not locks:add(STATUS_LOCK, true, PROBE_TIMEOUT_MS / 1000 + 5) then
+        if last then return last end
+        base.status = "checking"
+        return base
+    end
+    local ok, result = pcall(probe)
+    if locks then locks:delete(STATUS_LOCK) end
+    if not ok then result = { status = "down", reason = "Health check failed: " .. tostring(result) } end
+    for k, v in pairs(base) do result[k] = v end
+    result.checked_at = ngx.time()
+    if cache then cache:set(STATUS_KEY, cjson.encode(result), 600) end
+    return result
+end
+
 -- Bounds the tool-call loop so a confused model can't spin forever. Each
 -- iteration is one model round-trip (~seconds on the local model).
 local MAX_ITERATIONS = 6
