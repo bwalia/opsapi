@@ -218,6 +218,31 @@ spec:
             - name: CORS_ALLOWED_ORIGINS
               value: {{ .Values.corsAllowedOrigins | quote }}
             {{- end }}
+            # ── Workstation AI Shop (feature "shop") ───────────────────────
+            # Non-secret shop config, owned by git per env (values-workstation-*.yaml
+            # `shop:` block). Both OPTIONAL — omitted when unset, so other
+            # releases of this chart are unaffected.
+            # ``shop.allowedOrigins`` → SHOP_ALLOWED_ORIGINS: comma list of exact
+            #   origins that /checkout success_url/cancel_url must start with.
+            # ``shop.publicUrl``      → SHOP_PUBLIC_URL: shop base URL used to
+            #   build admin `public_url` links for quotes/orders.
+            # The SECRET shop keys are NOT set here — they arrive via envFrom from
+            # the Vault ExternalSecret (secret/diytaxreturnuk/opsapi/<env>/config),
+            # both optional (shop payments stay disabled until present):
+            #   STRIPE_SHOP_WEBHOOK_SECRET  whsec_… of the shop webhook endpoint
+            #   SHOP_BFF_KEY                shared key the shop BFF sends as X-Shop-Key
+            # NB: nginx only exposes env vars declared with `env NAME;` — those
+            # declarations live in lapis/nginx.conf + lapis/nginx-values-template.conf.
+            {{- if .Values.shop }}
+            {{- if .Values.shop.allowedOrigins }}
+            - name: SHOP_ALLOWED_ORIGINS
+              value: {{ .Values.shop.allowedOrigins | quote }}
+            {{- end }}
+            {{- if .Values.shop.publicUrl }}
+            - name: SHOP_PUBLIC_URL
+              value: {{ .Values.shop.publicUrl | quote }}
+            {{- end }}
+            {{- end }}
             # ── MinIO object storage isolation ─────────────────────────────
             # By default this release inherits MINIO_* from the shared Vault
             # ExternalSecret (envFrom above), which points at ANOTHER product's

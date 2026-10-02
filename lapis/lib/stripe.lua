@@ -188,6 +188,11 @@ function Stripe:create_checkout_session(options)
     if options.subscription_data then data.subscription_data = options.subscription_data end
     if options.payment_intent_data then data.payment_intent_data = options.payment_intent_data end
     if options.allow_promotion_codes ~= nil then data.allow_promotion_codes = options.allow_promotion_codes end
+    -- Hosted-checkout collection + expiry pass-throughs (used by the shop):
+    --   phone_number_collection { enabled }, tax_id_collection { enabled }, expires_at (unix seconds)
+    if options.phone_number_collection then data.phone_number_collection = options.phone_number_collection end
+    if options.tax_id_collection then data.tax_id_collection = options.tax_id_collection end
+    if options.expires_at then data.expires_at = options.expires_at end
 
     return self:_request("POST", "/checkout/sessions", data, options.idempotency_key)
 end

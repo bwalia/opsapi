@@ -29,6 +29,7 @@ const DEFAULT_MODULE_ICONS: Record<string, string> = {
   stores: 'Store',
   products: 'Package',
   orders: 'ShoppingCart',
+  shop: 'ShoppingCart',
   customers: 'UserCheck',
   settings: 'Settings',
   namespaces: 'Building2',

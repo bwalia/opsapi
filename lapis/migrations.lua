@@ -143,6 +143,10 @@ local academy_progress_migrations = load_if_enabled(ProjectConfig.FEATURES.ACADE
 local cms_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-system") or {}
 local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrations.cms-menu-items") or {}
 
+-- Shop (Workstation AI Shop: configurable catalogue, carts, quotes, orders, Stripe, RAG)
+local shop_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-system") or {}
+local shop_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-menu-items") or {}
+
 -- Render Templates (namespace {{slot}} template library). Core/always-on:
 -- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
 local render_template_migrations = require("migrations.render-templates")
@@ -2424,6 +2428,24 @@ local _migrations = {
     -- Employees → core module. `zzemp*` keys sort after every numeric migration
     -- (so they re-path the field-service menu item after it is seeded) and before
     -- the zzw/zzx/zzz finalizers. Idempotent + CORE-gated (runs for everyone).
+    -- =========================================================================
+    -- SHOP (FEATURES.SHOP) — "zzs*" keys sort after every core/menu table they
+    -- reference (namespaces, menu_items, modules, namespace_roles).
+    -- =========================================================================
+    ['zzs01_shop_pgvector_sequences'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 1),
+    ['zzs02_shop_catalogue'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 2),
+    ['zzs03_shop_configurator'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 3),
+    ['zzs04_shop_carts'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 4),
+    ['zzs05_shop_quotes_orders'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 5),
+    ['zzs06_shop_stock_stripe'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 6),
+    ['zzs07_shop_chat_knowledge'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 7),
+    ['zzs08_shop_search_indexes'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 8),
+    ['zzs09_shop_late_pgvector'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_migrations, 9),
+    ['zzs10_shop_menu_item'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 1),
+    ['zzs11_shop_register_module'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 2),
+    ['zzs12_shop_grant_permissions'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 3),
+    ['zzs13_shop_enable_menu'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 4),
+
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),
     ['zzemp3_employees_core_grants'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 3),
