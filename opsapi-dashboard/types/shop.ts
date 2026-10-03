@@ -617,3 +617,169 @@ export interface ShopReconcileResult {
   marked_paid?: number;
   [key: string]: unknown;
 }
+
+// ============================================================
+// Market prices (shop/MARKET.prompt.md §A) — third-party reference data
+// ============================================================
+
+export const SHOP_MARKET_FETCH_MODES = ['direct', 'firecrawl'] as const;
+export type ShopMarketFetchMode = (typeof SHOP_MARKET_FETCH_MODES)[number];
+
+export const SHOP_MARKET_STATUSES = ['ok', 'no_price', 'mismatch', 'http_error', 'blocked', 'rejected', 'anomaly'] as const;
+export type ShopMarketStatus = (typeof SHOP_MARKET_STATUSES)[number];
+
+export const SHOP_MARKET_AVAILABILITY = ['in_stock', 'limited', 'out_of_stock', 'preorder', 'backorder', 'unknown'] as const;
+export type ShopMarketAvailability = (typeof SHOP_MARKET_AVAILABILITY)[number];
+
+export type ShopMarketMethod = 'json_ld' | 'meta' | 'microdata' | 'llm';
+
+export interface ShopMarketMatch {
+  mpn?: string;
+  gtin?: string;
+  title_must_include?: string[];
+  variant_hint?: string;
+}
+
+export interface ShopMarketObservation {
+  uuid: string;
+  source_uuid: string | null;
+  source_name: string | null;
+  url: string | null;
+  price_minor: number | null;
+  currency: string;
+  price_ex_vat_minor: number | null;
+  price_inc_vat_minor: number | null;
+  availability: ShopMarketAvailability;
+  stock_qty: number | null;
+  title: string | null;
+  method: ShopMarketMethod;
+  confidence: number | null;
+  evidence: string | null;
+  flags: { anomaly?: boolean; previous_price_minor?: number; change_pct?: number; anomaly_accepted?: boolean; [k: string]: unknown };
+  accepted: boolean;
+  fetched_at: string;
+  created_at: string;
+  /** Only on a source's latest_observation: within the freshness window. */
+  fresh?: boolean;
+}
+
+export interface ShopMarketSource {
+  uuid: string;
+  product_uuid: string;
+  product_sku: string;
+  product_name: string;
+  name: string;
+  url: string;
+  fetch_mode: ShopMarketFetchMode;
+  prices_include_vat: boolean;
+  currency: string;
+  match: ShopMarketMatch;
+  is_active: boolean;
+  last_checked_at: string | null;
+  last_status: ShopMarketStatus | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Present on GET /market/products/:uuid. */
+  latest_observation?: ShopMarketObservation | null;
+  pending_anomalies?: number;
+}
+
+export interface ShopMarketSourceInput {
+  product_uuid?: string;
+  product_sku?: string;
+  name: string;
+  url: string;
+  fetch_mode?: ShopMarketFetchMode;
+  prices_include_vat?: boolean;
+  currency?: string;
+  match?: ShopMarketMatch;
+  is_active?: boolean;
+}
+
+export interface ShopMarketSummary {
+  min_ex_vat_minor: number | null;
+  median_ex_vat_minor: number | null;
+  max_ex_vat_minor: number | null;
+  sources_in_stock: number;
+  /** Sources with an accepted, fresh observation. */
+  sources_total: number;
+  priced_sources?: number;
+  freshest_at: string | null;
+  fresh_days?: number;
+}
+
+export interface ShopMarketProductDetail {
+  product: {
+    uuid: string;
+    sku: string;
+    slug: string;
+    name: string;
+    brand: string | null;
+    base_price_minor: number;
+    vat_rate: number;
+    currency: string;
+    price_verified: boolean;
+    stock_qty: number;
+    available: number;
+    lead_time_days: number;
+    status: ShopProductStatus;
+  };
+  sources: ShopMarketSource[];
+  summary: ShopMarketSummary;
+  /** Recent observations across all sources, newest first. */
+  observations: ShopMarketObservation[];
+}
+
+export interface ShopMarketOverviewRow {
+  product_uuid: string;
+  sku: string;
+  slug: string;
+  name: string;
+  brand: string | null;
+  status: ShopProductStatus;
+  vat_rate: number;
+  price_verified: boolean;
+  our_price_ex_vat_minor: number;
+  market_min_ex_vat_minor: number | null;
+  market_median_ex_vat_minor: number | null;
+  market_max_ex_vat_minor: number | null;
+  /** (ours − median) / median × 100. */
+  diff_pct: number | null;
+  in_stock_sources: number;
+  fresh_sources: number;
+  total_sources: number;
+  configured_sources: number;
+  failing_sources: number;
+  pending_anomalies: number;
+  freshest_at: string | null;
+  last_checked_at: string | null;
+  stale: boolean;
+}
+
+export interface ShopMarketOverviewParams {
+  stale?: boolean;
+  diff_gt?: number;
+  q?: string;
+  anomalies?: boolean;
+}
+
+export type ShopMarketApplyStrategy = 'median' | 'min' | 'value';
+
+export interface ShopMarketApplyResult {
+  product_uuid: string;
+  sku: string;
+  strategy: ShopMarketApplyStrategy;
+  previous_price_minor: number;
+  base_price_minor: number;
+  price_verified: boolean;
+  summary: ShopMarketSummary;
+}
+
+export interface ShopMarketUpsertResult {
+  received: number;
+  created: number;
+  updated: number;
+  failed: number;
+  errors: { index: number; product_sku: string | null; url: string | null; error: string }[];
+}

@@ -20,6 +20,7 @@
       DELETE /cart/lines/:uuid
       POST   /cart/attach-chat
       GET    /search
+      GET    /market?product_slug=|q=&limit=3   (market-price reference, MARKET.prompt.md §A)
       POST   /quotes
       GET    /quotes/:uuid?t=
       POST   /checkout
@@ -36,6 +37,7 @@ local Quote = require("queries.ShopQuoteQueries")
 local Orders = require("queries.ShopOrderQueries")
 local Search = require("queries.ShopSearchQueries")
 local Chat = require("queries.ShopChatQueries")
+local Market = require("queries.ShopMarketQueries")
 
 local BASE = "/api/v2/public/shop/:ns"
 
@@ -169,6 +171,32 @@ return function(app)
     app:get(BASE .. "/search", public(function(self, ns_id)
         local data, meta = Search.search(ns_id, self.params.q, self.params.limit)
         return U.ok(data, 200, meta)
+    end))
+
+    -- market prices (third-party reference; accepted + fresh observations only) ----
+    app:get(BASE .. "/market", public(function(self, ns_id)
+        local slug = U.nz(self.params.product_slug)
+        if slug then
+            local data = Market.publicBySlug(ns_id, slug)
+            if not data then return U.fail(404, "PRODUCT_NOT_FOUND", "Product not found") end
+            return U.ok(data, 200, { fresh_days = Market.FRESH_DAYS })
+        end
+        local q = U.nz(self.params.q)
+        if not q then return U.fail(400, "VALIDATION_ERROR", "product_slug or q is required") end
+        local limit = U.clamp(U.int(self.params.limit, 3), 1, 10)
+        -- Search a wider pool, then prefer hits that have fresh market data
+        -- (stable: search rank is kept within each group).
+        local hits = Search.search(ns_id, q, math.min(limit * 4, 30))
+        local uuids = {}
+        for _, p in ipairs(hits.products or {}) do uuids[#uuids + 1] = p.uuid end
+        local with, without = {}, {}
+        for _, e in ipairs(Market.publicByUuids(ns_id, uuids)) do
+            if #e.observations > 0 then with[#with + 1] = e else without[#without + 1] = e end
+        end
+        local data = {}
+        for _, e in ipairs(with) do if #data < limit then data[#data + 1] = e end end
+        for _, e in ipairs(without) do if #data < limit then data[#data + 1] = e end end
+        return U.ok(U.arr(data), 200, { fresh_days = Market.FRESH_DAYS, q = q })
     end))
 
     -- quotes ----------------------------------------------------------------------
