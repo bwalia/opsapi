@@ -664,6 +664,7 @@ load_if("cms", "routes.cms-webhooks")
 load_if("shop", "routes.shop-stripe-webhook")
 load_if("shop", "routes.shop-public")
 load_if("shop", "routes.shop-admin")
+load_if("shop", "routes.shop-market")
 
 -- ============================================
 -- PLUGINS (projects/<plugin>/ — see PLUGINS.md)

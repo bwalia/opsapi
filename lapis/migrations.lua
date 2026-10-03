@@ -146,6 +146,7 @@ local cms_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.CMS, "migrati
 -- Shop (Workstation AI Shop: configurable catalogue, carts, quotes, orders, Stripe, RAG)
 local shop_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-system") or {}
 local shop_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-menu-items") or {}
+local shop_market_migrations = load_if_enabled(ProjectConfig.FEATURES.SHOP, "migrations.shop-market") or {}
 
 -- Render Templates (namespace {{slot}} template library). Core/always-on:
 -- namespace-scoped, used by CMS pages + domains, so it isn't feature-gated.
@@ -2445,6 +2446,9 @@ local _migrations = {
     ['zzs11_shop_register_module'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 2),
     ['zzs12_shop_grant_permissions'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 3),
     ['zzs13_shop_enable_menu'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_menu_migrations, 4),
+    -- Market-price RAG (shop/MARKET.prompt.md §A): pinned sources + scraped observations
+    ['zzs14_shop_market_sources'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_market_migrations, 1),
+    ['zzs15_shop_market_observations'] = conditional_array(ProjectConfig.FEATURES.SHOP, shop_market_migrations, 2),
 
     ['zzemp1_employees_core_table'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 1),
     ['zzemp2_employees_core_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, employees_core_migrations, 2),

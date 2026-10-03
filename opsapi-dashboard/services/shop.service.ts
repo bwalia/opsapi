@@ -18,6 +18,15 @@ import type {
   ShopKnowledgeSourceType,
   ShopList,
   ShopListMeta,
+  ShopMarketApplyResult,
+  ShopMarketApplyStrategy,
+  ShopMarketObservation,
+  ShopMarketOverviewParams,
+  ShopMarketOverviewRow,
+  ShopMarketProductDetail,
+  ShopMarketSource,
+  ShopMarketSourceInput,
+  ShopMarketUpsertResult,
   ShopOrder,
   ShopOrderStatus,
   ShopOrderUpdate,
@@ -295,6 +304,64 @@ export const shopService = {
   async reindexKnowledge(sources: ('products' | 'cms_posts')[]): Promise<ShopReindexResult> {
     const res = await apiClient.post(`${BASE}/knowledge/reindex`, { sources }, JSON_BODY);
     return unwrap<ShopReindexResult>(res) ?? {};
+  },
+
+  // ---------------- Market prices (MARKET.prompt.md §A) ----------------
+  async getMarketOverview(params: ShopMarketOverviewParams = {}): Promise<ShopMarketOverviewRow[]> {
+    const qs = buildQueryString({
+      stale: params.stale === undefined ? undefined : params.stale ? 1 : 0,
+      diff_gt: params.diff_gt,
+      q: params.q,
+      anomalies: params.anomalies ? 1 : undefined,
+    });
+    const res = await apiClient.get(`${BASE}/market/overview${qs}`);
+    return unwrapList<ShopMarketOverviewRow>(res).data;
+  },
+
+  async getMarketProduct(uuid: string, history = 100): Promise<ShopMarketProductDetail> {
+    const res = await apiClient.get(`${BASE}/market/products/${uuid}${buildQueryString({ history })}`);
+    return unwrap<ShopMarketProductDetail>(res);
+  },
+
+  async getMarketSources(params: { product_uuid?: string; active?: boolean } = {}): Promise<ShopMarketSource[]> {
+    const qs = buildQueryString({
+      product_uuid: params.product_uuid,
+      active: params.active === undefined ? undefined : params.active ? 1 : 0,
+    });
+    const res = await apiClient.get(`${BASE}/market/sources${qs}`);
+    return unwrapList<ShopMarketSource>(res).data;
+  },
+
+  async createMarketSource(input: ShopMarketSourceInput): Promise<ShopMarketSource> {
+    const res = await apiClient.post(`${BASE}/market/sources`, input, JSON_BODY);
+    return unwrap<ShopMarketSource>(res);
+  },
+
+  async updateMarketSource(uuid: string, input: Partial<ShopMarketSourceInput>): Promise<ShopMarketSource> {
+    const res = await apiClient.put(`${BASE}/market/sources/${uuid}`, input, JSON_BODY);
+    return unwrap<ShopMarketSource>(res);
+  },
+
+  async deleteMarketSource(uuid: string): Promise<void> {
+    await apiClient.delete(`${BASE}/market/sources/${uuid}`);
+  },
+
+  async upsertMarketSources(sources: ShopMarketSourceInput[]): Promise<ShopMarketUpsertResult> {
+    const res = await apiClient.post(`${BASE}/market/sources/upsert`, { sources }, JSON_BODY);
+    return unwrap<ShopMarketUpsertResult>(res);
+  },
+
+  /** Accept an anomalous observation (> 40 % change) so it counts in summaries. */
+  async acceptMarketObservation(uuid: string): Promise<ShopMarketObservation> {
+    const res = await apiClient.post(`${BASE}/market/observations/${uuid}/accept`, {}, JSON_BODY);
+    return unwrap<ShopMarketObservation>(res);
+  },
+
+  /** Sets base_price_minor (ex VAT) and price_verified=true. Nothing changes prices automatically. */
+  async applyMarketPrice(uuid: string, strategy: ShopMarketApplyStrategy, valueMinor?: number): Promise<ShopMarketApplyResult> {
+    const body = strategy === 'value' ? { strategy, value_minor: valueMinor } : { strategy };
+    const res = await apiClient.post(`${BASE}/market/products/${uuid}/apply-price`, body, JSON_BODY);
+    return unwrap<ShopMarketApplyResult>(res);
   },
 };
 

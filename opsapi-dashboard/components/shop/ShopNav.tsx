@@ -12,6 +12,7 @@ import {
   FileText,
   MessageSquare,
   BookOpen,
+  LineChart,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +21,7 @@ export const SHOP_SECTIONS = [
   { href: '/dashboard/shop/products', label: 'Products', icon: Package },
   { href: '/dashboard/shop/categories', label: 'Categories', icon: FolderTree },
   { href: '/dashboard/shop/stock', label: 'Stock', icon: Boxes },
+  { href: '/dashboard/shop/market', label: 'Market', icon: LineChart },
   { href: '/dashboard/shop/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/dashboard/shop/quotes', label: 'Quotes', icon: FileText },
   { href: '/dashboard/shop/chats', label: 'Chats', icon: MessageSquare },
