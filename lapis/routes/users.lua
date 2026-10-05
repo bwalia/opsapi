@@ -111,11 +111,16 @@ return function(app)
                 }
             end
 
+            -- Scoped to the caller's workspace (see UserQueries.search); only a
+            -- platform admin may search across accounts. The "invite an
+            -- existing user" mode always means non-members of THIS workspace.
             local ok, result = pcall(UserQueries.search, {
                 query = query,
                 limit = tonumber(params.limit) or 10,
-                exclude_namespace_id = params.exclude_namespace_id and tonumber(params.exclude_namespace_id),
-                namespace_id = self.namespace.id
+                exclude_namespace_id = params.exclude_namespace_id and params.exclude_namespace_id ~= ""
+                    and (self.is_platform_admin and tonumber(params.exclude_namespace_id) or self.namespace.id) or nil,
+                namespace_id = self.namespace.id,
+                platform_admin = self.is_platform_admin == true,
             })
 
             if not ok then

@@ -2,6 +2,23 @@ import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+/**
+ * This workspace's own bank or VAT control account, from its chart of accounts
+ * (seeded codes 1000 "Bank Account" / 2100 "VAT Payable"; otherwise matched by
+ * type + name). Journal lines must use the workspace's own account ids — the
+ * API rejects any other — never hard-coded ones.
+ */
+export function findControlAccount(
+  accounts: AccountingAccount[],
+  kind: 'bank' | 'vat'
+): AccountingAccount | undefined {
+  const want = kind === 'bank'
+    ? { code: '1000', type: 'asset', name: /bank/i }
+    : { code: '2100', type: 'liability', name: /vat/i };
+  const live = accounts.filter((a) => a.is_active !== false && a.account_type === want.type);
+  return live.find((a) => a.code === want.code) ?? live.find((a) => want.name.test(a.name));
+}
+
 export interface AccountingAccount {
   id: number;
   uuid: string;

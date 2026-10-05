@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { cn, formatCurrency, generateId } from '@/lib/utils';
 import { SpreadsheetGrid } from '@/components/accounting';
 import type { GridColumn, GridRow } from '@/components/accounting';
-import accountingService from '@/services/accounting.service';
+import accountingService, { findControlAccount } from '@/services/accounting.service';
 import type { AccountingAccount } from '@/services/accounting.service';
 import toast from 'react-hot-toast';
 
@@ -175,6 +175,14 @@ export default function MoneyInPage() {
       // Validate required fields
       if (!row.data.date || !row.data.description || !row.data.amount) return;
 
+      // Journal lines need this workspace's own bank / VAT accounts.
+      const bank = findControlAccount(accounts, 'bank');
+      const vatAccount = findControlAccount(accounts, 'vat');
+      if (row.data.category && (!bank || (parseFloat(row.data.vatAmount || '0') > 0 && !vatAccount))) {
+        toast.error('Add a Bank account (code 1000) and a VAT account (code 2100) in Chart of Accounts first.');
+        return;
+      }
+
       setRows((prev) => {
         const updated = [...prev];
         updated[rowIndex] = { ...updated[rowIndex], isSaving: true, hasError: false };
@@ -208,14 +216,14 @@ export default function MoneyInPage() {
         if (row.data.category) {
           const netAmount = amount - vatAmount;
           const lines = [
-            { account_id: 1, debit_amount: amount, credit_amount: 0, description: 'Bank receipt' },
+            { account_id: bank!.id, debit_amount: amount, credit_amount: 0, description: 'Bank receipt' },
             { account_id: parseInt(row.data.category), debit_amount: 0, credit_amount: netAmount, description: row.data.description },
           ];
 
           // Add VAT line if applicable
           if (vatAmount > 0) {
             lines.push({
-              account_id: 2, // VAT output account - would be configurable
+              account_id: vatAccount!.id,
               debit_amount: 0,
               credit_amount: vatAmount,
               description: 'VAT on sales',
@@ -257,7 +265,7 @@ export default function MoneyInPage() {
         });
       }
     },
-    [rows]
+    [rows, accounts]
   );
 
   const handleAddRow = useCallback(() => {

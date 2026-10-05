@@ -4,6 +4,7 @@ import React, { memo, useState, useCallback, useEffect } from 'react';
 import { X, Mail, UserPlus, AlertCircle, Loader2, Search } from 'lucide-react';
 import { Button, Input, Select } from '@/components/ui';
 import { namespaceService } from '@/services';
+import { useNamespace } from '@/contexts/NamespaceContext';
 import { UserSearchInput } from './UserSearchInput';
 import type { NamespaceRole, InviteMemberDto, User } from '@/types';
 import toast from 'react-hot-toast';
@@ -33,6 +34,10 @@ export const InviteMemberModal = memo(function InviteMemberModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingRoles, setIsLoadingRoles] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Invite an existing user" searches people who aren't members of this
+  // workspace yet — by exact email only (the API never lists other tenants).
+  const { currentNamespace } = useNamespace();
+  const inviteToNamespaceId = Number(namespaceId) || currentNamespace?.id;
 
   // Fetch roles when modal opens
   useEffect(() => {
@@ -274,7 +279,8 @@ export const InviteMemberModal = memo(function InviteMemberModal({
                     setError(null);
                   }}
                   disabled={isLoading}
-                  placeholder="Search by name or email..."
+                  excludeNamespaceId={inviteToNamespaceId}
+                  placeholder="Enter their full email address..."
                 />
               ) : (
                 <>
