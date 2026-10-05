@@ -316,6 +316,23 @@ All environment variables are in `lapis/.env`. The `.sample.env` file has workin
 | `OPSAPI_VAULT_ALLOW_PRIVATE` | `true` lets the secret vault reach a HashiCorp Vault, Azure Key Vault or Kubernetes API on a private network or over `http://`. Off by default: vault URLs must be public `https://`. Set it when your Vault runs inside the cluster. |
 | `PASSWORD_RESET_ALLOWED_ORIGINS` | **Bootstrap-only**: comma-separated extra origins for the same migration 489 bootstrap. Used when one tenant has multiple frontends (e.g. staging + prod). |
 
+### AI assistant (every page)
+
+Every dashboard page has an **Ask AI** button (⌘J). The assistant there knows that page: it explains how to use it and does the work on it (create, update, delete) through the same API routes, with the user's own permissions in the current workspace. Each page area keeps its own conversation, so timesheet work never mixes with project work. Deletes only run after the user presses **Confirm**.
+
+The model is chosen by **env/secrets only**; switching provider needs no code change:
+
+| Variable | Description |
+|----------|-------------|
+| `AI_PROVIDER` | `ollama` (default), `anthropic`, or `openai`. `openai` works with any OpenAI-compatible API: OpenAI, OpenRouter, Groq, Together, Mistral, vLLM, LM Studio. |
+| `AI_MODEL` | Model id. Defaults: `qwen3.8:latest` (or `OLLAMA_MODEL`), `claude-opus-5-5`, `gpt-4.1`. |
+| `AI_API_KEY` | Provider key. Falls back to `OLLAMA_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. |
+| `AI_BASE_URL` | Optional endpoint. Falls back to `OLLAMA_URL`. |
+
+For example, to run production on Claude, set `AI_PROVIDER=anthropic`, `AI_MODEL=claude-opus-5-5` and `AI_API_KEY` in the Vault secret, then restart the pods. The dashboard footer shows the live model and its response time.
+
+What each page's assistant knows and may call lives in `lapis/lib/agent/knowledge/<page>.md`: a short guide plus that page's endpoints. Only the endpoints written there can be called. To give a new page an assistant, add one file. `lapis/spec/page-assistant_spec.lua` checks every file.
+
 **Note:** `NEXT_PUBLIC_API_URL` is a build-time variable for the Next.js dashboard. If changed after initial build, rebuild with:
 
 ```bash

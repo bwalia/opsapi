@@ -112,9 +112,12 @@ export interface ChatUser {
   has_chat_access?: boolean;
 }
 
-// A tool the agent invoked during a turn (create_timesheet, create_customer, …).
+// A tool the agent invoked during a turn (create_timesheet, call_api, …).
+// `label` is the readable form, e.g. "POST /api/v2/timesheets".
 export interface AgentAction {
   name: string;
+  label?: string;
+  method?: string;
   args?: Record<string, unknown>;
   result?: unknown;
   error?: string | null;
@@ -128,10 +131,38 @@ export interface AgentTurn {
   actions?: AgentAction[];
 }
 
+// The page area the assistant is working in (resolved server-side from the
+// URL); each scope keeps its own conversation.
+export interface AgentScope {
+  key: string;
+  title: string;
+  suggestions: string[];
+}
+
 export interface AgentConversation {
   run_uuid?: string;
   status: 'idle' | 'running' | 'done' | 'error';
   turns: AgentTurn[];
+  scope?: AgentScope;
+  // A delete the assistant wants to make, waiting for the user's Confirm.
+  pending?: { summary: string } | null;
+  // The finished run created/changed data (the page should reload its data).
+  changed?: boolean;
+}
+
+function toConversation(data: unknown, fallback: AgentConversation['status']): AgentConversation {
+  const b = (data || {}) as Partial<AgentConversation>;
+  const scope = b.scope
+    ? { ...b.scope, suggestions: Array.isArray(b.scope.suggestions) ? b.scope.suggestions : [] }
+    : undefined;
+  return {
+    run_uuid: b.run_uuid,
+    status: b.status ?? fallback,
+    turns: Array.isArray(b.turns) ? b.turns : [],
+    scope,
+    pending: b.pending && typeof b.pending === 'object' && 'summary' in b.pending ? b.pending : null,
+    changed: !!b.changed,
+  };
 }
 
 const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
@@ -336,22 +367,28 @@ export const chatService = {
    * background (survives reloads / page changes / closed tabs); completion is
    * pushed as the "agent:done" WebSocket event, with polling as a fallback.
    */
-  async getAgentConversation(): Promise<AgentConversation> {
-    const res = await apiClient.get('/api/chat/agent/conversation');
-    const b = res.data as Partial<AgentConversation>;
-    return { run_uuid: b?.run_uuid, status: b?.status ?? 'idle', turns: b?.turns ?? [] };
+  // `path` = the dashboard page the assistant is opened on; it picks the page
+  // scope (guide, tools, history). Omitted = the chat page's general assistant.
+  async getAgentConversation(path?: string): Promise<AgentConversation> {
+    const res = await apiClient.get('/api/chat/agent/conversation', { params: path ? { path } : undefined });
+    return toConversation(res.data, 'idle');
   },
 
   /** Start a turn. Resolves as soon as the run is queued (202). */
-  async sendAgentMessage(message: string): Promise<AgentConversation> {
-    const res = await apiClient.post('/api/chat/agent', { message }, JSON_BODY);
-    const b = res.data as Partial<AgentConversation>;
-    return { run_uuid: b?.run_uuid, status: b?.status ?? 'running', turns: b?.turns ?? [] };
+  async sendAgentMessage(message: string, path?: string): Promise<AgentConversation> {
+    const res = await apiClient.post('/api/chat/agent', { message, path }, JSON_BODY);
+    return toConversation(res.data, 'running');
   },
 
-  /** "New chat" — archive the current conversation. */
-  async resetAgentConversation(): Promise<void> {
-    await apiClient.delete('/api/chat/agent/conversation');
+  /** Confirm or cancel the delete the assistant is waiting on. */
+  async confirmAgentAction(approve: boolean, path?: string): Promise<AgentConversation> {
+    const res = await apiClient.post('/api/chat/agent/confirm', { approve, path }, JSON_BODY);
+    return toConversation(res.data, 'done');
+  },
+
+  /** "New chat" — archive this page's conversation. */
+  async resetAgentConversation(path?: string): Promise<void> {
+    await apiClient.delete('/api/chat/agent/conversation', { params: path ? { path } : undefined });
   },
 };
 

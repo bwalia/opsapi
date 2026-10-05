@@ -8,6 +8,7 @@ import ThemeStyles from './ThemeStyles';
 import BuildFooter from './BuildFooter';
 import GlobalSearch from './GlobalSearch';
 import ChatNotifier from '@/components/chat/ChatNotifier';
+import PageAssistant from '@/components/assistant/PageAssistant';
 import { GlobalTimerWidget } from '@/components/time-tracking';
 import { useAuthStore } from '@/store/auth.store';
 import { PermissionsProvider } from '@/contexts/PermissionsContext';
@@ -40,6 +41,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Bumped when the AI assistant changes data: re-keys <main> so the page
+  // remounts and re-fetches (no per-page wiring needed).
+  const [dataVersion, setDataVersion] = useState(0);
+  const reloadPageData = useCallback(() => setDataVersion((v) => v + 1), []);
   const { isAuthenticated, token, _hasHydrated, setToken } = useAuthStore();
 
   // Load sidebar collapsed state from localStorage
@@ -154,7 +159,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
             <Header onMenuClick={handleSidebarOpen} />
 
             {/* Main content — grows to fill, pushing the footer down */}
-            <main id="main-content" className="flex-1 p-4 sm:p-6">{children}</main>
+            <main key={dataVersion} id="main-content" className="flex-1 p-4 sm:p-6">
+              {children}
+            </main>
 
             {/* Build/version stamp — so it's obvious which build is live */}
             <BuildFooter />
@@ -169,6 +176,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = memo(function DashboardL
 
         {/* Chat WebSocket + new-message / assistant notifications (app-wide) */}
         <ChatNotifier />
+
+        {/* "Ask AI" — the page-aware assistant on every page (⌘J) */}
+        <PageAssistant onChanged={reloadPageData} />
       </PermissionsProvider>
     </NamespaceProvider>
   );

@@ -1,20 +1,23 @@
 'use client';
 
 /**
- * AgentPane — the "Chat with AI Assistant" conversation. The conversation lives
- * on the server and each turn runs there in the BACKGROUND (routes/chat-agent.lua),
- * so reloading, changing page or closing the tab never loses or stops a task.
+ * AgentPane — the AI assistant conversation. The conversation lives on the
+ * server and each turn runs there in the BACKGROUND (routes/chat-agent.lua), so
+ * reloading, changing page or closing the tab never loses or stops a task.
  * This pane just shows the server's conversation: it re-fetches on the
- * "agent:done" WebSocket event (via ChatNotifier), with a slow poll as fallback.
- * The app-wide ChatNotifier does the "Assistant finished" notification.
+ * "agent:done" WebSocket event (via ChatNotifier), with a poll as fallback.
+ *
+ * Two homes: the chat page (no `path` — the all-round assistant) and the page
+ * assistant panel on every dashboard page (`path` = the page; the server picks
+ * that page's guide, tools and its own separate history).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Sparkles, Send, Loader2, Check, AlertCircle, X, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
-import { chatService, type AgentTurn } from '@/services/chat.service';
+import { chatService, type AgentTurn, type AgentAction, type AgentScope } from '@/services/chat.service';
 import { onChatEvent } from '@/store/chat-realtime.store';
 
 // Render the agent's reply as markdown (lists, bold, tables, links, code) with
@@ -64,30 +67,65 @@ const SUGGESTIONS = [
   'Invite sam@example.com to this workspace',
 ];
 
-const POLL_MS = 6000; // fallback while a run is in progress and the socket is down
+// Fallback poll while a run is in progress (the socket only exists where Chat does).
+const POLL_MS = 6000;
+const PAGE_POLL_MS = 2500;
 
-export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: string; namespaceKey?: string }) {
+// "PUT /api/v2/kanban/tasks/<uuid>/move" -> "PUT kanban/tasks/…/move" for the chips.
+function actionLabel(a: AgentAction): string {
+  const label = a.label || a.name;
+  return label
+    .replace(/ \/api\/v\d+\//, ' ')
+    .replace(/ \/api\//, ' ')
+    .replace(/[0-9a-f]{8}-[0-9a-f-]{20,}/gi, '…');
+}
+
+interface AgentPaneProps {
+  namespaceName?: string;
+  namespaceKey?: string;
+  /** Dashboard path of the page the assistant serves; omitted on the chat page. */
+  path?: string;
+  /** Shown as a close button in the header (the page panel). */
+  onClose?: () => void;
+  /** A finished run created or changed data — reload the page's data. */
+  onChanged?: () => void;
+}
+
+export function AgentPane({ namespaceName, namespaceKey, path, onClose, onChanged }: AgentPaneProps) {
   const [turns, setTurns] = useState<AgentTurn[]>([]);
+  const [scope, setScope] = useState<AgentScope | undefined>();
+  const [pending, setPending] = useState<{ summary: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
+  const [deciding, setDeciding] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // The run this pane started; when it finishes having changed data, tell the page.
+  const watching = useRef<string | null>(null);
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
 
   const refresh = useCallback(async () => {
     try {
-      const conv = await chatService.getAgentConversation();
+      const conv = await chatService.getAgentConversation(path);
       setTurns(conv.turns);
+      setScope(conv.scope);
+      setPending(conv.pending ?? null);
       setThinking(conv.status === 'running');
+      if (watching.current && conv.run_uuid === watching.current && conv.status !== 'running') {
+        watching.current = null;
+        if (conv.changed) onChangedRef.current?.();
+      }
     } catch {
       /* keep what we have; the next event/poll retries */
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [path]);
 
   // Load the server conversation (also picks up a run still in progress from
-  // before a reload / from another tab).
+  // before a reload / from another tab). Re-runs when the page changes.
   useEffect(() => {
     void refresh();
   }, [refresh, namespaceKey]);
@@ -96,20 +134,21 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
   useEffect(() => onChatEvent((e) => e.type === 'agent' && void refresh()), [refresh]);
   useEffect(() => {
     if (!thinking) return;
-    const id = setInterval(() => void refresh(), POLL_MS);
+    const id = setInterval(() => void refresh(), path ? PAGE_POLL_MS : POLL_MS);
     return () => clearInterval(id);
-  }, [thinking, refresh]);
+  }, [thinking, refresh, path]);
 
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [turns, thinking]);
+  }, [turns, thinking, pending]);
 
   const newChat = async () => {
     if (thinking) return;
     try {
-      await chatService.resetAgentConversation();
+      await chatService.resetAgentConversation(path);
       setTurns([]);
+      setPending(null);
     } catch {
       toast.error('Could not start a new chat');
     }
@@ -122,12 +161,21 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
       if (!content || thinking) return;
       setTurns((t) => [...t, { role: 'user', content }]);
       setDraft('');
+      setPending(null);
       setThinking(true);
       try {
         // Returns immediately; the run continues on the server regardless of
-        // what happens to this page.
-        const conv = await chatService.sendAgentMessage(content);
+        // what happens to this page. (Replying "yes" to a pending delete is
+        // settled synchronously and comes back already done.)
+        const conv = await chatService.sendAgentMessage(content, path);
         if (conv.turns.length) setTurns(conv.turns);
+        if (conv.scope) setScope(conv.scope);
+        if (conv.status === 'running') {
+          watching.current = conv.run_uuid ?? null;
+        } else {
+          setThinking(false);
+          if (conv.changed) onChangedRef.current?.();
+        }
       } catch (e) {
         const status = (e as { response?: { status?: number } })?.response?.status;
         toast.error(
@@ -138,8 +186,30 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
         composerRef.current?.focus();
       }
     },
-    [thinking, refresh]
+    [thinking, refresh, path]
   );
+
+  const decide = async (approve: boolean) => {
+    if (deciding) return;
+    setDeciding(true);
+    try {
+      const conv = await chatService.confirmAgentAction(approve, path);
+      setTurns(conv.turns);
+      setPending(null);
+      if (conv.changed) onChangedRef.current?.();
+    } catch {
+      toast.error('Could not reach the assistant.');
+      void refresh();
+    } finally {
+      setDeciding(false);
+    }
+  };
+
+  const pageTitle = path && scope && scope.key !== 'general' ? scope.title : undefined;
+  const welcome = pageTitle
+    ? `I'm your ${pageTitle} assistant. Ask me how anything on this page works, or tell me what to do and I'll do it here — with your permissions. Each page keeps its own conversation.`
+    : WELCOME;
+  const suggestions = scope?.suggestions?.length ? scope.suggestions : SUGGESTIONS;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -165,21 +235,35 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
       <header className="flex items-center gap-2 border-b border-secondary-200 px-4 py-2.5">
         <AgentAvatar />
         <div className="min-w-0">
-          <h1 className="text-sm font-bold text-secondary-900">AI Assistant</h1>
+          <h1 className="truncate text-sm font-bold text-secondary-900">
+            AI Assistant{pageTitle ? ` · ${pageTitle}` : ''}
+          </h1>
           <p className="truncate text-xs text-secondary-400">
             Acts in {namespaceName || 'your workspace'} with your permissions
           </p>
         </div>
-        {turns.length > 0 && (
-          <button
-            type="button"
-            onClick={newChat}
-            disabled={thinking}
-            className="ml-auto rounded-md border border-secondary-200 px-2.5 py-1 text-xs font-medium text-secondary-600 transition hover:bg-secondary-100 disabled:opacity-50"
-          >
-            New chat
-          </button>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {turns.length > 0 && (
+            <button
+              type="button"
+              onClick={newChat}
+              disabled={thinking}
+              className="rounded-md border border-secondary-200 px-2.5 py-1 text-xs font-medium text-secondary-600 transition hover:bg-secondary-100 disabled:opacity-50"
+            >
+              New chat
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close assistant"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-secondary-500 transition hover:bg-secondary-100 hover:text-secondary-800"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </header>
 
       <div ref={listRef} className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
@@ -192,9 +276,9 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
             <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-100 text-primary-600">
               <Sparkles className="h-6 w-6" />
             </span>
-            <p className="text-sm leading-relaxed text-secondary-600">{WELCOME}</p>
+            <p className="text-sm leading-relaxed text-secondary-600">{welcome}</p>
             <div className="mt-4 flex flex-col gap-2">
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -242,7 +326,7 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
                           title={a.error || undefined}
                         >
                           {a.error ? <AlertCircle className="h-3 w-3" /> : <Check className="h-3 w-3" />}
-                          {a.name}
+                          {actionLabel(a)}
                         </span>
                       ))}
                     </div>
@@ -251,6 +335,37 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
               </div>
             );
           })
+        )}
+        {pending && !thinking && (
+          <div
+            role="alertdialog"
+            aria-label="Confirm the assistant's action"
+            className="ml-9 mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm"
+          >
+            <p className="flex items-start gap-2 text-rose-800">
+              <Trash2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{pending.summary}</span>
+            </p>
+            <div className="mt-2.5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => decide(true)}
+                disabled={deciding}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+              >
+                {deciding && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Confirm delete
+              </button>
+              <button
+                type="button"
+                onClick={() => decide(false)}
+                disabled={deciding}
+                className="min-h-9 rounded-lg border border-secondary-300 bg-surface px-3 text-xs font-medium text-secondary-700 transition hover:bg-secondary-100 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
         {thinking && (
           <div className="mt-3 flex justify-start">
@@ -279,7 +394,7 @@ export function AgentPane({ namespaceName, namespaceKey }: { namespaceName?: str
             onKeyDown={onKeyDown}
             rows={1}
             disabled={thinking}
-            placeholder="Ask the assistant to do something…"
+            placeholder={pageTitle ? `Ask about ${pageTitle}, or tell me what to do…` : 'Ask the assistant to do something…'}
             style={{ outline: 'none', boxShadow: 'none' }}
             className="max-h-40 min-h-6 flex-1 resize-none bg-transparent py-1 text-sm text-secondary-900 placeholder:text-secondary-400 disabled:opacity-60"
           />
