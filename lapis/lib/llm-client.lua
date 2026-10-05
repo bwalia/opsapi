@@ -1,34 +1,33 @@
--- Multi-Provider LLM Client
--- Supports Anthropic Claude, OpenAI, and Ollama for text classification,
--- image extraction (Claude Vision), and embedding generation.
+-- LLM client for the tax / bookkeeping features
+-- Text classification, bank-statement extraction (images/PDFs) and plain chat go
+-- through lib/agent/llm, so they use the platform's one model setting
+-- (AI_PROVIDER / AI_MODEL / AI_API_KEY / AI_BASE_URL — see that file); vision
+-- uses Llm.vision (AI_VISION_PROVIDER / AI_VISION_MODEL). Embeddings stay on
+-- their own model: the stored RAG vectors are 384-dim all-MiniLM, and switching
+-- the chat model must never change that space.
 -- Includes retry with exponential backoff and Langfuse tracing.
 
 local cjson = require("cjson")
+local Llm = require("lib.agent.llm")
 
 local LLMClient = {}
 
 -- ---------------------------------------------------------------------------
--- Configuration
+-- Configuration (embeddings only — every other call follows lib/agent/llm)
 -- ---------------------------------------------------------------------------
 
-local ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 local OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 local VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
 local OLLAMA_URL = os.getenv("OLLAMA_URL") or "http://ollama:11434"
-local OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "mistral"
 -- Dedicated embedding model. MUST be an embedder (NOT the chat model): the RAG
 -- corpus is stored as vector(384) from all-MiniLM-L6-v2, so query embeddings must
 -- land in that same 384-dim space. Ollama's `all-minilm` is that model.
 local OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL") or "all-minilm"
-local DEFAULT_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER") or "ollama"
+local DEFAULT_EMBED_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER") or "ollama"
 
 local MAX_RETRIES = 3
 local REQUEST_TIMEOUT = 60000 -- 60s for LLM calls
 
--- Provider defaults
-local CLAUDE_MODEL = "claude-sonnet-4-20250514"
-local CLAUDE_VISION_MODEL = "claude-sonnet-4-20250514"
-local OPENAI_MODEL = "gpt-4o-mini"
 local OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 local VOYAGE_EMBEDDING_MODEL = "voyage-3-lite"
 
@@ -74,251 +73,61 @@ local function with_retry(fn, max_retries)
 end
 
 -- ---------------------------------------------------------------------------
--- Claude (Anthropic)
+-- One completion through the configured model (lib/agent/llm)
 -- ---------------------------------------------------------------------------
 
-local function _call_claude(messages, opts)
+-- @param messages table agent-format messages (system/user, optional attachments)
+-- @param opts table { cfg?, json?, temperature?, max_tokens?, trace_id?, trace_name? }
+-- @return { content, model, input_tokens, output_tokens, latency_ms } | nil, err
+local function complete(messages, opts)
     opts = opts or {}
-    local api_key = opts.api_key or ANTHROPIC_API_KEY
-    if not api_key then return nil, "ANTHROPIC_API_KEY not set" end
-
-    local httpc, err = create_http_client()
-    if not httpc then return nil, err end
-
-    local model = opts.model or CLAUDE_MODEL
-    local body = {
-        model = model,
-        max_tokens = opts.max_tokens or 2048,
-        temperature = opts.temperature or 0.1,
-        messages = messages,
-    }
-    if opts.system then
-        body.system = opts.system
-    end
-
     local start_time = ngx.now()
-    local res, req_err = httpc:request_uri("https://api.anthropic.com/v1/messages", {
-        method = "POST",
-        body = cjson.encode(body),
-        headers = {
-            ["Content-Type"] = "application/json",
-            ["x-api-key"] = api_key,
-            ["anthropic-version"] = "2023-06-01",
-        },
-        ssl_verify = false,
-    })
-    local latency_ms = (ngx.now() - start_time) * 1000
-
-    if not res then return nil, "Claude request failed: " .. tostring(req_err) end
-    if res.status >= 400 then
-        return nil, "Claude HTTP " .. res.status .. ": " .. tostring(res.body)
-    end
-
-    local data, decode_err = safe_json_decode(res.body)
-    if not data then return nil, decode_err end
-
-    local content = ""
-    if data.content and #data.content > 0 then
-        content = data.content[1].text or ""
-    end
-
-    -- Langfuse trace
-    local langfuse = get_langfuse()
-    if langfuse and opts.trace_id then
-        langfuse.trace_generation(opts.trace_id, {
-            name = opts.trace_name or "claude",
-            model = model,
-            prompt = messages,
-            completion = content,
-            input_tokens = data.usage and data.usage.input_tokens,
-            output_tokens = data.usage and data.usage.output_tokens,
-            metadata = { latency_ms = latency_ms, provider = "anthropic" },
-        })
-    end
-
-    return {
-        content = content,
-        model = model,
-        input_tokens = data.usage and data.usage.input_tokens or 0,
-        output_tokens = data.usage and data.usage.output_tokens or 0,
-        latency_ms = latency_ms,
-    }, nil
-end
-
--- ---------------------------------------------------------------------------
--- OpenAI
--- ---------------------------------------------------------------------------
-
-local function _call_openai(messages, opts)
-    opts = opts or {}
-    local api_key = opts.api_key or OPENAI_API_KEY
-    if not api_key then return nil, "OPENAI_API_KEY not set" end
-
-    local httpc, err = create_http_client()
-    if not httpc then return nil, err end
-
-    local model = opts.model or OPENAI_MODEL
-    local body = {
-        model = model,
+    local msg, err = Llm.chat(messages, nil, {
+        cfg = opts.cfg,
+        json = opts.json,
         temperature = opts.temperature or 0.1,
         max_tokens = opts.max_tokens or 2048,
-        messages = messages,
-    }
-    if opts.response_format then
-        body.response_format = opts.response_format
-    end
-
-    local start_time = ngx.now()
-    local res, req_err = httpc:request_uri("https://api.openai.com/v1/chat/completions", {
-        method = "POST",
-        body = cjson.encode(body),
-        headers = {
-            ["Content-Type"] = "application/json",
-            ["Authorization"] = "Bearer " .. api_key,
-        },
-        ssl_verify = false,
+        timeout_ms = REQUEST_TIMEOUT,
     })
+    if not msg then return nil, err end
     local latency_ms = (ngx.now() - start_time) * 1000
-
-    if not res then return nil, "OpenAI request failed: " .. tostring(req_err) end
-    if res.status >= 400 then
-        return nil, "OpenAI HTTP " .. res.status .. ": " .. tostring(res.body)
-    end
-
-    local data, decode_err = safe_json_decode(res.body)
-    if not data then return nil, decode_err end
-
-    local content = ""
-    if data.choices and #data.choices > 0 then
-        content = data.choices[1].message and data.choices[1].message.content or ""
-    end
+    local result = {
+        content = msg.content or "",
+        model = msg.model,
+        input_tokens = msg.usage and msg.usage.input or 0,
+        output_tokens = msg.usage and msg.usage.output or 0,
+        latency_ms = latency_ms,
+    }
 
     local langfuse = get_langfuse()
     if langfuse and opts.trace_id then
         langfuse.trace_generation(opts.trace_id, {
-            name = opts.trace_name or "openai",
-            model = model,
+            name = opts.trace_name or "llm",
+            model = result.model,
             prompt = messages,
-            completion = content,
-            input_tokens = data.usage and data.usage.prompt_tokens,
-            output_tokens = data.usage and data.usage.completion_tokens,
-            metadata = { latency_ms = latency_ms, provider = "openai" },
+            completion = result.content,
+            input_tokens = result.input_tokens,
+            output_tokens = result.output_tokens,
+            metadata = { latency_ms = latency_ms, provider = (opts.cfg or Llm.default).provider },
         })
     end
-
-    return {
-        content = content,
-        model = model,
-        input_tokens = data.usage and data.usage.prompt_tokens or 0,
-        output_tokens = data.usage and data.usage.completion_tokens or 0,
-        latency_ms = latency_ms,
-    }, nil
-end
-
--- ---------------------------------------------------------------------------
--- Ollama
--- ---------------------------------------------------------------------------
-
-local function _call_ollama(prompt, opts)
-    opts = opts or {}
-    local httpc, err = create_http_client()
-    if not httpc then return nil, err end
-
-    local model = opts.model or OLLAMA_MODEL
-    local body = {
-        model = model,
-        prompt = prompt,
-        stream = false,
-        -- Disable chain-of-thought for hybrid reasoning models (e.g. qwen3):
-        -- with `format = "json"` the JSON grammar is applied to the whole
-        -- output, so an enabled thinking channel collapses `response` to an
-        -- empty string. Ollama ignores this flag for non-reasoning models.
-        think = false,
-        options = {
-            temperature = opts.temperature or 0.1,
-        },
-    }
-    if opts.format == "json" then
-        body.format = "json"
-    end
-
-    local start_time = ngx.now()
-    local res, req_err = httpc:request_uri(OLLAMA_URL .. "/api/generate", {
-        method = "POST",
-        body = cjson.encode(body),
-        headers = { ["Content-Type"] = "application/json" },
-        ssl_verify = false,
-    })
-    local latency_ms = (ngx.now() - start_time) * 1000
-
-    if not res then return nil, "Ollama request failed: " .. tostring(req_err) end
-    if res.status >= 400 then
-        return nil, "Ollama HTTP " .. res.status .. ": " .. tostring(res.body)
-    end
-
-    local data, decode_err = safe_json_decode(res.body)
-    if not data then return nil, decode_err end
-
-    local content = data.response or ""
-
-    local langfuse = get_langfuse()
-    if langfuse and opts.trace_id then
-        langfuse.trace_generation(opts.trace_id, {
-            name = opts.trace_name or "ollama",
-            model = model,
-            prompt = prompt,
-            completion = content,
-            input_tokens = data.prompt_eval_count,
-            output_tokens = data.eval_count,
-            metadata = { latency_ms = latency_ms, provider = "ollama" },
-        })
-    end
-
-    return {
-        content = content,
-        model = model,
-        input_tokens = data.prompt_eval_count or 0,
-        output_tokens = data.eval_count or 0,
-        latency_ms = latency_ms,
-    }, nil
+    return result, nil
 end
 
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
 
---- Get available LLM providers based on env configuration
--- @return table Array of { id, name, models, is_default }
+--- The model these features use (one, from the env — see lib/agent/llm).
+-- @return table Array of { id, name, models, is_default, available }
 function LLMClient.get_providers()
-    local providers = {}
-
-    if ANTHROPIC_API_KEY and #ANTHROPIC_API_KEY > 0 then
-        table.insert(providers, {
-            id = "claude",
-            name = "Anthropic Claude",
-            models = { CLAUDE_MODEL },
-            is_default = DEFAULT_PROVIDER == "claude",
-        })
-    end
-
-    if OPENAI_API_KEY and #OPENAI_API_KEY > 0 then
-        table.insert(providers, {
-            id = "openai",
-            name = "OpenAI",
-            models = { OPENAI_MODEL },
-            is_default = DEFAULT_PROVIDER == "openai",
-        })
-    end
-
-    -- Ollama is always available (local)
-    table.insert(providers, {
-        id = "ollama",
-        name = "Ollama (Local)",
-        models = { OLLAMA_MODEL },
-        is_default = DEFAULT_PROVIDER == "ollama",
-    })
-
-    return providers
+    return { {
+        id = Llm.default.provider,
+        name = Llm.default.label,
+        models = { Llm.default.model },
+        is_default = true,
+        available = Llm.configured(),
+    } }
 end
 
 --- Classify a transaction using the selected LLM provider
@@ -326,7 +135,9 @@ end
 -- @return table { category, hmrc_category, confidence, reasoning, is_tax_deductible } | nil, error
 function LLMClient.classify(opts)
     opts = opts or {}
-    local provider = opts.provider or DEFAULT_PROVIDER
+    -- opts.provider is accepted for old callers but ignored: the model is the
+    -- platform's one setting (lib/agent/llm).
+    local provider = Llm.default.provider
 
     -- Build category list for the prompt
     local cat_list = ""
@@ -422,34 +233,12 @@ Business profile: ]] .. (opts.profile_type or "general") .. examples_text
         opts.description or "", opts.amount or 0, opts.transaction_type or "DEBIT"
     )
 
-    local result, err
-
-    if provider == "claude" then
-        result, err = with_retry(function()
-            return _call_claude(
-                { { role = "user", content = user_prompt } },
-                { system = system_prompt, trace_id = opts.trace_id, trace_name = "classify", temperature = 0.1 }
-            )
-        end)
-    elseif provider == "openai" then
-        result, err = with_retry(function()
-            return _call_openai(
-                {
-                    { role = "system", content = system_prompt },
-                    { role = "user", content = user_prompt },
-                },
-                { trace_id = opts.trace_id, trace_name = "classify", temperature = 0.1,
-                  response_format = { type = "json_object" } }
-            )
-        end)
-    else -- ollama
-        result, err = with_retry(function()
-            return _call_ollama(
-                system_prompt .. "\n\n" .. user_prompt,
-                { format = "json", trace_id = opts.trace_id, trace_name = "classify" }
-            )
-        end)
-    end
+    local result, err = with_retry(function()
+        return complete({
+            { role = "system", content = system_prompt },
+            { role = "user", content = user_prompt },
+        }, { json = true, temperature = 0.1, trace_id = opts.trace_id, trace_name = "classify" })
+    end)
 
     if not result then
         return nil, err
@@ -486,39 +275,28 @@ Business profile: ]] .. (opts.profile_type or "general") .. examples_text
     return classification, nil
 end
 
---- Extract structured data from an image using Claude Vision
+--- Extract structured data from a statement image or PDF with the vision
+-- model (Llm.vision: AI_VISION_PROVIDER/AI_VISION_MODEL, else the main model;
+-- Claude by default while AI_PROVIDER is unset and an Anthropic key exists).
 -- @param opts table { image_base64, mime_type, prompt, trace_id }
 -- @return table { content, model, tokens } | nil, error
 function LLMClient.extract_from_image(opts)
     opts = opts or {}
-    if not ANTHROPIC_API_KEY then return nil, "ANTHROPIC_API_KEY required for Vision" end
-
-    local messages = {
-        {
-            role = "user",
-            content = {
-                {
-                    type = "image",
-                    source = {
-                        type = "base64",
-                        media_type = opts.mime_type or "image/png",
-                        data = opts.image_base64,
-                    },
-                },
-                {
-                    type = "text",
-                    text = opts.prompt or [[Extract all transactions from this bank statement image.
+    if not Llm.configured(Llm.vision) then
+        return nil, "No vision model is configured (set AI_VISION_PROVIDER / AI_VISION_MODEL or AI_PROVIDER)"
+    end
+    local prompt = opts.prompt or [[Extract all transactions from this bank statement.
 Return a JSON array where each element has: {"date": "DD/MM/YYYY", "description": "text", "amount": number, "type": "DEBIT" or "CREDIT", "balance": number}
 Also include: {"bank_name": "...", "account_number": "...", "sort_code": "...", "statement_period": "...", "opening_balance": number, "closing_balance": number}
-Respond with valid JSON only.]],
-                },
-            },
-        },
-    }
-
+Respond with valid JSON only.]]
+    local messages = { {
+        role = "user",
+        content = prompt,
+        attachments = { { mime = opts.mime_type or "image/png", data = opts.image_base64 } },
+    } }
     return with_retry(function()
-        return _call_claude(messages, {
-            model = opts.model or CLAUDE_VISION_MODEL,
+        return complete(messages, {
+            cfg = Llm.vision,
             max_tokens = 4096,
             trace_id = opts.trace_id,
             trace_name = "vision_extract",
@@ -531,7 +309,7 @@ end
 -- @return table { embedding: number[] } | nil, error
 function LLMClient.generate_embedding(opts)
     opts = opts or {}
-    local provider = opts.provider or DEFAULT_PROVIDER
+    local provider = opts.provider or DEFAULT_EMBED_PROVIDER
     local text = opts.text
     if not text or #text == 0 then return nil, "text is required" end
 
@@ -598,7 +376,8 @@ function LLMClient.generate_embedding(opts)
                 model = opts.model or OLLAMA_EMBED_MODEL,
                 prompt = text,
             }),
-            headers = { ["Content-Type"] = "application/json" },
+            -- The workstation gateway needs its JWT here too (as for chat).
+            headers = { ["Content-Type"] = "application/json", ["x-api-key"] = Llm.ollama_auth() },
             ssl_verify = false,
         })
 
@@ -613,35 +392,17 @@ function LLMClient.generate_embedding(opts)
     end
 end
 
---- Send a raw chat message to any provider
--- @param opts table { messages, system, provider, model, temperature, max_tokens, trace_id, trace_name }
+--- Send a chat to the configured model
+-- @param opts table { messages, system, temperature, max_tokens, json, trace_id, trace_name }
 -- @return table { content, model, input_tokens, output_tokens, latency_ms } | nil, error
 function LLMClient.chat(opts)
     opts = opts or {}
-    local provider = opts.provider or DEFAULT_PROVIDER
-
-    if provider == "claude" then
-        return with_retry(function()
-            return _call_claude(opts.messages, opts)
-        end)
-    elseif provider == "openai" then
-        local messages = opts.messages
-        if opts.system then
-            table.insert(messages, 1, { role = "system", content = opts.system })
-        end
-        return with_retry(function()
-            return _call_openai(messages, opts)
-        end)
-    else
-        local prompt = ""
-        if opts.system then prompt = opts.system .. "\n\n" end
-        for _, msg in ipairs(opts.messages or {}) do
-            prompt = prompt .. (msg.content or "") .. "\n"
-        end
-        return with_retry(function()
-            return _call_ollama(prompt, opts)
-        end)
-    end
+    local messages = {}
+    if opts.system then messages[1] = { role = "system", content = opts.system } end
+    for _, m in ipairs(opts.messages or {}) do messages[#messages + 1] = m end
+    return with_retry(function()
+        return complete(messages, opts)
+    end)
 end
 
 return LLMClient

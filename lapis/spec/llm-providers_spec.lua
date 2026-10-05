@@ -132,6 +132,72 @@ Llm = load_llm({ AI_PROVIDER = "nonsense" })
 check("fallback", Llm.provider == "ollama")
 check("claude alias = anthropic", load_llm({ AI_PROVIDER = "Claude", AI_API_KEY = "k" }).provider == "anthropic")
 
+print("env precedence (what deploys with the secrets that exist today):")
+-- int/test/acc/prod carry LLM_PROVIDER=openai, OPENAI_MODEL=gpt-4o-mini,
+-- ANTHROPIC_MODEL/ANTHROPIC_VISION_MODEL=claude-haiku-4-5, all three keys and OLLAMA_*.
+local TODAY = { LLM_PROVIDER = "openai", OPENAI_MODEL = "gpt-4o-mini", OPENAI_API_KEY = "sk-o",
+    ANTHROPIC_MODEL = "claude-haiku-4-5-20251001", ANTHROPIC_VISION_MODEL = "claude-haiku-4-5-20251001",
+    ANTHROPIC_API_KEY = "sk-a", OLLAMA_URL = "https://ollama.example", OLLAMA_MODEL = "qwen3.8:latest",
+    OLLAMA_API_KEY = "secret" }
+Llm = load_llm(TODAY)
+check("LLM_PROVIDER (the diy stack's) does NOT move OpsAPI off Ollama",
+    Llm.default.provider == "ollama" and Llm.default.model == "qwen3.8:latest", Llm.default.provider)
+check("vision stays on Claude with ANTHROPIC_VISION_MODEL until AI_PROVIDER is set",
+    Llm.vision.provider == "anthropic" and Llm.vision.model == "claude-haiku-4-5-20251001" and Llm.vision.key == "sk-a")
+local switched = {}
+for k, v in pairs(TODAY) do switched[k] = v end
+switched.AI_PROVIDER, switched.AI_MODEL, switched.AI_API_KEY = "anthropic", "claude-opus-5-5", "sk-new"
+Llm = load_llm(switched)
+check("AI_PROVIDER + AI_MODEL + AI_API_KEY move everything (chat)",
+    Llm.default.provider == "anthropic" and Llm.default.model == "claude-opus-5-5" and Llm.default.key == "sk-new")
+check("... and vision (same provider, same model)",
+    Llm.vision.provider == "anthropic" and Llm.vision.model == "claude-opus-5-5" and Llm.vision.key == "sk-new")
+switched.AI_MODEL = nil
+Llm = load_llm(switched)
+check("unset AI_MODEL falls back to the provider's own model setting", Llm.default.model == "claude-haiku-4-5-20251001")
+Llm = load_llm({ AI_PROVIDER = "openai", AI_API_KEY = "k", AI_VISION_PROVIDER = "ollama", AI_VISION_MODEL = "minicpm-v",
+    OLLAMA_URL = "https://ollama.example" })
+check("AI_VISION_PROVIDER / AI_VISION_MODEL override vision only",
+    Llm.default.provider == "openai" and Llm.vision.provider == "ollama" and Llm.vision.model == "minicpm-v")
+
+print("json mode, attachments, usage:")
+local IMG = { mime = "image/png", data = "iVBOR" }
+local PDF = { mime = "application/pdf", data = "JVBER" }
+Llm = load_llm({ AI_PROVIDER = "anthropic", AI_API_KEY = "k" })
+responses = { { body = { content = { { type = "text", text = "{}" } }, usage = { input_tokens = 7, output_tokens = 3 } } } }
+msg = Llm.chat({ { role = "user", content = "read", attachments = { IMG, PDF } } }, nil, { json = true })
+local blocks = captured.body.messages[1].content
+check("anthropic: image block + document block for PDFs + text",
+    blocks[1].type == "image" and blocks[1].source.media_type == "image/png"
+    and blocks[2].type == "document" and blocks[2].source.media_type == "application/pdf" and blocks[3].type == "text")
+check("anthropic: usage + model returned", msg.usage.input == 7 and msg.usage.output == 3 and msg.model == "claude-opus-5-5")
+Llm = load_llm({ AI_PROVIDER = "openai", AI_API_KEY = "k" })
+responses = { { body = { choices = { { message = { content = "{}" } } }, usage = { prompt_tokens = 5, completion_tokens = 2 } } } }
+msg = Llm.chat({ { role = "user", content = "read", attachments = { IMG, PDF } } }, nil, { json = true })
+local parts = captured.body.messages[1].content
+check("openai: json mode = response_format json_object", captured.body.response_format.type == "json_object")
+check("openai: image_url data URI + file part for PDFs",
+    parts[1].type == "image_url" and parts[1].image_url.url:find("^data:image/png;base64,") ~= nil
+    and parts[2].type == "file" and parts[3].type == "text")
+check("openai: usage", msg.usage.input == 5 and msg.usage.output == 2)
+Llm = load_llm({ OLLAMA_URL = "https://ollama.example" })
+responses = { { body = { message = { content = "{}" }, prompt_eval_count = 9, eval_count = 1 } } }
+msg = Llm.chat({ { role = "user", content = "read", attachments = { IMG } } }, nil, { json = true })
+check("ollama: json mode = format json, images inline",
+    captured.body.format == "json" and captured.body.messages[1].images[1] == "iVBOR")
+check("ollama: usage", msg.usage.input == 9 and msg.usage.output == 1)
+local none, perr = Llm.chat({ { role = "user", content = "read", attachments = { PDF } } }, nil, {})
+check("ollama: a PDF is refused with a clear message", none == nil and tostring(perr):find("only read images", 1, true) ~= nil)
+
+print("no feature talks to a provider directly any more:")
+local function src(path) local f = assert(io.open(path)); local t = f:read("*a"); f:close(); return t end
+for _, f in ipairs({ "lib/llm-client.lua", "lib/ai-service.lua" }) do
+    local t = src(f)
+    check(f .. " goes through lib/agent/llm", t:find('require("lib.agent.llm")', 1, true) ~= nil
+        and t:find("api.anthropic.com", 1, true) == nil and t:find("/api/generate", 1, true) == nil
+        and t:find("claude%-sonnet%-4") == nil and t:find('"mistral"', 1, true) == nil)
+end
+
 print("hallucination guard (claims without a tool call):")
 package.loaded["lib.agent.llm"] = { provider = "ollama", model = "m" }
 local Agent = require("lib.agent.agent")

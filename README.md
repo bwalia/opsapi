@@ -320,16 +320,17 @@ All environment variables are in `lapis/.env`. The `.sample.env` file has workin
 
 Every dashboard page has an **Ask AI** button (⌘J). The assistant there knows that page: it explains how to use it and does the work on it (create, update, delete) through the same API routes, with the user's own permissions in the current workspace. Each page area keeps its own conversation, so timesheet work never mixes with project work. Deletes only run after the user presses **Confirm**.
 
-The model is chosen by **env/secrets only**; switching provider needs no code change:
+**One model setting for every AI feature:** the page assistant, chat agent, tax transaction classification, bookkeeping AI (categorise, VAT, questions) and bank-statement extraction all go through `lapis/lib/agent/llm.lua`. The model is chosen by **env/secrets only**, so switching provider needs no code change:
 
 | Variable | Description |
 |----------|-------------|
 | `AI_PROVIDER` | `ollama` (default), `anthropic`, or `openai`. `openai` works with any OpenAI-compatible API: OpenAI, OpenRouter, Groq, Together, Mistral, vLLM, LM Studio. |
-| `AI_MODEL` | Model id. Defaults: `qwen3.8:latest` (or `OLLAMA_MODEL`), `claude-opus-5-5`, `gpt-4.1`. |
-| `AI_API_KEY` | Provider key. Falls back to `OLLAMA_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. |
-| `AI_BASE_URL` | Optional endpoint. Falls back to `OLLAMA_URL`. |
+| `AI_MODEL` | Model id. If unset: `OLLAMA_MODEL` / `ANTHROPIC_MODEL` / `OPENAI_MODEL`, then `qwen3.8:latest` / `claude-opus-5-5` / `gpt-4.1`. |
+| `AI_API_KEY` | Provider key. If unset: `OLLAMA_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. |
+| `AI_BASE_URL` | Optional endpoint. If unset: `OLLAMA_URL` or the provider's API. |
+| `AI_VISION_PROVIDER` / `AI_VISION_MODEL` | Optional: the model that reads statement images and PDFs. It must be able to see images (Claude, gpt-4.1, or `minicpm-v` on Ollama). Until `AI_PROVIDER` is set, this stays on Claude (`ANTHROPIC_VISION_MODEL`) when an Anthropic key exists. |
 
-For example, to run production on Claude, set `AI_PROVIDER=anthropic`, `AI_MODEL=claude-opus-5-5` and `AI_API_KEY` in the Vault secret, then restart the pods. The dashboard footer shows the live model and its response time.
+For example, to run production on Claude, set `AI_PROVIDER=anthropic`, `AI_MODEL=claude-opus-5-5` and `AI_API_KEY` in the Vault secret, then restart the pods. Every AI feature moves together. The dashboard footer shows the live model and its response time. The diy stack's `LLM_PROVIDER` setting is deliberately not read, so it can't change OpsAPI's model. Embeddings for search stay on `OLLAMA_EMBED_MODEL` (384-dim), because the stored vectors depend on it.
 
 What each page's assistant knows and may call lives in `lapis/lib/agent/knowledge/<page>.md`: a short guide plus that page's endpoints. Only the endpoints written there can be called. To give a new page an assistant, add one file. `lapis/spec/page-assistant_spec.lua` checks every file.
 

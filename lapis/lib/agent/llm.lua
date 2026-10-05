@@ -1,28 +1,39 @@
 --[[
-    LLM provider for the AI assistant — the model is chosen by env/secrets only
-    ============================================================================
+    LLM provider for every AI feature — the model is chosen by env/secrets only
+    ===========================================================================
 
-      AI_PROVIDER   ollama (default) | anthropic | openai
-      AI_MODEL      model id. Defaults: ollama -> OLLAMA_MODEL or qwen3.8:latest,
-                    anthropic -> claude-opus-5-5, openai -> gpt-4.1
-      AI_API_KEY    API key. Falls back to OLLAMA_API_KEY / ANTHROPIC_API_KEY /
-                    OPENAI_API_KEY for the chosen provider.
-      AI_BASE_URL   endpoint. Falls back to OLLAMA_URL (ollama),
-                    https://api.anthropic.com, https://api.openai.com/v1.
-                    "openai" speaks the OpenAI Chat Completions protocol, so any
-                    compatible server works: OpenAI, OpenRouter, Groq, Together,
-                    Mistral, vLLM, LM Studio, Ollama's /v1 ...
+    One switch for the whole platform: the page assistant + chat agent, tax
+    transaction classification, bookkeeping AI and bank-statement extraction
+    all call Llm.chat. Changing provider or model is a secret change + restart.
 
-    Switching to e.g. Claude in production = set AI_PROVIDER=anthropic,
-    AI_MODEL=claude-opus-5-5 and AI_API_KEY in the secret, restart. No code.
+      AI_PROVIDER     ollama (default) | anthropic | openai
+                      ("openai" = the OpenAI Chat Completions protocol, so any
+                      compatible API works: OpenAI, OpenRouter, Groq, Together,
+                      Mistral, vLLM, LM Studio, Ollama's /v1 ...)
+      AI_MODEL        model id
+      AI_API_KEY      API key
+      AI_BASE_URL     endpoint
+      AI_VISION_PROVIDER / AI_VISION_MODEL
+                      optional: reading statement images/PDFs needs a model that
+                      can see (e.g. Claude, gpt-4.1, or minicpm-v on Ollama).
 
-    The agent loop speaks ONE message format and this module converts it to and
-    from each provider's wire format:
+    Unset AI_* values fall back to the provider's own settings, which the
+    deployments already carry: OLLAMA_URL / OLLAMA_MODEL / OLLAMA_API_KEY,
+    ANTHROPIC_API_KEY / ANTHROPIC_MODEL / ANTHROPIC_VISION_MODEL,
+    OPENAI_API_KEY / OPENAI_MODEL — then built-in defaults (qwen3.8:latest,
+    claude-opus-5-5, gpt-4.1). The diy stack's LLM_PROVIDER is deliberately NOT
+    read, so its setting can't silently move OpsAPI's models.
+
+    Until AI_PROVIDER is set, vision keeps what it used before: Claude when an
+    Anthropic key exists, else Ollama.
+
+    The callers speak ONE message format; each adapter converts it:
       { role = "system" | "user" | "assistant" | "tool", content = "...",
-        tool_calls = { { id, ["function"] = { name, arguments = {table} } } },  -- assistant
-        tool_call_id, tool_name }                                              -- tool result
-    Llm.chat(messages, tools, opts) -> assistant message | nil, err, http_status
-    `tools` are OpenAI/Ollama-style function definitions.
+        attachments = { { mime = "image/png" | "application/pdf", data = <base64> } },  -- user
+        tool_calls = { { id, ["function"] = { name, arguments = {table} } } },          -- assistant
+        tool_call_id, tool_name }                                                      -- tool result
+    Llm.chat(messages, tools, opts) -> assistant message (+ .usage, .model) | nil, err, http_status
+      opts: cfg (default Llm.default), json, max_tokens, temperature, timeout_ms
 ]]
 
 local http = require("resty.http")
@@ -41,40 +52,52 @@ local function env(name)
     return nil
 end
 
-local PROVIDER = (env("AI_PROVIDER") or "ollama"):lower()
-if PROVIDER == "claude" then PROVIDER = "anthropic" end
-
-local DEFAULTS = {
-    ollama = {
-        model = env("OLLAMA_MODEL") or "qwen3.8:latest",
-        key = env("OLLAMA_API_KEY"),
-        url = env("OLLAMA_URL") or "https://ollama.workstation.co.uk",
-    },
-    anthropic = {
-        model = "claude-opus-5-5",
-        key = env("ANTHROPIC_API_KEY"),
-        url = "https://api.anthropic.com",
-    },
-    openai = {
-        model = "gpt-4.1",
-        key = env("OPENAI_API_KEY"),
-        url = "https://api.openai.com/v1",
-    },
+local PROVIDERS = {
+    ollama = { model = "qwen3.8:latest", model_env = "OLLAMA_MODEL", key_env = "OLLAMA_API_KEY",
+        url_env = "OLLAMA_URL", url = "https://ollama.workstation.co.uk", label = "Ollama" },
+    anthropic = { model = "claude-opus-5-5", model_env = "ANTHROPIC_MODEL", key_env = "ANTHROPIC_API_KEY",
+        url = "https://api.anthropic.com", label = "Anthropic Claude" },
+    openai = { model = "gpt-4.1", model_env = "OPENAI_MODEL", key_env = "OPENAI_API_KEY",
+        url = "https://api.openai.com/v1", label = "OpenAI-compatible" },
 }
-local D = DEFAULTS[PROVIDER] or DEFAULTS.ollama
-if not DEFAULTS[PROVIDER] then PROVIDER = "ollama" end
 
-Llm.provider = PROVIDER
-Llm.model = env("AI_MODEL") or D.model
-local API_KEY = env("AI_API_KEY") or D.key
-local BASE_URL = (env("AI_BASE_URL") or D.url):gsub("/+$", "")
+local function normalise(p)
+    p = (p or ""):lower()
+    if p == "claude" then p = "anthropic" end
+    return PROVIDERS[p] and p or nil
+end
 
---- Is a model configured at all? (the footer shows "off" otherwise)
-function Llm.configured()
-    if PROVIDER == "ollama" then
-        return env("AI_BASE_URL") ~= nil or env("OLLAMA_URL") ~= nil or API_KEY ~= nil
+local MAIN = normalise(env("AI_PROVIDER")) or "ollama"
+
+--- Settings for one provider: { provider, label, model, key, url }. The AI_*
+-- overrides apply to the main (AI_PROVIDER) provider only.
+function Llm.config(provider, model)
+    local d = PROVIDERS[provider]
+    local main = provider == MAIN
+    return {
+        provider = provider,
+        label = d.label,
+        model = model or (main and env("AI_MODEL")) or env(d.model_env) or d.model,
+        key = (main and env("AI_API_KEY")) or env(d.key_env),
+        url = ((main and env("AI_BASE_URL")) or (d.url_env and env(d.url_env)) or d.url):gsub("/+$", ""),
+    }
+end
+
+Llm.default = Llm.config(MAIN)
+Llm.provider, Llm.model = Llm.default.provider, Llm.default.model
+
+local VISION = normalise(env("AI_VISION_PROVIDER")) or normalise(env("AI_PROVIDER"))
+    or (env("ANTHROPIC_API_KEY") and "anthropic") or "ollama"
+Llm.vision = Llm.config(VISION, env("AI_VISION_MODEL")
+    or (VISION == "anthropic" and VISION ~= MAIN and env("ANTHROPIC_VISION_MODEL")) or nil)
+
+--- Is a model configured at all for this config? (the footer shows "off" otherwise)
+function Llm.configured(cfg)
+    cfg = cfg or Llm.default
+    if cfg.provider == "ollama" then
+        return env("AI_BASE_URL") ~= nil or env("OLLAMA_URL") ~= nil or cfg.key ~= nil
     end
-    return API_KEY ~= nil
+    return cfg.key ~= nil
 end
 
 local function text_of(v)
@@ -91,26 +114,26 @@ local function args_table(a)
     return {}
 end
 
-local function post(url, headers, body, timeout_ms)
+local function post(cfg, url, headers, body, timeout_ms)
     local encoded, enc_err = cjson.encode(body)
     if not encoded then return nil, "Could not encode the model request: " .. tostring(enc_err) end
     local httpc = http.new()
     httpc:set_timeout(timeout_ms or 120000)
     headers["Content-Type"] = "application/json"
     local res, err = httpc:request_uri(url, { method = "POST", body = encoded, headers = headers,
-        -- ponytail: TLS verify off to match lib/llm-client; turn on with a
-        -- trusted CA bundle in prod (lua_ssl_trusted_certificate is set there).
+        -- ponytail: TLS verify off to match the rest of the AI clients; turn on
+        -- with a trusted CA bundle (lua_ssl_trusted_certificate is set in prod).
         ssl_verify = false })
     if not res then return nil, "Model request failed: " .. tostring(err) end
     local data = cjson.decode(res.body or "")
     if res.status >= 400 then
-        local msg = type(data) == "table" and type(data.error) == "table" and data.error.message
-            or type(data) == "table" and data.error or res.body
-        ngx.log(ngx.ERR, "[llm] ", PROVIDER, " HTTP ", res.status, " (", #encoded, " bytes): ",
+        local e = type(data) == "table" and data.error
+        local msg = type(e) == "table" and (e.message or cjson.encode(e)) or e or res.body
+        ngx.log(ngx.ERR, "[llm] ", cfg.provider, " HTTP ", res.status, " (", #encoded, " bytes): ",
             tostring(msg):sub(1, 400))
-        return nil, PROVIDER .. " HTTP " .. res.status .. ": " .. tostring(msg):sub(1, 400), res.status
+        return nil, cfg.provider .. " HTTP " .. res.status .. ": " .. tostring(msg):sub(1, 400), res.status
     end
-    if type(data) ~= "table" then return nil, PROVIDER .. ": unexpected response" end
+    if type(data) ~= "table" then return nil, cfg.provider .. ": unexpected response" end
     return data
 end
 
@@ -118,26 +141,35 @@ end
 -- ollama: native /api/chat (same message shape as ours)
 -- ---------------------------------------------------------------------------
 
--- The workstation gateway wants a JWT in x-api-key. The key may be a ready-made
--- token, or the signing secret — then mint a short-lived HS256 token from it.
-local function ollama_key()
-    if not API_KEY then return nil end
-    local _, dots = API_KEY:gsub("%.", "")
-    if dots == 2 and API_KEY:sub(1, 2) == "ey" then return API_KEY end
+--- x-api-key for the workstation Ollama gateway: the key may be a ready-made
+-- JWT, or the signing secret — then mint a short-lived HS256 token from it.
+function Llm.ollama_auth(key)
+    key = key or Llm.config("ollama").key
+    if not key then return nil end
+    local _, dots = key:gsub("%.", "")
+    if dots == 2 and key:sub(1, 2) == "ey" then return key end
     local now = ngx.time()
     local ok, token = pcall(function()
-        return jwt:sign(API_KEY, {
+        return jwt:sign(key, {
             header = { typ = "JWT", alg = "HS256" },
             payload = { sub = "opsapi-agent", name = "OpsAPI Agent", admin = true, iat = now, exp = now + 300 },
         })
     end)
-    return ok and token or API_KEY
+    return ok and token or key
 end
 
-local function ollama_chat(messages, tools, opts)
+local function ollama_chat(cfg, messages, tools, opts)
     local wire = {}
     for i, m in ipairs(messages) do
         local w = { role = m.role, content = text_of(m.content) }
+        for _, a in ipairs(m.attachments or {}) do
+            if not tostring(a.mime):match("^image/") then
+                return nil, "The Ollama model can only read images, not " .. tostring(a.mime)
+                    .. ". Upload an image or CSV, or set AI_VISION_PROVIDER to a provider that reads PDFs."
+            end
+            w.images = w.images or {}
+            w.images[#w.images + 1] = a.data
+        end
         if m.tool_calls then
             w.tool_calls = {}
             for j, tc in ipairs(m.tool_calls) do
@@ -148,20 +180,20 @@ local function ollama_chat(messages, tools, opts)
         wire[i] = w
     end
     local body = {
-        model = Llm.model, messages = wire, stream = false, think = false,
+        model = cfg.model, messages = wire, stream = false, think = false,
+        format = opts.json and "json" or nil,
         -- num_predict caps each reply: a looping model otherwise generates
         -- forever and pins an Ollama slot after we time out (seen on hh193).
         options = { temperature = opts.temperature or 0.2, num_predict = opts.max_tokens or 2048 },
     }
     if tools and #tools > 0 then body.tools = tools end
-    local headers = {}
-    local key = ollama_key()
-    if key then headers["x-api-key"] = key end
-    local data, err, status = post(BASE_URL .. "/api/chat", headers, body, opts.timeout_ms)
+    local data, err, status = post(cfg, cfg.url .. "/api/chat", { ["x-api-key"] = Llm.ollama_auth(cfg.key) },
+        body, opts.timeout_ms)
     if not data then return nil, err, status end
     local msg = data.message
     if type(msg) ~= "table" then return nil, "ollama: no message in response" end
-    local out = { role = "assistant", content = text_of(msg.content) }
+    local out = { role = "assistant", content = text_of(msg.content),
+        usage = { input = data.prompt_eval_count or 0, output = data.eval_count or 0 } }
     if type(msg.tool_calls) == "table" and #msg.tool_calls > 0 then
         out.tool_calls = {}
         for i, tc in ipairs(msg.tool_calls) do
@@ -176,7 +208,7 @@ end
 -- openai: Chat Completions (and every compatible server)
 -- ---------------------------------------------------------------------------
 
-local function openai_chat(messages, tools, opts)
+local function openai_chat(cfg, messages, tools, opts)
     local wire = {}
     for i, m in ipairs(messages) do
         if m.role == "tool" then
@@ -188,25 +220,38 @@ local function openai_chat(messages, tools, opts)
                     name = tc["function"].name, arguments = cjson.encode(tc["function"].arguments or {}) or "{}" } }
             end
             wire[i] = { role = "assistant", content = text_of(m.content), tool_calls = calls }
+        elseif m.attachments and #m.attachments > 0 then
+            local parts = {}
+            for _, a in ipairs(m.attachments) do
+                local uri = "data:" .. tostring(a.mime) .. ";base64," .. a.data
+                parts[#parts + 1] = a.mime == "application/pdf"
+                    and { type = "file", file = { filename = "document.pdf", file_data = uri } }
+                    or { type = "image_url", image_url = { url = uri } }
+            end
+            parts[#parts + 1] = { type = "text", text = text_of(m.content) }
+            wire[i] = { role = m.role, content = parts }
         else
             wire[i] = { role = m.role, content = text_of(m.content) }
         end
     end
-    local body = { model = Llm.model, messages = wire, temperature = opts.temperature or 0.2,
-        max_tokens = opts.max_tokens or 2048 }
+    local body = { model = cfg.model, messages = wire, temperature = opts.temperature or 0.2,
+        max_tokens = opts.max_tokens or 2048, response_format = opts.json and { type = "json_object" } or nil }
     if tools and #tools > 0 then body.tools = tools end
-    local headers = { ["Authorization"] = API_KEY and ("Bearer " .. API_KEY) or nil }
-    local data, err, status = post(BASE_URL .. "/chat/completions", headers, body, opts.timeout_ms)
+    local headers = { ["Authorization"] = cfg.key and ("Bearer " .. cfg.key) or nil }
+    local url = cfg.url .. "/chat/completions"
+    local data, err, status = post(cfg, url, headers, body, opts.timeout_ms)
     -- Newer OpenAI models reject max_tokens / a custom temperature: retry once
     -- with what they accept.
     if not data and status == 400 and (err:find("max_tokens", 1, true) or err:find("temperature", 1, true)) then
         body.max_completion_tokens, body.max_tokens, body.temperature = body.max_tokens, nil, nil
-        data, err, status = post(BASE_URL .. "/chat/completions", headers, body, opts.timeout_ms)
+        data, err, status = post(cfg, url, headers, body, opts.timeout_ms)
     end
     if not data then return nil, err, status end
     local msg = type(data.choices) == "table" and data.choices[1] and data.choices[1].message
     if type(msg) ~= "table" then return nil, "openai: no message in response" end
-    local out = { role = "assistant", content = text_of(msg.content) }
+    local usage = type(data.usage) == "table" and data.usage or {}
+    local out = { role = "assistant", content = text_of(msg.content),
+        usage = { input = usage.prompt_tokens or 0, output = usage.completion_tokens or 0 } }
     if type(msg.tool_calls) == "table" and #msg.tool_calls > 0 then
         out.tool_calls = {}
         for i, tc in ipairs(msg.tool_calls) do
@@ -221,7 +266,7 @@ end
 -- anthropic: Messages API
 -- ---------------------------------------------------------------------------
 
-local function anthropic_chat(messages, tools, opts)
+local function anthropic_chat(cfg, messages, tools, opts)
     local system, wire = {}, {}
     local function push(role, block)
         local last = wire[#wire]
@@ -249,15 +294,19 @@ local function anthropic_chat(messages, tools, opts)
                     input = type(input) == "table" and input or {} })
             end
             if text == "" and not m.tool_calls then push("assistant", { type = "text", text = "(no reply)" }) end
-        elseif text ~= "" then
-            push("user", { type = "text", text = text })
+        else
+            for _, a in ipairs(m.attachments or {}) do
+                push("user", { type = a.mime == "application/pdf" and "document" or "image",
+                    source = { type = "base64", media_type = a.mime, data = a.data } })
+            end
+            if text ~= "" then push("user", { type = "text", text = text }) end
         end
     end
     if wire[1] and wire[1].role ~= "user" then
         table.insert(wire, 1, { role = "user", content = { { type = "text", text = "(continuing our conversation)" } } })
     end
     local body = {
-        model = Llm.model, max_tokens = opts.max_tokens or 2048, temperature = opts.temperature or 0.2,
+        model = cfg.model, max_tokens = opts.max_tokens or 2048, temperature = opts.temperature or 0.2,
         system = #system > 0 and table.concat(system, "\n\n") or nil, messages = wire,
     }
     if tools and #tools > 0 then
@@ -267,8 +316,8 @@ local function anthropic_chat(messages, tools, opts)
             body.tools[i] = { name = fn.name, description = fn.description, input_schema = fn.parameters }
         end
     end
-    local headers = { ["x-api-key"] = API_KEY, ["anthropic-version"] = "2023-06-01" }
-    local data, err, status = post(BASE_URL .. "/v1/messages", headers, body, opts.timeout_ms)
+    local headers = { ["x-api-key"] = cfg.key, ["anthropic-version"] = "2023-06-01" }
+    local data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.timeout_ms)
     if not data then return nil, err, status end
     local texts, calls = {}, {}
     for _, block in ipairs(type(data.content) == "table" and data.content or {}) do
@@ -278,14 +327,20 @@ local function anthropic_chat(messages, tools, opts)
             calls[#calls + 1] = { id = block.id, ["function"] = { name = block.name or "", arguments = args_table(block.input) } }
         end
     end
-    return { role = "assistant", content = table.concat(texts, "\n"), tool_calls = #calls > 0 and calls or nil }
+    local usage = type(data.usage) == "table" and data.usage or {}
+    return { role = "assistant", content = table.concat(texts, "\n"), tool_calls = #calls > 0 and calls or nil,
+        usage = { input = usage.input_tokens or 0, output = usage.output_tokens or 0 } }
 end
 
 local ADAPTERS = { ollama = ollama_chat, openai = openai_chat, anthropic = anthropic_chat }
 
---- One model round-trip. opts: max_tokens, temperature, timeout_ms.
+--- One model round-trip (see the header for the message format and opts).
 function Llm.chat(messages, tools, opts)
-    return ADAPTERS[PROVIDER](messages, tools, opts or {})
+    opts = opts or {}
+    local cfg = opts.cfg or Llm.default
+    local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools, opts)
+    if msg then msg.model = cfg.model end
+    return msg, err, status
 end
 
 return Llm
