@@ -140,9 +140,21 @@ return function(app)
             return api_response(400, nil, "name is required")
         end
 
+        -- An optional board must be one of this project's boards.
+        local board_id
+        if data.board_id ~= nil and data.board_id ~= "" then
+            board_id = tonumber(data.board_id)
+            local owned = board_id and db.query(
+                "SELECT 1 FROM kanban_boards WHERE id = ? AND project_id = ? LIMIT 1", board_id, project.id)
+            if not owned or #owned == 0 then
+                return api_response(400, nil, "Board does not belong to this project")
+            end
+        end
+
         local sprint, create_err = KanbanSprintQueries.create({
             project_id = project.id,
-            board_id = data.board_id,
+            board_id = board_id,
+            created_by = user.uuid, -- NOT NULL: sprint creation failed without it
             name = data.name,
             goal = data.goal,
             start_date = data.start_date,

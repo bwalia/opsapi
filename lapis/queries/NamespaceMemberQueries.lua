@@ -321,7 +321,23 @@ end
 -- @param member_id number Member ID
 -- @param role_id number Role ID
 -- @return table The created assignment
+--- Are all these role ids roles of the member's OWN workspace? Role ids are
+-- bare numbers from the request: without this a workspace admin could attach
+-- another workspace's role (and its permission set) to their members.
+local function roles_of_members_namespace(member_id, role_ids)
+    if #role_ids == 0 then return true end
+    local rows = db.query([[
+        SELECT COUNT(*)::int AS n FROM namespace_roles r
+        JOIN namespace_members m ON m.namespace_id = r.namespace_id
+        WHERE m.id = ? AND r.id IN ?
+    ]], member_id, db.list(role_ids))
+    return rows and rows[1] and rows[1].n == #role_ids or false
+end
+
 function NamespaceMemberQueries.assignRole(member_id, role_id)
+    if not tonumber(role_id) or not roles_of_members_namespace(member_id, { tonumber(role_id) }) then
+        return nil, "Role does not belong to this workspace"
+    end
     local timestamp = Global.getCurrentTimestamp()
 
     -- Check if already assigned
@@ -390,6 +406,9 @@ function NamespaceMemberQueries.setRoles(member_id, role_ids)
         end
     end
     role_ids = ids
+    if not roles_of_members_namespace(member_id, role_ids) then
+        error("Role does not belong to this workspace")
+    end
 
     local timestamp = Global.getCurrentTimestamp()
 

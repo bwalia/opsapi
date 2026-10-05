@@ -360,10 +360,12 @@ function KanbanTaskQueries.moveToColumn(uuid, column_id, position, user_uuid)
 
     local old_column_id = task.column_id
 
-    -- Get column info
-    local column = db.query("SELECT * FROM kanban_columns WHERE id = ?", column_id)
+    -- The column must be on the task's OWN board: any other id (another
+    -- board, project or workspace) would move the task where its members can
+    -- see and edit it.
+    local column = db.query("SELECT * FROM kanban_columns WHERE id = ? AND board_id = ?", column_id, task.board_id)
     if not column or #column == 0 then
-        return nil, "Column not found"
+        return nil, "Column not found on this task's board"
     end
 
     local update_params = {
@@ -388,6 +390,16 @@ function KanbanTaskQueries.moveToColumn(uuid, column_id, position, user_uuid)
 
     -- :update() returns a boolean; the refreshed row was merged into `task` via returning = "*"
     return task
+end
+
+--- Is a task (numeric id) on a board of the given project?
+function KanbanTaskQueries.inProject(task_id, project_id)
+    local rows = db.query([[
+        SELECT 1 FROM kanban_tasks t JOIN kanban_boards b ON b.id = t.board_id
+        WHERE t.id = ? AND b.project_id = ? AND t.deleted_at IS NULL
+        LIMIT 1
+    ]], task_id, project_id)
+    return rows ~= nil and #rows > 0
 end
 
 --- Archive task
@@ -620,6 +632,19 @@ end
 -- @param label_id number Label ID
 -- @return table|nil Link
 function KanbanTaskQueries.addLabel(task_id, label_id)
+    -- The label must be one of the task's own project's labels (labels are
+    -- per project; another project's would leak its name across workspaces).
+    local same_project = db.query([[
+        SELECT 1 FROM kanban_task_labels l
+        JOIN kanban_boards b ON b.project_id = l.project_id
+        JOIN kanban_tasks t ON t.board_id = b.id
+        WHERE l.id = ? AND t.id = ? AND l.deleted_at IS NULL
+        LIMIT 1
+    ]], label_id, task_id)
+    if not same_project or #same_project == 0 then
+        return nil, "Label does not belong to this project"
+    end
+
     -- Check if already linked
     local existing = db.query([[
         SELECT id FROM kanban_task_label_links

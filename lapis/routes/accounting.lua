@@ -220,6 +220,13 @@ return function(app)
                 end
             end
 
+            -- A parent account must be one of this workspace's accounts.
+            local parent = data.parent_id or data.parent_account_id
+            if parent ~= nil and parent ~= "" and parent ~= ngx.null
+                and not AccountingQueries.accountsInNamespace({ parent }, self.namespace.id) then
+                return api_response(400, nil, "parent_id must be an account in this workspace")
+            end
+
             local account = AccountingQueries.createAccount({
                 namespace_id = self.namespace.id,
                 code = data.code,
@@ -291,6 +298,13 @@ return function(app)
 
             if next(update_params) == nil then
                 return api_response(400, nil, "No valid fields to update")
+            end
+
+            -- A parent account must be one of this workspace's accounts.
+            local parent = update_params.parent_id
+            if parent ~= nil and parent ~= "" and parent ~= ngx.null
+                and not AccountingQueries.accountsInNamespace({ parent }, self.namespace.id) then
+                return api_response(400, nil, "parent_id must be an account in this workspace")
             end
 
             local updated = AccountingQueries.updateAccount(self.params.uuid, update_params)

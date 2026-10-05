@@ -73,6 +73,12 @@ return function(app)
     app:get("/api/v2/timesheets/approval-queue", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local params = self.params or {}
+            -- Everyone's submitted timesheets (hours, notes, emails) are for
+            -- approvers only; anyone else gets an empty queue, not a 403, so the
+            -- tab simply shows nothing to approve.
+            if not can_view_others(self) then
+                return success_response({ data = {}, meta = { total = 0, page = 1, per_page = 0, total_pages = 0 } })
+            end
             local result = TimesheetQueries.getApprovalQueue(self.namespace.id, self.current_user.uuid, {
                 page = params.page,
                 per_page = params.per_page

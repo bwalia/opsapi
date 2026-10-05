@@ -442,65 +442,48 @@ function UserQueries.SCIMupdate(id, params)
     -- }), 204
 end
 
--- Search users by email, name, or username
+--- Search users for a workspace's pickers.
+-- Accounts are platform-wide, so this must never become a directory of every
+-- workspace's people (names + emails). For anyone but a platform admin:
+--   * default: active members of params.namespace_id only (assignees,
+--     project members, sharing);
+--   * exclude_namespace_id (invite an existing user who isn't a member yet):
+--     only an EXACT email match — you can find someone whose address you
+--     already know, never browse or enumerate the platform by name.
+-- Platform admins (params.platform_admin) search every account.
 function UserQueries.search(params)
     local db = require("lapis.db")
-    local query = params.query or params.q or ""
-    local limit = tonumber(params.limit) or 10
-    local exclude_namespace_id = params.exclude_namespace_id
-
+    local query = tostring(params.query or params.q or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local limit = math.min(tonumber(params.limit) or 10, 50)
     if query == "" then
         return { data = {}, total = 0 }
     end
 
-    -- Escape the query for LIKE pattern
-    local search_pattern = "%" .. query:lower() .. "%"
+    local p = "%" .. query:lower() .. "%"
+    local select_users = "SELECT u.id, u.uuid, u.email, u.first_name, u.last_name, u.username FROM users u"
+    local matches = [[(LOWER(u.email) LIKE ? OR LOWER(u.first_name) LIKE ? OR LOWER(u.last_name) LIKE ?
+        OR LOWER(u.username) LIKE ? OR LOWER(CONCAT(u.first_name, ' ', u.last_name)) LIKE ?)]]
+    local not_member = [[u.id NOT IN (SELECT nm.user_id FROM namespace_members nm
+        WHERE nm.namespace_id = ? AND nm.status = 'active')]]
 
-    local sql
-    if exclude_namespace_id then
-        -- Exclude users already in the namespace
-        sql = [[
-            SELECT u.id, u.uuid, u.email, u.first_name, u.last_name, u.username
-            FROM users u
-            WHERE (
-                LOWER(u.email) LIKE ? OR
-                LOWER(u.first_name) LIKE ? OR
-                LOWER(u.last_name) LIKE ? OR
-                LOWER(u.username) LIKE ? OR
-                LOWER(CONCAT(u.first_name, ' ', u.last_name)) LIKE ?
-            )
-            AND u.id NOT IN (
-                SELECT nm.user_id FROM namespace_members nm
-                WHERE nm.namespace_id = ? AND nm.status = 'active'
-            )
-            ORDER BY u.email ASC
-            LIMIT ?
-        ]]
-        local users = db.query(sql, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, exclude_namespace_id, limit)
-        return {
-            data = users or {},
-            total = #(users or {})
-        }
-    else
-        sql = [[
-            SELECT u.id, u.uuid, u.email, u.first_name, u.last_name, u.username
-            FROM users u
-            WHERE (
-                LOWER(u.email) LIKE ? OR
-                LOWER(u.first_name) LIKE ? OR
-                LOWER(u.last_name) LIKE ? OR
-                LOWER(u.username) LIKE ? OR
-                LOWER(CONCAT(u.first_name, ' ', u.last_name)) LIKE ?
-            )
-            ORDER BY u.email ASC
-            LIMIT ?
-        ]]
-        local users = db.query(sql, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit)
-        return {
-            data = users or {},
-            total = #(users or {})
-        }
+    local users
+    if params.exclude_namespace_id then
+        if params.platform_admin then
+            users = db.query(select_users .. " WHERE " .. matches .. " AND " .. not_member
+                .. " ORDER BY u.email ASC LIMIT ?", p, p, p, p, p, params.exclude_namespace_id, limit)
+        else
+            users = db.query(select_users .. " WHERE LOWER(u.email) = ? AND " .. not_member .. " LIMIT 1",
+                query:lower(), params.exclude_namespace_id)
+        end
+    elseif params.platform_admin then
+        users = db.query(select_users .. " WHERE " .. matches .. " ORDER BY u.email ASC LIMIT ?",
+            p, p, p, p, p, limit)
+    elseif params.namespace_id then
+        users = db.query(select_users .. [[ JOIN namespace_members nm
+            ON nm.user_id = u.id AND nm.namespace_id = ? AND nm.status = 'active'
+            WHERE ]] .. matches .. " ORDER BY u.email ASC LIMIT ?", params.namespace_id, p, p, p, p, p, limit)
     end
+    return { data = users or {}, total = #(users or {}) }
 end
 
 return UserQueries

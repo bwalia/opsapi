@@ -672,6 +672,9 @@ return function(app)
                 end
                 local roles_ok, roles_err = pcall(NamespaceMemberQueries.setRoles, existing.id, role_ids)
                 if not roles_ok then
+                    if tostring(roles_err):find("does not belong to this workspace", 1, true) then
+                        return error_response(400, "Role does not belong to this workspace")
+                    end
                     return error_response(500, "Failed to update member roles", tostring(roles_err))
                 end
                 return success_response({
@@ -759,6 +762,9 @@ return function(app)
 
         local roles_ok, roles_err = pcall(NamespaceMemberQueries.setRoles, membership.id, role_ids)
         if not roles_ok then
+            if tostring(roles_err):find("does not belong to this workspace", 1, true) then
+                return error_response(400, "Role does not belong to this workspace")
+            end
             return error_response(500, "Failed to update member roles", tostring(roles_err))
         end
 
@@ -911,6 +917,9 @@ return function(app)
                 if params.role_ids then
                     local roles_ok, roles_err = pcall(NamespaceMemberQueries.setRoles, member.id, params.role_ids)
                     if not roles_ok then
+                        if tostring(roles_err):find("does not belong to this workspace", 1, true) then
+                            return error_response(400, "Role does not belong to this workspace")
+                        end
                         return error_response(500, "Failed to update member roles", tostring(roles_err))
                     end
                     audit(self, "member.role_changed", "namespace_member", member.id,

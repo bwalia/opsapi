@@ -352,13 +352,21 @@ function KanbanSprintQueries.addTasks(sprint_id, task_ids)
         return 0
     end
 
+    -- Only tasks on a board of the SPRINT'S OWN project: a bare numeric id must
+    -- never pull another project's (or another workspace's) task into this
+    -- sprint, where its members could then read and edit it.
     local count = 0
     for _, task_id in ipairs(task_ids) do
         local result = db.query([[
             UPDATE kanban_tasks
             SET sprint_id = ?, updated_at = NOW()
             WHERE id = ? AND deleted_at IS NULL AND archived_at IS NULL
-        ]], sprint_id, task_id)
+              AND board_id IN (
+                  SELECT b.id FROM kanban_boards b
+                  JOIN kanban_sprints s ON s.project_id = b.project_id
+                  WHERE s.id = ?
+              )
+        ]], sprint_id, task_id, sprint_id)
 
         if result and result.affected_rows and result.affected_rows > 0 then
             count = count + 1

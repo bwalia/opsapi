@@ -226,6 +226,26 @@ function AccountingQueries.getJournalEntry(uuid)
     return entry
 end
 
+--- Are all of these numeric account ids live accounts of this namespace?
+-- @param ids table list of account ids (numbers or numeric strings)
+-- @param namespace_id number
+-- @return boolean
+function AccountingQueries.accountsInNamespace(ids, namespace_id)
+    local wanted, list = {}, {}
+    for _, v in ipairs(ids or {}) do
+        local n = tonumber(v)
+        if not n or n ~= math.floor(n) then return false end
+        if not wanted[n] then
+            wanted[n] = true
+            list[#list + 1] = n
+        end
+    end
+    if #list == 0 or not namespace_id then return false end
+    local rows = db.query("SELECT COUNT(*)::int AS n FROM accounting_accounts WHERE id IN ?"
+        .. " AND namespace_id = ? AND deleted_at IS NULL", db.list(list), namespace_id)
+    return rows and rows[1] and rows[1].n == #list or false
+end
+
 --- Create a journal entry with balanced debit/credit lines
 -- @param params table Entry params (namespace_id, description, entry_date, reference, lines[])
 -- @return table|nil Created entry with lines
@@ -233,6 +253,16 @@ end
 function AccountingQueries.createJournalEntry(params)
     if not params.lines or #params.lines == 0 then
         return nil, "Journal entry must have at least one line"
+    end
+
+    -- Every line must post to one of THIS workspace's accounts: lines carry raw
+    -- numeric account ids, and the balance update below writes to whatever id
+    -- it is given — another workspace's books included. One gate here covers
+    -- every caller (journal entries, bank reconciliation, expense approval).
+    local ids = {}
+    for _, line in ipairs(params.lines) do ids[#ids + 1] = line.account_id end
+    if not AccountingQueries.accountsInNamespace(ids, params.namespace_id) then
+        return nil, "Every line needs an account_id from this workspace's chart of accounts"
     end
 
     -- Validate that debits equal credits

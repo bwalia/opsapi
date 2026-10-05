@@ -313,7 +313,7 @@ return function(app)
     -- GET /api/v2/templates/:uuid - Get template
     app:get("/api/v2/templates/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local template = DocumentTemplateQueries.get(self.params.uuid)
+            local template = DocumentTemplateQueries.get(self.params.uuid, self.namespace.id)
             if not template then
                 return api_response(404, nil, "Template not found")
             end
@@ -327,7 +327,7 @@ return function(app)
             local body = parse_json_body()
             body.updated_by_uuid = self.current_user.uuid
 
-            local template, err = DocumentTemplateQueries.update(self.params.uuid, body)
+            local template, err = DocumentTemplateQueries.update(self.params.uuid, body, self.namespace.id)
             if not template then
                 return api_response(404, nil, err)
             end
@@ -338,7 +338,7 @@ return function(app)
     -- DELETE /api/v2/templates/:uuid - Soft delete
     app:delete("/api/v2/templates/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local ok, err = DocumentTemplateQueries.delete(self.params.uuid)
+            local ok, err = DocumentTemplateQueries.delete(self.params.uuid, self.namespace.id)
             if not ok then
                 return api_response(404, nil, err)
             end
@@ -360,7 +360,7 @@ return function(app)
                 return api_response(400, nil, err)
             end
 
-            local result, clone_err = DocumentTemplateQueries.clone(self.params.uuid, body.name)
+            local result, clone_err = DocumentTemplateQueries.clone(self.params.uuid, body.name, self.namespace.id)
             if not result then
                 return api_response(404, nil, clone_err)
             end
@@ -372,7 +372,7 @@ return function(app)
     app:post("/api/v2/templates/:uuid/set-default", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             -- Look up template to get its type
-            local template = DocumentTemplateQueries.get(self.params.uuid)
+            local template = DocumentTemplateQueries.get(self.params.uuid, self.namespace.id)
             if not template then
                 return api_response(404, nil, "Template not found")
             end
@@ -393,7 +393,7 @@ return function(app)
     -- GET /api/v2/templates/:uuid/versions - Get version history
     app:get("/api/v2/templates/:uuid/versions", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local template = DocumentTemplateQueries.get(self.params.uuid)
+            local template = DocumentTemplateQueries.get(self.params.uuid, self.namespace.id)
             if not template then
                 return api_response(404, nil, "Template not found")
             end
@@ -406,7 +406,7 @@ return function(app)
     -- POST /api/v2/templates/:uuid/restore/:version - Restore to version
     app:post("/api/v2/templates/:uuid/restore/:version", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local template = DocumentTemplateQueries.get(self.params.uuid)
+            local template = DocumentTemplateQueries.get(self.params.uuid, self.namespace.id)
             if not template then
                 return api_response(404, nil, "Template not found")
             end
@@ -437,7 +437,7 @@ return function(app)
         NamespaceMiddleware.requireNamespace(function(self)
             local body = parse_json_body()
 
-            local template = DocumentTemplateQueries.get(self.params.uuid)
+            local template = DocumentTemplateQueries.get(self.params.uuid, self.namespace.id)
             if not template then
                 return api_response(404, nil, "Template not found")
             end
@@ -507,7 +507,7 @@ return function(app)
             -- Get template (from request body or default)
             local template
             if body.template_uuid and body.template_uuid ~= "" then
-                template = DocumentTemplateQueries.get(body.template_uuid)
+                template = DocumentTemplateQueries.get(body.template_uuid, self.namespace.id)
             else
                 template = DocumentTemplateQueries.getDefault(self.namespace.id, "invoice")
             end
@@ -641,7 +641,7 @@ return function(app)
             -- Get template (from request body or default)
             local template
             if body.template_uuid and body.template_uuid ~= "" then
-                template = DocumentTemplateQueries.get(body.template_uuid)
+                template = DocumentTemplateQueries.get(body.template_uuid, self.namespace.id)
             else
                 template = DocumentTemplateQueries.getDefault(self.namespace.id, "timesheet")
             end
@@ -777,7 +777,7 @@ return function(app)
     -- GET /api/v2/documents/:uuid - Get generated document details
     app:get("/api/v2/documents/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            local doc = DocumentTemplateQueries.getGeneratedDocument(self.params.uuid)
+            local doc = DocumentTemplateQueries.getGeneratedDocument(self.params.uuid, self.namespace.id)
             if not doc then
                 return api_response(404, nil, "Generated document not found")
             end
@@ -796,7 +796,7 @@ return function(app)
             end
 
             -- Get the generated document
-            local doc = DocumentTemplateQueries.getGeneratedDocument(self.params.uuid)
+            local doc = DocumentTemplateQueries.getGeneratedDocument(self.params.uuid, self.namespace.id)
             if not doc then
                 return api_response(404, nil, "Generated document not found")
             end

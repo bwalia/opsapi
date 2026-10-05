@@ -270,9 +270,11 @@ export const UserSearchInput = memo(function UserSearchInput({
           ref={dropdownRef}
           className="absolute z-50 w-full mt-1 bg-surface border border-secondary-200 rounded-lg shadow-lg p-4 text-center"
         >
-          <p className="text-secondary-500">No users found matching "{query}"</p>
+          <p className="text-secondary-500">No users found matching &ldquo;{query}&rdquo;</p>
           <p className="text-sm text-secondary-400 mt-1">
-            Try a different search term or invite by email
+            {excludeNamespaceId
+              ? 'Existing users are found by their full email address — or invite by email'
+              : 'Try a different search term or invite by email'}
           </p>
         </div>
       )}

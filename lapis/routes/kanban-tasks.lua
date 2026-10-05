@@ -343,10 +343,29 @@ return function(app)
             end
         end
 
-        -- Get first column if not specified
-        local column_id = data.column_id
-        if not column_id and board.columns and #board.columns > 0 then
+        -- Column: one of THIS board's columns (default the first). Any other id
+        -- would file the task on another board/workspace.
+        local column_id
+        if data.column_id ~= nil and data.column_id ~= "" then
+            column_id = tonumber(data.column_id)
+            local on_board = false
+            for _, c in ipairs(board.columns or {}) do
+                if tonumber(c.id) == column_id then on_board = true break end
+            end
+            if not on_board then
+                return api_response(400, nil, "Column does not belong to this board")
+            end
+        elseif board.columns and #board.columns > 0 then
             column_id = board.columns[1].id
+        end
+
+        -- A parent task must be in this same project.
+        local parent_task_id
+        if data.parent_task_id ~= nil and data.parent_task_id ~= "" then
+            parent_task_id = tonumber(data.parent_task_id)
+            if not parent_task_id or not KanbanTaskQueries.inProject(parent_task_id, board.project_id) then
+                return api_response(400, nil, "Parent task does not belong to this project")
+            end
         end
 
         -- Tenant gate: an epic_id must belong to this task's own project (and
@@ -360,7 +379,7 @@ return function(app)
         local task = KanbanTaskQueries.create({
             board_id = board.id,
             column_id = column_id,
-            parent_task_id = data.parent_task_id,
+            parent_task_id = parent_task_id,
             epic_id = epic_id,
             title = data.title,
             description = data.description,

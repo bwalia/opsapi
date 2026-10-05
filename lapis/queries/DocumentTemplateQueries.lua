@@ -175,7 +175,10 @@ end
 --- Get a single template by UUID
 -- @param uuid string
 -- @return table|nil template
-function DocumentTemplateQueries.get(uuid)
+-- Tenant scoping: routes MUST pass namespace_id (a template uuid from another
+-- workspace is "not found"); nil is only for internal calls on a row already
+-- owned by the caller.
+function DocumentTemplateQueries.get(uuid, namespace_id)
     local results = db.query([[
         SELECT
             dt.id as internal_id,
@@ -206,8 +209,9 @@ function DocumentTemplateQueries.get(uuid)
         FROM document_templates dt
         WHERE dt.uuid = ?
           AND dt.deleted_at IS NULL
+          AND (?::bigint IS NULL OR dt.namespace_id = ?::bigint)
         LIMIT 1
-    ]], uuid)
+    ]], uuid, namespace_id or db.NULL, namespace_id or db.NULL)
 
     return results and results[1] or nil
 end
@@ -216,9 +220,13 @@ end
 -- @param uuid string
 -- @param params table
 -- @return table|nil updated template, string|nil error
-function DocumentTemplateQueries.update(uuid, params)
+local function in_namespace(row, namespace_id)
+    return namespace_id == nil or tonumber(row.namespace_id) == tonumber(namespace_id)
+end
+
+function DocumentTemplateQueries.update(uuid, params, namespace_id)
     local template = DocumentTemplateModel:find({ uuid = uuid })
-    if not template then
+    if not template or not in_namespace(template, namespace_id) then
         return nil, "Template not found"
     end
     if template.deleted_at then
@@ -288,9 +296,9 @@ end
 --- Soft delete a template
 -- @param uuid string
 -- @return boolean success, string|nil error
-function DocumentTemplateQueries.delete(uuid)
+function DocumentTemplateQueries.delete(uuid, namespace_id)
     local template = DocumentTemplateModel:find({ uuid = uuid })
-    if not template then
+    if not template or not in_namespace(template, namespace_id) then
         return false, "Template not found"
     end
     if template.deleted_at then
@@ -310,9 +318,9 @@ end
 -- @param uuid string - source template UUID
 -- @param new_name string - name for the cloned template
 -- @return table|nil { data = template }, string|nil error
-function DocumentTemplateQueries.clone(uuid, new_name)
+function DocumentTemplateQueries.clone(uuid, new_name, namespace_id)
     local source = DocumentTemplateModel:find({ uuid = uuid })
-    if not source then
+    if not source or not in_namespace(source, namespace_id) then
         return nil, "Template not found"
     end
     if source.deleted_at then
@@ -637,7 +645,7 @@ end
 --- Get a single generated document by UUID
 -- @param uuid string
 -- @return table|nil generated document
-function DocumentTemplateQueries.getGeneratedDocument(uuid)
+function DocumentTemplateQueries.getGeneratedDocument(uuid, namespace_id)
     local results = db.query([[
         SELECT
             gd.id as internal_id,
@@ -662,8 +670,9 @@ function DocumentTemplateQueries.getGeneratedDocument(uuid)
         FROM generated_documents gd
         LEFT JOIN document_templates dt ON dt.id = gd.template_id
         WHERE gd.uuid = ?
+          AND (?::bigint IS NULL OR gd.namespace_id = ?::bigint)
         LIMIT 1
-    ]], uuid)
+    ]], uuid, namespace_id or db.NULL, namespace_id or db.NULL)
 
     return results and results[1] or nil
 end
