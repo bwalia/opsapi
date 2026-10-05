@@ -66,8 +66,8 @@ function aiLabel(ai: AiStatus): string {
 /**
  * The model behind the chat assistant and how it's answering right now:
  * green under 3s, amber when slower, red when down. The backend measures one
- * real request a minute, shared by all users (lapis/lib/agent/ollama-agent).
- * Hidden where the chat module isn't deployed.
+ * real request a minute, shared by all users (lapis/lib/agent/agent).
+ * Hidden if this API doesn't expose it.
  */
 function AiStatusBadge() {
   const [ai, setAi] = useState<AiStatus | null>(null);
@@ -132,7 +132,7 @@ export function BuildFooter() {
   const builtExact = BUILT_AT ? new Date(BUILT_AT).toLocaleString() : '';
 
   return (
-    <footer className="border-t border-secondary-200 bg-surface px-4 py-3 text-xs text-secondary-500 sm:px-6">
+    <footer className="border-t border-secondary-200 bg-surface py-3 pl-4 pr-32 text-xs text-secondary-500 sm:pl-6">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <span className="inline-flex items-center gap-1.5 font-semibold text-secondary-700">
           <span className="h-2 w-2 rounded-full bg-primary-500" aria-hidden />

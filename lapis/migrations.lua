@@ -2382,6 +2382,33 @@ local _migrations = {
             ON chat_agent_runs (user_uuid, namespace_id, id DESC) WHERE NOT archived
         ]])
     end),
+    -- Page-aware AI assistant (core): the runs table everywhere (deployments
+    -- without chat never got 2000_*), plus the page scope that keys each
+    -- thread, the page it was asked on, and a delete awaiting confirmation.
+    ['zzv_ai_assistant_page_scopes'] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS chat_agent_runs (
+                id BIGSERIAL PRIMARY KEY,
+                uuid TEXT NOT NULL UNIQUE,
+                namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                user_uuid TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                turns JSONB NOT NULL DEFAULT '[]',
+                reply TEXT,
+                actions JSONB,
+                archived BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("ALTER TABLE chat_agent_runs ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'general'")
+        db.query("ALTER TABLE chat_agent_runs ADD COLUMN IF NOT EXISTS page_path TEXT")
+        db.query("ALTER TABLE chat_agent_runs ADD COLUMN IF NOT EXISTS pending JSONB")
+        db.query([[
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_runs_scope
+            ON chat_agent_runs (user_uuid, namespace_id, scope, id DESC) WHERE NOT archived
+        ]])
+    end,
     -- CMS sidebar menu item + RBAC module ("cms") + role grants + enable for namespaces
     ['839_seed_cms_menu_items'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 1),
     ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),

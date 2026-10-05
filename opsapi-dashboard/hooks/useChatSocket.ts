@@ -48,6 +48,9 @@ export interface ChatWsAgentDone {
   namespace_id?: number;
   status: 'done' | 'error';
   reply?: string;
+  // Page assistant runs: the scope + page they were asked on.
+  scope?: string;
+  path?: string;
 }
 
 export interface ChatSocketHandlers {

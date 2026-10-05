@@ -85,11 +85,11 @@ register({
         properties = {
             first_name = { type = "string", description = "Customer first name (or company name)." },
             last_name = { type = "string", description = "Customer last name (optional)." },
-            email = { type = "string", description = "Email address (optional)." },
+            email = { type = "string", description = "Email address (required — customers need one)." },
             phone = { type = "string", description = "Phone number (optional)." },
             notes = { type = "string", description = "Any notes (optional)." },
         },
-        required = { "first_name" },
+        required = { "first_name", "email" },
     },
     handler = function(ctx, a)
         local rec = CustomerQueries.create({
@@ -840,29 +840,203 @@ register({
     end,
 })
 
+-- ========================= call_api (page assistant) =========================
+
+-- Generic access to the REST API for the page the user is on, made AS THE
+-- USER: the request carries their own JWT + workspace header, so the real
+-- route does the validation, RBAC and tenant scoping — the assistant can never
+-- do more than the user could in the dashboard. Limited to the page's `api:`
+-- prefixes (lib/agent/scopes); never auth/keys/secrets/billing; DELETE only
+-- runs after the user presses Confirm (routes/chat-agent.lua).
+
+local http = require("resty.http")
+local cjson_safe = require("cjson.safe")
+local Scopes = require("lib.agent.scopes")
+
+local BLOCKED_PATHS = {
+    "^/auth", "^/api/v2/auth", "^/api/chat/agent", "api%-keys", "secret", "vault", "stripe",
+    "billing", "password", "/2fa", "/otp", "/impersonat",
+}
+local METHODS = { GET = true, POST = true, PUT = true, PATCH = true, DELETE = true }
+local MAX_RESULT_CHARS = 6000
+
+-- Shrink an API response for the model: drop nulls, clip long strings and lists.
+local function compact(v, depth)
+    if type(v) == "string" then
+        return #v > 300 and (v:sub(1, 300) .. "…") or v
+    end
+    if type(v) ~= "table" then return v end
+    if depth > 5 then return "…" end
+    local out = {}
+    if #v > 0 then
+        for i = 1, math.min(#v, 15) do out[i] = compact(v[i], depth + 1) end
+        if #v > 15 then out[#out + 1] = "… " .. (#v - 15) .. " more" end
+        return out
+    end
+    for k, val in pairs(v) do
+        if val ~= ngx.null and val ~= "" then out[k] = compact(val, depth + 1) end
+    end
+    return out
+end
+
+--- Validate a call against the scope. Returns (path, query) or (nil, err).
+function Tools.check_api_call(scope, method, path)
+    if not METHODS[method] then
+        return nil, "method must be one of GET, POST, PUT, PATCH, DELETE"
+    end
+    if type(path) ~= "string" or path:sub(1, 1) ~= "/" or path:find("%.%.") or path:find("[%s\\]")
+        or path:find("://", 1, true) then
+        return nil, "path must be an API path starting with / (e.g. /api/v2/...)"
+    end
+    local clean, qs = path:match("^([^?#]*)%??([^#]*)")
+    local lower = clean:lower()
+    for _, pat in ipairs(BLOCKED_PATHS) do
+        if lower:find(pat) then
+            return nil, "The assistant isn't allowed to call " .. clean .. "."
+        end
+    end
+    if not Scopes.allows_api(scope, clean, method) then
+        return nil, method .. " " .. clean .. " isn't one of this page's documented endpoints. Use only the "
+            .. "endpoints in your page guide; for other areas, tell the user which page to open."
+    end
+    if scope.readonly and method ~= "GET" then
+        return nil, "The assistant can only read data on this page."
+    end
+    return clean, qs
+end
+
+--- Perform the HTTP call as the user (ctx.forward_headers, ctx.port).
+-- Returns (result_table|nil, err_string|nil).
+function Tools.http_call(ctx, method, path, query, body)
+    local clean, qs_or_err = Tools.check_api_call(ctx.scope, method, path)
+    if not clean then return nil, qs_or_err end
+
+    local args = {}
+    if qs_or_err ~= "" then args = ngx.decode_args(qs_or_err) end
+    if type(query) == "table" then
+        for k, v in pairs(query) do
+            if type(v) == "boolean" then v = tostring(v) end
+            if type(v) ~= "table" and v ~= ngx.null then args[k] = v end
+        end
+    end
+
+    local headers = {
+        ["Accept"] = "application/json",
+        ["X-OpsAPI-Agent"] = "1",
+    }
+    for k, v in pairs(ctx.forward_headers or {}) do headers[k] = v end
+    local payload
+    if method ~= "GET" and type(body) == "table" then
+        headers["Content-Type"] = "application/json"
+        payload = cjson_safe.encode(body)
+    end
+
+    local httpc = http.new()
+    httpc:set_timeout(30000)
+    local res, err = httpc:request_uri("http://127.0.0.1:" .. (ctx.port or 80) .. clean, {
+        method = method,
+        query = args,
+        body = payload,
+        headers = headers,
+    })
+    if not res then
+        return nil, "The API didn't answer: " .. tostring(err)
+    end
+    local data = cjson_safe.decode(res.body or "")
+    if res.status >= 400 then
+        local msg = type(data) == "table" and (data.error or data.message or data.errors) or res.body
+        if type(msg) == "table" then msg = cjson_safe.encode(msg) end
+        return nil, "HTTP " .. res.status .. ": " .. tostring(msg or ""):sub(1, 600)
+    end
+    local out = compact(type(data) == "table" and data or { body = res.body }, 0)
+    local encoded = cjson_safe.encode(out) or ""
+    if #encoded > MAX_RESULT_CHARS then
+        return { status = res.status, truncated = true, data = encoded:sub(1, MAX_RESULT_CHARS) }
+    end
+    return { status = res.status, data = out }
+end
+
+register({
+    name = "call_api",
+    description = "Call the OpsAPI REST API as the current user for this page's module, using the "
+        .. "endpoints in your page guide. GET reads data; POST/PUT/PATCH create or change it. "
+        .. "DELETE is not run straight away: the user is asked to confirm it first.",
+    parameters = {
+        type = "object",
+        properties = {
+            method = { type = "string", enum = { "GET", "POST", "PUT", "PATCH", "DELETE" } },
+            path = { type = "string", description = "API path with ids filled in, e.g. /api/v2/timesheets/<uuid>" },
+            query = { type = "object", description = "Query-string parameters (filters, page, per_page)." },
+            body = { type = "object", description = "JSON body for POST/PUT/PATCH, with the documented fields." },
+            summary = {
+                type = "string",
+                description = "One short sentence saying what this call does, in the user's terms "
+                    .. "(e.g. 'Delete the 7.5h timesheet for 3 Oct'). Required for DELETE.",
+            },
+        },
+        required = { "method", "path" },
+    },
+    handler = function(ctx, a)
+        local method = tostring(a.method or "GET"):upper()
+        if method == "DELETE" and not ctx.confirmed then
+            local path, err = Tools.check_api_call(ctx.scope, method, a.path)
+            if not path then return nil, err end
+            local summary = type(a.summary) == "string" and a.summary ~= "" and a.summary
+                or ("DELETE " .. path)
+            return {
+                needs_confirmation = true,
+                question = "Please confirm: **" .. summary .. "**. This can't be undone.",
+                pending = { method = method, path = a.path, query = a.query, summary = summary },
+            }
+        end
+        return Tools.http_call(ctx, method, a.path, a.query, a.body)
+    end,
+})
+
 -- ========================= public API =========================
 
---- Ollama tool definitions (function schemas) for every registered tool.
-function Tools.definitions()
+--- Ollama tool definitions (function schemas). With a scope: ask_user, the
+-- scope's typed tools and (when it has API prefixes) call_api; without one,
+-- every typed tool (the chat page's all-round assistant).
+function Tools.definitions(scope)
+    local names
+    if scope and scope.tools then
+        names = { "ask_user" }
+        for _, n in ipairs(scope.tools) do
+            if registry[n] and n ~= "ask_user" and n ~= "call_api" then names[#names + 1] = n end
+        end
+        if #(scope.api or {}) > 0 then names[#names + 1] = "call_api" end
+    else
+        names = {}
+        for _, n in ipairs(order) do
+            if n ~= "call_api" then names[#names + 1] = n end
+        end
+    end
     local defs = {}
-    for _, name in ipairs(order) do
+    for _, name in ipairs(names) do
         local spec = registry[name]
+        local description = spec.description
+        if name == "call_api" then
+            description = description .. " Allowed path prefixes here: " .. table.concat(scope.api, ", ")
+                .. (scope.readonly and " (read-only: GET only)." or ".")
+        end
         defs[#defs + 1] = {
             type = "function",
             ["function"] = {
                 name = spec.name,
-                description = spec.description,
+                description = description,
                 parameters = spec.parameters,
             },
         }
     end
-    return defs
+    return defs, names
 end
 
 --- Execute a tool by name with RBAC. Returns (result_table|nil, err_string|nil).
+-- ctx.tool_names (optional set) limits it to the tools offered for the page.
 function Tools.execute(ctx, name, args)
     local spec = registry[name]
-    if not spec then
+    if not spec or (ctx.tool_names and not ctx.tool_names[name]) then
         return nil, "Unknown tool: " .. tostring(name)
     end
     if not spec.handler then

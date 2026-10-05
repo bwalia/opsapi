@@ -7,6 +7,20 @@ local GlobalRateLimit = require("middleware.global-rate-limit")
 require("helper.request-context").install()
 local Errors = require("lib.errors")
 
+-- ngx.req.get_post_args() parses ANY body as form data: a JSON body
+-- {"column_id":23} comes back as one junk key, so the routes that read form
+-- args first and fall back to JSON (kanban, tax, academy, invoices, themes...)
+-- never reached their JSON branch — JSON clients (the SDK, the AI assistant)
+-- silently lost every field. A JSON request has no form args.
+if not ngx.req.opsapi_json_safe then
+    local get_post_args = ngx.req.get_post_args
+    ngx.req.get_post_args = function(...)
+        if (ngx.var.http_content_type or ""):find("application/json", 1, true) then return {} end
+        return get_post_args(...)
+    end
+    ngx.req.opsapi_json_safe = true
+end
+
 -- Build metadata baked into the image at `docker build` time — the CI
 -- workflow passes `--build-arg APP_VERSION=$(git describe --tags --always)`
 -- + BUILD_NUMBER + BUILD_TIME, and the Dockerfile turns them into container
@@ -258,6 +272,31 @@ end)
 app:before_filter(function(self)
     local uri = ngx.var.uri
 
+    -- AI assistant calls (lib/agent/tools call_api) send a JSON body. Mirror its
+    -- fields into self.params the way the dashboard's toFormData would (scalars
+    -- as strings, objects as JSON strings, scalar lists as lists) so routes that
+    -- read self.params and routes that decode the body both work. Never
+    -- overrides a URL/query param. Grants nothing: it's just another encoding.
+    if ngx.var.http_x_opsapi_agent and (ngx.var.http_content_type or ""):find("application/json", 1, true) then
+        ngx.req.read_body()
+        local data = require("cjson.safe").decode(ngx.req.get_body_data() or "")
+        if type(data) == "table" then
+            for k, v in pairs(data) do
+                if type(k) == "string" and self.params[k] == nil and v ~= ngx.null then
+                    if type(v) ~= "table" then
+                        self.params[k] = tostring(v)
+                    elseif #v > 0 and type(v[1]) ~= "table" then
+                        local items = {}
+                        for i, item in ipairs(v) do items[i] = tostring(item) end
+                        self.params[k] = items
+                    else
+                        self.params[k] = require("cjson.safe").encode(v)
+                    end
+                end
+            end
+        end
+    end
+
     -- Public auth routes (no authentication required)
     -- Note: /auth/refresh handles its own token validation for refresh flow
     local public_auth_routes = {
@@ -389,6 +428,9 @@ safe_load_routes("routes.module")
 -- namespace can use, RBAC-gated on the "employees" module. It also mounts the
 -- legacy /api/v2/field-service/employees* aliases for the field-service UI.
 safe_load_routes("routes.employees")
+-- AI assistant (/api/chat/agent*): CORE, so the page assistant works in every
+-- deployment, not only those with chat. Table: chat_agent_runs (core migration).
+safe_load_routes("routes.chat-agent")
 -- Namespace template library ({{slot}} templates for CMS pages + domain sync).
 -- Always on (core): namespace-scoped, RBAC-gated on the "templates" module.
 safe_load_routes("routes.render-templates")
@@ -463,7 +505,6 @@ load_if("chat", "routes.chat-messages")
 load_if("chat", "routes.chat-reactions")
 load_if("chat", "routes.chat-mentions")
 load_if("chat", "routes.chat-extras")
-load_if("chat", "routes.chat-agent")
 
 -- ============================================
 -- KANBAN PROJECT MANAGEMENT

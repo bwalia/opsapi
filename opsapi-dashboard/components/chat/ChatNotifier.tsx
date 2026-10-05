@@ -19,6 +19,7 @@ import { useChatSocket, type ChatWsNewMessage, type ChatWsAgentDone } from '@/ho
 import { useChatRealtime, emitChatEvent, AGENT_ID } from '@/store/chat-realtime.store';
 import { senderName } from '@/services/chat.service';
 import { notify } from '@/lib/notify';
+import { useAssistant } from '@/store/assistant.store';
 
 export default function ChatNotifier() {
   const router = useRouter();
@@ -65,18 +66,40 @@ export default function ChatNotifier() {
   const onAgentDone = useCallback(
     (data: ChatWsAgentDone) => {
       emitChatEvent({ type: 'agent', data });
+      const title = data.status === 'error' ? 'Assistant couldn’t finish' : 'Assistant finished';
+      const body = (data.reply || '').replace(/[*_`#>|]/g, '').slice(0, 140);
+      // A page assistant run: point back at that page and open its panel.
+      if (data.scope && data.scope !== 'general' && data.path) {
+        const path = data.path;
+        const showing =
+          useAssistant.getState().open &&
+          window.location.pathname === path &&
+          document.visibilityState === 'visible';
+        if (showing) return;
+        void notify({
+          title,
+          body,
+          url: path,
+          tag: `assistant-${data.scope}`,
+          onClick: () => {
+            router.push(path);
+            useAssistant.getState().setOpen(true);
+          },
+        });
+        return;
+      }
       const viewing =
         useChatRealtime.getState().activeChannel === AGENT_ID && document.visibilityState === 'visible';
       if (viewing) return;
       void notify({
-        title: data.status === 'error' ? 'Assistant couldn’t finish' : 'Assistant finished',
-        body: (data.reply || '').replace(/[*_`#>|]/g, '').slice(0, 140),
+        title,
+        body,
         url: `/dashboard/chat?c=${AGENT_ID}`,
         tag: 'chat-agent',
         onClick: () => openChannel(AGENT_ID),
       });
     },
-    [openChannel]
+    [openChannel, router]
   );
 
   const { status } = useChatSocket(
