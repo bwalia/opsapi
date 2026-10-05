@@ -81,6 +81,8 @@ function CustomerQueries.all(params)
     -- Validate ORDER BY to prevent SQL injection
     local valid_fields = { id = true, name = true, email = true, phone = true, created_at = true, updated_at = true, first_name = true, last_name = true }
     local orderField, orderDir = Global.sanitizeOrderBy(params.orderBy, params.orderDir, valid_fields, "created_at", "desc")
+    -- There is no `name` column: sorting by name 500'd. Name = first + last.
+    if orderField == "name" then orderField = "first_name " .. orderDir .. ", last_name" end
 
     local where_clause = ""
     local order_clause = " order by " .. orderField .. " " .. orderDir

@@ -637,6 +637,11 @@ return function(app)
                 return api_response(400, nil, "amount is required")
             end
 
+            -- category is NOT NULL: without it the insert failed with a 500.
+            if not data.category or data.category == "" then
+                return api_response(400, nil, "category is required")
+            end
+
             local expense = AccountingQueries.createExpense({
                 namespace_id = self.namespace.id,
                 expense_date = data.expense_date or os.date("%Y-%m-%d"),

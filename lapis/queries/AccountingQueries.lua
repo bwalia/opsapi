@@ -247,17 +247,15 @@ function AccountingQueries.createJournalEntry(params)
         return nil, string.format("Journal entry is unbalanced: debits=%.2f credits=%.2f", total_debits, total_credits)
     end
 
-    -- Generate entry number
+    -- Next entry number. entry_number is TEXT, so ORDER BY sorted "9" above
+    -- "10": the 11th entry got number 10 again and hit the unique index.
+    -- Take the numeric maximum instead.
     local last_entry = db.query([[
-        SELECT entry_number FROM accounting_journal_entries
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(entry_number, '[^0-9]', '', 'g'), '')::bigint), 0) AS n
+        FROM accounting_journal_entries
         WHERE namespace_id = ?
-        ORDER BY entry_number DESC LIMIT 1
     ]], params.namespace_id)
-
-    local next_number = 1
-    if last_entry and last_entry[1] then
-        next_number = (tonumber(last_entry[1].entry_number) or 0) + 1
-    end
+    local next_number = (tonumber(last_entry and last_entry[1] and last_entry[1].n) or 0) + 1
 
     local entry_uuid = Global.generateUUID()
 
@@ -369,13 +367,23 @@ function AccountingQueries.importBankTransactions(namespace_id, transactions, im
     local imported = 0
 
     for _, txn in ipairs(transactions) do
+        -- Money out is stored negative (reconciliation reads the sign). An
+        -- explicit transaction_type wins: Money Out sends positive amounts with
+        -- "debit", which used to be filed as money IN.
         local amount = tonumber(txn.amount) or 0
+        local given = type(txn.transaction_type) == "string" and txn.transaction_type:lower() or nil
+        if given == "debit" then
+            amount = -math.abs(amount)
+        elseif given == "credit" then
+            amount = math.abs(amount)
+        end
         local transaction_type = amount < 0 and "debit" or "credit"
 
         AccountingBankTransactionModel:create({
             uuid = Global.generateUUID(),
             namespace_id = namespace_id,
-            transaction_date = txn.date,
+            -- The dashboard sends transaction_date (the column); CSV parsing gives date.
+            transaction_date = txn.transaction_date or txn.date,
             description = txn.description or "",
             amount = amount,
             transaction_type = transaction_type,
