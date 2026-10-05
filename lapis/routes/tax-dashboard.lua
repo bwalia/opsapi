@@ -144,6 +144,43 @@ return function(app)
     --   - monthly income/expense breakdown for chart
     --   - upcoming tax deadlines
     -- =========================================================================
+    -- GET /api/v2/tax/dashboard/stats — counts for the Tax overview cards
+    -- (taxService.getDashboardStats). The page called this path but no route
+    -- existed, so every card showed 0. Scoped to the caller like /summary.
+    app:get("/api/v2/tax/dashboard/stats", function(self)
+        local user = self.current_user
+        if not user then
+            return { status = 401, json = { error = "Authentication required" } }
+        end
+        local user_id = getUserId(user)
+        if not user_id then
+            return { status = 404, json = { error = "User not found" } }
+        end
+        local s = db.query([[
+            SELECT
+                (SELECT COUNT(*) FROM tax_bank_accounts WHERE user_id = ?) AS total_bank_accounts,
+                (SELECT COUNT(*) FROM tax_statements WHERE user_id = ?) AS total_statements,
+                COUNT(t.id) AS total_transactions,
+                COUNT(t.id) FILTER (WHERE COALESCE(t.classification_status, 'PENDING') <> 'PENDING')
+                    AS classified_transactions,
+                COALESCE(SUM(ABS(t.amount)) FILTER (WHERE t.transaction_type = 'CREDIT'), 0) AS total_income,
+                COALESCE(SUM(ABS(t.amount)) FILTER (WHERE t.transaction_type = 'DEBIT'), 0) AS total_expenses
+            FROM tax_transactions t
+            WHERE t.user_id = ?
+        ]], user_id, user_id, user_id)[1] or {}
+        local total = tonumber(s.total_transactions) or 0
+        local classified = tonumber(s.classified_transactions) or 0
+        return { status = 200, json = { data = {
+            total_bank_accounts = tonumber(s.total_bank_accounts) or 0,
+            total_statements = tonumber(s.total_statements) or 0,
+            total_transactions = total,
+            classified_transactions = classified,
+            unclassified_transactions = total - classified,
+            total_income = tonumber(s.total_income) or 0,
+            total_expenses = tonumber(s.total_expenses) or 0,
+        } } }
+    end)
+
     app:get("/api/v2/tax/dashboard/summary", function(self)
         local user = self.current_user
         if not user then

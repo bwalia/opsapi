@@ -472,6 +472,32 @@ jobs:
           docker logs --tail 30 "opsapi-smoke-pg-$RUN_ID" 2>&1 || true
           exit 1
 
+      # The AI page assistant may only call the endpoints written in its page
+      # guides (lapis/lib/agent/knowledge/*.md), so a renamed or removed route
+      # silently breaks it. This probes every documented endpoint against the
+      # smoke container and annotates any that no longer exist. Shown as a
+      # failed step, but continue-on-error: a guide mismatch never blocks a deploy.
+      - name: Checkout AI page guides + checker
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+            lapis/lib/agent/knowledge
+
+      - name: AI page guides — every documented endpoint is a real route
+        continue-on-error: true
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          USER_UUID=11111111-2222-4333-8444-555555555555
+          docker exec "opsapi-smoke-pg-$RUN_ID" psql -U pguser -d opsapi -qc \
+            "INSERT INTO users (uuid, first_name, last_name, email, username, password)
+             VALUES ('$USER_UUID', 'CI', 'Check', 'ci-check@example.invalid', 'ci-check', '!')
+             ON CONFLICT DO NOTHING"
+          python3 .github/scripts/check-ai-guide-endpoints.py "http://localhost:${SMOKE_PORT}" \
+            smoke-test-not-a-real-secret "$USER_UUID"
+
       - name: Cleanup
         if: always()
         env:

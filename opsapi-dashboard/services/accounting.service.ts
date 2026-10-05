@@ -1,4 +1,10 @@
-import apiClient, { toFormData, buildQueryString } from '@/lib/api-client';
+import apiClient, { buildQueryString } from '@/lib/api-client';
+
+// The accounting routes read JSON bodies only. The client's default form
+// encoding sent them nothing they could read — and turned journal lines /
+// imported transactions into "[object Object]" — so every accounting write
+// from the dashboard failed. Send JSON.
+const JSON_BODY = { headers: { 'Content-Type': 'application/json' } } as const;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -281,12 +287,12 @@ export const accountingService = {
   },
 
   async createAccount(data: Partial<AccountingAccount>): Promise<AccountingAccount> {
-    const response = await apiClient.post(`${BASE}/accounts`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/accounts`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateAccount(uuid: string, data: Partial<AccountingAccount>): Promise<AccountingAccount> {
-    const response = await apiClient.put(`${BASE}/accounts/${uuid}`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.put(`${BASE}/accounts/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -315,7 +321,7 @@ export const accountingService = {
   },
 
   async createJournalEntry(data: { entry_date: string; description: string; reference?: string; lines: Omit<JournalLine, 'id'>[] }): Promise<JournalEntry> {
-    const response = await apiClient.post(`${BASE}/journal-entries`, toFormData(data as unknown as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/journal-entries`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -345,17 +351,17 @@ export const accountingService = {
   },
 
   async updateBankTransaction(uuid: string, data: Partial<BankTransaction>): Promise<BankTransaction> {
-    const response = await apiClient.put(`${BASE}/bank-transactions/${uuid}`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.put(`${BASE}/bank-transactions/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async importBankTransactions(data: { csv_content?: string; transactions?: Partial<BankTransaction>[] }): Promise<{ imported: number; message: string }> {
-    const response = await apiClient.post(`${BASE}/bank-transactions/import`, toFormData(data as unknown as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/bank-transactions/import`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async reconcileTransaction(uuid: string, data: { account_id: number }): Promise<BankTransaction> {
-    const response = await apiClient.post(`${BASE}/bank-transactions/${uuid}/reconcile`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/bank-transactions/${uuid}/reconcile`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -380,12 +386,12 @@ export const accountingService = {
   },
 
   async createExpense(data: Partial<Expense>): Promise<Expense> {
-    const response = await apiClient.post(`${BASE}/expenses`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/expenses`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async updateExpense(uuid: string, data: Partial<Expense>): Promise<Expense> {
-    const response = await apiClient.put(`${BASE}/expenses/${uuid}`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.put(`${BASE}/expenses/${uuid}`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -416,7 +422,7 @@ export const accountingService = {
   },
 
   async createVatReturn(data: { period_start: string; period_end: string }): Promise<VatReturn> {
-    const response = await apiClient.post(`${BASE}/vat-returns`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/vat-returns`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
@@ -463,17 +469,17 @@ export const accountingService = {
   // ── AI ─────────────────────────────────────────────────────────────────────
 
   async aiCategorize(data: { description: string; amount: number }): Promise<AiCategorization> {
-    const response = await apiClient.post(`${BASE}/ai/categorize`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/ai/categorize`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async aiSuggestVat(data: { description: string; amount: number; category?: string }): Promise<AiVatSuggestion> {
-    const response = await apiClient.post(`${BASE}/ai/suggest-vat`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/ai/suggest-vat`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 
   async aiQuery(data: { query: string }): Promise<AiQueryResponse> {
-    const response = await apiClient.post(`${BASE}/ai/query`, toFormData(data as Record<string, unknown>));
+    const response = await apiClient.post(`${BASE}/ai/query`, data, JSON_BODY);
     return response.data?.data ?? response.data;
   },
 

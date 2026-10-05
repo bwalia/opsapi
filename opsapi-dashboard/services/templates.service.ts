@@ -190,7 +190,7 @@ export const templatesService = {
    */
   async restoreVersion(uuid: string, version: number): Promise<DocumentTemplate> {
     const response = await apiClient.post(
-      `/api/v2/templates/${uuid}/versions/${version}/restore`
+      `/api/v2/templates/${uuid}/restore/${version}`
     );
     return unwrap<DocumentTemplate>(response);
   },

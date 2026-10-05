@@ -35,6 +35,39 @@ local Global = require("helper.global")
 return function(app)
     ----------------- Helper Functions --------------------
 
+    -- Task ids for add/remove-to-sprint: numeric `task_ids`, or `task_uuids`
+    -- (what the dashboard sends — a JSON-array string in its form body, which
+    -- the old code rejected with "task_ids array is required"). uuids resolve
+    -- only to tasks on this sprint's own project. Scalars (one form value) work.
+    local function sprint_task_ids(data, sprint)
+        local function list(v)
+            if type(v) == "string" then
+                local ok, decoded = pcall(cJson.decode, v)
+                if ok and type(decoded) == "table" then return decoded end
+                return { v }
+            end
+            return type(v) == "table" and v or {}
+        end
+        local ids, seen = {}, {}
+        local function add(n)
+            n = tonumber(n)
+            if n and not seen[n] then seen[n] = true ids[#ids + 1] = n end
+        end
+        for _, v in ipairs(list(data.task_ids)) do add(v) end
+        local uuids = {}
+        for _, u in ipairs(list(data.task_uuids)) do
+            if type(u) == "string" and u ~= "" then uuids[#uuids + 1] = u end
+        end
+        if #uuids > 0 then
+            local rows = db.query([[
+                SELECT t.id FROM kanban_tasks t JOIN kanban_boards b ON b.id = t.board_id
+                WHERE b.project_id = ? AND t.uuid IN ?
+            ]], sprint.project_id, db.list(uuids))
+            for _, r in ipairs(rows or {}) do add(r.id) end
+        end
+        return ids
+    end
+
     local function parse_request_body()
         ngx.req.read_body()
         local post_args = ngx.req.get_post_args()
@@ -401,21 +434,9 @@ return function(app)
             return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
-        local data = parse_request_body()
-
-        if not data.task_ids or type(data.task_ids) ~= "table" or #data.task_ids == 0 then
-            return api_response(400, nil, "task_ids array is required")
-        end
-
-        -- Coerce to numeric ids: these hit an integer column, so a non-numeric
-        -- element ("abc") would 500 on the cast. Drop non-numerics.
-        local task_ids = {}
-        for _, v in ipairs(data.task_ids) do
-            local n = tonumber(v)
-            if n then task_ids[#task_ids + 1] = n end
-        end
+        local task_ids = sprint_task_ids(parse_request_body(), sprint)
         if #task_ids == 0 then
-            return api_response(400, nil, "task_ids must contain numeric ids")
+            return api_response(400, nil, "task_ids (numeric) or task_uuids is required")
         end
 
         local count = KanbanSprintQueries.addTasks(sprint.id, task_ids)
@@ -445,20 +466,9 @@ return function(app)
             return api_response(403, nil, "Read-only access: this action requires an editor role")
         end
 
-        local data = parse_request_body()
-
-        if not data.task_ids or type(data.task_ids) ~= "table" or #data.task_ids == 0 then
-            return api_response(400, nil, "task_ids array is required")
-        end
-
-        -- Coerce to numeric ids (integer column → non-numeric would 500).
-        local task_ids = {}
-        for _, v in ipairs(data.task_ids) do
-            local n = tonumber(v)
-            if n then task_ids[#task_ids + 1] = n end
-        end
+        local task_ids = sprint_task_ids(parse_request_body(), sprint)
         if #task_ids == 0 then
-            return api_response(400, nil, "task_ids must contain numeric ids")
+            return api_response(400, nil, "task_ids (numeric) or task_uuids is required")
         end
 
         local count = KanbanSprintQueries.removeTasks(sprint.id, task_ids)
