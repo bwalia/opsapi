@@ -1,9 +1,11 @@
--- AI Service: Ollama Integration for Bookkeeping Assistance
+-- AI Service: bookkeeping assistance
 -- Provides AI-powered expense categorisation, VAT treatment suggestions,
 -- natural language queries, anomaly detection, and bank statement parsing.
--- Gracefully degrades when Ollama is unavailable.
+-- Uses the platform's one model setting (lib/agent/llm: AI_PROVIDER / AI_MODEL
+-- / AI_API_KEY / AI_BASE_URL). Gracefully degrades when the model is unavailable.
 
 local cjson = require("cjson")
+local Llm = require("lib.agent.llm")
 
 local AIService = {}
 
@@ -11,25 +13,11 @@ local AIService = {}
 -- Configuration
 -- ============================================================================
 
-local OLLAMA_URL = os.getenv("OLLAMA_URL") or "http://ollama:11434"
-local OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "mistral"
 local REQUEST_TIMEOUT = 30000 -- 30 seconds
 
 -- ============================================================================
 -- Internal Helpers
 -- ============================================================================
-
---- Create an HTTP client with timeout configured.
--- @return httpc, nil | nil, error string
-local function create_http_client()
-    local ok, http = pcall(require, "resty.http")
-    if not ok then
-        return nil, "resty.http not available"
-    end
-    local httpc = http.new()
-    httpc:set_timeout(REQUEST_TIMEOUT)
-    return httpc, nil
-end
 
 --- Safely decode a JSON string.
 -- @param str string
@@ -68,59 +56,25 @@ end
 -- Core Query Function
 -- ============================================================================
 
---- Send a prompt to the Ollama /api/generate endpoint and return the response.
+--- Send a prompt to the configured model and return the reply text.
 -- @param prompt string The user prompt
 -- @param options table|nil Optional settings: { json = bool, temperature = number }
 -- @return string|nil response text, string|nil error
 function AIService.query(prompt, options)
     options = options or {}
-
-    local httpc, http_err = create_http_client()
-    if not httpc then
-        return nil, "AI service unavailable: " .. tostring(http_err)
-    end
-
-    local body = {
-        model = OLLAMA_MODEL,
-        prompt = prompt,
-        stream = false,
-    }
-    if options.json then
-        body.format = "json"
-    end
-    if options.temperature then
-        body.options = { temperature = options.temperature }
-    end
-
-    local ok, res_or_err = pcall(function()
-        return httpc:request_uri(OLLAMA_URL .. "/api/generate", {
-            method = "POST",
-            body = cjson.encode(body),
-            headers = {
-                ["Content-Type"] = "application/json",
-            },
-        })
-    end)
-
+    local ok, msg, err = pcall(Llm.chat, { { role = "user", content = prompt } }, nil, {
+        json = options.json,
+        temperature = options.temperature or 0.2,
+        max_tokens = 2048,
+        timeout_ms = REQUEST_TIMEOUT,
+    })
     if not ok then
-        return nil, "AI service unavailable: " .. tostring(res_or_err)
+        return nil, "AI service unavailable: " .. tostring(msg)
     end
-
-    local res = res_or_err
-    if not res then
-        return nil, "AI service unavailable: no response"
+    if not msg then
+        return nil, "AI service unavailable: " .. tostring(err)
     end
-
-    if res.status ~= 200 then
-        return nil, string.format("Ollama returned HTTP %d: %s", res.status, tostring(res.body))
-    end
-
-    local decoded, decode_err = safe_json_decode(res.body)
-    if not decoded then
-        return nil, "Failed to parse Ollama response: " .. tostring(decode_err)
-    end
-
-    return decoded.response, nil
+    return msg.content, nil
 end
 
 -- ============================================================================
@@ -241,6 +195,7 @@ function AIService.naturalLanguageQuery(question, namespace_id)
 
 Question: "%s"
 Namespace ID: %s
+Today's date: %s (resolve "this year", "last month" etc. from it)
 
 Available tables and key columns:
 - accounting_accounts: id, namespace_id, code, name, account_type, current_balance
@@ -250,7 +205,7 @@ Available tables and key columns:
 - accounting_expenses: id, namespace_id, expense_date, description, amount, category, vat_rate, vat_amount, status
 
 Respond with JSON only:
-{"query_type": "trial_balance|profit_loss|balance_sheet|expense_summary|transaction_search|vat_return|custom", "interpretation": "human-readable interpretation of what the user wants", "sql_hint": "a safe read-only SQL query hint (SELECT only, with namespace_id filter)", "parameters": {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}]], question, tostring(namespace_id or "unknown"))
+{"query_type": "trial_balance|profit_loss|balance_sheet|expense_summary|transaction_search|vat_return|custom", "interpretation": "human-readable interpretation of what the user wants", "sql_hint": "a safe read-only SQL query hint (SELECT only, with namespace_id filter)", "parameters": {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}]], question, tostring(namespace_id or "unknown"), os.date("!%Y-%m-%d"))
 
     local response, err = AIService.query(prompt, { json = true, temperature = 0.2 })
     if not response then
@@ -624,29 +579,12 @@ end
 -- Availability Check
 -- ============================================================================
 
---- Check whether the Ollama service is reachable.
+--- Is the model answering? Uses the shared, cached health probe behind the
+-- dashboard footer (one real request a minute), so this never adds load.
 -- @return boolean
 function AIService.isAvailable()
-    local httpc, http_err = create_http_client()
-    if not httpc then
-        return false
-    end
-
-    local ok, res_or_err = pcall(function()
-        return httpc:request_uri(OLLAMA_URL .. "/api/tags", {
-            method = "GET",
-            headers = {
-                ["Content-Type"] = "application/json",
-            },
-        })
-    end)
-
-    if not ok then
-        return false
-    end
-
-    local res = res_or_err
-    return res and res.status == 200
+    local ok, status = pcall(function() return require("lib.agent.agent").status() end)
+    return ok and type(status) == "table" and (status.status == "ok" or status.status == "slow")
 end
 
 return AIService
