@@ -11,7 +11,7 @@ app: workstation-opsapi
 # ingress.hosts[0].host below.
 host: acc-opsapi.workstation.co.uk
 
-projectCode: tax_copilot
+projectCode: all
 
 frontendUrl: "https://acc.diytaxreturn.co.uk"
 

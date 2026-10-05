@@ -44,7 +44,7 @@ on:
         default: ""
         type: string
       PROJECT_CODE:
-        description: "Override migration project code(s). Leave BLANK to use the env's values file (tax_copilot)."
+        description: "Override PROJECT_CODE. Leave BLANK to use the env's values file (workstation int/prod: all)."
         required: false
         default: ""
         type: string
@@ -421,16 +421,33 @@ jobs:
             docker logs "opsapi-smoke-pg-$RUN_ID" || true
             exit 1
           fi
-          # PROJECT_CODE=tax_copilot matches the deployed fleet so the
-          # feature-gated tax migrations (7xx) actually run, not just core.
-          if ! docker exec \
-              -e LAPIS_ENVIRONMENT=production \
-              -e PROJECT_CODE=tax_copilot \
-              "opsapi-smoke-$RUN_ID" sh -c "cd /app && lapis migrate"; then
-            echo "::error::lapis migrate failed against a fresh database — deploying this image would break the migrate hook (deploys blocked)"
-            exit 1
-          fi
-          echo "All migrations applied cleanly from zero state."
+          # Gate BOTH project codes this image is deployed with, each on its own
+          # fresh database: tax_copilot = the diy tax-return API fleet (feature-
+          # gated tax migrations 7xx); all = opsapi.workstation.co.uk (every
+          # module: kanban, shop, accounting, ...). One retry per code absorbs a
+          # transient "failed to connect: timeout" from the runner's Postgres.
+          docker exec "opsapi-smoke-pg-$RUN_ID" psql -U pguser -d opsapi -qc "CREATE DATABASE opsapi_all"
+          docker exec "opsapi-smoke-pg-$RUN_ID" psql -U pguser -d opsapi_all -qc "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+          for gate in tax_copilot:opsapi all:opsapi_all; do
+            code="${gate%%:*}"; db="${gate##*:}"
+            passed=""
+            for attempt in 1 2; do
+              if docker exec \
+                  -e LAPIS_ENVIRONMENT=production \
+                  -e PROJECT_CODE="$code" \
+                  -e POSTGRES_DB="$db" \
+                  "opsapi-smoke-$RUN_ID" sh -c "cd /app && lapis migrate"; then
+                passed=1; break
+              fi
+              echo "lapis migrate (PROJECT_CODE=$code) failed on attempt $attempt"
+              sleep 5
+            done
+            if [ -z "$passed" ]; then
+              echo "::error::lapis migrate (PROJECT_CODE=$code) failed against a fresh database — deploying this image would break the migrate hook (deploys blocked)"
+              exit 1
+            fi
+            echo "PROJECT_CODE=$code: all migrations applied cleanly from zero state."
+          done
 
       - name: Check container starts
         env:
