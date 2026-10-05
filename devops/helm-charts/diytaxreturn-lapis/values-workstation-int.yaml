@@ -119,6 +119,9 @@ postgresSsl: "false"
 
 externalSecret:
   enabled: true
+  # int-opsapi.workstation.co.uk: its own WSL Vault path (see values-workstation-prod.yaml).
+  secretStore: wslvault-backend
+  vaultPath: workstation-opsapi/int/config
 
 # MINIO — this release's OWN isolated object store (workstation-minio), NOT
 # diytaxreturn's. See devops/k8s/workstation-minio.yaml. Without this the app

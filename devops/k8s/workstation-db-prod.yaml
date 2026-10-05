@@ -21,7 +21,7 @@
 # Credentials: pguser REUSES the app's Vault password so the app connects with
 # no change. The `workstation-db-auth` Secret is provisioned by the
 # ExternalSecret below from the prod Vault path the app reads — WSL Vault
-# (wslvault-backend, kv/data/diytaxreturnuk/prod/opsapi, property
+# (wslvault-backend, kv/data/workstation-opsapi/prod/config, property
 # POSTGRES_PASSWORD), not the in-cluster HC Vault — no plaintext in git.
 #
 # Apply (one-time, BEFORE the first prod deploy so the DB is up when the app's
@@ -48,7 +48,7 @@ spec:
   data:
     - secretKey: POSTGRES_PASSWORD
       remoteRef:
-        key: diytaxreturnuk/prod/opsapi
+        key: workstation-opsapi/prod/config
         property: POSTGRES_PASSWORD
 ---
 apiVersion: v1

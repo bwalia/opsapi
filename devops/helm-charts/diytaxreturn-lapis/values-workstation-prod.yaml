@@ -72,12 +72,12 @@ postgresSsl: "false"
 
 externalSecret:
   enabled: true
-  # Prod secrets come from WSL Vault, not the in-cluster HC Vault (which goes
-  # down whenever its pods restart sealed — every prod ExternalSecret on it
-  # failed from 2026-10-04). Same blob the diy prod API reads
-  # (diy-tax-return-uk values-prod.yaml): kv/data/diytaxreturnuk/prod/opsapi.
+  # opsapi.workstation.co.uk reads its secrets from WSL Vault — its OWN path,
+  # not the in-cluster HC Vault (which goes down whenever its pods restart
+  # sealed; every ExternalSecret on it failed from 2026-10-04) and not the
+  # diy tax-return API's blob (that one stays in HC Vault).
   secretStore: wslvault-backend
-  vaultPath: diytaxreturnuk/prod/opsapi
+  vaultPath: workstation-opsapi/prod/config
 
 # Bootstrap super-admin for the fresh prod workstation_opsapi DB, seeded on
 # first boot by scripts/setup-namespace. The CREDENTIALS come from Vault, not

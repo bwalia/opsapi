@@ -30,7 +30,7 @@
 # Credentials: pguser REUSES the app's Vault password so the app connects with
 # no change. The `workstation-db-auth` Secret is provisioned by the
 # ExternalSecret below from the same Vault path the app reads
-# (secret/diytaxreturnuk/opsapi/int/config, property POSTGRES_PASSWORD) — no
+# (WSL Vault wslvault-backend, kv/data/workstation-opsapi/int/config, property POSTGRES_PASSWORD) — no
 # plaintext in git (this repo is public).
 #
 # Apply (one-time; the StatefulSet's PVC persists across app redeploys):
@@ -50,7 +50,7 @@ metadata:
 spec:
   refreshInterval: "1h"
   secretStoreRef:
-    name: vault-backend
+    name: wslvault-backend
     kind: ClusterSecretStore
   target:
     name: workstation-db-auth
@@ -59,7 +59,7 @@ spec:
   data:
     - secretKey: POSTGRES_PASSWORD
       remoteRef:
-        key: secret/diytaxreturnuk/opsapi/int/config
+        key: workstation-opsapi/int/config
         property: POSTGRES_PASSWORD
 ---
 apiVersion: v1
