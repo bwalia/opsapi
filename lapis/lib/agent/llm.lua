@@ -27,14 +27,24 @@
     Until AI_PROVIDER is set, vision keeps what it used before: Claude when an
     Anthropic key exists, else Ollama.
 
+    Fallback: when the main provider fails, the same request is sent to the
+    fallback, so a provider outage or a bad key never takes AI down.
+      AI_FALLBACK_PROVIDER  ollama (default) | anthropic | openai | none
+      AI_FALLBACK_MODEL     default: that provider's own model setting
+                            (OLLAMA_MODEL for Ollama, on OLLAMA_URL / OLLAMA_API_KEY)
+    If the main provider is down (timeout, 5xx, rate limit, bad key, unknown
+    model), calls go straight to the fallback for the next 60s instead of each
+    waiting out the failure. The health check keeps probing the main provider.
+
     The callers speak ONE message format; each adapter converts it:
       { role = "system" | "user" | "assistant" | "tool", content = "...",
         attachments = { { mime = "image/png" | "application/pdf", data = <base64> } },  -- user
         tool_calls = { { id, ["function"] = { name, arguments = {table} } } },          -- assistant
         tool_call_id, tool_name }                                                      -- tool result
-    Llm.chat(messages, tools, opts) -> assistant message (+ .usage, .model) | nil, err, http_status
+    Llm.chat(messages, tools, opts) -> assistant message (+ .usage, .model, .fallback) | nil, err, http_status
       opts: cfg (default Llm.default), json, max_tokens, temperature, timeout_ms,
-            usage = { feature, user_uuid, namespace_id, scope, run_uuid, system }
+            usage = { feature, user_uuid, namespace_id, scope, run_uuid, system },
+            no_fallback (the health check measures the main provider itself)
 
     Metering: every call is one ai_usage row (who, workspace, feature, model,
     tokens in/out (+ how many input tokens came from the provider's prompt
@@ -108,6 +118,17 @@ function Llm.configured(cfg)
     return cfg.key ~= nil
 end
 
+local function same(a, b)
+    return a.provider == b.provider and a.model == b.model and a.url == b.url
+end
+
+-- The fallback (nil = none): a different, configured model.
+local FALLBACK = (env("AI_FALLBACK_PROVIDER") or "ollama"):lower()
+Llm.fallback = normalise(FALLBACK) and Llm.config(normalise(FALLBACK), env("AI_FALLBACK_MODEL")) or nil
+if Llm.fallback and (same(Llm.fallback, Llm.default) or not Llm.configured(Llm.fallback)) then
+    Llm.fallback = nil
+end
+
 local function text_of(v)
     if v == nil or v == cjson.null then return "" end
     return tostring(v)
@@ -166,6 +187,8 @@ function Llm.ollama_auth(key)
     return ok and token or key
 end
 
+local CALL_SEQ = 0
+
 local function ollama_chat(cfg, messages, tools, opts)
     local wire = {}
     for i, m in ipairs(messages) do
@@ -206,7 +229,11 @@ local function ollama_chat(cfg, messages, tools, opts)
         out.tool_calls = {}
         for i, tc in ipairs(msg.tool_calls) do
             local fn = tc["function"] or {}
-            out.tool_calls[i] = { id = "call_" .. i, ["function"] = { name = fn.name or "", arguments = args_table(fn.arguments) } }
+            -- Unique ids: a run that falls back mid-way mixes providers, and
+            -- Claude rejects repeated tool_use ids.
+            CALL_SEQ = CALL_SEQ + 1
+            out.tool_calls[i] = { id = "call_" .. CALL_SEQ, ["function"] = { name = fn.name or "",
+                arguments = args_table(fn.arguments) } }
         end
     end
     return out
@@ -416,6 +443,34 @@ local function over_limit(user)
     return ok and rows[1] ~= nil and tonumber(rows[1].used) >= DAILY_LIMIT
 end
 
+-- ---------------------------------------------------------------------------
+-- Fallback circuit breaker: a main provider that is down is skipped for a
+-- minute, shared by every worker (ngx.shared.cache).
+-- ---------------------------------------------------------------------------
+
+local BREAKER_SECONDS = 60
+
+local function breaker(cfg)
+    local cache = ngx.shared and ngx.shared.cache
+    return cache, "ai:down:" .. cfg.provider .. ":" .. cfg.model
+end
+
+-- Failures that mean the provider itself is unusable right now (not this one
+-- request): no answer / timeout, 5xx, rate limit, bad key, unknown model.
+local function provider_down(status)
+    return status == nil or status >= 500 or status == 429 or status == 401 or status == 403 or status == 404
+end
+
+local function attempt(cfg, messages, tools, opts, u, user, ns)
+    ngx.update_time()
+    local started = ngx.now()
+    local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools, opts)
+    ngx.update_time()
+    record(cfg, u, user, ns, msg, err, math.floor((ngx.now() - started) * 1000))
+    if msg then msg.model = cfg.model end
+    return msg, err, status
+end
+
 --- One model round-trip (see the header for the message format and opts).
 function Llm.chat(messages, tools, opts)
     opts = opts or {}
@@ -425,13 +480,32 @@ function Llm.chat(messages, tools, opts)
         record(cfg, u, user, ns, nil, "daily limit reached", 0)
         return nil, Llm.LIMIT_MESSAGE, 429
     end
-    ngx.update_time()
-    local started = ngx.now()
-    local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools, opts)
-    ngx.update_time()
-    record(cfg, u, user, ns, msg, err, math.floor((ngx.now() - started) * 1000))
-    if msg then msg.model = cfg.model end
-    return msg, err, status
+    local fb = not opts.no_fallback and Llm.fallback or nil
+    if fb and same(fb, cfg) then fb = nil end
+    local cache, key = breaker(cfg)
+
+    if fb and cache and cache:get(key) then
+        local msg, err, status = attempt(fb, messages, tools, opts, u, user, ns)
+        if msg then msg.fallback = true end
+        return msg, err, status
+    end
+
+    local msg, err, status = attempt(cfg, messages, tools, opts, u, user, ns)
+    if msg then
+        if cache and opts.no_fallback then cache:delete(key) end -- the health check saw it recover
+        return msg
+    end
+    if not fb then return nil, err, status end
+
+    if cache and provider_down(status) then cache:set(key, true, BREAKER_SECONDS) end
+    ngx.log(ngx.WARN, "[llm] ", cfg.provider, " ", cfg.model, " failed (", tostring(err):sub(1, 200),
+        "); falling back to ", fb.provider, " ", fb.model)
+    local fmsg, ferr = attempt(fb, messages, tools, opts, u, user, ns)
+    if fmsg then
+        fmsg.fallback = true
+        return fmsg
+    end
+    return nil, tostring(err) .. " (fallback " .. fb.model .. " also failed: " .. tostring(ferr) .. ")", status
 end
 
 return Llm
