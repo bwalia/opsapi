@@ -77,7 +77,8 @@ local b = captured.body
 check("POSTs to /v1/messages", captured.url == "https://api.anthropic.com/v1/messages", captured.url)
 check("x-api-key + anthropic-version headers",
     captured.headers["x-api-key"] == "sk-ant-test" and captured.headers["anthropic-version"] ~= nil)
-check("leading system message becomes `system`", b.system == "You are the Timesheets assistant.", b.system)
+check("leading system message becomes `system` (a cached block)", b.system[1].text == "You are the Timesheets assistant."
+    and b.system[1].cache_control.type == "ephemeral", cjson.encode(b.system))
 check("first message is the user's", b.messages[1].role == "user")
 check("roles alternate", (function()
     for i = 2, #b.messages do if b.messages[i].role == b.messages[i - 1].role then return false end end
@@ -94,6 +95,54 @@ check("empty schema properties stay an object", cjson.encode(b.tools[1].input_sc
 check("reply text parsed", msg.content == "Checking.")
 check("reply tool_use -> tool_calls with table arguments",
     msg.tool_calls[1].id == "toolu_9" and msg.tool_calls[1]["function"].arguments.path == "/x")
+
+print("claude: caching, sampling, thinking:")
+local calls = {}
+local real_new = package.loaded["resty.http"].new
+package.loaded["resty.http"].new = function()
+    local c = real_new()
+    local inner = c.request_uri
+    c.request_uri = function(self, url, req)
+        calls[#calls + 1] = cjson.decode(req.body)
+        return inner(self, url, req)
+    end
+    return c
+end
+Llm = load_llm({ AI_PROVIDER = "anthropic", AI_API_KEY = "k" })
+local TWO_PART = { { role = "system", content = "Stable page guide" }, { role = "system", content = "User: Ada, 2026-10-06" },
+    { role = "user", content = "hi" } }
+responses = {
+    { status = 400, body = { error = { message = "temperature: is not supported for this model" } } },
+    { body = { content = {
+        { type = "thinking", thinking = "", signature = "sig-1" },
+        { type = "tool_use", id = "toolu_1", name = "call_api", input = {} },
+    }, usage = { input_tokens = 40, cache_creation_input_tokens = 1500, cache_read_input_tokens = 0, output_tokens = 30 } } },
+}
+msg = Llm.chat(TWO_PART, TOOLS, { max_tokens = 2048 })
+b = calls[#calls]
+check("a model that rejects temperature: retried once without it", #calls == 2 and calls[1].temperature ~= nil
+    and b.temperature == nil, #calls)
+check("only the stable first part is cached", b.system[1].cache_control ~= nil and b.system[2].cache_control == nil
+    and b.system[2].text:find("Ada", 1, true) ~= nil)
+check("thinking gets headroom over a small max_tokens", b.max_tokens >= 8192, b.max_tokens)
+check("usage counts cache writes + reads as input", msg.usage.input == 1540 and msg.usage.cached == 0)
+calls = {}
+responses = { { body = { content = { { type = "text", text = "Done." } },
+    usage = { input_tokens = 60, cache_creation_input_tokens = 0, cache_read_input_tokens = 1500, output_tokens = 5 } } } }
+local convo = { TWO_PART[1], TWO_PART[2], TWO_PART[3], msg,
+    { role = "tool", tool_call_id = "toolu_1", tool_name = "call_api", content = '{"ok":true}' } }
+local msg2 = Llm.chat(convo, TOOLS, { max_tokens = 2048 })
+b = calls[1]
+check("model remembered: no temperature, no second request", #calls == 1 and b.temperature == nil, #calls)
+check("this run's Claude turn replayed verbatim, thinking block first", b.messages[2].content[1].type == "thinking"
+    and b.messages[2].content[1].signature == "sig-1" and b.messages[2].content[2].id == "toolu_1")
+check("empty tool input stays an object", cjson.encode(b.messages[2].content[2]):find('"input":{}', 1, true) ~= nil)
+check("cache reads reported as cached input", msg2.usage.input == 1560 and msg2.usage.cached == 1500)
+calls = {}
+responses = { { body = { content = {}, usage = { input_tokens = 9, output_tokens = 1 } } } }
+Llm.chat({ { role = "user", content = "ping" } }, nil, { max_tokens = 1 })
+check("the 1-token health probe stays tiny", calls[1].max_tokens == 1)
+package.loaded["resty.http"].new = real_new
 
 print("openai (and compatible):")
 Llm = load_llm({ AI_PROVIDER = "openai", AI_API_KEY = "sk-test", AI_MODEL = "gpt-x", AI_BASE_URL = "https://router.example/v1/" })
@@ -180,6 +229,10 @@ check("openai: image_url data URI + file part for PDFs",
     parts[1].type == "image_url" and parts[1].image_url.url:find("^data:image/png;base64,") ~= nil
     and parts[2].type == "file" and parts[3].type == "text")
 check("openai: usage", msg.usage.input == 5 and msg.usage.output == 2)
+responses = { { body = { choices = { { message = { content = "{}" } } },
+    usage = { prompt_tokens = 2000, completion_tokens = 2, prompt_tokens_details = { cached_tokens = 1536 } } } } }
+msg = Llm.chat({ { role = "user", content = "x" } }, nil, {})
+check("openai: cached prompt tokens reported", msg.usage.input == 2000 and msg.usage.cached == 1536)
 Llm = load_llm({ OLLAMA_URL = "https://ollama.example" })
 responses = { { body = { message = { content = "{}" }, prompt_eval_count = 9, eval_count = 1 } } }
 msg = Llm.chat({ { role = "user", content = "read", attachments = { IMG } } }, nil, { json = true })

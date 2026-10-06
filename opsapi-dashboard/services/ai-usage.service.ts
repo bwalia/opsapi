@@ -16,7 +16,8 @@ interface Usage {
 
 export interface AiUsageSummary {
   days: number;
-  totals: Usage & { failed: number; users: number; avg_latency_ms: number };
+  /** cached_input_tokens: input served from the provider's prompt cache (billed far lower). */
+  totals: Usage & { cached_input_tokens: number; failed: number; users: number; avg_latency_ms: number };
   series: (Usage & { day: string })[];
   members: (Usage & {
     user_uuid: string;
@@ -26,7 +27,7 @@ export interface AiUsageSummary {
     last_used_at?: string;
   })[];
   features: (Usage & { feature: string })[];
-  models: (Omit<Usage, 'requests'> & { provider: string; model: string })[];
+  models: (Omit<Usage, 'requests'> & { provider: string; model: string; cached_input_tokens: number })[];
   /** Platform view only. */
   workspaces?: (Usage & { namespace_uuid?: string; name?: string; slug?: string; users: number })[];
 }

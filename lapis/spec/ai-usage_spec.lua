@@ -62,7 +62,8 @@ local msg = Llm.chat(HELLO, nil, { usage = { feature = "tax_classify" } })
 local r = rows[#rows]
 check("a call writes one ai_usage row", #rows == 1 and r._table == "ai_usage", #rows)
 check("user + workspace come from the request", r.user_uuid == "user-1" and r.namespace_id == 7)
-check("tokens in/out from the provider", r.input_tokens == 120 and r.output_tokens == 7)
+check("tokens in/out from the provider", r.input_tokens == 120 and r.output_tokens == 7
+    and r.cached_input_tokens == 0)
 check("feature, provider, model, ok", r.feature == "tax_classify" and r.provider == "ollama"
     and r.model == "qwen3.8:latest" and r.ok == true and r.error == nil)
 check("the reply still comes back", msg and msg.content == "hi")
@@ -128,6 +129,12 @@ check("assistant runs are metered per run", route:find('feature = "assistant"', 
     and route:find("run_uuid = job.run_uuid", 1, true))
 check("the user sees the limit message, not 'unavailable'", route:find("err == Llm.LIMIT_MESSAGE", 1, true))
 check("the health probe is a system call", read("lib/agent/agent.lua"):find('feature = "health_check", system = true', 1, true))
+check("cached input tokens get their own column", read("migrations.lua"):find(
+    "ADD COLUMN IF NOT EXISTS cached_input_tokens", 1, true))
+check("prompts: stable part first, per-user context second (cacheable)",
+    route:find('return { table.concat(lines, "\\n"), table.concat(context, "\\n") }', 1, true))
+check("old tool records aren't resent on every call", route:find("REFERENCE_TURNS = 2", 1, true)
+    and route:find("m.actions and recent[i]", 1, true))
 check("migration creates ai_usage", read("migrations.lua"):find("['zzw_ai_usage']", 1, true)
     and read("migrations.lua"):find("CREATE TABLE IF NOT EXISTS ai_usage", 1, true))
 check("the limit env var reaches Lua", read("nginx.conf"):find("env AI_USER_DAILY_TOKEN_LIMIT;", 1, true))
