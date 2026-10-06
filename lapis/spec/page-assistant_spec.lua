@@ -23,7 +23,7 @@ local function check(name, ok, detail)
     end
 end
 local function read(path)
-    local h = assert(io.open(path))
+    local h = io.open(path) or assert(io.open((path:gsub("^lapis/", ""))))
     local s = h:read("*a")
     h:close()
     return s
@@ -49,7 +49,8 @@ check("prefix is a path boundary", not Scopes.allows_api(t, "/api/v2/timesheetsX
 check("other module refused", not Scopes.allows_api(t, "/api/v2/users", "GET"))
 
 print("Knowledge files:")
-local dir = "lapis/lib/agent/knowledge"
+-- Runs from the repo root or from /app in the container.
+local dir = io.open("lib/agent/knowledge/general.md") and "lib/agent/knowledge" or "lapis/lib/agent/knowledge"
 local files = {}
 local h = io.popen("ls -1 " .. dir .. " 2>/dev/null")
 for name in h:lines() do files[#files + 1] = name end

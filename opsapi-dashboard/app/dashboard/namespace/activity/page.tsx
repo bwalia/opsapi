@@ -1343,7 +1343,9 @@ function AiUsage() {
           icon={<Coins size={18} />}
           label="Tokens used"
           value={compact(tokens)}
-          sub={`${compact(t.input_tokens)} in · ${compact(t.output_tokens)} out`}
+          sub={`${compact(t.input_tokens)} in · ${compact(t.output_tokens)} out${
+            t.cached_input_tokens ? ` · ${compact(t.cached_input_tokens)} cached` : ''
+          }`}
           tone="success"
         />
         <StatCard
@@ -1445,7 +1447,9 @@ function AiUsage() {
                       <span className="block text-xs text-secondary-500">{pretty(m.provider)}</span>
                     </span>
                     <span className="text-xs text-secondary-500 tabular-nums shrink-0">
-                      {formatNumber(m.model_calls)} calls · {compact(m.input_tokens)} in · {compact(m.output_tokens)} out
+                      {formatNumber(m.model_calls)} calls · {compact(m.input_tokens)} in
+                      {m.cached_input_tokens ? ` (${compact(m.cached_input_tokens)} cached)` : ''} ·{' '}
+                      {compact(m.output_tokens)} out
                     </span>
                   </li>
                 ))}

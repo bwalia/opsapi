@@ -2436,6 +2436,11 @@ local _migrations = {
         db.query("CREATE INDEX IF NOT EXISTS idx_ai_usage_ns_created ON ai_usage (namespace_id, created_at DESC)")
         db.query("CREATE INDEX IF NOT EXISTS idx_ai_usage_user_created ON ai_usage (user_uuid, created_at DESC)")
     end,
+    -- Input tokens served from the provider's prompt cache (Claude / OpenAI),
+    -- billed at a fraction of normal input: kept apart so pricing can tell.
+    ['zzw_ai_usage_cached'] = function()
+        db.query("ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER NOT NULL DEFAULT 0")
+    end,
     -- CMS sidebar menu item + RBAC module ("cms") + role grants + enable for namespaces
     ['839_seed_cms_menu_items'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 1),
     ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),

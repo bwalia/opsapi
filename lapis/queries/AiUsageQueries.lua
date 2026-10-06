@@ -16,6 +16,7 @@ local AiUsageQueries = {}
 local REQUESTS = "COUNT(DISTINCT COALESCE(a.run_uuid, a.id::text))::int"
 local TOKENS_IN = "COALESCE(SUM(a.input_tokens), 0)::bigint"
 local TOKENS_OUT = "COALESCE(SUM(a.output_tokens), 0)::bigint"
+local TOKENS_CACHED = "COALESCE(SUM(a.cached_input_tokens), 0)::bigint"
 local NAME = "NULLIF(trim(coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, '')), '')"
 
 local function iso(col)
@@ -37,12 +38,12 @@ function AiUsageQueries.summary(ns_id, days)
 
     local totals = db.query(([[
         SELECT %s AS requests, COUNT(*)::int AS model_calls,
-               %s AS input_tokens, %s AS output_tokens,
+               %s AS input_tokens, %s AS output_tokens, %s AS cached_input_tokens,
                COUNT(*) FILTER (WHERE NOT a.ok)::int AS failed,
                COUNT(DISTINCT a.user_uuid)::int AS users,
                COALESCE(ROUND(AVG(a.latency_ms) FILTER (WHERE a.ok)), 0)::int AS avg_latency_ms
         FROM ai_usage a WHERE %s
-    ]]):format(REQUESTS, TOKENS_IN, TOKENS_OUT, where))[1]
+    ]]):format(REQUESTS, TOKENS_IN, TOKENS_OUT, TOKENS_CACHED, where))[1]
 
     local series = db.query(([[
         SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
@@ -75,9 +76,10 @@ function AiUsageQueries.summary(ns_id, days)
     ]]):format(REQUESTS, TOKENS_IN, TOKENS_OUT, where))
 
     local models = db.query(([[
-        SELECT a.provider, a.model, COUNT(*)::int AS model_calls, %s AS input_tokens, %s AS output_tokens
+        SELECT a.provider, a.model, COUNT(*)::int AS model_calls, %s AS input_tokens, %s AS output_tokens,
+               %s AS cached_input_tokens
         FROM ai_usage a WHERE %s GROUP BY a.provider, a.model ORDER BY COUNT(*) DESC
-    ]]):format(TOKENS_IN, TOKENS_OUT, where))
+    ]]):format(TOKENS_IN, TOKENS_OUT, TOKENS_CACHED, where))
 
     local result = {
         days = days, totals = totals, series = series, members = members, features = features, models = models,

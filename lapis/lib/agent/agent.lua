@@ -109,7 +109,7 @@ function Agent.claims_action(text)
 end
 
 --- Run the agent loop.
--- @param opts.system   string  system prompt
+-- @param opts.system   string|table  system prompt, or its parts (stable first: lib/agent/llm caches part 1)
 -- @param opts.messages table   prior conversation [{role="user"|"assistant", content=...}]
 -- @param opts.tools    table   tool definitions (Ollama function schema)
 -- @param opts.execute  function(name, args) -> (result_table|nil, err_string|nil)
@@ -117,8 +117,8 @@ end
 -- @return { reply=string, actions={ {name,args,result,error}, ... }, pending? } | nil, err
 function Agent.run(opts)
     local messages = {}
-    if opts.system then
-        messages[#messages + 1] = { role = "system", content = opts.system }
+    for _, part in ipairs(type(opts.system) == "table" and opts.system or { opts.system }) do
+        messages[#messages + 1] = { role = "system", content = part }
     end
     for _, m in ipairs(opts.messages or {}) do
         if m.role and m.content ~= nil then

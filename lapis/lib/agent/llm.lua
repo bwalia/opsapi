@@ -37,7 +37,8 @@
             usage = { feature, user_uuid, namespace_id, scope, run_uuid, system }
 
     Metering: every call is one ai_usage row (who, workspace, feature, model,
-    tokens in/out, latency, outcome). User and workspace default to the current
+    tokens in/out (+ how many input tokens came from the provider's prompt
+    cache, billed far lower), latency, outcome). User and workspace default to the current
     request's (ngx.ctx); `usage.system` calls (health checks) are billed to no one.
       AI_USER_DAILY_TOKEN_LIMIT  optional: tokens one user may use per UTC day
                                  across every AI feature (unset = no limit).
@@ -257,8 +258,9 @@ local function openai_chat(cfg, messages, tools, opts)
     local msg = type(data.choices) == "table" and data.choices[1] and data.choices[1].message
     if type(msg) ~= "table" then return nil, "openai: no message in response" end
     local usage = type(data.usage) == "table" and data.usage or {}
-    local out = { role = "assistant", content = text_of(msg.content),
-        usage = { input = usage.prompt_tokens or 0, output = usage.completion_tokens or 0 } }
+    local details = type(usage.prompt_tokens_details) == "table" and usage.prompt_tokens_details or {}
+    local out = { role = "assistant", content = text_of(msg.content), usage = {
+        input = usage.prompt_tokens or 0, output = usage.completion_tokens or 0, cached = details.cached_tokens or 0 } }
     if type(msg.tool_calls) == "table" and #msg.tool_calls > 0 then
         out.tool_calls = {}
         for i, tc in ipairs(msg.tool_calls) do
@@ -272,6 +274,11 @@ end
 -- ---------------------------------------------------------------------------
 -- anthropic: Messages API
 -- ---------------------------------------------------------------------------
+
+-- Newer Claude models (Opus 4.7 on, Opus 5.x, Sonnet 5.x, Fable) reject
+-- `temperature` with a 400. Remembered per model after the first refusal
+-- rather than kept as a model list that goes stale.
+local NO_SAMPLING = {}
 
 local function anthropic_chat(cfg, messages, tools, opts)
     local system, wire = {}, {}
@@ -290,9 +297,17 @@ local function anthropic_chat(cfg, messages, tools, opts)
         if m.role == "system" then
             -- Leading system messages are THE system prompt; later ones (tool
             -- data notes, nudges) become user-side notes.
-            if #wire == 0 then system[#system + 1] = text else push("user", { type = "text", text = "[Note] " .. text }) end
+            if #wire == 0 then
+                system[#system + 1] = { type = "text", text = text }
+            else
+                push("user", { type = "text", text = "[Note] " .. text })
+            end
         elseif m.role == "tool" then
             push("user", { type = "tool_result", tool_use_id = m.tool_call_id, content = text })
+        elseif m.role == "assistant" and m.raw then
+            -- This run's own Claude turn: replayed verbatim, thinking blocks
+            -- included (Claude keeps its reasoning between tool calls).
+            for _, block in ipairs(m.raw) do push("assistant", block) end
         elseif m.role == "assistant" then
             if text ~= "" then push("assistant", { type = "text", text = text }) end
             for _, tc in ipairs(m.tool_calls or {}) do
@@ -312,9 +327,20 @@ local function anthropic_chat(cfg, messages, tools, opts)
     if wire[1] and wire[1].role ~= "user" then
         table.insert(wire, 1, { role = "user", content = { { type = "text", text = "(continuing our conversation)" } } })
     end
+    -- Prompt caching: the FIRST system message is the stable part (instructions
+    -- + page guide, the same for everyone on a page); it and the tools before
+    -- it are cached, so repeat calls pay ~10% for them. Later system messages
+    -- (who the user is, today's date) stay uncached.
+    if system[1] then system[1].cache_control = { type = "ephemeral" } end
+    local max_tokens = opts.max_tokens or 2048
+    -- Thinking (always on for newer models) counts against max_tokens: give
+    -- real replies headroom; only what is generated is billed. Tiny caps (the
+    -- 1-token health probe) stay as asked.
+    if max_tokens >= 256 then max_tokens = math.max(max_tokens, 8192) end
     local body = {
-        model = cfg.model, max_tokens = opts.max_tokens or 2048, temperature = opts.temperature or 0.2,
-        system = #system > 0 and table.concat(system, "\n\n") or nil, messages = wire,
+        model = cfg.model, max_tokens = max_tokens,
+        temperature = not NO_SAMPLING[cfg.model] and (opts.temperature or 0.2) or nil,
+        system = #system > 0 and system or nil, messages = wire,
     }
     if tools and #tools > 0 then
         body.tools = {}
@@ -325,6 +351,10 @@ local function anthropic_chat(cfg, messages, tools, opts)
     end
     local headers = { ["x-api-key"] = cfg.key, ["anthropic-version"] = "2023-06-01" }
     local data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.timeout_ms)
+    if not data and status == 400 and body.temperature and err:find("temperature", 1, true) then
+        NO_SAMPLING[cfg.model], body.temperature = true, nil
+        data, err, status = post(cfg, cfg.url .. "/v1/messages", headers, body, opts.timeout_ms)
+    end
     if not data then return nil, err, status end
     local texts, calls = {}, {}
     for _, block in ipairs(type(data.content) == "table" and data.content or {}) do
@@ -334,9 +364,14 @@ local function anthropic_chat(cfg, messages, tools, opts)
             calls[#calls + 1] = { id = block.id, ["function"] = { name = block.name or "", arguments = args_table(block.input) } }
         end
     end
+    -- input_tokens is only the uncached part: the prompt's full size adds the
+    -- cache writes and reads; reads (billed at ~10%) are reported as `cached`.
     local usage = type(data.usage) == "table" and data.usage or {}
+    local cached = usage.cache_read_input_tokens or 0
     return { role = "assistant", content = table.concat(texts, "\n"), tool_calls = #calls > 0 and calls or nil,
-        usage = { input = usage.input_tokens or 0, output = usage.output_tokens or 0 } }
+        raw = type(data.content) == "table" and data.content or nil,
+        usage = { input = (usage.input_tokens or 0) + (usage.cache_creation_input_tokens or 0) + cached,
+            output = usage.output_tokens or 0, cached = cached } }
 end
 
 local ADAPTERS = { ollama = ollama_chat, openai = openai_chat, anthropic = anthropic_chat }
@@ -363,7 +398,8 @@ local function record(cfg, u, user, ns, msg, err, ms)
     local ok, ierr = pcall(db.insert, "ai_usage", {
         namespace_id = ns, user_uuid = user, feature = u.feature or "other", scope = u.scope,
         run_uuid = u.run_uuid, provider = cfg.provider, model = cfg.model,
-        input_tokens = usage.input or 0, output_tokens = usage.output or 0, latency_ms = ms or 0,
+        input_tokens = usage.input or 0, output_tokens = usage.output or 0, cached_input_tokens = usage.cached or 0,
+        latency_ms = ms or 0,
         ok = msg ~= nil, error = (not msg and err) and tostring(err):sub(1, 300) or nil,
     })
     if not ok then ngx.log(ngx.ERR, "[llm] usage not recorded: ", tostring(ierr)) end
