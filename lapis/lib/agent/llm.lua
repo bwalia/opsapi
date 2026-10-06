@@ -33,7 +33,14 @@
         tool_calls = { { id, ["function"] = { name, arguments = {table} } } },          -- assistant
         tool_call_id, tool_name }                                                      -- tool result
     Llm.chat(messages, tools, opts) -> assistant message (+ .usage, .model) | nil, err, http_status
-      opts: cfg (default Llm.default), json, max_tokens, temperature, timeout_ms
+      opts: cfg (default Llm.default), json, max_tokens, temperature, timeout_ms,
+            usage = { feature, user_uuid, namespace_id, scope, run_uuid, system }
+
+    Metering: every call is one ai_usage row (who, workspace, feature, model,
+    tokens in/out, latency, outcome). User and workspace default to the current
+    request's (ngx.ctx); `usage.system` calls (health checks) are billed to no one.
+      AI_USER_DAILY_TOKEN_LIMIT  optional: tokens one user may use per UTC day
+                                 across every AI feature (unset = no limit).
 ]]
 
 local http = require("resty.http")
@@ -334,11 +341,59 @@ end
 
 local ADAPTERS = { ollama = ollama_chat, openai = openai_chat, anthropic = anthropic_chat }
 
+-- ---------------------------------------------------------------------------
+-- Metering (ai_usage) and the optional per-user daily limit
+-- ---------------------------------------------------------------------------
+
+local DAILY_LIMIT = tonumber(env("AI_USER_DAILY_TOKEN_LIMIT") or "")
+Llm.LIMIT_MESSAGE = "You've reached today's AI usage limit. It resets at midnight UTC; "
+    .. "ask a workspace admin if you need more."
+
+local function attribution(opts)
+    local u = opts.usage or {}
+    local ctx = (not u.system and ngx.ctx) or {}
+    return u, u.user_uuid or (type(ctx.user) == "table" and ctx.user.uuid) or nil, u.namespace_id or ctx.namespace_id
+end
+
+-- Never fails the AI call: a lost row is logged, not raised.
+local function record(cfg, u, user, ns, msg, err, ms)
+    local ok_db, db = pcall(require, "lapis.db")
+    if not ok_db then return end
+    local usage = msg and msg.usage or {}
+    local ok, ierr = pcall(db.insert, "ai_usage", {
+        namespace_id = ns, user_uuid = user, feature = u.feature or "other", scope = u.scope,
+        run_uuid = u.run_uuid, provider = cfg.provider, model = cfg.model,
+        input_tokens = usage.input or 0, output_tokens = usage.output or 0, latency_ms = ms or 0,
+        ok = msg ~= nil, error = (not msg and err) and tostring(err):sub(1, 300) or nil,
+    })
+    if not ok then ngx.log(ngx.ERR, "[llm] usage not recorded: ", tostring(ierr)) end
+end
+
+local function over_limit(user)
+    if not DAILY_LIMIT or not user then return false end
+    local ok, rows = pcall(function()
+        return require("lapis.db").query([[
+            SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used FROM ai_usage
+            WHERE user_uuid = ? AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+        ]], user)
+    end)
+    return ok and rows[1] ~= nil and tonumber(rows[1].used) >= DAILY_LIMIT
+end
+
 --- One model round-trip (see the header for the message format and opts).
 function Llm.chat(messages, tools, opts)
     opts = opts or {}
     local cfg = opts.cfg or Llm.default
+    local u, user, ns = attribution(opts)
+    if over_limit(user) then
+        record(cfg, u, user, ns, nil, "daily limit reached", 0)
+        return nil, Llm.LIMIT_MESSAGE, 429
+    end
+    ngx.update_time()
+    local started = ngx.now()
     local msg, err, status = ADAPTERS[cfg.provider](cfg, messages, tools, opts)
+    ngx.update_time()
+    record(cfg, u, user, ns, msg, err, math.floor((ngx.now() - started) * 1000))
     if msg then msg.model = cfg.model end
     return msg, err, status
 end

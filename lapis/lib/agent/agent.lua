@@ -36,7 +36,7 @@ local function probe()
     ngx.update_time()
     local started = ngx.now()
     local msg, err, status = Llm.chat({ { role = "user", content = "ping" } }, nil,
-        { max_tokens = 1, timeout_ms = PROBE_TIMEOUT_MS })
+        { max_tokens = 1, timeout_ms = PROBE_TIMEOUT_MS, usage = { feature = "health_check", system = true } })
     ngx.update_time()
     local ms = math.floor((ngx.now() - started) * 1000)
     if msg then
@@ -113,6 +113,7 @@ end
 -- @param opts.messages table   prior conversation [{role="user"|"assistant", content=...}]
 -- @param opts.tools    table   tool definitions (Ollama function schema)
 -- @param opts.execute  function(name, args) -> (result_table|nil, err_string|nil)
+-- @param opts.usage    table   who/what each model call is metered to (lib/agent/llm)
 -- @return { reply=string, actions={ {name,args,result,error}, ... }, pending? } | nil, err
 function Agent.run(opts)
     local messages = {}
@@ -131,7 +132,7 @@ function Agent.run(opts)
 
     for _ = 1, MAX_ITERATIONS do
         local msg, err = Llm.chat(messages, opts.tools, {
-            temperature = 0.2, max_tokens = 2048, timeout_ms = REQUEST_TIMEOUT_MS,
+            temperature = 0.2, max_tokens = 2048, timeout_ms = REQUEST_TIMEOUT_MS, usage = opts.usage,
         })
         if not msg then
             return nil, err

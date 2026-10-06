@@ -2409,6 +2409,33 @@ local _migrations = {
             ON chat_agent_runs (user_uuid, namespace_id, scope, id DESC) WHERE NOT archived
         ]])
     end,
+    -- AI usage metering (core): one row per model call, written by lib/agent/llm
+    -- — who, workspace, feature, model, tokens in/out, latency, outcome. Counts
+    -- only (never prompts or replies). Deleting a user or workspace keeps the
+    -- counts for billing but drops the link (SET NULL).
+    ['zzw_ai_usage'] = function()
+        db.query([[
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                id BIGSERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                namespace_id BIGINT REFERENCES namespaces(id) ON DELETE SET NULL,
+                user_uuid VARCHAR(255) REFERENCES users(uuid) ON DELETE SET NULL,
+                feature VARCHAR(40) NOT NULL,
+                scope VARCHAR(60),
+                run_uuid VARCHAR(64),
+                provider VARCHAR(20) NOT NULL,
+                model VARCHAR(120) NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                ok BOOLEAN NOT NULL,
+                error VARCHAR(300)
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage (created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_ai_usage_ns_created ON ai_usage (namespace_id, created_at DESC)")
+        db.query("CREATE INDEX IF NOT EXISTS idx_ai_usage_user_created ON ai_usage (user_uuid, created_at DESC)")
+    end,
     -- CMS sidebar menu item + RBAC module ("cms") + role grants + enable for namespaces
     ['839_seed_cms_menu_items'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 1),
     ['840_register_cms_modules'] = conditional_array(ProjectConfig.FEATURES.CMS, cms_menu_migrations, 2),

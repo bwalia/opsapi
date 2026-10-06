@@ -120,6 +120,8 @@ export {
 export { apiKeysService } from './apiKeys.service';
 export { activityService } from './activity.service';
 export type { ActivitySummary, ActivityMember, ActivityEntry } from './activity.service';
+export { aiUsageService } from './ai-usage.service';
+export type { AiUsageSummary } from './ai-usage.service';
 
 // Field Service (service jobs, job phases, engineer site visits)
 export {

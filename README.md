@@ -329,8 +329,11 @@ Every dashboard page has an **Ask AI** button (⌘J). The assistant there knows 
 | `AI_API_KEY` | Provider key. If unset: `OLLAMA_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. |
 | `AI_BASE_URL` | Optional endpoint. If unset: `OLLAMA_URL` or the provider's API. |
 | `AI_VISION_PROVIDER` / `AI_VISION_MODEL` | Optional: the model that reads statement images and PDFs. It must be able to see images (Claude, gpt-4.1, or `minicpm-v` on Ollama). Until `AI_PROVIDER` is set, this stays on Claude (`ANTHROPIC_VISION_MODEL`) when an Anthropic key exists. |
+| `AI_USER_DAILY_TOKEN_LIMIT` | Optional: how many tokens one user may use per UTC day, across every AI feature. Past it, AI requests are refused with a clear message until midnight UTC. Unset = no limit. |
 
 For example, to run production on Claude, set `AI_PROVIDER=anthropic`, `AI_MODEL=claude-opus-5-5` and `AI_API_KEY` in the Vault secret, then restart the pods. Every AI feature moves together. The dashboard footer shows the live model and its response time. The diy stack's `LLM_PROVIDER` setting is deliberately not read, so it can't change OpsAPI's model. Embeddings for search stay on `OLLAMA_EMBED_MODEL` (384-dim), because the stored vectors depend on it.
+
+**Usage metering:** every model call is recorded in `ai_usage`: the user, workspace, feature (assistant, tax classification, statement reading, bookkeeping, health check), model, tokens in and out, response time and whether it worked. Counts only, never prompts or replies. One assistant message counts as one request, however many model calls it took. Workspace owners and admins see it under **Activity → AI usage** (`GET /api/v2/namespace/ai-usage?days=30`). Platform admins can switch to **All workspaces** (`GET /api/v2/admin/ai-usage`). Search embeddings aren't counted (they run on the small local embedder).
 
 What each page's assistant knows and may call lives in `lapis/lib/agent/knowledge/<page>.md`: a short guide plus that page's endpoints. Only the endpoints written there can be called. To give a new page an assistant, add one file. `lapis/spec/page-assistant_spec.lua` checks every file.
 
