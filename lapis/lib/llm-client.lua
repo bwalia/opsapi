@@ -77,7 +77,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- @param messages table agent-format messages (system/user, optional attachments)
--- @param opts table { cfg?, json?, temperature?, max_tokens?, trace_id?, trace_name? }
+-- @param opts table { cfg?, json?, temperature?, max_tokens?, trace_id?, trace_name?, feature? }
 -- @return { content, model, input_tokens, output_tokens, latency_ms } | nil, err
 local function complete(messages, opts)
     opts = opts or {}
@@ -88,6 +88,7 @@ local function complete(messages, opts)
         temperature = opts.temperature or 0.1,
         max_tokens = opts.max_tokens or 2048,
         timeout_ms = REQUEST_TIMEOUT,
+        usage = { feature = opts.feature or "tax_chat" }, -- metered to the request's user (lib/agent/llm)
     })
     if not msg then return nil, err end
     local latency_ms = (ngx.now() - start_time) * 1000
@@ -237,7 +238,8 @@ Business profile: ]] .. (opts.profile_type or "general") .. examples_text
         return complete({
             { role = "system", content = system_prompt },
             { role = "user", content = user_prompt },
-        }, { json = true, temperature = 0.1, trace_id = opts.trace_id, trace_name = "classify" })
+        }, { json = true, temperature = 0.1, trace_id = opts.trace_id, trace_name = "classify",
+            feature = "tax_classify" })
     end)
 
     if not result then
@@ -300,6 +302,7 @@ Respond with valid JSON only.]]
             max_tokens = 4096,
             trace_id = opts.trace_id,
             trace_name = "vision_extract",
+            feature = "statement_extract",
         })
     end)
 end

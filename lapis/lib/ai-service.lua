@@ -67,6 +67,7 @@ function AIService.query(prompt, options)
         temperature = options.temperature or 0.2,
         max_tokens = 2048,
         timeout_ms = REQUEST_TIMEOUT,
+        usage = { feature = "bookkeeping" }, -- metered to the request's user (lib/agent/llm)
     })
     if not ok then
         return nil, "AI service unavailable: " .. tostring(msg)

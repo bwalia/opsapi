@@ -41,6 +41,7 @@ local NamespaceMiddleware = require("middleware.namespace")
 local Agent = require("lib.agent.agent")
 local Tools = require("lib.agent.tools")
 local Scopes = require("lib.agent.scopes")
+local Llm = require("lib.agent.llm")
 
 return function(app)
     local function parse_json_body()
@@ -209,7 +210,7 @@ return function(app)
     -- just repeated "I couldn't complete that…" without trying anything.
     local SYSTEM_REPLY_PREFIXES = {
         "I couldn't complete that", "I wasn't able to complete that", "Sorry — the assistant is unavailable",
-        "The assistant was interrupted", "Could not start the assistant",
+        "The assistant was interrupted", "Could not start the assistant", Llm.LIMIT_MESSAGE,
     }
     local function is_system_reply(m)
         if m.role ~= "assistant" then return false end
@@ -298,6 +299,9 @@ return function(app)
             system = job.system,
             messages = job.conversation,
             tools = job.tools,
+            -- One user request = one run; ai_usage groups its model calls by run_uuid.
+            usage = { feature = "assistant", user_uuid = job.ctx.user_uuid, namespace_id = job.ctx.namespace_id,
+                scope = job.ctx.scope.key, run_uuid = job.run_uuid },
             execute = function(name, args)
                 local res, terr = Tools.execute(job.ctx, name, args)
                 -- Audit trail: every action the agent takes, who for, and outcome.
@@ -316,7 +320,7 @@ return function(app)
         else
             ngx.log(ngx.ERR, "[chat-agent] run ", job.run_uuid, ": ", tostring(err))
             status = "error"
-            reply = "Sorry — the assistant is unavailable right now. Please try again."
+            reply = err == Llm.LIMIT_MESSAGE and err or "Sorry — the assistant is unavailable right now. Please try again."
         end
 
         local pending = result and result.pending

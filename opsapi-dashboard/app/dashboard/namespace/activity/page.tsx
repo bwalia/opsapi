@@ -13,12 +13,14 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  Coins,
   History,
   KeyRound,
   Loader2,
   PencilLine,
   Search,
   ShieldAlert,
+  Sparkles,
   UserCheck,
   Users,
 } from 'lucide-react';
@@ -39,7 +41,9 @@ import { Badge, Button, Card, Input, Pagination, SearchableSelect, Select, Table
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ProtectedPage } from '@/components/permissions';
 import { useNamespace } from '@/contexts/NamespaceContext';
-import { activityService } from '@/services';
+import { usePermissions } from '@/contexts/PermissionsContext';
+import { activityService, aiUsageService } from '@/services';
+import type { AiUsageSummary } from '@/services/ai-usage.service';
 import type {
   ActivityEntry,
   ActivityLogParams,
@@ -53,7 +57,7 @@ import { cn, extractApiError, formatDateTime, formatNumber, formatRelativeTime }
 import type { TableColumn } from '@/types';
 import toast from 'react-hot-toast';
 
-type Tab = 'overview' | 'members' | 'log' | 'changes';
+type Tab = 'overview' | 'members' | 'log' | 'changes' | 'ai';
 type MemberRef = { uuid: string; label: string };
 
 const TABS: { id: Tab; label: string }[] = [
@@ -61,6 +65,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'members', label: 'Members' },
   { id: 'log', label: 'Activity log' },
   { id: 'changes', label: 'Audit trail' },
+  { id: 'ai', label: 'AI usage' },
 ];
 
 const VERBS: Record<string, { label: string; variant: 'info' | 'success' | 'warning' | 'error' }> = {
@@ -198,6 +203,7 @@ function ActivityContent() {
         {tab === 'members' && <Members key={nsKey} onMember={openLog} />}
         {tab === 'log' && <Log key={nsKey} member={logMember} onMemberChange={setLogMember} />}
         {tab === 'changes' && <Changes key={nsKey} />}
+        {tab === 'ai' && <AiUsage key={nsKey} />}
       </div>
     </div>
   );
@@ -1199,6 +1205,277 @@ function Changes() {
             Load more
           </Button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── AI usage ───────────────────────────────────────────────────────────────
+
+const FEATURES: Record<string, string> = {
+  assistant: 'AI assistant',
+  tax_classify: 'Transaction classification',
+  statement_extract: 'Statement reading',
+  bookkeeping: 'Bookkeeping AI',
+  tax_chat: 'Tax AI chat',
+  health_check: 'Model health checks',
+  other: 'Other',
+};
+
+const compact = (n: number) =>
+  new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+
+type AiMember = AiUsageSummary['members'][number];
+type AiWorkspace = NonNullable<AiUsageSummary['workspaces']>[number];
+
+const tokenCells = <T extends { input_tokens: number; output_tokens: number }>(): TableColumn<T>[] => [
+  { key: 'input_tokens', header: 'Tokens in', render: (r) => formatNumber(r.input_tokens) },
+  { key: 'output_tokens', header: 'Tokens out', render: (r) => formatNumber(r.output_tokens) },
+  {
+    key: 'total',
+    header: 'Total tokens',
+    render: (r) => <span className="font-medium">{formatNumber(r.input_tokens + r.output_tokens)}</span>,
+  },
+];
+
+const MEMBER_COLUMNS: TableColumn<AiMember>[] = [
+  {
+    key: 'member',
+    header: 'Member',
+    render: (m) => (
+      <span className="min-w-0">
+        <span className="block font-medium text-secondary-800 truncate">{who(m)}</span>
+        {m.name && m.email && <span className="block text-xs text-secondary-500 truncate">{m.email}</span>}
+      </span>
+    ),
+  },
+  { key: 'requests', header: 'Requests', render: (m) => formatNumber(m.requests) },
+  { key: 'model_calls', header: 'Model calls', render: (m) => formatNumber(m.model_calls) },
+  ...tokenCells<AiMember>(),
+  { key: 'last_used_at', header: 'Last used', render: (m) => <Relative at={m.last_used_at} /> },
+];
+
+const WORKSPACE_COLUMNS: TableColumn<AiWorkspace>[] = [
+  {
+    key: 'workspace',
+    header: 'Workspace',
+    render: (w) => <span className="font-medium text-secondary-800">{w.name || 'No workspace'}</span>,
+  },
+  { key: 'users', header: 'Members using AI', render: (w) => formatNumber(w.users) },
+  { key: 'requests', header: 'Requests', render: (w) => formatNumber(w.requests) },
+  ...tokenCells<AiWorkspace>(),
+];
+
+function AiUsage() {
+  const { isAdmin } = usePermissions();
+  const [days, setDays] = useState(30);
+  const [all, setAll] = useState(false);
+  const [res, setRes] = useState<{ key: string; data?: AiUsageSummary; error?: string } | null>(null);
+  const key = `${days}:${all}`;
+
+  useEffect(() => {
+    let live = true;
+    const k = `${days}:${all}`;
+    (all ? aiUsageService.platform(days) : aiUsageService.workspace(days))
+      .then((data) => {
+        if (live) setRes({ key: k, data });
+      })
+      .catch((e) => {
+        if (live) setRes({ key: k, error: extractApiError(e, 'Could not load AI usage') });
+      });
+    return () => {
+      live = false;
+    };
+  }, [days, all]);
+  const current = res?.key === key ? res : null;
+  const data = current?.data;
+
+  const series = useMemo(() => (data?.series ?? []).map((d) => ({ ...d, label: dayLabel(d.day) })), [data]);
+  const maxFeature = Math.max(1, ...(data?.features ?? []).map((f) => f.input_tokens + f.output_tokens));
+
+  const controls = (
+    <div className="flex flex-wrap justify-end gap-2">
+      {isAdmin && (
+        <div className="w-48">
+          <Select aria-label="Scope" value={all ? 'all' : 'ws'} onChange={(e) => setAll(e.target.value === 'all')}>
+            <option value="ws">This workspace</option>
+            <option value="all">All workspaces</option>
+          </Select>
+        </div>
+      )}
+      <div className="w-44">
+        <Select aria-label="Time range" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last 12 months</option>
+        </Select>
+      </div>
+    </div>
+  );
+
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        {controls}
+        {current?.error ? <ErrorCard message={current.error} /> : <LoadingCard />}
+      </div>
+    );
+  }
+
+  const t = data.totals;
+  const tokens = t.input_tokens + t.output_tokens;
+  const failRate = t.model_calls > 0 ? (t.failed / t.model_calls) * 100 : 0;
+
+  return (
+    <div className="space-y-6">
+      {controls}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard
+          icon={<Sparkles size={18} />}
+          label="AI requests"
+          value={formatNumber(t.requests)}
+          sub={`${formatNumber(t.model_calls)} model calls`}
+          tone="primary"
+        />
+        <StatCard
+          icon={<Coins size={18} />}
+          label="Tokens used"
+          value={compact(tokens)}
+          sub={`${compact(t.input_tokens)} in · ${compact(t.output_tokens)} out`}
+          tone="success"
+        />
+        <StatCard
+          icon={<Users size={18} />}
+          label="Members using AI"
+          value={formatNumber(t.users)}
+          sub={`last ${days} days`}
+        />
+        <StatCard
+          icon={<AlertTriangle size={18} />}
+          label="Failed model calls"
+          value={formatNumber(t.failed)}
+          sub={`${failRate.toFixed(1)}% · avg ${(t.avg_latency_ms / 1000).toFixed(1)}s per call`}
+          tone={failRate > 5 ? 'warning' : 'default'}
+        />
+      </div>
+
+      {t.model_calls === 0 ? (
+        <Card className="p-10 text-center">
+          <Sparkles className="w-8 h-8 mx-auto text-secondary-300" aria-hidden="true" />
+          <p className="mt-3 font-medium text-secondary-700">No AI usage in the last {days} days</p>
+          <p className="mt-1 text-sm text-secondary-500">
+            Every request to the AI assistant and the other AI features shows up here.
+          </p>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ChartCard title="Tokens per day">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" minTickGap={16} />
+                  <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickFormatter={compact} />
+                  <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => formatNumber(Number(v))} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="input_tokens" name="Tokens in" stackId="t" fill="#3b82f6" />
+                  <Bar dataKey="output_tokens" name="Tokens out" stackId="t" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Requests per day">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={series} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gAiRequests" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" minTickGap={16} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                  <Tooltip />
+                  <Area
+                    type="monotone"
+                    dataKey="requests"
+                    name="Requests"
+                    stroke="#3b82f6"
+                    fill="url(#gAiRequests)"
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card className="p-4">
+              <h3 className="text-sm font-semibold text-secondary-700 mb-3">By feature</h3>
+              <ul className="space-y-2.5">
+                {data.features.map((f) => (
+                  <li key={f.feature}>
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className="font-medium text-secondary-800 truncate">
+                        {FEATURES[f.feature] ?? pretty(f.feature)}
+                      </span>
+                      <span className="text-xs text-secondary-500 tabular-nums shrink-0">
+                        {formatNumber(f.requests)} requests · {compact(f.input_tokens + f.output_tokens)} tokens
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 rounded-full bg-secondary-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary-500"
+                        style={{ width: `${Math.max(2, ((f.input_tokens + f.output_tokens) / maxFeature) * 100)}%` }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+            <Card className="p-4">
+              <h3 className="text-sm font-semibold text-secondary-700 mb-3">By model</h3>
+              <ul className="divide-y divide-secondary-100">
+                {data.models.map((m) => (
+                  <li key={`${m.provider}/${m.model}`} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-secondary-800 truncate">{m.model}</span>
+                      <span className="block text-xs text-secondary-500">{pretty(m.provider)}</span>
+                    </span>
+                    <span className="text-xs text-secondary-500 tabular-nums shrink-0">
+                      {formatNumber(m.model_calls)} calls · {compact(m.input_tokens)} in · {compact(m.output_tokens)} out
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+
+          {data.workspaces && (
+            <Card className="p-4">
+              <h3 className="text-sm font-semibold text-secondary-700 mb-3">By workspace</h3>
+              <Table
+                columns={WORKSPACE_COLUMNS}
+                data={data.workspaces}
+                keyExtractor={(w) => w.namespace_uuid ?? 'none'}
+                caption="AI usage by workspace"
+              />
+            </Card>
+          )}
+
+          <Card className="p-4">
+            <h3 className="text-sm font-semibold text-secondary-700 mb-3">By member</h3>
+            <Table
+              columns={MEMBER_COLUMNS}
+              data={data.members}
+              keyExtractor={(m) => m.user_uuid}
+              emptyMessage="Only system calls (health checks) in this period."
+              caption="AI usage by member"
+            />
+          </Card>
+        </>
       )}
     </div>
   );
