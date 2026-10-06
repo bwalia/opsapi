@@ -130,3 +130,14 @@ tolerations:
   - key: node-role.kubernetes.io/edge
     operator: Exists
     effect: NoSchedule
+  # cloud003's link to the control plane blips (node flips NotReady for a few
+  # minutes). Keep the single replica bound for 15 min instead of the default
+  # 300 s eviction, so it serves again as soon as the node re-registers.
+  - key: node.kubernetes.io/not-ready
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: 900
+  - key: node.kubernetes.io/unreachable
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: 900
