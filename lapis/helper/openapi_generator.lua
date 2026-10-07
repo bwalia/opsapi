@@ -529,7 +529,7 @@ local function build_summary(method, path, tag)
         else
             return "Create " .. resource
         end
-    elseif method == "put" then
+    elseif method == "put" or method == "patch" then
         return "Update " .. resource
     elseif method == "delete" then
         return "Delete " .. resource
@@ -562,7 +562,7 @@ end
 
 --- Build the request body schema for POST/PUT based on the entity.
 local function build_request_body(method, path, tag)
-    if method ~= "post" and method ~= "put" then return nil end
+    if method ~= "post" and method ~= "put" and method ~= "patch" then return nil end
 
     -- Action endpoints typically have minimal or no body
     local action_paths = { "send", "void", "submit", "approve", "reopen", "clone", "set%-default" }
@@ -799,7 +799,7 @@ local function build_responses(method, path, tag)
     end
 
     -- Add 400 for write operations
-    if method == "post" or method == "put" then
+    if method == "post" or method == "put" or method == "patch" then
         responses["400"] = {
             description = "Bad request / validation error",
             content = {
@@ -848,6 +848,8 @@ end
 -- ROUTE DISCOVERY
 -- ============================================================
 
+local HTTP_METHODS = { get = true, post = true, put = true, patch = true, delete = true }
+
 local function discover_routes()
     -- Try container path first, then local development path
     local routes_dirs = { "/app/routes", "./routes" }
@@ -889,14 +891,33 @@ local function discover_routes()
             local tag = route_name_to_tag(route_name)
             discovered_tags[tag] = true
 
-            -- Parse app:method("path", ...) patterns
-            -- Handle both quoted styles: app:get("/path" and app:get('/path'
-            for method, route_path in content:gmatch('app:(%w+)%(["\']([^"\']+)["\']') do
+            local function add(method, route_path)
+                -- SCIM is for identity providers, not API clients: not documented.
+                if route_path:find("^/scim/") then return end
+                local openapi_path = lapis_to_openapi_path(route_path)
+                paths[openapi_path] = paths[openapi_path] or {}
+                paths[openapi_path][method] = build_operation(method, route_path, tag)
+            end
+
+            -- app:get("/path", ...) — either quote style; the path may start
+            -- on the next line (app:get(\n "/path", ...)).
+            for method, route_path in content:gmatch('app:(%w+)%(%s*["\'](/[^"\']*)["\']') do
                 method = method:lower()
-                if method == "get" or method == "post" or method == "put" or method == "delete" then
-                    local openapi_path = lapis_to_openapi_path(route_path)
-                    paths[openapi_path] = paths[openapi_path] or {}
-                    paths[openapi_path][method] = build_operation(method, route_path, tag)
+                if HTTP_METHODS[method] then add(method, route_path) end
+            end
+
+            -- app:match(["name",] "/path", respond_to({ GET = ..., PUT = ... })):
+            -- every method named in the block, up to the next app: call.
+            for start in content:gmatch("()app:match%(") do
+                local head = content:sub(start, start + 300)
+                local route_path = head:match('^app:match%(%s*["\'][^"\']*["\']%s*,%s*["\'](/[^"\']*)["\']')
+                    or head:match('^app:match%(%s*["\'](/[^"\']*)["\']')
+                if route_path then
+                    local block = content:sub(start, (content:find("app:", start + 10, true) or #content + 1) - 1)
+                    for method in block:gmatch("[^%w_](%u+)%s*=") do
+                        method = method:lower()
+                        if HTTP_METHODS[method] then add(method, route_path) end
+                    end
                 end
             end
         end
