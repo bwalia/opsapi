@@ -29,3 +29,5 @@ firebase-service-account.json
 AuthKey_*.p8
 
 mcp/node_modules
+# Private keys never belong in git (an Ansible-Vault copy was tracked until 2026-10; rotate that key)
+id_rsa
