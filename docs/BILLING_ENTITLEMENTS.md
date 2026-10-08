@@ -4,8 +4,8 @@ Status:
 - **v2, approved 2026-10-08** with the owner's changes in §21. It is built on PR #694: Phase 1 first, then Phase 2 in the same PR.
 - v2 It adds the 2026-10-08 addendum (lifetime and fixed-term purchases, apps with no back end, hosted pages, an open licence format, store purchases, privacy, scale) to the approved v1.
 - The licence and token format is specified in **[LICENCE_FORMAT.md](LICENCE_FORMAT.md)**, with test vectors.
-- v1's Phase 1 is built in PR #694, which is not merged yet. §19 lists what v2 changes in it.
-- No v2 code is written until this document and LICENCE_FORMAT.md are approved. Decisions needed are in §21.
+- **Phase 1 (no payments) is built** in PR #694, which is not merged yet. Test results are in §20. §19 lists what v2 changed in v1.
+- **Phase 2 (payments)** is next, in the same PR.
 
 ## 1. What we are building
 
@@ -406,6 +406,7 @@ The modules are unchanged: `billing`, `subscriptions`, `entitlements`, `licenses
 ## 18. Gating, env and deployment
 
 - **Gating:** everything new is behind `billing` (feature check, routes, migrations, catalogue). `tax_copilot` billing stays unchanged.
+- **Exception: workspace email is core** (§10). Every deployment gets `namespace_mail_settings`, `namespace_email_templates` and the `/api/v2/namespace/mail-settings` and `/email-templates` routes. Each built-in template names the feature that sends it, so the billing templates are only listed where billing is deployed.
 - **Env:**
 
   | Variable | Purpose |
@@ -457,6 +458,22 @@ then breaks. So the recommendation is to **extend #694 rather than merge it firs
 - **Privacy:** export, and delete (revoked, anonymised, accounting rows kept).
 - **End to end, data only:** an app configured purely through the API (settings, features, plans), a manual lifetime sale, a licence, activation through the public endpoint, offline verification with the reference verifier, then revoke and refresh.
 - **Regressions:** the tax-app regression sandbox is re-run; a fresh `PROJECT_CODE=billing` install.
+
+Delivery and payment tests come with Phase 2.
+
+**Phase 1 results (2026-10-08):**
+- **Tax app (`tax_copilot,services`), `main` vs this branch,** each server migrating an empty DB in a no-internet sandbox:
+  - Schema: identical, apart from the two new core email tables. Migrations differ only by `zznm1` and `zznm2`. Modules, menu and webhook subscriptions are identical.
+  - Requests: 1,747 compared (every GET path in either spec as anonymous, non-member and owner, plus a 40-step plan, checkout and billing-route flow). There are 4 differences, all on the new workspace email routes, which return 404 on `main`.
+  - Server error logs show the same messages on both.
+  - The sweep found that the billing email templates were listed on tax deployments. They are now hidden there.
+- **Fresh billing install, end to end** (`lapis/spec/billing-e2e/run.sh`, its own Postgres, Redis and SMTP sink): 53 of 53 checks pass, and 11 of 11 SDK checks against the live server.
+  - The server's licence file and token verify with the Python and Swift reference verifiers.
+- **Specs and builds:**
+  - `spec/billing-entitlements_spec.lua`: 64 checks;
+  - SDK: 66 unit tests, including every published vector;
+  - dashboard: `tsc`, eslint and `next build` pass, and a Cypress smoke of the v2 pages passes (6 of 6).
+- **One behaviour change outside billing:** `helper/mail.lua` sent `Reply-To` under a key the mail library ignores, so no OpsAPI email had a Reply-To header. It is now sent.
 
 ## 21. Decisions (approved 2026-10-08)
 
