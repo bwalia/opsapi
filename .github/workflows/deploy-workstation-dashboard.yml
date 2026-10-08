@@ -105,7 +105,8 @@ jobs:
           API_URL="$(awk '/^apiUrl:/{print $2; exit}' "$VALUES")"
           [ -n "$API_URL" ] || { echo "::error::no 'apiUrl:' in $VALUES"; exit 1; }
 
-          APP_VERSION=$(git describe --tags --always 2>/dev/null || echo 'dev')
+          # SDK release tags (sdk-v*) version the npm package, not the server.
+          APP_VERSION=$(git describe --tags --always --exclude 'sdk-v*' 2>/dev/null || echo 'dev')
           SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
           IMAGE_TAG="${SAFE_VERSION}-${GITHUB_RUN_NUMBER:-local}"
           BUILD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo '')

@@ -10,6 +10,10 @@ Multi-tenant API platform built on OpenResty Nginx/Lua/PostgreSQL (OLP Stack). L
 
 ---
 
+## Run it without the source code
+
+The server is published on Docker Hub as **`bwalia/opsapi`**, so you don't need this repository to run it. [Run an OpsAPI server](sdk/typescript/README.md#1-run-an-opsapi-server) has a ready `docker-compose.yml`, the setup commands (tables, first admin and workspace) and a production checklist. The rest of this page is for developing OpsAPI itself.
+
 ## Quick Start (Local Development)
 
 ### Prerequisites
@@ -270,7 +274,7 @@ const opsapi = createClient({ baseUrl: 'https://api.example.com', token: process
 const { data } = await opsapi.GET('/api/v2/customers', { params: { query: { page: 1 } } });
 ```
 
-Its [README](sdk/typescript/README.md) covers sign-in, errors, pagination, typed plugins and webhooks.
+Its [README](sdk/typescript/README.md) covers running your own server, sign-in, API keys, errors, pagination, typed plugins, webhooks and troubleshooting.
 
 Tenants who just need integrations don't need a plugin. Under **Dashboard → Webhooks** each workspace can send its events (invoice paid, lead created, …) to its own URLs, signed and retried. See [WEBHOOKS.md](WEBHOOKS.md).
 

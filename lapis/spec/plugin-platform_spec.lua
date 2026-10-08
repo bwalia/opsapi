@@ -345,6 +345,10 @@ check("api key: plugin module scope opens the plugin's prefix", ApiKey.permits_u
 check("api key: ...not other plugins or core modules", not ApiKey.permits_uri(key, "/api/v2/helpdesk-x/tickets")
     and not ApiKey.permits_uri(key, "/api/v2/customers/1"))
 check("api key: core scopes still match the URL segment", ApiKey.permits_uri({ scopes = { customers = { "read" } } }, "/api/v2/customers/1"))
+check("api key: ...including the collection itself (list / create)",
+    ApiKey.permits_uri({ scopes = { customers = { "read" } } }, "/api/v2/customers"))
+check("api key: a look-alike module isn't matched", not ApiKey.permits_uri({ scopes = { customers = { "read" } } },
+    "/api/v2/customers-export") and not ApiKey.permits_uri({ scopes = { customers = { "read" } } }, "/api/v2/"))
 check("api key: no scope, no access", not ApiKey.permits_uri({ scopes = {} }, "/api/v2/helpdesk/tickets"))
 ProjectLoader.getRegistered = real_registered
 

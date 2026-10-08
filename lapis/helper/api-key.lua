@@ -48,7 +48,10 @@ end
 -- @return boolean
 function ApiKey.permits_uri(principal, uri)
     if type(uri) ~= "string" then return false end
-    local module_name = uri:match("^/api/v2/([^/]+)/")
+    -- The module is the first segment, with or without more path: a key
+    -- scoped to customers may list/create (/api/v2/customers) as well as
+    -- reach /api/v2/customers/{id}.
+    local module_name = uri:match("^/api/v2/([^/]+)")
     if not module_name then return false end
     local scopes = principal and principal.scopes or {}
     if scopes[module_name] ~= nil then return true end

@@ -15,7 +15,7 @@ export type {
 } from './client';
 export { OpsApiError } from './errors';
 export { collect, paginate, paginateCursor } from './paginate';
-export type { PageMeta } from './paginate';
+export type { PageMeta, PageOptions, PageResult } from './paginate';
 export { signWebhook, verifyWebhook, WebhookVerificationError } from './webhooks';
 export type { VerifyWebhookOptions, WebhookEvent } from './webhooks';
 export type { components, operations, paths } from './generated/opsapi';

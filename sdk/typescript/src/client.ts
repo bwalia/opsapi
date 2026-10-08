@@ -209,11 +209,12 @@ export function createClient<Paths extends {} = CorePaths>(options: ClientOption
   client.use(headersMiddleware, errorMiddleware);
 
   // The auth endpoints, through the same transport and headers.
-  async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // The /auth/* endpoints read FORM fields (not JSON), on every OpsAPI version.
+  async function call<T>(method: string, path: string, body?: Record<string, string>): Promise<T> {
     const request = new Request(baseUrl + path, {
       method,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: body === undefined ? undefined : new URLSearchParams(body).toString(),
     });
     for (const [k, v] of Object.entries(options.headers ?? {})) request.headers.set(k, v);
     const res = await transport(request);

@@ -161,7 +161,9 @@ describe('auth', () => {
     const opsapi = createClient({ baseUrl: BASE, fetch });
     const res = await opsapi.auth.login({ username: 'a@b.test', password: 'pw' });
     expect(res).toMatchObject({ status: 'signed_in', token: 'jwt1', refreshToken: 'r1', currentNamespace: ns });
-    expect(await calls[0]!.json()).toEqual({ username: 'a@b.test', password: 'pw' });
+    // The server reads form fields on /auth/* (JSON there is ignored -> "identifier required").
+    expect(calls[0]!.headers.get('content-type')).toBe('application/x-www-form-urlencoded');
+    expect(Object.fromEntries(new URLSearchParams(await calls[0]!.text()))).toEqual({ username: 'a@b.test', password: 'pw' });
     await opsapi.GET('/api/v2/customers');
     expect(calls[1]!.headers.get('authorization')).toBe('Bearer jwt1');
     expect(calls[1]!.headers.get('x-namespace-id')).toBe(NS_UUID);
@@ -177,7 +179,7 @@ describe('auth', () => {
     expect(challenge).toMatchObject({ status: 'needs_2fa', sessionToken: 's1' });
     const done = await opsapi.auth.verify2fa({ sessionToken: 's1', code: '123456' });
     expect(done.token).toBe('jwt2');
-    expect(await calls[1]!.json()).toEqual({ session_token: 's1', code: '123456' });
+    expect(Object.fromEntries(new URLSearchParams(await calls[1]!.text()))).toEqual({ session_token: 's1', code: '123456' });
   });
 
   it('wrong password -> OpsApiError 401', async () => {
@@ -192,6 +194,7 @@ describe('auth', () => {
       new URL(req.url).pathname === '/auth/refresh' ? json({ token: 'jwt3', refresh_token: 'r2' }) : json({}));
     const opsapi = createClient({ baseUrl: BASE, token: 'old', fetch });
     expect(await opsapi.auth.refresh('r1')).toEqual({ token: 'jwt3', refreshToken: 'r2' });
+    expect(new URLSearchParams(await calls[0]!.text()).get('refresh_token')).toBe('r1');
     await opsapi.GET('/api/v2/customers');
     expect(calls[1]!.headers.get('authorization')).toBe('Bearer jwt3');
     await opsapi.auth.logout('r2');
@@ -212,6 +215,43 @@ describe('pagination', () => {
     const fetchPage = vi.fn(async (page: number) => ({ data: page < 3 ? [page] : [] }));
     expect(await collect(paginate(fetchPage))).toEqual([1, 2]);
     expect(await collect(paginate(fetchPage), 1)).toEqual([1]);
+  });
+
+  // The shapes OpsAPI's list endpoints really return (surveyed across ~230 of them).
+  it('reads camelCase meta.totalPages (kanban, cms, templates, documents)', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ data: [page], meta: { page, perPage: 1, totalPages: 2 } }));
+    expect(await collect(paginate(fetchPage))).toEqual([1, 2]);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('works out the last page from total + page size', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ data: page === 1 ? [1, 2] : [3], meta: { total: 3, per_page: 2 } }));
+    expect(await collect(paginate(fetchPage))).toEqual([1, 2, 3]);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads items and paging info at the top level (e.g. tax admin lists)', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ items: [page], page, total_pages: 2 }));
+    expect(await collect(paginate(fetchPage))).toEqual([1, 2]);
+  });
+
+  it('never loops on an endpoint that ignores ?page (no paging info at all)', async () => {
+    const fetchPage = vi.fn(async () => ({ data: [{ uuid: 'a' }, { uuid: 'b' }] }));
+    expect(await collect(paginate(fetchPage))).toEqual([{ uuid: 'a' }, { uuid: 'b' }]);
+    expect(fetchPage).toHaveBeenCalledTimes(2); // page 2 repeated page 1: stop, nothing yielded twice
+  });
+
+  it('takes items from anywhere with options.items', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ notifications: page === 1 ? ['n1'] : [], unread_count: 1 }));
+    expect(await collect(paginate<string>(fetchPage, { items: (r) => r.notifications }))).toEqual(['n1']);
+  });
+
+  it('keeps the item type from typed responses', async () => {
+    type Customer = { uuid: string; email: string };
+    const fetchPage = async (page: number) => ({ data: page === 1 ? [{ uuid: 'c1', email: 'a@b.test' }] as Customer[] : [] });
+    const first = (await collect(paginate(fetchPage)))[0];
+    const email: string = first!.email; // compiles only if T was inferred as Customer
+    expect(email).toBe('a@b.test');
   });
 
   it('follows next_cursor', async () => {
