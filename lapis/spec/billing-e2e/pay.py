@@ -29,9 +29,11 @@ def pub(method, path, body=None, headers=None): return req(method, path, body, t
 n = [0]
 def key():
     n[0] += 1; return f"e2e-{time.time()}-{n[0]}"
-def hook(etype, obj, secret=SECRETS[0], eid=None, sig=None):
-    payload = json.dumps({"id": eid or f"evt_{key()}", "type": etype, "api_version": "2023-10-16", "livemode": False,
-                          "data": {"object": obj}}).encode()
+T0 = int(time.time())
+def hook(etype, obj, secret=SECRETS[0], eid=None, sig=None, created=None, livemode=False):
+    n[0] += 1  # events are created in order, a second apart
+    payload = json.dumps({"id": eid or f"evt_{key()}", "type": etype, "api_version": "2023-10-16", "livemode": livemode,
+                          "created": created or T0 + n[0], "data": {"object": obj}}).encode()
     t = int(time.time())
     s = sig or hmac.new(secret.encode(), f"{t}.".encode() + payload, hashlib.sha256).hexdigest()
     return req("POST", "/api/v2/public/billing/stripe/webhook", token=None, raw=payload,
@@ -182,9 +184,15 @@ BOB = bob[0]["customer_uuid"] if "customer_uuid" in bob[0] else bob[0]["customer
 st, r, _ = req("POST", "/api/v2/subscriptions/portal", {"app": APP, "customer": BOB})
 check("Customer Portal URL", st == 200 and r["data"]["url"], r)
 st, r, _ = req("POST", "/api/v2/subscriptions/upgrade", {"app": APP, "customer": BOB, "to_plan": "team"})
-check("admin switches the Stripe subscription (prorated)", st == 200, r)
+check("admin switch sent to Stripe: pending until the prorated invoice is paid (B9)", st == 200 and r["data"].get("pending") is True, r)
 st, h, _ = req("GET", f"/api/v2/subscriptions/plan-changes?app={APP}&customer={BOB}")
-check("plan change recorded: upgrade via stripe, prorated", any(x["kind"] == "upgrade" and x["source"] == "stripe" for x in h["data"]), h)
+check("... nothing recorded or switched yet", not any(x["kind"] == "upgrade" for x in h["data"]), h)
+st, r, _ = hook("customer.subscription.updated", {"id": "sub_e2e_1_" + RUN, "object": "subscription", "status": "active",
+    "current_period_end": future, "items": {"data": [{"id": "si_1", "price": {"id": "price_not_ours"}}]},
+    "metadata": {"opsapi": "billing", "plan": PLANS["team"]}})
+st, h, _ = req("GET", f"/api/v2/subscriptions/plan-changes?app={APP}&customer={BOB}")
+check("the webhook applies the switch and records it (upgrade via stripe)", any(x["kind"] == "upgrade" and x["source"] == "stripe"
+    and x.get("to_plan_uuid") == PLANS["team"] for x in h["data"]), h)
 st, r, _ = pub("POST", "/api/v2/public/billing/checkout", {"pk": PK, "plan_key": "team", "license_key": SUBKEY}, {"Idempotency-Key": key()})
 check("a second subscription is refused", st == 409 and r.get("code") == "already_subscribed", r)
 st, r, _ = hook("customer.subscription.deleted", {"id": "sub_e2e_1_" + RUN, "status": "canceled", "ended_at": int(time.time()) - 5,
@@ -193,6 +201,11 @@ check("subscription.deleted -> 200", st == 200, r)
 st, v, _ = pub("POST", "/api/v2/public/licenses/validate", {"pk": PK, "license_key": SUBKEY, "fingerprint_hash": fp, "app_version": "1.0.0"},
                {"Idempotency-Key": key()})
 check("ended subscription: licence access over", st == 403 and v.get("code") in ("access_ended", "subscription_inactive"), v)
+st, r, _ = hook("customer.subscription.updated", {"id": "sub_e2e_1_" + RUN, "object": "subscription", "status": "active",
+    "current_period_end": future, "metadata": {"opsapi": "billing", "plan": PLANS["team"]}})
+st, v, _ = pub("POST", "/api/v2/public/licenses/validate", {"pk": PK, "license_key": SUBKEY, "fingerprint_hash": fp, "app_version": "1.0.0"},
+               {"Idempotency-Key": key()})
+check("a late 'updated' after 'deleted' doesn't revive it (B5)", st == 403, v)
 
 print("customer upgrades from the account page")
 s3 = session_event("cs_test_e2e_basic1_" + RUN, "basic", buyer("cy"), 2900, {"payment_intent": "pi_e2e_3_" + RUN})
@@ -226,6 +239,142 @@ st, v, _ = pub("POST", "/api/v2/public/licenses/activate", {"pk": PK, "license_k
 check("the original key now carries Lifetime", st == 200 and claims(v["data"]["license_file"])["plan_key"] == "lifetime", v)
 st, r, _ = pub("POST", "/api/v2/public/billing/me/portal", {"pk": PK}, SESSION)
 check("portal without a subscription -> 404 no_subscription", st == 404 and r.get("code") == "no_subscription", r)
+
+print("review fixes (2026-10-08)")
+# B1: coupon limits hold across parallel checkouts; abandoned ones give their use back.
+st, c1, _ = req("POST", "/api/v2/billing/coupons", {"code": "FREE" + RUN, "discount_type": "percent", "percent_off": 100,
+    "max_redemptions": 1, "app": APP})
+check("single-use 100% coupon", st == 201, c1)
+ca = {"pk": PK, "plan_key": "lifetime", "coupon": "FREE" + RUN, "email": buyer("free1")}
+st, ra, _ = pub("POST", "/api/v2/public/billing/checkout", ca, {"Idempotency-Key": key()})
+check("B1 first checkout reserves the only use", st == 201, ra)
+st, rb, _ = pub("POST", "/api/v2/public/billing/checkout", dict(ca, email=buyer("free2")), {"Idempotency-Key": key()})
+check("B1 a second checkout while the first is open -> 422 coupon_exhausted", st == 422 and rb.get("code") == "coupon_exhausted", rb)
+st, _, _ = hook("checkout.session.expired", {"id": ra["data"]["session_id"], "object": "checkout.session", "metadata": {"opsapi": "billing"}})
+st, rc, _ = pub("POST", "/api/v2/public/billing/checkout", dict(ca, email=buyer("free3")), {"Idempotency-Key": key()})
+check("B1 the expired session gave its use back", st == 201, rc)
+st, c2, _ = req("POST", "/api/v2/billing/coupons", {"code": "ONCE" + RUN, "discount_type": "percent", "percent_off": 50,
+    "per_customer_limit": 1, "app": APP})
+cb = {"pk": PK, "plan_key": "lifetime", "coupon": "ONCE" + RUN}
+st, r, _ = pub("POST", "/api/v2/public/billing/checkout", cb, {"Idempotency-Key": key()})
+check("B1 per-customer coupon without an email -> 422 email_required", st == 422 and r.get("code") == "email_required", r)
+st, r, _ = pub("POST", "/api/v2/public/billing/checkout", dict(cb, email=buyer("once")), {"Idempotency-Key": key()})
+check("B1 first use for that email", st == 201, r)
+st, r, _ = pub("POST", "/api/v2/public/billing/checkout", dict(cb, email=buyer("ONCE").upper()), {"Idempotency-Key": key()})
+check("B1 the same email again (any case) -> coupon_customer_limit", st == 422 and r.get("code") == "coupon_customer_limit", r)
+
+# B2: subscriptions not from Stripe end with their period.
+st, r, _ = req("POST", "/api/v2/subscriptions/purchases", {"app": APP, "customer_external_id": "lapsed-" + RUN,
+    "email": buyer("lapsed"), "plan": "pro", "expires_at": "not-a-date"})
+check("B19 an invalid expires_at -> 4xx, not 500", 400 <= st < 500, (st, r))
+st, r, _ = req("POST", "/api/v2/subscriptions/purchases", {"app": APP, "customer_external_id": "lapsed-" + RUN,
+    "email": buyer("lapsed"), "plan": "pro", "expires_at": "2020-01-01T00:00:00Z"})
+check("a manual subscription whose period has ended", st == 201, r)
+st, subs, _ = req("GET", f"/api/v2/subscriptions?app={APP}")
+lapsed = [x for x in subs["data"] if x.get("customer_email") == buyer("lapsed")]
+st, e, _ = req("GET", f"/api/v2/subscriptions/entitlements?app={APP}&customer={lapsed[0]['customer_uuid']}")
+check("B2 ... no longer entitles", st == 200 and (e["data"].get("plan") or {}).get("key") != "pro", e)
+
+# B3: the past-due grace counts from the failed payment, not the (moved) period end.
+s6 = session_event("cs_test_e2e_sub3_" + RUN, "pro", buyer("eve"), 1200, {"mode": "subscription", "subscription": "sub_e2e_3_" + RUN,
+                                                                        "customer": "cus_e2e_3_" + RUN})
+st, _, _ = hook("checkout.session.completed", s6)
+st, _, _ = hook("customer.subscription.updated", {"id": "sub_e2e_3_" + RUN, "object": "subscription", "status": "past_due",
+    "current_period_end": future, "metadata": {"opsapi": "billing", "plan": PLANS["pro"]}})
+st, subs, _ = req("GET", f"/api/v2/subscriptions?app={APP}")
+eve = [x for x in subs["data"] if x.get("customer_email") == buyer("eve")][0]
+st, e, _ = req("GET", f"/api/v2/subscriptions/entitlements?app={APP}&customer={eve['customer_uuid']}")
+check("past_due within its grace still entitles", (e["data"].get("plan") or {}).get("key") == "pro", e)
+st, _, _ = req("PUT", f"/api/v2/billing/apps/{APP}", {"settings": {"past_due_grace_days": 0}})
+st, e, _ = req("GET", f"/api/v2/subscriptions/entitlements?app={APP}&customer={eve['customer_uuid']}")
+check("B3 grace 0: past_due ends access although the period end is a year away", (e["data"].get("plan") or {}).get("key") != "pro", e)
+st, _, _ = req("PUT", f"/api/v2/billing/apps/{APP}", {"settings": {"past_due_grace_days": 7}})
+st, _, _ = hook("customer.subscription.updated", {"id": "sub_e2e_3_" + RUN, "object": "subscription", "status": "active",
+    "current_period_end": future, "metadata": {"opsapi": "billing", "plan": PLANS["pro"]}}, created=T0 - 1000)
+st, subs, _ = req("GET", f"/api/v2/subscriptions?app={APP}")
+eve = [x for x in subs["data"] if x.get("customer_email") == buyer("eve")][0]
+check("B5 an older event than the last one applied is skipped", eve["status"] == "past_due", eve)
+
+# B6b: a replayed reissue never gives the key again (it isn't stored).
+CYLIC = me["data"]["licences"][0]["uuid"]
+k6 = key()
+st, r1, _ = pub("POST", f"/api/v2/public/billing/me/licenses/{CYLIC}/reissue?pk={PK}", {}, dict(SESSION, **{"Idempotency-Key": k6}))
+CYKEY = r1["data"]["key"] if st == 200 else CYKEY
+st, r2, h2 = pub("POST", f"/api/v2/public/billing/me/licenses/{CYLIC}/reissue?pk={PK}", {}, dict(SESSION, **{"Idempotency-Key": k6}))
+check("B6b replay: same answer without the key (key_redacted)", st == 200 and h2.get("Idempotent-Replayed") == "true"
+      and r2["data"].get("key") is None and r2["data"].get("key_redacted") is True, r2)
+
+# B11: releasing a device doesn't free its seat for the hold period; an admin release does.
+fps = {n_: hashlib.sha256(f"salt:{n_}".encode()).hexdigest() for n_ in ("d1", "d2", "d3", "d4")}
+# Three seats: the device activated earlier, d1 and d2.
+for n_ in ("d1", "d2"):
+    st, r, _ = pub("POST", "/api/v2/public/licenses/activate", {"pk": PK, "license_key": CYKEY, "fingerprint_hash": fps[n_],
+        "app_version": "1.0.0", "name": n_}, {"Idempotency-Key": key()})
+    check("activate " + n_, st == 200, r)
+st, r, _ = pub("POST", "/api/v2/public/licenses/deactivate", {"pk": PK, "license_key": CYKEY, "fingerprint_hash": fps["d2"]},
+               {"Idempotency-Key": key()})
+check("a device releases its own seat", st == 200, r)
+st, r, _ = pub("POST", "/api/v2/public/licenses/activate", {"pk": PK, "license_key": CYKEY, "fingerprint_hash": fps["d4"],
+    "app_version": "1.0.0", "name": "d4"}, {"Idempotency-Key": key()})
+check("B11 ... but it still counts: a new device is refused (no activate/deactivate cycling)", st == 409 and r.get("code") == "activation_limit", r)
+st, lic, _ = req("GET", f"/api/v2/licenses/{CYLIC}")
+d1 = [a_ for a_ in lic["data"]["activations"] if a_.get("name") == "d1" and not a_.get("deactivated_at")]
+st, r, _ = req("DELETE", f"/api/v2/licenses/{CYLIC}/activations/{d1[0]['uuid']}")
+st, r, _ = pub("POST", "/api/v2/public/licenses/activate", {"pk": PK, "license_key": CYKEY, "fingerprint_hash": fps["d4"],
+    "app_version": "1.0.0", "name": "d4"}, {"Idempotency-Key": key()})
+check("B11 a seat an admin frees is free at once", st == 200, r)
+
+# B12 / B13 / B16: a second app, plans behind billing.read, per-app transaction ids, account pages stay in their app.
+st, ak, _ = req("POST", "/api/v2/api-keys", {"name": "ent-" + RUN, "scopes": {"entitlements": ["read", "create"]}})
+EKEY = ak["data"]["key"]
+st, r, _ = req("GET", f"/api/v2/billing/plans?app={APP}", token=EKEY)
+check("B12 an entitlements-only key can't read an app's plans", st == 403, (st, r))
+st, two, _ = req("POST", "/api/v2/billing/apps", {"name": "Two " + RUN, "kind": "desktop"})
+TWO = two["data"]["uuid"]
+st, _, _ = req("POST", "/api/v2/billing/plans", {"app": TWO, "name": "One", "plan_key": "one", "purchase_type": "one_time",
+    "amount": 100, "currency": "gbp"})
+st, _, _ = req("POST", "/api/v2/billing/plans", {"app": APP, "name": "Ext", "plan_key": "ext", "purchase_type": "one_time",
+    "amount": 100, "currency": "gbp"})
+ext = {"customer_external_id": "ext-" + RUN, "email": buyer("ext"), "source": "external", "external_transaction_id": "txn-" + RUN}
+st, r1, _ = req("POST", f"/api/v2/entitlements/{APP}/purchases", dict(ext, plan_key="ext"), token=EKEY, headers={"Idempotency-Key": key()})
+st2, r2, _ = req("POST", f"/api/v2/entitlements/{TWO}/purchases", dict(ext, plan_key="one"), token=EKEY, headers={"Idempotency-Key": key()})
+check("B13 the same store transaction id in two apps: two purchases", st == 201 and st2 == 201 and not r2["data"].get("duplicate"), (r1, r2))
+st, pl, _ = req("GET", f"/api/v2/subscriptions/purchases?app={APP}")
+cyu = [p_ for p_ in pl["data"] if p_["customer_email"] == buyer("cy")][0]["customer_uuid"]
+st, il, _ = req("POST", "/api/v2/licenses", {"app": TWO, "customer": cyu})
+st, r, _ = pub("POST", f"/api/v2/public/billing/me/licenses/{il['data']['license']['uuid']}/reissue?pk={PK}", {}, dict(SESSION, **{"Idempotency-Key": key()}))
+check("B16 an account session can't reissue a licence of another app", st == 404, (st, r))
+
+# B17 / B19 smaller items.
+for bad in ("https://shop.example.evil.com/x", "https://shop.example/a/../b", "https://shop.example/a/%2e%2e/b"):
+    st, r, _ = pub("POST", "/api/v2/public/billing/checkout", {"pk": PK, "plan_key": "lifetime", "success_url": bad}, {"Idempotency-Key": key()})
+    check(f"B17 redirect {bad} -> 422", st == 422 and r.get("code") == "redirect_not_allowed", r)
+st, r, _ = req("PUT", f"/api/v2/billing/apps/{APP}", {"settings": {"allowed_origins": ["http://localhost.evil.com"]}})
+check("B19 http://localhost.evil.com is not localhost", st in (400, 422), (st, r))
+st, r, _ = req("PUT", f"/api/v2/billing/plans/{PLANS['lifetime']}", {"plan_type": "subscription"})
+check("B19 plan_type can't contradict purchase_type", st in (400, 422), (st, r))
+st, r, _ = hook("account.updated", {"id": ACCT}, livemode=True)
+check("B19 a live event to a test deployment -> 400", st == 400, r)
+s7 = session_event("cs_test_e2e_fay1_" + RUN, "basic", buyer("fay"), 2900, {"payment_intent": "pi_e2e_7_" + RUN})
+st, _, _ = hook("checkout.session.completed", s7)
+st, r, _ = hook("charge.dispute.closed", {"id": "dp_1", "status": "lost", "payment_intent": "pi_e2e_7_" + RUN, "amount": 2900})
+st, pl, _ = req("GET", f"/api/v2/subscriptions/purchases?app={APP}")
+fay = [p_ for p_ in pl["data"] if p_["customer_email"] == buyer("fay")][0]
+check("B19 a lost dispute follows refund_policy (revoke)", fay["status"] == "refunded", fay)
+st, r, _ = req("DELETE", f"/api/v2/customers/{fay['customer_uuid']}")
+check("B19 deleting a customer who has purchases -> 409 (not 500)", st == 409, (st, r))
+st, r, _ = pub("POST", "/api/v2/public/billing/access-link", {"pk": PK, "email": buyer("nobody")}, {"Idempotency-Key": key()})
+check("access link for an unknown email: the same 202", st == 202, r)
+
+# B7: refunds undo what each purchase granted (cy: Basic, then the Lifetime upgrade).
+st, r, _ = hook("charge.refunded", {"id": "ch_3", "payment_intent": "pi_e2e_3_" + RUN, "refunded": True, "amount": 2900, "amount_refunded": 2900})
+st, v, _ = pub("POST", "/api/v2/public/licenses/validate", {"pk": PK, "license_key": CYKEY, "fingerprint_hash": fps["d4"], "app_version": "1.0.0"},
+               {"Idempotency-Key": key()})
+check("B7 refunding the original purchase leaves the upgrade's access", st == 200 and claims(v["data"]["license_file"])["plan_key"] == "lifetime", v)
+st, r, _ = hook("charge.refunded", {"id": "ch_4", "payment_intent": "pi_e2e_4_" + RUN, "refunded": True, "amount": 7000, "amount_refunded": 7000})
+st, v, _ = pub("POST", "/api/v2/public/licenses/validate", {"pk": PK, "license_key": CYKEY, "fingerprint_hash": fps["d4"], "app_version": "1.0.0"},
+               {"Idempotency-Key": key()})
+check("B7 refunding the upgrade too: nothing left, the licence is revoked", st == 403 and v.get("code") == "license_revoked", v)
 
 print("privacy delete")
 s5 = session_event("cs_test_e2e_sub2_" + RUN, "pro", buyer("dee"), 1200, {"mode": "subscription", "subscription": "sub_e2e_2_" + RUN,

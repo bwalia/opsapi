@@ -194,14 +194,123 @@ local delivery = read("lib/billing-delivery.lua")
 check("keys wait encrypted (AES-256-GCM, licence id as AAD) for at most 24 h",
     delivery:find('"aes-256-gcm"', 1, true) and delivery:find("tostring(license_id)", 1, true)
         and delivery:find("interval '24 hours'", 1, true) ~= nil)
-check("revealed once: claimed by an UPDATE ... revealed_at IS NULL",
-    delivery:find("revealed_at IS NULL AND expires_at > NOW() RETURNING", 1, true) ~= nil)
+check("revealed once: decrypted first, then claimed by an UPDATE ... revealed_at IS NULL",
+    delivery:find("local raw, err = decrypt(row)", 1, true) and delivery:find("WHERE license_id = ? AND revealed_at IS NULL RETURNING", 1, true) ~= nil)
 
 print("customers: email unique per workspace")
 local cq = read("queries/CustomerQueries.lua")
 check("findByEmail is workspace-scoped", cq:find("function CustomerQueries.findByEmail%(namespace_id, email%)") ~= nil)
 check("legacy checkout lookup only sees workspace-less customers",
     read("routes/checkout_enhanced.lua"):find("namespace_id IS NULL") ~= nil)
+
+print("review fixes (2026-10-08)")
+local offers = read("queries/BillingOfferQueries.lua")
+local purchases = read("queries/BillingPurchaseQueries.lua")
+local stripe_lib = read("lib/billing-stripe.lua")
+-- B1
+check("B1 coupons: a checkout reserves a use atomically, fulfilment confirms it, expiry gives it back",
+    offers:find("function Offers.reserve", 1, true) and offers:find("function Offers.confirm", 1, true)
+        and offers:find("function Offers.release", 1, true) and stripe_lib:find('["checkout.session.expired"]', 1, true)
+        and stripe_lib:find("Offers.release(reservation)", 1, true) ~= nil)
+check("B1 no forced redemption; the Stripe coupon carries max_redemptions / redeem_by; sessions expire in 31 min",
+    not purchases:find("force_coupon", 1, true) and stripe_lib:find("body.max_redemptions", 1, true)
+        and stripe_lib:find("body.redeem_by", 1, true) and stripe_lib:find("SESSION_SECONDS = 31 * 60", 1, true) ~= nil)
+check("B1 anonymous buyers: per-customer limits by email", offers:find("email_norm = ?", 1, true) ~= nil
+    and stripe_lib:find('"email_required"', 1, true) ~= nil)
+-- B2 / B3
+local live = Ent.liveSubscriptionSql("s")
+check("B2 active subscriptions entitle only until the period ends", live:find("s.current_period_end IS NULL", 1, true)
+    and live:find("s.current_period_end + CASE WHEN s.source = 'stripe'", 1, true) ~= nil)
+check("B3 past_due grace counts from past_due_since", live:find("COALESCE(s.past_due_since, s.updated_at) + make_interval(days => ?)", 1, true) ~= nil)
+check("B2 the same rule in currentPlan and licence checks; lapsed manual/store subscriptions end",
+    purchases:find('liveSubscriptionSql("s")', 1, true) and read("queries/BillingLicenseQueries.lua"):find("liveSubscriptionSql", 1, true)
+        and read("lib/billing-jobs.lua"):find("function Jobs.lapseSubscriptions", 1, true) ~= nil)
+-- B4 / B5
+check("B4 webhook transactions that roll back raise (Stripe retries)",
+    stripe_lib:find('if not ok then error("subscription sync failed: "', 1, true)
+        and stripe_lib:find('if not ok then error("refund failed: "', 1, true) ~= nil)
+check("B4 a refund seen before fulfilment is recorded and applied by fulfilment",
+    stripe_lib:find("INSERT INTO billing_stripe_refunds", 1, true) and stripe_lib:find("DELETE FROM billing_stripe_refunds", 1, true) ~= nil)
+check("B5 subscription events apply in order; an ended subscription never comes back",
+    stripe_lib:find("created < tonumber(row.last_event_epoch)", 1, true) and stripe_lib:find('row.status == "canceled" and row.ended_at', 1, true) ~= nil)
+-- B6
+local lic_src = read("queries/BillingLicenseQueries.lua")
+check("B6a no raw key in events: the webhook sender decrypts it", not lic_src:find("data.key = key", 1, true)
+    and read("lib/outbound-webhooks.lua"):find("forWebhook(data.uuid)", 1, true) ~= nil)
+package.loaded["helper.redis-client"] = package.loaded["helper.redis-client"] or { connect = function() return nil end }
+local okg, Guard = pcall(require, "lib.billing-guard")
+if okg then
+    local r = Guard._redact({ success = true, data = { key = "AAAAA-BBBBB", license = { uuid = "x" } } })
+    check("B6b stored idempotent responses never hold a key", r.data.key == nil and r.data.key_redacted == true and r.data.license.uuid == "x")
+    -- B17
+    local A = { kind = "web", name = "A", settings = { allowed_redirect_urls = { "https://shop.example/account" } } }
+    local function allowed(u) return Guard.redirectAllowed(A, u) end
+    check("B17 redirects: the allowed path and below it", allowed("https://shop.example/account") and allowed("https://shop.example/account/done?x=1"))
+    check("B17 redirects: no prefix tricks, other hosts/ports, dot segments or userinfo",
+        not allowed("https://shop.example/accounts") and not allowed("https://shop.example.evil.com/account")
+            and not allowed("https://shop.example:8443/account") and not allowed("https://shop.example/account/../admin")
+            and not allowed("https://shop.example/account/%2e%2e/admin") and not allowed("https://user@shop.example/account")
+            and not allowed("http://shop.example/account"))
+else
+    check("lib/billing-guard loads in the spec", false, Guard)
+end
+-- B7
+check("B7 a purchase records its licence; refunds undo exactly that", purchases:find("UPDATE billing_purchases SET license_id = ?", 1, true)
+    and purchases:find("local function release_licence", 1, true) and not purchases:find("WHERE purchase_id = ? AND status <> 'revoked'\", purchase.id", 1, true))
+-- B8
+local Common = require("queries.FieldServiceCommon")
+local ran = false
+Common.transaction(function() Common.afterCommit(function() ran = true end); check("B8 after-commit work waits for the commit", ran == false); return true end)
+check("B8 ... and runs after it", ran == true)
+local ran2 = false
+Common.transaction(function() Common.afterCommit(function() ran2 = true end); return nil, "rolled back" end)
+check("B8 ... and never after a rollback", ran2 == false)
+check("B8 the plan generation is bumped after the save", read("routes/billing-plans.lua"):find("After the save: bumped before it", 1, true) ~= nil)
+-- B9 / B10
+check("B9 Stripe switches invoice now and apply once paid", stripe_lib:find('proration_behavior = "always_invoice"', 1, true)
+    and stripe_lib:find('payment_behavior = "pending_if_incomplete"', 1, true) and purchases:find("summary.pending = true", 1, true) ~= nil)
+local has_promo = false
+for _, sp in ipairs(Settings.SCHEMA) do has_promo = has_promo or sp.key == "allow_promotion_codes" end
+check("B10 no platform promotion codes (they'd break the fee and be shared by every seller)", not has_promo
+    and not stripe_lib:find("allow_promotion_codes", 1, true))
+-- B11
+local hold_spec
+for _, sp in ipairs(Settings.SCHEMA) do if sp.key == "released_seat_hold_days" then hold_spec = sp end end
+check("B11 released seats keep counting for a configurable hold (app setting)", hold_spec ~= nil and hold_spec.nullable == true
+    and lic_src:find("released_by IN ('device', 'customer')", 1, true) ~= nil)
+-- B12 / B13 / B14 / B15 / B16
+check("B12 app plans need billing.read; another workspace's app plan is a 404", read("routes/billing-plans.lua"):find('has_perm(self, "billing", "read")', 1, true)
+    and read("routes/billing-plans.lua"):find('if app_plan then return api_response(404', 1, true) ~= nil)
+local mig = read("migrations/billing-entitlements.lua")
+check("B13 transaction ids are unique per app", mig:find("billing_purchases (app_id, source, external_transaction_id)", 1, true)
+    and purchases:find("WHERE app_id = ? AND source = ?", 1, true) ~= nil)
+check("B14 fixed-term stacking is locked per (app, customer, plan)", purchases:find("opsapi.billing.stack:", 1, true) ~= nil)
+local privacy = read("queries/BillingPrivacyQueries.lua")
+check("B15 erase drops key deliveries and Stripe customer links; Stripe down -> 502", privacy:find("DELETE FROM billing_key_deliveries", 1, true)
+    and privacy:find("stripe_customer_id = NULL", 1, true) and privacy:find("perr.status or 502", 1, true) ~= nil)
+check("B16 account-page reissue / free a device stay within the session's app", lic_src:find("(?::bigint IS NULL OR l.app_id = ?::bigint)", 1, true) ~= nil)
+-- B18
+local signing = read("lib/billing-signing.lua")
+check("B18 kid and issuer are required; old keys publish public members only", signing:find('not jwk.kid or not env("OPSAPI_PUBLIC_URL")', 1, true)
+    and signing:find("kty = k.kty, crv = k.crv, x = k.x, y = k.y", 1, true) and not read("helper/entitlement-service.lua"):find("ngx.var.http_host", 1, true))
+-- B19
+local Lic = require("queries.BillingLicenseQueries")
+check("B19 device names are cut on a UTF-8 boundary", Lic._utf8_cut("ab\xC3\xA9", 3) == "ab" and Lic._utf8_cut("abc", 3) == "abc")
+check("B19 URL settings anchor the host", Settings._url_ok("https://app.example.com/x") and Settings._url_ok("http://localhost:3000/a")
+    and not Settings._url_ok("http://localhost.evil.com") and not Settings._url_ok("https://example"))
+check("B19 list settings must be arrays", select(2, Settings.merge({}, { allowed_origins = { a = "https://x.example" } })) ~= nil)
+local CQ = require("queries.CustomerQueries")
+check("B19 emails the customers table would reject are refused up front", CQ.validEmail("a.b+c@x.co") and not CQ.validEmail("o'b@x.com")
+    and not CQ.validEmail("a@localhost"))
+check("B19 MenuQueries uses a private cjson", read("queries/MenuQueries.lua"):find('require("cjson").new()', 1, true) ~= nil)
+check("B19 idempotency is bound to the caller", read("lib/billing-guard.lua"):find('headers["x-billing-session"]', 1, true) ~= nil)
+check("B19 access links: the job, not the request, looks the email up", read("routes/billing-public.lua"):find("email_norm = email", 1, true)
+    and read("lib/billing-jobs.lua"):find("l.customer_id IS NULL", 1, true) ~= nil)
+check("B19 the tax webhook leaves app-billing objects alone", read("routes/billing-webhook.lua"):find("belongs_to_app_billing(object)", 1, true) ~= nil)
+check("B19 lost disputes follow refund_policy; webhook mode must match", stripe_lib:find('["charge.dispute.closed"]', 1, true)
+    and read("routes/billing-payments.lua"):find("event mode does not match", 1, true) ~= nil)
+check("B19 deleting a customer with purchases is a 409", read("routes/customers.lua"):find("error_response(409", 1, true) ~= nil)
+check("B19 fixed upgrade paths use the plan's currency", offers:find("currency must be the plan's currency", 1, true) ~= nil)
 
 print(failures == 0 and "\nAll checks passed." or ("\n" .. failures .. " check(s) FAILED."))
 os.exit(failures == 0 and 0 or 1)
