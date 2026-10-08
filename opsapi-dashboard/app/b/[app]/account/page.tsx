@@ -75,7 +75,7 @@ export default function AccountPage() {
   const accent = accentOf(app);
 
   // Leave for Stripe (checkout for a paid upgrade, or the Customer Portal).
-  const go = async (fn: () => Promise<{ url?: string; upgraded?: boolean }>) => {
+  const go = async (fn: () => Promise<{ url?: string; upgraded?: boolean; pending?: boolean }>) => {
     setBusy(true);
     setMessage('');
     try {
@@ -84,6 +84,7 @@ export default function AccountPage() {
         window.location.assign(r.url);
         return;
       }
+      if (r.pending) setMessage('Your plan changes as soon as the prorated invoice is paid. This can take a minute.');
       load();
     } catch (err) {
       setMessage(err instanceof PublicApiError ? err.message : 'Something went wrong. Try again.');

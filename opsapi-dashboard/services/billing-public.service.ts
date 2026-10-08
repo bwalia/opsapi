@@ -135,7 +135,7 @@ export const billingPublic = {
     }),
   order: (pk: string, sessionId: string) => call<Order>('GET', `/api/v2/public/billing/checkout/${enc(sessionId)}?pk=${enc(pk)}`),
   upgrade: (pk: string, session: string, to_plan: string) =>
-    call<{ url?: string; upgraded?: boolean }>('POST', `/api/v2/public/billing/me/upgrade?pk=${enc(pk)}`, { to_plan }, session, true),
+    call<{ url?: string; upgraded?: boolean; pending?: boolean }>('POST', `/api/v2/public/billing/me/upgrade?pk=${enc(pk)}`, { to_plan }, session, true),
   portal: (pk: string, session: string) =>
     call<{ url: string }>('POST', `/api/v2/public/billing/me/portal?pk=${enc(pk)}`, {}, session),
 };

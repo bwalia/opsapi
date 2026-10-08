@@ -309,6 +309,8 @@ export interface SaleResult {
   currency?: string;
   from_plan?: { name: string };
   to_plan?: { name: string };
+  /** A Stripe subscription switch: invoiced now, applied once Stripe confirms payment. */
+  pending?: boolean;
 }
 
 export interface Entitlements {

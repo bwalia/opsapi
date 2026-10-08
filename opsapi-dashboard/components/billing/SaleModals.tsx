@@ -236,7 +236,11 @@ export function UpgradeModal({
     setSaving(true);
     try {
       const res = await billingService.upgrade({ app, customer, to_plan: toPlan, coupon: coupon.trim() || undefined });
-      toast.success(`Upgraded to ${res.to_plan?.name ?? 'the new plan'}`);
+      toast.success(
+        res.pending
+          ? `Switch to ${res.to_plan?.name ?? 'the new plan'} sent to Stripe: it applies once the prorated invoice is paid`
+          : `Upgraded to ${res.to_plan?.name ?? 'the new plan'}`
+      );
       onSaved();
       if (res.key) setResult(res);
       else onClose();
