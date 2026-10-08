@@ -227,6 +227,20 @@ return function(app)
                 return error_response(400, "Missing required fields", table.concat(missing, ", "))
             end
 
+            -- You can't grant what you don't hold: a platform role, another
+            -- workspace, or a workspace role beyond your own permissions.
+            local RbacGuard = require("helper.rbac-guard")
+            if not self.is_platform_admin then
+                if params.role ~= nil and params.role ~= "" and params.role ~= "buyer" then
+                    return error_response(403, "Only a platform admin can set a platform role")
+                end
+                if params.namespace_id ~= nil and tonumber(params.namespace_id) ~= tonumber(self.namespace.id) then
+                    return error_response(403, "You can only add users to this workspace")
+                end
+            end
+            local may, why = RbacGuard.can_assign_role_names(self, params.namespace_role or "member")
+            if not may then return error_response(403, why) end
+
             local user_data = {
                 email = params.email,
                 password = params.password,

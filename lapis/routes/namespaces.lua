@@ -22,6 +22,8 @@ local Global = require("helper.global")
 local db = require("lapis.db")
 local cjson = require("cjson")
 local RateLimit = require("middleware.rate-limit")
+-- You can't grant what you don't hold (roles, members, invitations).
+local RbacGuard = require("helper.rbac-guard")
 
 -- Rate limit configs for sensitive namespace operations
 local NS_SWITCH_LIMIT = { rate = 20, window = 60, prefix = "ns:switch" }   -- 20/min per IP
@@ -839,6 +841,9 @@ return function(app)
                 end
             end
 
+            local may, why = RbacGuard.can_assign_role_ids(self, params.role_ids)
+            if not may then return error_response(403, why) end
+
             -- Check namespace limits
             local member_count = NamespaceMemberQueries.count(self.namespace.id, "active")
             if member_count >= (self.namespace.max_users or 10) then
@@ -904,6 +909,9 @@ return function(app)
                 if params.is_owner and not self.is_namespace_owner then
                     return error_response(403, "Only namespace owner can transfer ownership")
                 end
+                local may, why = RbacGuard.can_manage_member(self, member)
+                if may and params.role_ids then may, why = RbacGuard.can_assign_role_ids(self, params.role_ids) end
+                if not may then return error_response(403, why) end
 
                 local ok, updated = pcall(NamespaceMemberQueries.update, member.id, {
                     status = params.status
@@ -949,6 +957,8 @@ return function(app)
                 if current_member and current_member.id == member.id then
                     return error_response(400, "Use the leave endpoint to remove yourself")
                 end
+                local may, why = RbacGuard.can_manage_member(self, member)
+                if not may then return error_response(403, why) end
 
                 local member_id = member.id
                 local member_user_id = member.user_id
@@ -1078,6 +1088,8 @@ return function(app)
                 if not role_check or #role_check == 0 then
                     return error_response(400, "Invalid role for this namespace")
                 end
+                local may, why = RbacGuard.can_assign_role_ids(self, { params.role_id })
+                if not may then return error_response(403, why) end
             end
 
             -- Get inviter's user id
@@ -1301,6 +1313,8 @@ return function(app)
             if not params.role_name or params.role_name == "" then
                 return error_response(400, "role_name is required")
             end
+            local may, why = RbacGuard.can_grant(self, params.permissions)
+            if not may then return error_response(403, why) end
 
             local ok, role = pcall(NamespaceRoleQueries.create, {
                 namespace_id = self.namespace.id,
@@ -1362,6 +1376,9 @@ return function(app)
 
                 local params = RequestParser.parse_request(self)
                 local old_permissions = role.permissions
+                local may, why = RbacGuard.can_change_role(self, role)
+                if may and params.permissions ~= nil then may, why = RbacGuard.can_grant(self, params.permissions) end
+                if not may then return error_response(403, why) end
 
                 local ok, updated = pcall(NamespaceRoleQueries.update, role.id, params)
 
@@ -1388,6 +1405,9 @@ return function(app)
                 if not role or role.namespace_id ~= self.namespace.id then
                     return error_response(404, "Role not found")
                 end
+
+                local may, why = RbacGuard.can_change_role(self, role)
+                if not may then return error_response(403, why) end
 
                 local role_name = role.role_name
                 local ok, result = pcall(NamespaceRoleQueries.destroy, role.id)
