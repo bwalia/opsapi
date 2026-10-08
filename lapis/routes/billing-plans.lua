@@ -25,6 +25,7 @@ local NamespaceMiddleware = require("middleware.namespace")
 local PaymentProvider = require("lib.payment-provider")
 local BillingPlanQueries = require("queries.BillingPlanQueries")
 local NamespaceQueries = require("queries.NamespaceQueries")
+local ProjectConfig = require("helper.project-config")
 
 -- Fields whose change requires a new Stripe Price (Prices are immutable).
 local PRICE_FIELDS = { "amount", "currency", "billing_interval", "interval_count", "plan_type" }
@@ -147,7 +148,7 @@ return function(app)
     app:get("/api/v2/billing/plans", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
             local app_id
-            if self.params.app and self.params.app ~= "" then
+            if self.params.app and self.params.app ~= "" and ProjectConfig.isFeatureEnabled("billing") then
                 local app_row = require("queries.BillingAppQueries").find(self.namespace.id, self.params.app)
                 if not app_row then return api_response(404, nil, "App not found") end
                 app_id = app_row.id

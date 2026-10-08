@@ -110,9 +110,10 @@ function BillingPlanQueries.listByNamespace(namespace_id, opts)
     if not opts.include_inactive then
         table.insert(where, "active = TRUE")
     end
-    -- Billing & Entitlements: one app's plans (id), or only the app-less ones (false).
+    -- Billing & Entitlements: one app's plans (id), or only the app-less ones
+    -- (false). The column exists only where the billing feature is deployed.
     if opts.app_id == false then
-        table.insert(where, "app_id IS NULL")
+        if require("helper.project-config").isFeatureEnabled("billing") then table.insert(where, "app_id IS NULL") end
     elseif opts.app_id then
         table.insert(where, "app_id = ?")
         table.insert(vals, opts.app_id)
@@ -135,8 +136,10 @@ end
 -- app's) accept none of these and keep their free-form features.
 -- @return fields to write (maybe empty) | nil, err
 function BillingPlanQueries.appFields(namespace_id, body, current)
-    local Apps = require("queries.BillingAppQueries")
     local f = {}
+    -- Without the billing feature (e.g. the tax app) plans work exactly as before.
+    if not require("helper.project-config").isFeatureEnabled("billing") then return f end
+    local Apps = require("queries.BillingAppQueries")
     local app_id = current and current.app_id
     if body.app ~= nil then
         local app = Apps.find(namespace_id, body.app)
