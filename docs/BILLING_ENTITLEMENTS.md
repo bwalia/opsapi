@@ -1,415 +1,452 @@
-# Billing & Entitlements — design
+# Billing & Entitlements — design (v2)
 
-Status: **Phase 1 implemented** (no payments). The owner approved every proposal
-in §16 on 2026-10-08. Phase 2 (Stripe Connect) follows once Phase 1 is merged.
+Status:
+- **v2, for owner approval.** It adds the 2026-10-08 addendum (lifetime and fixed-term purchases, apps with no back end, hosted pages, an open licence format, store purchases, privacy, scale) to the approved v1.
+- The licence and token format is specified in **[LICENCE_FORMAT.md](LICENCE_FORMAT.md)**, with test vectors.
+- v1's Phase 1 is built in PR #694, which is not merged yet. §19 lists what v2 changes in it.
+- No v2 code is written until this document and LICENCE_FORMAT.md are approved. Decisions needed are in §21.
 
 ## 1. What we are building
 
-A client (an OpsAPI workspace) registers **their app**, defines its **features** and
-**flat-tier plans**, and lets **their own end users** subscribe. Their app then asks
-OpsAPI *"may this customer use this feature?"*:
+A client (an OpsAPI workspace) registers **the apps it sells**, defines their **features** and **flat-tier
+plans**, and sells them to **its own customers**. The client's apps then ask *"may this customer, or this
+machine, use this feature?"*, and verify the signed answer themselves.
 
-- **Web/SaaS apps** gate features with a signed entitlement token that they verify
-  locally. One SDK call does it.
-- **Desktop and self-hosted apps** use **licence keys**, with activations and an
-  offline signed licence file.
-- **Mobile app-store purchases** are designed for, but not built.
+| Kind of app | Typical stack | How it checks access |
+|---|---|---|
+| **Web/SaaS** | A back end of its own | Its server calls OpsAPI with a secret key and caches the signed **entitlement token** |
+| **Desktop** | Native (Swift, C#, Kotlin, Rust, Electron), sold as a direct download or through app stores, **often as a lifetime licence**, usually **without a back end** | The app holds a **licence key** and an offline **licence file**. It talks to OpsAPI only with the app's **publishable key** |
+| **Self-hosted** | A server the customer runs | The same as desktop, per installation |
+| **Mobile / store** | App Store, Play Store | The client's server records verified store purchases. They resolve to the same entitlements (§12) |
 
-The money goes into the client's **own Stripe account** (Stripe Connect), and the
-platform takes a configurable percentage. It runs hosted as a separate deployment
-(`PROJECT_CODE=billing`), or self-hosted with the same code.
+Everything is **generic and data-driven**:
+- Purchase types, prices, features, limits, offline behaviour, branding, rate limits and privacy are **per-app data** (§4), validated against a declared settings schema.
+- No client-specific code, names, prices or URLs.
+- Money goes into the client's own Stripe account through Stripe Connect, and the platform takes a configurable percentage (Phase 2).
 
-Fixed decisions:
+Fixed decisions (v1, unchanged):
 
 | Topic | Decision |
 |---|---|
-| Who collects | The client, via Stripe Connect, plus a platform fee (`STRIPE_PLATFORM_FEE_PERCENT`) |
-| App types | Web/SaaS (entitlements), desktop and self-hosted (licences); mobile later |
+| Who collects | The client, through Stripe Connect, plus a platform fee (`STRIPE_PLATFORM_FEE_PERCENT`) |
 | Pricing | **Flat tiers only.** A feature is on/off or a numeric limit. No per-seat or usage-based pricing |
-| Hosting | A separate deployment with `PROJECT_CODE=billing`, which is the hard module boundary |
-| OpsAPI unreachable | **Per-app** `fail_open` / `fail_closed`, with a grace period |
-| Customers | **Reuse the existing `customers` table** (extended), not a new one |
+| Hosting | A separate deployment with `PROJECT_CODE=billing` (the hard module boundary), or self-hosted |
+| Offline | Per app, `fail_open` or `fail_closed`, with a grace period |
+| Customers | The existing `customers` table, extended. `email` is unique per workspace |
+| Store receipts | Apple and Google receipt validation is **not** built. There's an extension point (§12) |
+| Card data | Never touches OpsAPI. Stripe Checkout and the Customer Portal handle it |
 
-## 2. What exists today (and what we reuse)
+## 2. What we reuse
 
-| Piece | Where | Reuse? |
+| Piece | Where | Use |
 |---|---|---|
-| `billing_plans` (with a `features` JSONB map), `billing_subscriptions` (keyed by OpsAPI `user_uuid`), `billing_payments`, `billing_refunds` (unused), `stripe_webhook_events`, `usage_meters` (unused) | `migrations/billing-system.lua`, keys 700–709, gated on `tax_copilot` | **Yes.** Extend these; don't duplicate them |
-| Routes `/api/v2/billing/{plans,checkout,subscription,entitlements,payments}` and `/api/v2/public/billing/{plans,webhook,checkout/return}` | `routes/billing-*.lua`, `load_if("tax_copilot")` | **Keep the contracts unchanged.** The DIY tax frontend (`diy-tax-return-uk/frontend/src/lib/api.ts`) is the only consumer |
-| Entitlement snapshot for an OpsAPI user | `helper/entitlement-service.lua` (`forUser`, `can`, `limit`) | **Yes.** Generalise it to customers |
-| Single-merchant Stripe client: plans → product/price sync, webhook signature verification and idempotency | `lib/stripe.lua`, `lib/payment-provider.lua`, `BillingPlanQueries.ensureStripeSync`, `StripeWebhookQueries` | **Yes.** Add the `Stripe-Account` header and Connect calls in Phase 2 |
-| Committed Stripe Connect code (Express onboarding, `account.updated`, destination charges, `application_fee_*`) | Academy commits `f86afefe` and `4728e291`, removed in `3a0d8240` ("platform-as-merchant") | **As a reference** for Phase 2 |
-| `customers` (workspace-scoped, `email`, names, `stripe_customer_id`, `custom_fields`, `user_id`), routes `/api/v2/customers` (RBAC `customers`) | ecommerce migrations 15/31/71–75/166; `routes/customers.lua`; `CustomerQueries` | **Yes**, extended (§4.1) |
-| API keys `opsk_…`: SHA-256 hashed, workspace-bound, module scopes; `permits_uri` = the first segment of `/api/v2/<segment>/` must be a scoped module | `helper/api-key.lua`, `routes/api-keys.lua` | **Yes.** These are the client's **secret server key** |
-| Outbound webhooks: signed `X-Opsapi-Signature-256`, retries, outbox driven by `PluginEvents.CATALOG` table triggers | `lib/outbound-webhooks.lua`, `helper/plugin-events.lua` | **Yes.** Add billing tables to the catalogue |
-| Rate limiting | `middleware/rate-limit.lua` (`RateLimit.check(key, rate, window)`) | **Yes**, keyed per licence or key, not only per IP |
-| Asymmetric signing | none. All JWTs are HS256. ES256 building blocks exist (`resty.openssl.pkey`, see `helper/apns-push.lua`) | **New:** ES256 tokens plus a JWKS endpoint (§6) |
+| `billing_plans`, `billing_subscriptions`, `billing_payments`, `stripe_webhook_events` | `migrations/billing-system.lua` (700–709) | Extended. The tax app's contracts stay byte-identical (proven in #694, §20) |
+| `customers` | ecommerce migrations, `routes/customers.lua` | Extended with `external_id`; billing customers appear on the Customers page |
+| API keys `opsk_…` (hashed, module-scoped; the first URL segment = the scope) | `helper/api-key.lua` | The client's **secret server key** |
+| Event outbox: table triggers, a delivery queue claimed with `SKIP LOCKED`, exponential backoff, dead letters | `helper/plugin-events.lua` | **Every** webhook and every billing email goes through it, never inline (§14) |
+| Outbound webhooks (signed, retried) | `lib/outbound-webhooks.lua` | Clients subscribe to billing events |
+| Mail (SMTP, templates) | `helper/mail.lua` | Billing emails, sent from an outbox job (§10) |
+| Redis cache-aside with explicit busting, falling back to the DB | `helper/permission-cache.lua` | The pattern for the entitlement cache and shared rate limits (§15) |
+| Typed settings validation | `PluginWorkspaces.checkSettings` and `plugin-sdk.validate` | The app settings schema (§4) |
+| Stripe client (Checkout `mode`, `automatic_tax`, idempotency keys, webhook verification) | `lib/stripe.lua` | Phase 2, with a `Stripe-Account` header for Connect |
+| ES256 signing and JWKS | `lib/billing-signing.lua` (#694) | Unchanged mechanism; claims become format v1 |
 
-Known issues found along the way, fixed in the phase that touches them:
-
-- The billing routes have **no RBAC modules**. Admin actions use `namespace.manage`; everything else is open to any member.
-- `STRIPE_SSL_VERIFY` isn't declared in `nginx.conf`, so outbound Stripe TLS verification is effectively off.
-- The header comments of `billing-system.lua` and `payment-provider.lua` still describe Connect.
+New building blocks:
+- an AES-256-GCM helper for short-lived key delivery (`Global.encryptSecret` is AES-CBC, not authenticated);
+- a core outbox subscriber (`core.billing`) for billing emails and jobs;
+- a "computed" event source, so webhooks can subscribe to `license.issued` (§14).
 
 ## 3. Concepts
 
 | Concept | Meaning |
 |---|---|
-| **Workspace** (namespace) | The client's account. Isolation boundary for everything below |
-| **App** | One product the client sells (web, desktop, self-hosted, mobile). A workspace can have several |
-| **Feature** | Something an app can gate: `advanced_reports` (on/off) or `projects` (limit). Belongs to an app |
-| **Plan** | A flat tier of an app: price, interval, trial days, and a value for each feature. The **default plan** is what every customer gets for free |
-| **Customer** | The client's end user: a `customers` row with `external_id` (the client's own user id) |
-| **Subscription** | A customer on a plan (from Stripe, or manual) |
-| **Grant** | Manual access without payment: a comped plan, a trial extension, a single feature, an enterprise deal. Can expire |
-| **Licence / activation** | A licence key for desktop or self-hosted software; each machine that uses it is an activation |
-| **Entitlements** | A customer's effective features for an app right now (§5) |
-| **Keys** | **Secret key** = an `opsk_` API key, server side only. **Publishable key** = `pk_…` per app, safe in browsers and desktop binaries, used only to identify the app on public endpoints |
+| **App** | A product the client sells. It has a kind (`web`, `desktop`, `self_hosted`, `mobile`), a mode (`test`/`live`), a **publishable key** (`pk_test_…`/`pk_live_…`; it identifies the app and is safe to ship in a binary) and **settings** (§4) |
+| **Feature** | Something the app gates: on/off (`export_pdf`) or a limit (`projects`). It has an optional **`released_at`** date (§6) |
+| **Plan** | A flat tier: price, a value for each feature, and a **purchase type** (below). The app's **default plan** is what everyone gets for free |
+| **Purchase type** | `recurring`: a subscription. `one_time`: a lifetime purchase, optionally with N days of updates. `fixed_term`: one payment for N days of **access** or of **updates**. It doesn't renew, and buying again **stacks** |
+| **Purchase** | A paid (or manually recorded) `one_time` / `fixed_term` purchase with `access_until` and `updates_until` windows. `null` = unbounded |
+| **Subscription** | A customer on a recurring plan (Stripe, or a verified store subscription) |
+| **Grant** | Access given by hand: a comped plan or single features, optionally until a date |
+| **Licence** | A licence key (shown once; only its hash is kept). It belongs to a customer and a plan, has its own `access_until` / `updates_until`, and a device limit |
+| **Activation** | A machine using a licence, identified by a salted **fingerprint hash** sent by the app |
+| **Source** | Where a purchase, subscription or licence came from: `stripe`, `manual`, `app_store`, `play_store`, `external` |
+| **Access link** | A single-use, 15-minute magic link emailed to a customer. It opens the hosted "my licences" page |
+| **Entitlements** | What a customer, or a licence, may use right now (§6) |
 
-## 4. Data model
+## 4. App settings (data, not code)
 
-All changes are **additive and idempotent**, with migration keys prefixed `zzbe…` (Lapis
-sorts keys as strings). Every new table is workspace-scoped. The retired key `700`
-is never reused.
+Every tunable lives in `billing_apps.settings` (JSONB). It is validated against a **declared schema**:
+- the schema is code in `lib/billing-settings.lua`, in the plugin-settings style (type, bounds, enum, default per app kind);
+- it is published at `GET /api/v2/billing/settings-schema`, so the dashboard renders the form from it;
+- unknown keys are rejected;
+- missing keys take the default for the app's kind.
 
-### 4.1 Changes to existing tables
+Changing settings bumps the app's cache generation (§15).
 
-- **`customers`**
-  - Add `external_id TEXT`, with a partial unique index on `(namespace_id, external_id) WHERE external_id IS NOT NULL`.
-  - Add it to `CustomerQueries.VALID_CUSTOMER_FIELDS`.
-  - **Blocker, see §16 Q1:** `customers_email_unique_idx` makes `email` unique **across all workspaces**, so the same person can't be a customer of two clients. Proposed fix: replace it with a per-workspace `(namespace_id, lower(email))` unique index, and scope `CustomerQueries.findByEmail` to the workspace. The ecommerce lookups that rely on it are updated in the same change.
-- **`billing_plans`**
-  - Add `app_id` (FK `billing_apps`, ON DELETE CASCADE; **NULL = the existing tax plans**).
-  - Add `plan_key` (unique per app), `is_default BOOL` (at most one per app, partial unique index), and `is_public BOOL`.
-  - `features` stays JSONB and is now validated against the app's feature catalogue.
-  - Phase 2 adds `stripe_refs JSONB` (product and price ids per connected account and mode). The existing `stripe_*_id` columns stay for tax.
-- **`billing_subscriptions`**
-  - Add `app_id` and `customer_id` (FK `customers`, **ON DELETE RESTRICT**: cancel before deleting).
-  - Drop NOT NULL on `user_uuid`.
-  - Add `CHECK (user_uuid IS NOT NULL OR customer_id IS NOT NULL)`.
-  - Add the index `(app_id, customer_id, status)`.
-  - Existing rows are untouched.
-- **`modules`:** `ADD COLUMN IF NOT EXISTS allowed_actions TEXT`. It is only created under `tax_copilot` today, and the module rows here need it.
+| Group | Setting | Type and bounds | Default (web / desktop and self-hosted) |
+|---|---|---|---|
+| Offline | `offline_policy` | `fail_open` \| `fail_closed` | `fail_closed` / `fail_closed` |
+| | `token_ttl_seconds` | 60–86400. Entitlement tokens' `exp` | 900 / 900 |
+| | `refresh_interval_days` | 1–365. Licence files' `exp` | — / 7 |
+| | `grace_days` | 0–365. `grace_until = exp + grace` | 3 / 30 |
+| | `past_due_grace_days` | 0–90. How long a failed renewal keeps access | 7 / 7 |
+| Licences | `max_activations` | 1–10000, or `null` (unlimited). Default for new licences; each licence can override it | `null` / 3 |
+| | `activation_auto_release_days` | 0–3650; 0 = never. Frees activations not seen for N days | 0 / 90 |
+| | `fingerprint_salt` | Generated, read-only, public | random 32 hex |
+| Public endpoints | `allowed_origins` | List of origins (`https://…`; `http://localhost:*` allowed) for browser CORS | `[]` |
+| | `allowed_redirect_urls` | List of URL prefixes (same rules) for checkout success/cancel and access-link returns | `[]` |
+| | `rate_limits` | `licence_per_ip_per_min` (30), `licence_per_key_per_min` (20), `app_per_min` (6000), `checkout_per_ip_per_hour` (20), `access_link_per_email_per_hour` (3), `access_link_per_ip_per_hour` (10) | as shown |
+| | `lockout` | `failures` (10) bad licence keys from one IP within `window_minutes` (15) lock that IP out of the app's licence endpoints for `lock_minutes` (30) | as shown |
+| Customers | `email_collection` | `required` \| `optional` \| `none` | `required` / `optional` |
+| | `activation_retention_days` | 0–3650. Deactivated and released activations are deleted after this | 90 |
+| Branding | `display_name`, `logo_url` (https), `accent_color` (`#rrggbb`), `support_email`, `terms_url`, `privacy_url` | Strings, validated | app name; others empty |
+| Delivery | `email_licence_keys` | bool. Email new and reissued keys (Phase 2) | false / true |
+| | `webhook_include_licence_key` | bool. Put the raw key in the `license.issued` webhook. **Off unless the client opts in** | false |
+| Payments (Phase 2) | `refund_policy` | `revoke` \| `keep`. What a **full** refund does; partial refunds always keep access | `revoke` |
+| | `automatic_tax` | bool. Stripe Tax on checkout | false |
+| | `allow_promotion_codes` | bool. Stripe promotion codes on checkout | false |
 
-### 4.2 New tables
+The app row keeps only its identity in columns: `name`, `slug`, `kind`, `mode`, `publishable_key`,
+`active`, `cache_generation`.
 
-**`billing_apps`**
+## 5. Data model
 
-| Column | Type / notes |
-|---|---|
-| `id`, `uuid` | |
-| `namespace_id` | FK, CASCADE |
-| `name` | |
-| `slug` | unique per workspace |
-| `kind` | `web`, `desktop`, `self_hosted`, `mobile` |
-| `mode` | `test` / `live`; default `test` |
-| `publishable_key` | `pk_test_…` / `pk_live_…`; unique |
-| `offline_policy` | `fail_open` / `fail_closed`; default `fail_closed` |
-| `offline_grace_seconds` | default 259200 (72 h) |
-| `entitlement_ttl_seconds` | default 900 |
-| `past_due_grace_days` | default 7 |
-| `allowed_return_urls` | JSONB (checkout redirects) |
-| `settings` | JSONB |
-| `active`, `deleted_at`, timestamps | |
+All changes are additive and idempotent (`zzbe…` migration keys), gated on `billing`. They are workspace-scoped, and every id
+in a request is checked against `self.namespace` (404 otherwise).
 
-**`billing_features`**
+**Changes to tables from v1 / #694**
+- **`billing_apps`**
+  - the tunable columns move into `settings` (§4);
+  - add `cache_generation BIGINT`.
+- **`billing_features`:** add `released_at TIMESTAMPTZ` (null = always available).
+- **`billing_plans`** (app plans only):
+  - `purchase_type`: `recurring` | `one_time` | `fixed_term`. It sets the legacy `plan_type` and requires `billing_interval` for `recurring`.
+  - `term_days` (fixed_term, required) and `term_covers`: `access` | `updates`.
+  - `updates_days` (one_time; null = all future updates).
+  - `store_products JSONB`, e.g. `{"app_store": "com.acme.pro", "play_store": "pro_yearly"}`. This is data: it maps store products to plans.
+  - Phase 2: `stripe_refs JSONB` holds the Stripe product and price ids **per mode** (test/live) and connected account. The amount and currency are one value per plan.
+- **`billing_subscriptions`:** add `source` (default `stripe`), `external_transaction_id` and `original_transaction_id`. Unique `(namespace_id, source, original_transaction_id)` where it is not null.
+- **`billing_licenses`:** add `access_until`, `updates_until`, `source`, `purchase_id` (the purchase it last fulfilled) and `key_rotated_at`.
+- **`billing_license_activations`:**
+  - `fingerprint_hash` is the **app-salted hash sent by the client** (64 hex), never a raw id;
+  - add `app_version`;
+  - `last_seen_at` drives auto-release.
 
-| Column | Type / notes |
-|---|---|
-| `id`, `uuid`, `app_id` | `app_id` FK, CASCADE |
-| `key` | `[a-z0-9_]{1,64}`, unique per app |
-| `name`, `description` | |
-| `type` | `boolean` / `limit` |
-| `unit` | e.g. "projects" |
-| `sort_order`, timestamps | |
+**New tables**
 
-**`billing_grants`**
-
-| Column | Type / notes |
-|---|---|
-| `id`, `uuid`, `namespace_id`, `app_id` | |
-| `customer_id` | FK, CASCADE |
-| `plan_id` / `features` | grant a whole plan, **or** specific feature values |
-| `reason` | |
-| `starts_at`, `expires_at` | `expires_at` NULL = no end |
-| `granted_by` | user uuid |
-| `revoked_at`, timestamps | |
-
-**`billing_licenses`**
-
-| Column | Type / notes |
-|---|---|
-| `id`, `uuid`, `namespace_id`, `app_id` | |
-| `customer_id` | FK, RESTRICT |
-| `subscription_id` / `plan_id` | the licence either follows a subscription or carries a fixed plan |
-| `key_hash` | SHA-256; UNIQUE |
-| `key_prefix` | for display |
-| `status` | `active`, `suspended`, `revoked`, `expired` |
-| `max_activations` | NULL = unlimited |
-| `expires_at` | |
-| `metadata`, `revoked_at`, timestamps | |
-
-**`billing_license_activations`**
-
-| Column | Type / notes |
-|---|---|
-| `id`, `uuid`, `license_id` | `license_id` FK, CASCADE |
-| `fingerprint_hash` | SHA-256 of the machine fingerprint the app sends |
-| `name`, `platform`, `app_version` | |
-| `first_seen_at`, `last_seen_at`, `deactivated_at` | |
-
-Unique on `(license_id, fingerprint_hash) WHERE deactivated_at IS NULL`.
-
-**Phase 2: `billing_connect_accounts`**
-
-| Column | Type / notes |
-|---|---|
-| `namespace_id` | UNIQUE |
-| `stripe_account_id` | |
-| `mode` | |
-| `charges_enabled`, `payouts_enabled`, `details_submitted` | |
-| `onboarding_status` | |
-| timestamps | |
-
-This is a new name on purpose: key 708 drops the old `namespace_payment_accounts`.
-
-Licence keys are shown **once** at creation, like API keys. Only `key_hash` and `key_prefix` are stored.
-
-## 5. Entitlement resolution
-
-`Entitlements.resolve(app, customer)` builds the result in this order:
-
-1. Start from the app's **default plan** features. With no default plan, every feature is off.
-2. Overlay the newest subscription for this app whose status is `active` or `trialing`, or `past_due` within `past_due_grace_days`.
-3. Overlay active grants: whole-plan grants first, then single-feature grants. For booleans the result is OR; for limits it is the maximum (NULL means unlimited and wins).
-4. Return:
-   - `{ plan, status, features, sources[] }`;
-   - `expires_at`: the earliest of the period end, the grant expiry and the TTL;
-   - the app's offline policy.
-
-It's deterministic and fast: a few indexed queries, no Stripe calls. Changes to
-subscriptions, grants or plans emit `entitlements.changed` (§9).
-
-## 6. Signed tokens and licence files (new ES256 signing)
-
-- **One signing key per deployment:**
-  - `BILLING_SIGNING_KEY`: an EC P-256 private key (PEM), from Vault or `.env`, with `BILLING_SIGNING_KEY_ID`;
-  - `BILLING_PREVIOUS_PUBLIC_KEYS`: old public keys kept for rotation.
-  - Declared in `nginx.conf`.
-- **Signing:** via `resty.openssl.pkey`, using the DER→raw conversion already used in `helper/apns-push.lua`.
-- **JWKS:** `GET /api/v2/public/billing/jwks.json` publishes the current and previous public keys.
-- **Entitlement token** (`typ: opsapi-entitlements+jwt`):
-  - claims: `iss` (deployment URL), `aud` (app uuid), `sub` (customer `external_id`), `ns`, `plan`, `status`, `features`, `iat`, `exp` (now + `entitlement_ttl_seconds`), `grace` (`offline_grace_seconds`), `policy`;
-  - the SDK verifies it locally (WebCrypto) and caches it until `exp`;
-  - past `exp`, and with OpsAPI unreachable, the SDK honours `policy`. `fail_open` keeps the last known entitlements until `exp + grace`; `fail_closed` denies.
-- **Licence file** (`typ: opsapi-license+jwt`):
-  - claims: `lic`, `aud`, `sub`, `fp` (fingerprint hash), `features`, `exp` (the earlier of the licence expiry and the next check-in), `offline_until`;
-  - desktop and self-hosted apps verify it offline with the public key embedded in the app or fetched from JWKS.
-- Without `BILLING_SIGNING_KEY`, nothing is signed and nothing silently uses a weak key:
-  - the licence endpoints return **503** `not_configured`;
-  - the runtime entitlement check still returns the entitlements, but with `"token": null` and a `meta.token` hint. The SDK refuses unsigned answers.
-
-## 7. APIs
-
-The URL's first segment **equals its RBAC module**, so API-key scopes work through the
-existing `permits_uri` with no change to it. JSON envelopes are `{ success, data, meta }`.
-Lists use `Global.pageParam` / `perPageParam` and `meta.total_pages`.
-
-### 7.1 Management (dashboard JWT, or a scoped secret key)
-
-| Route | Module.action |
-|---|---|
-| `GET/POST /api/v2/billing/apps`, `GET/PUT/DELETE /api/v2/billing/apps/:uuid` | `billing.read/create/update/delete` |
-| `POST /api/v2/billing/apps/:uuid/rotate-key` (publishable key) | `billing.update` |
-| `GET/POST /api/v2/billing/apps/:uuid/features`, `PUT/DELETE …/features/:key` | `billing.*` |
-| Plans: the **existing** `/api/v2/billing/plans*`, plus `?app=` and the new fields | `billing.*` **or** `namespace.manage` (the existing check, kept so the tax app works unchanged) |
-| `GET /api/v2/billing/apps/:uuid/reports` (active subscriptions, MRR, trials, churn in the last 30 days) | `billing.read` |
-| `GET /api/v2/subscriptions?app=&customer=&status=`, `GET /api/v2/subscriptions/:uuid` | `subscriptions.read` |
-| `POST /api/v2/subscriptions/:uuid/cancel`, `…/change-plan` (**Phase 2**, with checkout) | `subscriptions.update` |
-| `GET /api/v2/subscriptions/entitlements?app=&customer=` (a customer's effective entitlements, for the dashboard; no token) | `subscriptions.read` |
-| `GET/POST /api/v2/subscriptions/grants`, `DELETE …/grants/:uuid` | `subscriptions.create/delete` |
-| `GET/POST /api/v2/licenses`, `GET/PUT /api/v2/licenses/:uuid` | `licenses.read/create/update` |
-| `POST /api/v2/licenses/:uuid/revoke`, `DELETE /api/v2/licenses/:uuid/activations/:id` | `licenses.update/delete` |
-| Customers: the existing `/api/v2/customers` (module `customers`), with `external_id` now accepted | unchanged |
-
-### 7.2 Runtime (the client's server, with a secret key scoped `entitlements` / `subscriptions`)
-
-| Route | Module.action |
-|---|---|
-| `PUT /api/v2/entitlements/:app/customers/:external_id` (upsert email and names) | `entitlements.create` |
-| `GET /api/v2/entitlements/:app/customers/:external_id` → entitlements plus a signed `token`. An unknown `external_id` gets the default plan, not a 404 | `entitlements.read` |
-| `POST /api/v2/subscriptions/checkout` → Stripe Checkout URL (Phase 2) | `subscriptions.create` |
-| `POST /api/v2/subscriptions/portal` → Stripe Customer Portal URL (Phase 2) | `subscriptions.create` |
-
-### 7.3 Public (no secret; publishable key or licence key; rate-limited per key and per IP)
-
-| Route | Purpose |
-|---|---|
-| `GET /api/v2/public/billing/pricing?pk=` | The app's public plans and features, for a pricing page |
-| `GET /api/v2/public/billing/jwks.json` | Public signing keys |
-| `POST /api/v2/public/licenses/activate`, `/validate`, `/deactivate` (`{pk, license_key, fingerprint, name?, platform?}`) | Desktop and self-hosted licensing; returns the signed licence file |
-
-Every route checks that the app, plan, customer and licence ids belong to
-`self.namespace` (404 otherwise), following the tenant-isolation rules of #682.
-
-## 8. RBAC
-
-New modules, in `PROJECT_MODULES.billing` and the `modules` table:
-
-| Module | Covers | Owner | Admin | Member |
-|---|---|---|---|---|
-| `billing` | Apps, features, plans, reports, Connect settings | manage | manage | none |
-| `subscriptions` | Subscriptions, grants, checkout and portal sessions | manage | manage | none |
-| `entitlements` | Runtime customer upsert and entitlement checks | manage | manage | none |
-| `licenses` | Licences and activations | manage | manage | none |
-
-- They're registered by a migration in the `outbound-webhooks.lua` style: `INSERT … ON CONFLICT DO NOTHING RETURNING`, then `ModuleQueries.propagateToNamespaceAdmins` on first insert only, so later revocations stick.
-- Menu items under a **Billing** section use icons already in `ICON_MAP`.
-- Nothing bypasses roles; owners get access through the owner role.
-- Custom roles, e.g. "Support" with `subscriptions.read/update` and `licenses.read/update` but no `billing`, work automatically.
-
-## 9. Webhooks to the client
-
-- **Catalogue (as built):** `PluginEvents.CATALOG` gains these entities, only where the billing feature is deployed. Table triggers feed the existing signed and retried delivery:
-  - `subscription` (`billing_subscriptions`): verbs `activated`, `trialing`, `past_due`, `canceled`;
-  - `billing.plan` (`billing_plans`);
-  - `billing.grant` (`billing_grants`);
-  - `license` (`billing_licenses`, `key_hash` hidden): verbs `suspended`, `revoked`, `expired`;
-  - `license.activation` (`billing_license_activations`, fingerprint hidden).
-
-  Each also has `created/updated/deleted`.
-- **No computed `entitlements.changed`.** Entitlements are computed from exactly these rows, so an app drops its cache on `subscription.*`, `billing.grant.*` or `billing.plan.*` (SDK: `billing.invalidate()`). Tokens also expire within the app's TTL, 15 minutes by default.
-- **Subscribing:** clients subscribe through the existing Webhooks page. Event visibility follows RBAC read on the entity's module.
-
-## 10. Stripe Connect (Phase 2)
-
-- **Onboarding:**
-  - `POST /api/v2/billing/connect/onboard` (`billing.manage`) creates or reuses an Express account and returns the onboarding link;
-  - `account.updated` refreshes `billing_connect_accounts`.
-- **Product and price sync** happens on the connected account via the `Stripe-Account` header, per mode, into `stripe_refs`.
-- **Checkout:**
-  - destination charges (`transfer_data.destination`, as in the academy reference) with `application_fee_percent` / `application_fee_amount` from `STRIPE_PLATFORM_FEE_PERCENT`;
-  - `client_reference_id` and metadata carry `{namespace, app, customer, plan}`;
-  - a Stripe Customer is created on first checkout and stored in `customers.stripe_customer_id`;
-  - idempotency keys on every create call.
-- **Customer Portal sessions** let customers cancel, update their card and download invoices.
-- **Webhooks:**
-  - a **separate** endpoint for Connect events (`STRIPE_CONNECT_WEBHOOK_SECRET`), routed by `event.account`;
-  - same `stripe_webhook_events` idempotency, now recording `stripe_account_id`;
-  - same subscription and payment mirroring.
-  - The tax app's single-merchant endpoint and flow are untouched.
-- **Modes:** each app's `mode` picks the test or live platform keys.
-- **TLS:** declare `STRIPE_SSL_VERIFY` and turn verification on.
-
-## 11. Feature gating and deployment
-
-- `FEATURES.BILLING = "billing"`, plus a `billing` preset: `core`, `billing`, `notifications`, `menu`, `themes`.
-- **Migrations:**
-  - billing-system keys 700–709 → `conditional_array({TAX_COPILOT, BILLING}, …)`;
-  - `customers` keys (15, 31, 71–75, 166) → `{ECOMMERCE, BILLING}` (the same OR pattern as keys 54/55);
-  - the new `zzbe*` keys → `BILLING`.
-- **Routes:** `load_if` in `app.lua` accepts a list (OR). `routes/billing-plans.lua` → `{tax_copilot, billing}`; `routes/customers.lua` → `{ecommerce, billing}`; the new `billing-apps`, `billing-subscriptions` and `billing-licenses` → `billing`. The tax app's checkout, webhook and account routes stay `tax_copilot` only.
-- **Without the billing feature** no new column or table is referenced: app-plan fields, `?app=` and the webhook catalogue entries are all behind `isFeatureEnabled("billing")`.
-- **`PROJECT_CODE=all`** (workstation int/prod) gets everything; diy (`tax_copilot,services`) is unchanged.
-- **Hosted deployment** (Helm values, DNS, the Ring Promoter app) is a follow-up, once the hostname is confirmed.
-
-## 12. Dashboard
-
-A **Billing** section with these pages, all gated with `ProtectedPage`:
-
-| Page | Module | Contents |
+| Table | Columns (besides `id`, `uuid`, timestamps) | Notes |
 |---|---|---|
-| Apps | `billing` | Create an app, keys, offline policy, return URLs |
-| Features & Plans | `billing` | Per app; default plan; features as on/off or a limit per plan |
-| Subscriptions | `subscriptions` | Filter by app and status; cancel and change plan; grants |
-| Licences | `licenses` | Issue (key shown once), revoke, activations |
-| Payments | `billing.manage` | Connect onboarding (Phase 2) |
+| `billing_purchases` | `namespace_id`, `app_id`, `customer_id` (RESTRICT), `plan_id`, `purchase_type`, `source`, `external_transaction_id`, `original_transaction_id`, `access_until`, `updates_until`, `amount`, `currency`, `status` (`active`/`refunded`/`revoked`), `refunded_amount`, `refunded_at`, `metadata` | `one_time` and `fixed_term` purchases from any source. Unique `(namespace_id, source, external_transaction_id)`. Kept (anonymised) when a customer is deleted, for accounting |
+| `billing_access_links` | `namespace_id`, `app_id`, `customer_id`, `token_hash` (set when the email is sent), `expires_at` (+15 min), `used_at` | Magic links. Single use |
+| `billing_customer_sessions` | `app_id`, `customer_id`, `token_hash`, `expires_at` (+30 min) | What an access link is exchanged for |
+| `billing_key_deliveries` | `license_id` (PK), `ciphertext`, `nonce`, `key_id`, `expires_at` (+24 h), `revealed_at`, `emailed_at` | Phase 2. Deleted when every configured channel has delivered the key, or at 24 h (§10) |
+| `billing_idempotency` | `app_id` (or `namespace_id`), `key`, `endpoint`, `request_hash`, `status`, `response`, `expires_at` (+24 h) | Replays mutating calls (§9) |
+| `billing_plan_upgrades` | `app_id`, `from_plan_id`, `to_plan_id`, `amount`, `currency`, `active` | Phase 2. Priced upgrade paths (§13) |
 
-The existing Customers page gains a **Billing** tab (subscriptions, grants, licences,
-effective entitlements). Built with the existing UI components and services.
+Purge jobs run on worker 0 of one pod: expired links, sessions, deliveries and idempotency rows; released and
+deactivated activations past their retention.
 
-## 13. SDK (`@opsapi/client`, new subpath `@opsapi/client/billing`)
+## 6. Entitlement resolution
 
-| Function | What it does |
+`Entitlements.resolve(app, customer)` (and `resolveLicense(app, licence)`) combines these sources:
+
+| # | Source | Features it contributes | Window |
+|---|---|---|---|
+| 1 | The app's **default plan** | all its features | none |
+| 2 | The newest **recurring subscription** that entitles (`active`, `trialing`, or `past_due` within `past_due_grace_days`) | **all** features in its plan, including ones released later | `access_until` = period end |
+| 3 | Every **active purchase** (`access_until` null or in the future) | its plan's features **released on or before `updates_until`** (no `released_at`, or `updates_until` null → included) | the purchase's |
+| 4 | Active **grants** | the granted plan's features, then the granted values | `access_until` = the grant's expiry |
+| 5 | For licence files: the **licence's own plan** | as for a purchase, with the licence's `updates_until` | the licence's |
+
+Combining them:
+- An on/off feature is on if any source turns it on.
+- For a limit, the largest wins, and `null` (unlimited) beats any number.
+- Only features in the app's catalogue are returned; each gets a value (`false` / `0` when no source sets it).
+- `plan_key`, `status`, `access_until` and `updates_until` in the answer come from the deciding source. The order is subscription, then purchase (newest), then plan grant, then the default plan.
+
+**Fixed-term stacking:**
+- Buying a `fixed_term` plan again extends from `max(now, current end) + term_days` on the covered dimension (`access` or `updates`).
+- "Current end" is the latest end among the customer's active purchases of that plan in that app.
+- With licences, the customer's licence for that plan takes the new window, so the same key keeps working.
+
+**Upgrades** (Phase 2) create a purchase of the target plan whose windows start at the upgrade date (§13).
+
+## 7. Signed tokens and licence files
+
+See **[LICENCE_FORMAT.md](LICENCE_FORMAT.md)** for the exact claims, verification steps, clock rules,
+fingerprint derivation, test vectors and the Swift and Python reference verifiers. In short:
+- **ES256 only**, with JWKS and key rotation.
+- Claims: `ver: 1`, `iss`, `aud` (app), `sub`, `iat`, `exp`, `grace_until`, `plan_key`, `features`, `access_until`, `updates_until`, `offline_policy`; plus `fingerprint_hash` (licence files) or `status` (entitlement tokens).
+- A client in any language can verify offline, without the SDK.
+- Unsigned answers are never produced: without `BILLING_SIGNING_KEY` the licence endpoints return 503, and entitlement checks return `token: null`.
+
+## 8. APIs
+
+The URL's first segment is its RBAC module, which is also the API-key scope. JSON envelopes are
+`{ success, data, meta }`. Lists are paginated (`page`, `per_page`, `meta.total_pages`). Ids from another
+workspace or another app return 404.
+
+**Auth columns:**
+- **JWT** = a dashboard user, with that role permission.
+- **Secret** = an `opsk_` key scoped to that module.
+- **PK** = the app's publishable key.
+- **Licence** = a licence key.
+- **Session** = a customer session from an access link.
+
+### 8.1 Management (JWT or secret key)
+
+| Route | Auth: permission |
 |---|---|
-| `createBilling({ baseUrl, apiKey, app })` | Server-side helper with the secret key |
-| `getEntitlements(externalId)` | Cached until the token expires, verified against JWKS, honours `policy` / `grace` when OpsAPI is unreachable |
-| `can(externalId, feature)`, `limit(externalId, feature)` | Simple checks |
-| `requireFeature(feature, getCustomerId)` | Express/Connect middleware; 402 `feature_required` with an optional upgrade URL |
-| `withFeature(feature, getCustomerId, handler)` | The same for fetch-style handlers (Next.js route handlers, Hono, Bun, Deno) |
-| `upsertCustomer(…)`, `invalidate(externalId?)` | Register a customer; drop cached answers (from a webhook) |
-| `checkout(…)`, `portal(…)` | Phase 2 |
-| `licenses.activate/validate/deactivate({ publishableKey, licenseKey, fingerprint })` and `verifyLicenseFile(file, jwks)` | Desktop and self-hosted; offline verification |
+| `GET/POST /api/v2/billing/apps`, `GET/PUT/DELETE …/apps/:app`, `POST …/rotate-key`, `GET …/reports` | `billing.read/create/update/delete` |
+| `GET /api/v2/billing/settings-schema` | `billing.read` |
+| `GET/POST /api/v2/billing/apps/:app/features`, `PUT/DELETE …/features/:key` (now with `released_at`) | `billing.*` |
+| `/api/v2/billing/plans*` (+ `purchase_type`, `term_days`, `term_covers`, `updates_days`, `store_products`) | `billing.*`, or `namespace.manage` (the tax app's existing check) |
+| `GET /api/v2/subscriptions`, `GET …/:uuid`, grants (`GET/POST …/grants`, `DELETE …/grants/:uuid`), `GET …/entitlements?app=&customer=` | `subscriptions.*` |
+| `GET/POST /api/v2/subscriptions/purchases`: list, or record a **manual** sale (`source: manual`) | `subscriptions.read/create` |
+| `POST /api/v2/subscriptions/purchases/:uuid/revoke` | `subscriptions.update` |
+| `GET/POST /api/v2/licenses`, `GET/PUT …/:uuid`, `POST …/revoke`, `DELETE …/activations/:id` | `licenses.*` |
+| `POST /api/v2/licenses/:uuid/reissue`: new key, shown once; the old key stops working; activations are kept | `licenses.update` |
+| `GET /api/v2/customers/:uuid/billing-export` | `customers.read` **and** `subscriptions.read` |
+| `DELETE /api/v2/customers/:uuid/billing-data` (§16) | `customers.delete` **and** `subscriptions.delete` |
+| Phase 2: `POST /api/v2/billing/connect/onboard`, upgrade paths `GET/POST/DELETE /api/v2/billing/apps/:app/upgrades` | `billing.manage` / `billing.*` |
 
-Ships in the same package (a new tsup entry plus an `exports["./billing"]` block), as a
-**minor** version, with a README section.
+### 8.2 Runtime (the client's server, secret key)
 
-## 14. Backward compatibility, security, testing
-
-**The tax app must not notice anything.**
-- Existing billing routes keep the same paths, bodies, responses and permission checks; plan routes only gain the optional `billing.*` alternative.
-- Its migrations only gain OR-gating.
-- Its single-merchant checkout and webhook are unchanged.
-- **Proof:** a differential regression of every `/api/v2/billing/*` route, `main` vs the branch, under `PROJECT_CODE=tax_copilot,services`, in the no-internet sandbox (the API regression sandbox recipe).
-
-**Security**
-- Secret keys and licence keys are stored hashed and shown once.
-- Card data never touches OpsAPI.
-- Public endpoints are rate-limited per key and per IP.
-- Signing keys only come from Vault or env.
-- Workspace checks on every id.
-- `fail_closed` is the default.
-
-**Tests**
-- **Lua specs** (house style):
-  - entitlement resolution: default plan, subscriptions, `past_due` grace, grants and expiry, limit merging;
-  - licences: activation limits, deactivate, revoke, expiry;
-  - ES256 sign/verify and JWKS;
-  - RBAC: 403 for members without the module;
-  - cross-workspace ids → 404;
-  - webhook idempotency;
-  - gating wiring (routes and migrations load for `billing`, and for `tax_copilot` as before).
-- **SDK unit tests:** token verification, caching, fail-open/closed, middleware, licence-file verification.
-- **Fresh install** with `PROJECT_CODE=billing`: migrates cleanly and serves only core plus billing.
-- **Phase 2:** an end-to-end run on Stripe **test mode** with a test connected account.
-
-**Phase 1 results (2026-10-08)**
-- **Tax app untouched:** in a no-internet sandbox, `main` and this branch each migrated an empty database under `PROJECT_CODE=tax_copilot,services`. The results matched:
-  - schemas: identical;
-  - migration list, modules, menu and webhook sources: identical.
-- **Request sweep:** 1,674 requests compared main against the branch, with **0 differences**:
-  - every GET path in either spec (562) as anonymous, as a non-member and as the workspace owner;
-  - the tax plan flow (25 steps, bodies compared), covering create (also with app fields sent), list, `?app=`, update, sync, public plans, subscription, entitlements, payments, checkout, member 403, the webhook event list and delete;
-  - the new route families, which are 404 on both.
-- **Fresh `PROJECT_CODE=billing` install:** migrates cleanly, and a re-run only repeats the always-run migrations. Checked on it:
-  - the menu shows Billing, Subscriptions, Licences and Customers;
-  - an owner can create an app, a feature and a default plan;
-  - an `entitlements`-scoped key can upsert a customer and read entitlements, and gets 403 on `billing`;
-  - JWKS is empty and licensing returns 503 without a key;
-  - tax, kanban, CRM, invoices and orders are 404.
-- **Live on `PROJECT_CODE=all`:**
-  - the API flows for apps, features, plans (validation and the default switch), grants (merge and expiry), licences (seat limit, suspend, expiry, revoke), reports, tenant isolation and API-key scopes;
-  - ES256 tokens and licence files verified against the JWKS, and a server-signed token verified by the SDK;
-  - dashboard pages checked in Cypress, desktop and mobile.
-- **Specs:**
-  - `spec/billing-entitlements_spec.lua`: 34 checks;
-  - SDK `test/billing.test.ts`: 16 tests;
-  - the existing plugin-platform, openapi-coverage, quality-fixes and tenant-isolation specs still pass.
-
-## 15. Phases
-
-| PR | Contents |
+| Route | Scope |
 |---|---|
-| **Phase 1** | Gating and preset; schema (§4); entitlements engine; ES256 tokens and JWKS; licensing; management, runtime and public APIs (except checkout and portal); RBAC, menu and dashboard; webhook catalogue; SDK billing subpath; tests; docs. Clients can already gate features (default plan, trials, grants, licences) **without payments** |
-| **Phase 2** (after Phase 1 merges) | Stripe Connect: onboarding, product and price sync, checkout, portal, Connect webhooks, fees, modes, TLS verification on, end-to-end test-mode run |
-| **Later** | Mobile store purchases (an extension point: `billing_subscriptions.provider` gains `apple` / `google`); usage reporting; the hosted deployment; using it for OpsAPI's own AI plans |
+| `PUT /api/v2/entitlements/:app/customers/:external_id`: upsert a customer; email per `email_collection` | `entitlements.create` |
+| `GET /api/v2/entitlements/:app/customers/:external_id` → entitlements and a signed token. An unknown id gets the default plan | `entitlements.read` |
+| `POST /api/v2/entitlements/:app/purchases`: record a **verified external purchase** (`source`, `external_transaction_id`, `original_transaction_id`, `plan_key` or a store product id, `customer` external_id, `purchased_at`, `expires_at` for subscriptions). Idempotent on `(source, transaction id)` | `entitlements.create` |
+| `POST /api/v2/entitlements/:app/purchases/verify` `{source, payload}`: runs the source's **verifier** (§12). `app_store` / `play_store` return 501 `not_implemented` | `entitlements.create` |
+| Phase 2: `POST /api/v2/subscriptions/checkout`, `POST /api/v2/subscriptions/portal` | `subscriptions.create` |
 
-## 16. Owner decisions (approved 2026-10-08, all as proposed)
+### 8.3 Public: for apps with no back end, and for hosted pages
 
-1. **`customers.email` is unique across all workspaces.** OK to change it to unique **per workspace** (and scope `findByEmail` to the workspace)? Without this, reusing `customers` can't work for more than one client.
-2. **Several apps per workspace** (proposed), or exactly one app per workspace?
-3. **Route families** `billing`, `subscriptions`, `entitlements`, `licenses` (they double as the RBAC modules and API-key scopes) — OK?
-4. **One signing key per deployment** (proposed), or one per app?
-5. **Platform fee:** one global `STRIPE_PLATFORM_FEE_PERCENT`, or a per-workspace override set by a platform admin?
-6. **Defaults:** `fail_closed`, 72 h offline grace, 15 min token TTL, 7-day `past_due` grace. OK?
-7. **Billing customers in the existing Customers page:** they share one table, so they'll appear there, with a Billing tab. OK?
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET /api/v2/public/billing/apps/:app` (`:app` = id or `?pk=`) | none | Public app info: branding, `fingerprint_salt`, `email_collection`, public plans and features. Cacheable, with an ETag |
+| `GET /api/v2/public/billing/jwks.json` | none | Signing keys. `Cache-Control: max-age=300` |
+| `POST /api/v2/public/licenses/activate` `{pk, license_key, fingerprint_hash, app_version, name?, platform?}` | PK + licence | Uses a seat and returns a licence file |
+| `POST /api/v2/public/licenses/validate` `{pk, license_key, fingerprint_hash, app_version}` | PK + licence | Refresh. Returns a new licence file, or `license_revoked` / `license_suspended` / `not_activated` / `access_ended` |
+| `POST /api/v2/public/licenses/deactivate` `{pk, license_key, fingerprint_hash}` | PK + licence | Frees this machine's seat |
+| `POST /api/v2/public/billing/access-link` `{pk, email, return_url?}` | PK | Always 202. If the email has billing records in this app, it emails a magic link |
+| `POST /api/v2/public/billing/sessions` `{token}` | the link's token | Exchanges a single-use link for a 30-minute session |
+| `GET /api/v2/public/billing/me` | Session | The customer's licences (prefix, status, plan, windows, devices), purchases and subscriptions in this app |
+| `POST /api/v2/public/billing/me/licenses/:uuid/reissue` | Session | Rotates the key and shows the new one once; activations are kept |
+| `DELETE /api/v2/public/billing/me/licenses/:uuid/activations/:id` | Session | Frees a device |
+| Phase 2: `POST /api/v2/public/billing/checkout` `{pk, plan_key, email?, success_url, cancel_url, upgrade_from?}` | PK | Returns a Stripe Checkout URL (`mode=subscription` for recurring, `mode=payment` otherwise) |
+| Phase 2: `GET /api/v2/public/billing/checkout/:session_id` | the Stripe session id | Order status. Reveals the new licence key **once** (§10) |
+| Phase 2: `POST /api/v2/public/billing/me/portal` | Session | Stripe Customer Portal URL for recurring plans |
+
+## 9. Protecting the public endpoints
+
+- **CORS.** A browser request is answered only when its `Origin` is in the app's `allowed_origins` (or is the hosted pages' own origin). That origin is echoed, without credentials. A mutating request with any other `Origin` gets 403 `origin_not_allowed`. Native apps send no `Origin` and are unaffected.
+- **Redirects.** `success_url`, `cancel_url` and `return_url` must start with one of `allowed_redirect_urls` (same scheme, host and port). Otherwise: 422 `redirect_not_allowed`. There are no open redirects.
+- **Rate limits** are per IP, per app and per licence key, using the app's `rate_limits` settings:
+  - Redis-backed, so they are shared across pods, when Redis is configured;
+  - otherwise per pod (shared memory), and then they apply per pod.
+- **Lockout.** Too many invalid licence keys from one IP lock that IP out of the app's licence endpoints for a while (429 `locked_out`). Licence keys carry 125 random bits, so this is defence in depth, not the main protection.
+- **Idempotency.** Every mutating call accepts an `Idempotency-Key` header. The same key and body within 24 h replays the stored response; a different body gets 409. It is **required** on checkout and recommended everywhere else, and the SDKs always send one.
+- **Data exposure.** A response carries customer data only to the holder of a valid licence key (that licence), a Stripe session id (that order) or a session (that customer). `access-link` always answers 202, so email addresses can't be enumerated.
+- **No IP addresses are stored.** They exist only as rate-limit and lockout counters that expire with their window.
+
+## 10. Fulfilment and key delivery (Phase 2)
+
+**On a paid Checkout session** (Connect webhook `checkout.session.completed`, or the success page, whichever comes first):
+- Fulfilment runs **once**, under a row lock on the Stripe session id plus the `stripe_webhook_events` idempotency.
+- Desktop and self-hosted apps: a new or extended **licence** (§6, stacking).
+- Other kinds: a new or extended **subscription** (recurring), **purchase** (one_time / fixed_term) or grant.
+
+**Delivering the key once:**
+1. The raw key is encrypted with **AES-256-GCM**: key from `LICENCE_DELIVERY_KEY` (32 bytes, base64), `LICENCE_DELIVERY_KEY_ID` stored with it, the licence uuid as associated data.
+2. It is stored in `billing_key_deliveries` for **at most 24 h**. For rotation, `LICENCE_DELIVERY_PREVIOUS_KEYS` keeps old keys readable until their rows expire.
+3. The **success page** reveals it once (`revealed_at`).
+4. If `email_licence_keys` is on, the email job decrypts it at send time (`emailed_at`).
+5. The row is **deleted** as soon as every configured channel has delivered it, or at 24 h. A purge job enforces this.
+6. The raw key is never logged, and never put in an event. The **`license.issued`** webhook carries the licence id, key prefix, plan and customer. The raw key is included only if the app turned on `webhook_include_licence_key`.
+
+**Lost keys:** reissue (from the "my licences" page or `POST /api/v2/licenses/:uuid/reissue`):
+- rotates the key on the same licence and revokes the old key immediately;
+- keeps every activation;
+- emits `license.reissued`.
+
+**Email:**
+- Sent by the existing SMTP mailer (`helper/mail.lua`), called from the **outbox** (`core.billing` subscriber), so it is retried with backoff and visible when it fails.
+- The sender address is the deployment's; the display name, reply-to and colours come from the app's branding.
+- Secrets never sit in events: the job generates the magic-link token (storing only its hash), or decrypts the delivery, at send time.
+
+## 11. Hosted pages (no client code needed)
+
+These are public pages in opsapi-dashboard under `{BILLING_HOSTED_BASE_URL}/b/{app_id}/…`, branded from the app's settings:
+
+| Page | Phase | Contents |
+|---|---|---|
+| `/b/{app}/account` | 1 | "My licences": request an access link; then licences, devices (free one), reissue a key, purchases and subscriptions, plus the Customer Portal (Phase 2) |
+| `/b/{app}/pricing` | 2 | Public plans and features → checkout |
+| `/b/{app}/success` | 2 | Order status, the licence key revealed once, next steps |
+
+- Clients can link to these pages or embed them (iframe), or build their own on the public API.
+- The magic link's token travels in the URL **fragment**, so it never reaches server logs or `Referer` headers.
+
+## 12. Store purchases (extension point; the data model is built now)
+
+- Purchases, subscriptions and licences carry a `source` and transaction ids. Each is unique per workspace and source.
+- Plans map store product ids (`store_products`).
+- **Recording:** the client's own server verifies a receipt itself, then records it with `POST /api/v2/entitlements/:app/purchases`.
+- **Verifier interface:** `lib/billing-verifiers/<source>.lua` exports `verify(app, payload) → normalised purchase | nil, err`.
+  - `app_store` and `play_store` are stubs returning `not_implemented`.
+  - `external` and `manual` need no verification.
+  - Adding a real verifier later is a new file, not a change to callers.
+- The result: a customer who bought through any channel resolves to **one** set of entitlements (§6).
+
+## 13. Payments (Phase 2)
+
+- **Checkout:** `mode=subscription` for `recurring`; `mode=payment` for `one_time` and `fixed_term`.
+  - Destination charges on the client's connected account, with `application_fee_*` from `STRIPE_PLATFORM_FEE_PERCENT`.
+  - `automatic_tax` per app, idempotency keys on every Stripe call, and per-mode prices (`stripe_refs`).
+- **Upgrades: recommended `billing_plan_upgrades`.** An explicit `from → to` path with its own price:
+  - data, not code;
+  - it works the same for licences and subscriptions, and is auditable;
+  - it doesn't depend on Stripe, so manual and store sales can use the same paths.
+
+  The buyer proves ownership with a licence key or a session. Stripe promotion codes stay available for **discounts** (`allow_promotion_codes`), but promotion codes alone can't express "owners of Pro pay £X for Pro+".
+- **Refunds** (`charge.refunded`):
+  - a full refund applies the app's `refund_policy`: `revoke` marks the purchase refunded, revokes the licence and ends any subscription; `keep` only records it;
+  - partial refunds keep access;
+  - either way `purchase.refunded` and `license.*` events are emitted and the cache is busted.
+- **Connect:** onboarding, `account.updated`, a separate Connect webhook endpoint and secret, and the Customer Portal (unchanged from v1).
+
+## 14. Events and webhooks
+
+These go through the outbox (signed, retried) and only exist where billing is deployed:
+- `subscription.*`: `activated`, `trialing`, `past_due`, `canceled`.
+- `purchase.*`: `refunded`, `revoked`.
+- `billing.grant.*` and `billing.plan.*`.
+- `license.*`: `suspended`, `revoked`, `expired`.
+- `license.activation.*`.
+- **Computed:** `license.issued` and `license.reissued`. These need a new "computed source" in `plugin_event_sources` (no table), emitted by core code.
+
+Payloads never include `key_hash` or `fingerprint_hash`. There is no computed `entitlements.changed`: SDKs drop cached answers on `subscription.*`, `purchase.*`, `billing.grant.*`, `billing.plan.*` and `license.*`.
+
+## 15. Scale
+
+| Hot path | How |
+|---|---|
+| Licence validate and activate | The app by `publishable_key` (unique), the licence by `key_hash` (unique), the activation by `(license_id, fingerprint_hash)` (unique): all O(1) |
+| Entitlements | The customer by `(namespace_id, external_id)` (unique). The resolution and signed token are cached in Redis under `billing:ent:{app}:{cache_generation}:{customer}` with TTL = token TTL |
+| Cache busting | Customer-scoped writes (grants, purchases, subscriptions, licences, deletion) delete the key. Plan, feature and settings changes bump `billing_apps.cache_generation`, so every customer's old entry stops being read. Without Redis, every call resolves from the DB |
+| JWKS and public app info | `Cache-Control: public, max-age=300` and an ETag that includes the app's generation |
+| Webhooks and email | Outbox only, never inline |
+| Clients | Verify signed tokens and files locally. They call OpsAPI only to refresh |
+
+## 16. Privacy and data minimisation
+
+- **Email:** `email_collection` per app. With `none`, customers are identified only by `external_id` or licence. Access links then aren't available.
+- **Machine fingerprints:** only app-salted SHA-256 hashes, computed on the device (LICENCE_FORMAT.md §6).
+- **IP addresses:** never stored. They exist only as rate-limit and lockout counters that expire with their window.
+- **Export:** `GET /api/v2/customers/:uuid/billing-export` returns JSON of the customer, their subscriptions, purchases, grants, licences (prefix only) and activations.
+- **Delete:** `DELETE /api/v2/customers/:uuid/billing-data`:
+  - revokes licences; cancels recurring subscriptions (immediately, in Stripe too, Phase 2);
+  - deletes activations, access links, sessions, key deliveries and grants;
+  - anonymises the customer (email → `deleted+{uuid}@invalid`, names, phone, addresses and `external_id` cleared);
+  - **keeps** purchases and payments (amounts, dates, plan, currency) against the anonymised customer, because accounting law requires them. How long to keep them is the client's legal call. OpsAPI doesn't delete them automatically.
+
+### What a client must disclose
+
+A client can copy this into its privacy policy and app-store privacy answers.
+
+| Data | When | Kept |
+|---|---|---|
+| Email, name (as the app's settings allow) and your own user id | Per customer | Until the customer or you delete it |
+| Purchases, subscriptions, refunds: plan, amount, currency, dates, store transaction ids | Per purchase | For accounting, after deletion too (anonymised) |
+| Licence key (only a hash and the first 5 characters), status, dates | Per licence | Until deletion |
+| Activations: a salted hash of a machine identifier (not reversible, different in every app), a device name, platform, app version, first and last seen | Per device | Until freed, then `activation_retention_days` (default 90) |
+| IP address | Per request | **Not stored.** Only short-lived rate-limit counters (minutes) |
+
+**Processors:**
+- Stripe, for payments: Phase 2; card data goes only to Stripe.
+- The deployment's email provider, for access links and keys.
+- The OpsAPI host.
+
+App stores are processors only for sales made through them. Server access logs follow the hosting deployment's log retention; operators should keep it short.
+
+## 17. RBAC
+
+The modules are unchanged: `billing`, `subscriptions`, `entitlements`, `licenses`, plus `customers`.
+- Owner and admin roles get `manage`; members get nothing.
+- Custom roles work automatically. Example: "Support" with `subscriptions.read` and `licenses.read`/`update`.
+- No owner bypass.
+- Privacy operations need two permissions (§8.1).
+- Secret keys can never get `namespace`.
+
+## 18. Gating, env and deployment
+
+- **Gating:** everything new is behind `billing` (feature check, routes, migrations, catalogue). `tax_copilot` billing stays unchanged.
+- **Env:**
+
+  | Variable | Purpose |
+  |---|---|
+  | `BILLING_SIGNING_KEY`, `BILLING_SIGNING_KEY_ID`, `BILLING_PREVIOUS_PUBLIC_KEYS` | Token signing (#694) |
+  | `LICENCE_DELIVERY_KEY`, `LICENCE_DELIVERY_KEY_ID`, `LICENCE_DELIVERY_PREVIOUS_KEYS` | Key delivery (Phase 2) |
+  | `BILLING_HOSTED_BASE_URL` | Hosted pages and email links |
+  | `OPSAPI_PUBLIC_URL` | Token `iss` |
+  | Phase 2: `STRIPE_PLATFORM_FEE_PERCENT`, `STRIPE_CONNECT_WEBHOOK_SECRET`, `STRIPE_SSL_VERIFY` | Payments |
+
+  All are declared in `nginx.conf` and the deploy templates. None are committed.
+
+## 19. Changes v2 makes to PR #694 (unmerged)
+
+#694 implements v1 Phase 1. Merging it as it stands would ship a licence format, fingerprint input and settings shape that v2
+then breaks. So the recommendation is to **extend #694 rather than merge it first** (§21, Q1). The concrete changes:
+1. App tunables move into `settings` (§4). Migration `zzbe2` is edited in place; it has never run outside development.
+2. Licence endpoints take `fingerprint_hash` (salted, from the client) and `app_version` instead of a raw fingerprint.
+3. Tokens and licence files use format v1 claims (`fp` → `fingerprint_hash`, `offline_until` → `grace_until`, `policy` → `offline_policy`, `plan` → `plan_key`, plus `ver`, `access_until`, `updates_until`).
+4. `/api/v2/public/billing/pricing` becomes `GET /api/v2/public/billing/apps/:app` (it adds branding and the salt).
+5. SDK `@opsapi/client/billing` follows format v1 and adds a fingerprint helper and the public endpoints. 1.1.0 is not released yet, so nobody breaks.
+
+## 20. Tests
+
+**Already passing in #694** (v1):
+- tax app untouched: identical schema, and 1,674 requests with 0 differences;
+- fresh billing install;
+- live API flows; ES256 and licence lifecycle;
+- specs and SDK tests;
+- Cypress pages.
+
+**Added for v2:**
+- **Resolution:**
+  - lifetime and fixed-term purchases, with features released **before and after** `updates_until`;
+  - recurring subscriptions keep later features;
+  - stacking a fixed term twice;
+  - store, manual and Stripe sources resolving to one set of entitlements.
+- **Format:**
+  - the server's tokens and licence files verify with the Python and Swift reference verifiers and the SDK;
+  - every case in `licence-format-vectors.json` passes in the SDK test suite and in CI.
+- **Public endpoints:**
+  - a disallowed `Origin` or redirect URL is refused;
+  - lockout after repeated bad keys;
+  - rate limits come from the app's settings;
+  - idempotent replay, and 409 on a different body;
+  - no customer data without a credential;
+  - `access-link` gives the same answer for known and unknown emails.
+- **Delivery:** a key revealed once and then purged; purged at 24 h; never in logs or events by default. Reissue rotates the key, the old key fails and activations stay.
+- **Privacy:** export, and delete (revoked, anonymised, accounting rows kept).
+- **End to end, data only:** an app configured purely through the API (settings, features, plans), a manual lifetime sale, a licence, activation through the public endpoint, offline verification with the reference verifier, then revoke and refresh.
+- **Regressions:** the tax-app regression sandbox is re-run; a fresh `PROJECT_CODE=billing` install.
+
+## 21. Decisions needed
+
+My recommendation is listed first in each row.
+
+| # | Question | Recommendation |
+|---|---|---|
+| 1 | Merge #694 as it is, or extend it? | **Extend #694** with v2 Phase 1 before merging: nothing ships with a format we then break (§19) |
+| 2 | Upgrades: a table, or promotion codes? | **`billing_plan_upgrades`**, plus optional promotion codes for discounts (§13) |
+| 3 | Email | The **existing SMTP mailer through the outbox**: one sender address per deployment, per-app name and reply-to. Per-app sending domains later |
+| 4 | Where hosted pages live | **On the dashboard** at `{BILLING_HOSTED_BASE_URL}/b/{app_id}/…`. Custom domains per app later |
+| 5 | Rate limits and lockouts across pods | **Redis when configured, else per pod** (documented) |
+| 6 | Idempotency keys | Accepted on every mutating call, **required on checkout**, replayed for 24 h |
+| 7 | Per-kind defaults | §4. Desktop: `fail_closed`, refresh every 7 days, 30 days of grace, 3 devices, email optional. Web: `fail_closed`, 15-minute tokens, 3 days of grace, email required |
+| 8 | Access link and session lifetime | Links last 15 minutes and are single-use; sessions last 30 minutes |
+| 9 | Retention after delete | Accounting rows are kept, anonymised; the client decides the legal period. Activations are kept for 90 days after release |
+| 10 | Phase split | **Phase 1** (no payments), added to #694: settings; purchase types, purchases and windows; `released_at`; format v1 and test vectors; hardened publishable licence endpoints; access links and the "my licences" page; manual sales; the store data model, record endpoint and verifier stubs; privacy export and delete; configurable rate limits and lockout; the entitlement cache; SDK v1. **Phase 2** (payments, new PR): Connect; checkout for all three purchase types; fulfilment and key delivery; the pricing and success pages; refunds; upgrades and promotion codes; automatic tax; the Customer Portal |
