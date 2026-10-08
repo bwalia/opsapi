@@ -2640,6 +2640,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/billing/connect": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List connect */
+        get: operations["get__api_v2_billing_connect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/billing/connect/onboard": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create onboard */
+        post: operations["post__api_v2_billing_connect_onboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/billing/coupons": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -10958,6 +10992,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/public/billing/checkout": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create checkout */
+        post: operations["post__api_v2_public_billing_checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/billing/checkout/{session_id}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get checkout */
+        get: operations["get__api_v2_public_billing_checkout_session_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/public/billing/checkout/return": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -11077,6 +11145,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/public/billing/me/portal": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create portal */
+        post: operations["post__api_v2_public_billing_me_portal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/billing/me/upgrade": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create upgrade */
+        post: operations["post__api_v2_public_billing_me_upgrade"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/public/billing/plans": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -11105,6 +11207,23 @@ export interface paths {
         put?: never;
         /** Create sessions */
         post: operations["post__api_v2_public_billing_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/billing/stripe/webhook": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create webhook */
+        post: operations["post__api_v2_public_billing_stripe_webhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11893,6 +12012,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/subscriptions/checkout": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create checkout */
+        post: operations["post__api_v2_subscriptions_checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/subscriptions/entitlements": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -11962,6 +12098,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/subscriptions/portal": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create portal */
+        post: operations["post__api_v2_subscriptions_portal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/subscriptions/purchases": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -11974,6 +12127,23 @@ export interface paths {
         put?: never;
         /** Create purchases */
         post: operations["post__api_v2_subscriptions_purchases"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/subscriptions/purchases/{uuid}/refund": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refund refund */
+        post: operations["post__api_v2_subscriptions_purchases_uuid_refund"];
         delete?: never;
         options?: never;
         head?: never;
@@ -25840,6 +26010,99 @@ export interface operations {
         };
     };
     post__api_v2_billing_checkout_payment_intent: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_billing_connect: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_billing_connect_onboard: {
         parameters: {
             query?: { [key: string]: unknown };
             header?: never;
@@ -58187,6 +58450,94 @@ export interface operations {
             };
         };
     };
+    post__api_v2_public_billing_checkout: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_public_billing_checkout_session_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get__api_v2_public_billing_checkout_return: {
         parameters: {
             query?: {
@@ -58507,6 +58858,98 @@ export interface operations {
             };
         };
     };
+    post__api_v2_public_billing_me_portal: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_public_billing_me_upgrade: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get__api_v2_public_billing_plans: {
         parameters: {
             query?: {
@@ -58555,6 +58998,52 @@ export interface operations {
         };
     };
     post__api_v2_public_billing_sessions: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_public_billing_stripe_webhook: {
         parameters: {
             query?: { [key: string]: unknown };
             header?: never;
@@ -61454,6 +61943,52 @@ export interface operations {
             };
         };
     };
+    post__api_v2_subscriptions_checkout: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get__api_v2_subscriptions_entitlements: {
         parameters: {
             query?: {
@@ -61677,6 +62212,52 @@ export interface operations {
             };
         };
     };
+    post__api_v2_subscriptions_portal: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get__api_v2_subscriptions_purchases: {
         parameters: {
             query?: {
@@ -61729,6 +62310,55 @@ export interface operations {
             query?: { [key: string]: unknown };
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_subscriptions_purchases_uuid_refund: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
             cookie?: never;
         };
         requestBody: {

@@ -1,5 +1,5 @@
 import { createBilling, createLicensing, fingerprintHash, verifyLicenseFile } from '/sdk/billing.js';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 const B = 'http://e2e-api', OWNER = readFileSync('/e2e/owner.jwt', 'utf8').trim();
 let fails = 0;
 const check = (name, ok, d = '') => { console.log((ok ? '  ok   ' : '  FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(d).slice(0, 300))); if (!ok) fails++; };
@@ -39,4 +39,21 @@ const rec2 = await billing.recordPurchase({ customerExternalId: WEB, source: 'ex
 check('recordPurchase (external) -> purchase', rec2.purchase?.source === 'external', rec2);
 const ent = await billing.getEntitlements(WEB);
 check('entitlements after the purchase (signed token verified): pass_30', ent.plan === 'pass_30' && ent.features.projects === 20 && ent.accessUntil > Date.now() / 1000, ent);
+
+// Payments (pay.py's workspace, Stripe connected, stripe-mock behind api.stripe.com).
+if (existsSync('/e2e/out/pay.json')) {
+  const pay = JSON.parse(readFileSync('/e2e/out/pay.json', 'utf8'));
+  const shop = createLicensing({ baseUrl: B, publishableKey: pay.pk });
+  const co = await shop.checkout({ planKey: 'lifetime', coupon: 'SAVE10' });
+  check('licensing.checkout -> Stripe Checkout URL', typeof co.url === 'string' && co.url.startsWith('http'), co);
+  const ord = await shop.order('cs_test_never_paid');
+  check('licensing.order (unpaid session) -> pending', ord.status === 'pending', ord);
+  const r = await fetch(B + '/api/v2/api-keys', { method: 'POST', headers: { Authorization: `Bearer ${OWNER}`, 'X-Namespace-Slug': pay.ws,
+    'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'sdk-pay', scopes: { subscriptions: ['read', 'create'] } }) });
+  const server = createBilling({ baseUrl: B, apiKey: (await r.json()).data.key, app: pay.app });
+  const sc = await server.checkout({ plan: 'pro', customerExternalId: 'sdk-' + Date.now(), email: `sdk${Date.now()}@buyer.test` });
+  check('billing.checkout (secret key, subscriptions scope) -> URL', typeof sc.url === 'string', sc);
+  const portal = await server.portal({ customerExternalId: 'nobody-' + Date.now() }).catch((e) => e);
+  check('billing.portal without a subscription -> BillingError 404 / 422', portal.status === 404 || portal.status === 422, portal);
+}
 console.log('\nSDK FAILURES:', fails);

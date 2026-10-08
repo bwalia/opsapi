@@ -234,6 +234,27 @@ export function createBilling(opts: BillingOptions) {
     return json.data;
   }
 
+  async function post<T>(path: string, body: unknown, idem?: string): Promise<T> {
+    let res: Response;
+    try {
+      res = await doFetch(`${base}${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${opts.apiKey}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          ...(idem ? { 'Idempotency-Key': idem } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      throw new BillingError(`OpsAPI unreachable: ${(err as Error).message}`, 0, 'unreachable');
+    }
+    const json = (await res.json().catch(() => ({}))) as { data?: T; error?: string; code?: string };
+    if (!res.ok) throw new BillingError(json.error ?? `OpsAPI answered ${res.status}`, res.status, json.code);
+    return json.data as T;
+  }
+
   async function fetchFresh(externalId: string): Promise<Entitlements> {
     const data = (await call('GET', externalId)) as { token: string | null };
     if (!data?.token) {
@@ -369,6 +390,34 @@ export function createBilling(opts: BillingOptions) {
       return json.data as { purchase?: unknown; subscription?: unknown; license?: unknown; key?: string; duplicate?: boolean };
     },
 
+    /**
+     * Start a purchase on Stripe's hosted checkout for one of your users: redirect them to `url`.
+     * A customer on another plan with an upgrade path pays the path's price. Needs an API key with
+     * the `subscriptions` scope. Stripe's webhook fulfils the order in OpsAPI.
+     */
+    checkout(input: {
+      plan: string;
+      customerExternalId?: string;
+      email?: string;
+      coupon?: string;
+      successUrl?: string;
+      cancelUrl?: string;
+      /** Same key = same checkout session (safe to retry). Default: a new one per call. */
+      idempotencyKey?: string;
+    }) {
+      return post<CheckoutResult>('/api/v2/subscriptions/checkout', {
+        app: opts.app, plan: input.plan, customer_external_id: input.customerExternalId, email: input.email,
+        coupon: input.coupon, success_url: input.successUrl, cancel_url: input.cancelUrl,
+      }, input.idempotencyKey ?? idempotencyKey());
+    },
+
+    /** Stripe's Customer Portal (payment method, invoices, cancel) for a customer's subscription. */
+    portal(input: { customerExternalId: string; returnUrl?: string }) {
+      return post<{ url: string }>('/api/v2/subscriptions/portal', {
+        app: opts.app, customer_external_id: input.customerExternalId, return_url: input.returnUrl,
+      });
+    },
+
     /** Drop cached entitlements (all, or one customer), e.g. from a subscription.* / billing.grant.* webhook. */
     invalidate(externalId?: string) {
       if (externalId === undefined) cache.clear();
@@ -491,6 +540,22 @@ export interface LicenseRequest {
   platform?: string;
 }
 
+/** A checkout: open `url` (Stripe's page); `upgraded` when a free upgrade was applied at once. */
+export interface CheckoutResult {
+  url?: string;
+  session_id?: string;
+  upgraded?: boolean;
+}
+
+/** An order for the success page. `key` (a new licence key) is present the first time only. */
+export interface Order {
+  status: 'pending' | 'complete';
+  plan?: { key: string; name: string };
+  license?: { uuid: string; key_prefix: string; status: string; access_until?: string | null; updates_until?: string | null };
+  key?: string | null;
+  key_emailed?: boolean;
+}
+
 const idempotencyKey = () =>
   typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -540,6 +605,29 @@ export function createLicensing(opts: LicensingOptions) {
     /** Email the customer a link to the hosted "my licences" page (always succeeds: no enumeration). */
     requestAccessLink: (email: string) =>
       send<{ message: string }>('POST', '/api/v2/public/billing/access-link', { pk: opts.publishableKey, email }),
+    /**
+     * Start a purchase on Stripe's hosted checkout: open the returned `url`. Pass `licenseKey` to
+     * upgrade the plan that key holds (the seller's upgrade path sets the price). Redirect URLs
+     * must be in the app's allowed redirect URLs; by default the buyer returns to the hosted pages.
+     */
+    checkout: (input: {
+      planKey: string;
+      email?: string;
+      coupon?: string;
+      licenseKey?: string;
+      successUrl?: string;
+      cancelUrl?: string;
+    }) =>
+      send<CheckoutResult>('POST', '/api/v2/public/billing/checkout', {
+        pk: opts.publishableKey, plan_key: input.planKey, email: input.email, coupon: input.coupon,
+        license_key: input.licenseKey, success_url: input.successUrl, cancel_url: input.cancelUrl,
+      }),
+    /** The order behind a checkout session (your success page): a new licence key is in it once. */
+    order: (sessionId: string) =>
+      send<Order>(
+        'GET',
+        `/api/v2/public/billing/checkout/${encodeURIComponent(sessionId)}?pk=${encodeURIComponent(opts.publishableKey)}`,
+      ),
   };
 }
 

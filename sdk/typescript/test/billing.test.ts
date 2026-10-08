@@ -281,6 +281,54 @@ describe('licences (format v1)', () => {
   });
 });
 
+describe('payments', () => {
+  function recorder(answer: unknown, status = 200) {
+    const calls: { url: string; method: string; body?: Record<string, unknown>; headers: Headers }[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url).replace(BASE, ''),
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        headers: new Headers(init?.headers),
+      });
+      return json(status < 400 ? { success: true, data: answer } : answer, status);
+    }) as unknown as typeof globalThis.fetch;
+    return { fetch, calls };
+  }
+
+  it('public checkout: publishable key, plan, coupon, licence key for an upgrade; always an Idempotency-Key', async () => {
+    const { fetch, calls } = recorder({ url: 'https://checkout.stripe.com/c/pay/cs_1', session_id: 'cs_1' }, 201);
+    const licensing = createLicensing({ baseUrl: BASE, publishableKey: 'pk_test_abc', fetch });
+    const r = await licensing.checkout({ planKey: 'lifetime', coupon: 'SAVE10', licenseKey: 'ABCDE' });
+    expect(r.url).toContain('checkout.stripe.com');
+    expect(calls[0]).toMatchObject({ url: '/api/v2/public/billing/checkout', method: 'POST' });
+    expect(calls[0]!.body).toMatchObject({ pk: 'pk_test_abc', plan_key: 'lifetime', coupon: 'SAVE10', license_key: 'ABCDE' });
+    expect(calls[0]!.headers.get('Idempotency-Key')).toBeTruthy();
+  });
+
+  it('order(): the success page reads the order by Stripe session id', async () => {
+    const { fetch, calls } = recorder({ status: 'complete', key: 'ABCDE-FGHJK', key_emailed: true });
+    const licensing = createLicensing({ baseUrl: BASE, publishableKey: 'pk_test_abc', fetch });
+    const o = await licensing.order('cs_test_1');
+    expect(o).toMatchObject({ status: 'complete', key: 'ABCDE-FGHJK' });
+    expect(calls[0]).toMatchObject({ url: '/api/v2/public/billing/checkout/cs_test_1?pk=pk_test_abc', method: 'GET' });
+  });
+
+  it('server checkout and portal use the secret key; errors keep the server code', async () => {
+    const ok = recorder({ url: 'https://checkout.stripe.com/x' }, 201);
+    const billing = createBilling({ baseUrl: BASE, apiKey: 'opsk_secret', app: APP, fetch: ok.fetch });
+    await billing.checkout({ plan: 'pro', customerExternalId: 'user_42', successUrl: 'https://app.test/ok', idempotencyKey: 'order-7' });
+    expect(ok.calls[0]!.url).toBe('/api/v2/subscriptions/checkout');
+    expect(ok.calls[0]!.headers.get('Authorization')).toBe('Bearer opsk_secret');
+    expect(ok.calls[0]!.headers.get('Idempotency-Key')).toBe('order-7');
+    expect(ok.calls[0]!.body).toMatchObject({ app: APP, plan: 'pro', customer_external_id: 'user_42', success_url: 'https://app.test/ok' });
+    const bad = recorder({ success: false, code: 'no_subscription', error: 'There is no paid subscription to manage' }, 404);
+    const b2 = createBilling({ baseUrl: BASE, apiKey: 'opsk_secret', app: APP, fetch: bad.fetch });
+    await expect(b2.portal({ customerExternalId: 'user_42' })).rejects.toMatchObject({ status: 404, code: 'no_subscription' });
+    expect(bad.calls[0]!.body).toMatchObject({ app: APP, customer_external_id: 'user_42' });
+  });
+});
+
 describe('docs/licence-format-vectors.json (every published case)', () => {
   const v = JSON.parse(readFileSync(new URL('../../../docs/licence-format-vectors.json', import.meta.url), 'utf8'));
   for (const c of v.cases as { name: string; token: string; typ: string; now: number; expect: string; fingerprint_hash?: string; iss?: string; high_water?: number }[]) {

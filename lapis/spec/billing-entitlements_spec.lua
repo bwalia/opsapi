@@ -113,7 +113,8 @@ for _, m in ipairs(ProjectConfig.PROJECT_MODULES.billing or {}) do modules[m.mac
 check("RBAC modules = route families", modules.billing and modules.subscriptions and modules.entitlements
     and modules.licenses and modules.customers)
 local app_lua = read("app.lua")
-for _, r in ipairs({ "billing-apps", "billing-subscriptions", "billing-licenses", "billing-public", "billing-privacy" }) do
+for _, r in ipairs({ "billing-apps", "billing-subscriptions", "billing-licenses", "billing-public", "billing-privacy",
+    "billing-payments" }) do
     check("routes." .. r .. " loads only under billing", app_lua:find('load_if("billing", "routes.' .. r .. '")', 1, true) ~= nil)
 end
 check("customers + plans also load for billing",
@@ -125,7 +126,7 @@ for i = 1, 8 do
     check("migration zzbe" .. i .. " gated on BILLING",
         migrations:find("%['zzbe" .. i .. "_[%w_]+'%] = conditional_array%(ProjectConfig%.FEATURES%.BILLING") ~= nil)
 end
-for i = 1, 5 do
+for i = 1, 6 do
     check("v2 migration zzbf" .. i .. " gated on BILLING",
         migrations:find("%['zzbf" .. i .. "_[%w_]+'%] = conditional_array%(ProjectConfig%.FEATURES%.BILLING") ~= nil)
 end
@@ -138,6 +139,7 @@ for file, families in pairs({
     ["routes/billing-licenses.lua"] = { licenses = true },
     ["routes/billing-public.lua"] = {},
     ["routes/billing-privacy.lua"] = { customers = true },
+    ["routes/billing-payments.lua"] = { billing = true },
 }) do
     local src = read(file)
     local ok, bad = true, nil
@@ -164,6 +166,33 @@ check("computed license.issued / license.reissued events", (function()
 end)())
 check("activations hide the fingerprint", entities["license.activation"]
     and entities["license.activation"].hide == "fingerprint_hash" and entities["license.activation"].ns_sql ~= nil)
+check("purchase.refunded / purchase.revoked events", entities.purchase and entities.purchase.module == "subscriptions"
+    and entities.purchase.verbs.refunded ~= nil and entities.purchase.verbs.revoked ~= nil)
+check("licence key emails ride the outbox", read("helper/plugin-events.lua"):find('"billing.licence_key.requested"', 1, true) ~= nil
+    and require("lib.billing-jobs").handlers["billing.licence_key.requested"] ~= nil)
+
+print("payments")
+local pay_routes = read("routes/billing-payments.lua")
+check("Stripe webhook dedupes in its own id space (the tax webhook sees the same platform events)",
+    pay_routes:find('"billing:" .. tostring(event.id)', 1, true) ~= nil)
+check("webhook payload is not stored (customer data)", pay_routes:find("payload = { id = event.id, type = event.type }", 1, true) ~= nil)
+local pay = read("lib/billing-stripe.lua")
+check("destination charges: money to the seller, seller is merchant of record",
+    pay:find("transfer_data = { destination = acct.stripe_account_id }", 1, true) ~= nil
+        and pay:find("on_behalf_of = acct.stripe_account_id", 1, true) ~= nil)
+check("every Stripe write is idempotent", (function()
+    for call in pay:gmatch('s:_request%("POST",.-%)\n') do
+        if not call:find("opsapi%-") and not call:find("account_links") and not call:find("billing_portal") then return false end
+    end
+    return true
+end)())
+check("fulfilment runs once per checkout session", pay:find("pg_advisory_xact_lock", 1, true) ~= nil)
+local delivery = read("lib/billing-delivery.lua")
+check("keys wait encrypted (AES-256-GCM, licence id as AAD) for at most 24 h",
+    delivery:find('"aes-256-gcm"', 1, true) and delivery:find("tostring(license_id)", 1, true)
+        and delivery:find("interval '24 hours'", 1, true) ~= nil)
+check("revealed once: claimed by an UPDATE ... revealed_at IS NULL",
+    delivery:find("revealed_at IS NULL AND expires_at > NOW() RETURNING", 1, true) ~= nil)
 
 print("customers: email unique per workspace")
 local cq = read("queries/CustomerQueries.lua")

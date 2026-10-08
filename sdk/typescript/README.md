@@ -339,6 +339,30 @@ export const GET = billing.withFeature('advanced_reports', getUserId, async (req
 
 To pick up changes at once, subscribe a webhook to `subscription.*`, `billing.grant.*` and `billing.plan.*` and call `billing.invalidate(userId)` (or `billing.invalidate()` for everyone).
 
+### Taking payments (Stripe Checkout)
+
+Connect the workspace's Stripe account first (dashboard: **Billing → Payments**). Customers then pay on
+Stripe's hosted checkout page; OpsAPI fulfils the order from Stripe's webhook (a subscription, a purchase, and
+for desktop apps a licence). Use an API key that also has the `subscriptions` scope:
+
+```ts
+// Send the signed-in user to Stripe. A customer on another plan with an upgrade path pays the path's price.
+const { url } = await billing.checkout({
+  plan: 'pro',
+  customerExternalId: user.id,
+  coupon: 'LAUNCH25', // optional
+  successUrl: 'https://app.example.com/billing/done',
+  cancelUrl: 'https://app.example.com/pricing',
+});
+res.redirect(303, url!);
+
+// Payment method, invoices and cancelling, on Stripe's Customer Portal:
+const { url: portal } = await billing.portal({ customerExternalId: user.id, returnUrl: 'https://app.example.com/account' });
+```
+
+Without your own pages, link to the app's hosted pricing page (`/b/<app id>/pricing` on the dashboard): it
+does the same, and the buyer lands on a hosted success page that shows a new licence key once.
+
 ### Recording store purchases
 
 If you sell through the App Store or Google Play, verify the receipt on your own server, then record it. It
@@ -397,6 +421,11 @@ if (claims.updates_until && BUILD_DATE > claims.updates_until) showUpgradeOffer(
 Errors are `BillingError`s with a `code`:
 - from OpsAPI: `invalid_license`, `activation_limit`, `license_suspended`, `license_revoked`, `access_ended`, `not_activated`, `locked_out`, `rate_limited`;
 - from offline checks: `bad_signature`, `wrong_machine`, `wrong_app`, `bad_version`.
+
+To sell from inside the app, `licensing.checkout({ planKey })` returns a Stripe Checkout URL to open in the
+browser (pass `licenseKey` to upgrade the plan that key holds), and `licensing.order(sessionId)` reads the
+order on your own success page; a new key is in it once. Put `{CHECKOUT_SESSION_ID}` in your `successUrl`
+(e.g. `https://example.com/thanks?session_id={CHECKOUT_SESSION_ID}`) and Stripe fills it in.
 
 `licensing.deactivate()` gives a machine's seat back. `licensing.requestAccessLink(email)` emails the customer
 a link to the hosted "my licences" page, where they can see their licences, free devices and get a new key
