@@ -130,11 +130,13 @@ return function(app)
         -- Fetch the latest valid OTP — READ-ONLY. Do not delete it, mark it
         -- verified, or bump attempts; /auth/2fa/verify owns that lifecycle.
         local rows = db.query([[
-            SELECT code FROM admin_otp_codes
+            SELECT peek_code FROM admin_otp_codes
             WHERE user_id = ? AND verified = false AND expires_at > NOW()
             ORDER BY created_at DESC LIMIT 1
         ]], user_id)
-        local code = rows and rows[1] and rows[1].code
+        -- Codes are stored hashed; only test mailboxes get a readable copy (helper/otp.lua).
+        local code = rows and rows[1] and rows[1].peek_code
+        if code == db.NULL then code = nil end
         if not code then
             -- The login may not have committed the OTP row yet; the broker/test
             -- retries on 404.
