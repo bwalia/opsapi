@@ -1,7 +1,8 @@
 # Billing & Entitlements — design (v2)
 
 Status:
-- **v2, for owner approval.** It adds the 2026-10-08 addendum (lifetime and fixed-term purchases, apps with no back end, hosted pages, an open licence format, store purchases, privacy, scale) to the approved v1.
+- **v2, approved 2026-10-08** with the owner's changes in §21. It is built on PR #694: Phase 1 first, then Phase 2 in the same PR.
+- v2 It adds the 2026-10-08 addendum (lifetime and fixed-term purchases, apps with no back end, hosted pages, an open licence format, store purchases, privacy, scale) to the approved v1.
 - The licence and token format is specified in **[LICENCE_FORMAT.md](LICENCE_FORMAT.md)**, with test vectors.
 - v1's Phase 1 is built in PR #694, which is not merged yet. §19 lists what v2 changes in it.
 - No v2 code is written until this document and LICENCE_FORMAT.md are approved. Decisions needed are in §21.
@@ -141,7 +142,12 @@ in a request is checked against `self.namespace` (404 otherwise).
 | `billing_customer_sessions` | `app_id`, `customer_id`, `token_hash`, `expires_at` (+30 min) | What an access link is exchanged for |
 | `billing_key_deliveries` | `license_id` (PK), `ciphertext`, `nonce`, `key_id`, `expires_at` (+24 h), `revealed_at`, `emailed_at` | Phase 2. Deleted when every configured channel has delivered the key, or at 24 h (§10) |
 | `billing_idempotency` | `app_id` (or `namespace_id`), `key`, `endpoint`, `request_hash`, `status`, `response`, `expires_at` (+24 h) | Replays mutating calls (§9) |
-| `billing_plan_upgrades` | `app_id`, `from_plan_id`, `to_plan_id`, `amount`, `currency`, `active` | Phase 2. Priced upgrade paths (§13) |
+| `billing_plan_upgrades` | `app_id`, `from_plan_id`, `to_plan_id`, `pricing` (`difference` / `fixed` / `free`), `amount`, `currency`, `active` | Upgrade paths the admin defines (§13). Customers can upgrade at any time |
+| `billing_coupons` | `namespace_id`, `app_id` (null = every app), `code` (unique per workspace, case-insensitive), `discount_type` (`percent` / `amount`), `percent_off`, `amount_off`, `currency`, `duration` (`once` / `repeating` / `forever`, for recurring), `duration_months`, `plan_ids` (null = every plan), `max_redemptions`, `per_customer_limit`, `starts_at`, `expires_at`, `active` | Discount coupons the admin creates (§13) |
+| `billing_coupon_redemptions` | `coupon_id`, `customer_id`, `purchase_id` / `subscription_id`, `amount_off`, `currency`, `redeemed_at` | Every use of a coupon |
+| `billing_plan_changes` | `namespace_id`, `app_id`, `customer_id`, `from_plan_id`, `to_plan_id`, `kind` (`upgrade` / `downgrade` / `new`), `source`, `amount`, `currency`, `coupon_id`, `purchase_id` / `subscription_id`, `actor`, `created_at` | The full history of plan changes, from any source |
+| `namespace_mail_settings` (core) | `namespace_id` (unique), `host`, `port`, `security` (`starttls` / `ssl`), `username`, `password_encrypted`, `from_email`, `from_name`, `reply_to`, `enabled`, `last_tested_at`, `last_error` | The workspace's own SMTP (§10). Used instead of the deployment's when enabled |
+| `namespace_email_templates` (core) | `namespace_id`, `template_key`, `subject`, `html`, `updated_by` | A workspace's own version of a built-in template (§10)
 
 Purge jobs run on worker 0 of one pod: expired links, sessions, deliveries and idempotency rows; released and
 deactivated activations past their retention.
@@ -206,6 +212,11 @@ workspace or another app return 404.
 | `POST /api/v2/subscriptions/purchases/:uuid/revoke` | `subscriptions.update` |
 | `GET/POST /api/v2/licenses`, `GET/PUT …/:uuid`, `POST …/revoke`, `DELETE …/activations/:id` | `licenses.*` |
 | `POST /api/v2/licenses/:uuid/reissue`: new key, shown once; the old key stops working; activations are kept | `licenses.update` |
+| `GET/POST /api/v2/billing/apps/:app/upgrades`, `PUT/DELETE …/upgrades/:uuid` (upgrade paths) | `billing.*` |
+| `GET/POST /api/v2/billing/coupons`, `GET/PUT/DELETE …/coupons/:uuid`, `GET …/coupons/:uuid/redemptions` | `billing.*` |
+| `POST /api/v2/subscriptions/upgrade` `{customer, app, to_plan, coupon?}`: an admin upgrades a customer by hand (recorded); `GET /api/v2/subscriptions/plan-changes?app=&customer=` | `subscriptions.update` / `subscriptions.read` |
+| `GET/PUT/DELETE /api/v2/namespace/mail-settings`, `POST …/mail-settings/test` (core) | `namespace.read` / `namespace.update` |
+| `GET /api/v2/namespace/email-templates`, `PUT/DELETE …/email-templates/:key`, `POST …/:key/preview` (core) | `namespace.read` / `namespace.update` |
 | `GET /api/v2/customers/:uuid/billing-export` | `customers.read` **and** `subscriptions.read` |
 | `DELETE /api/v2/customers/:uuid/billing-data` (§16) | `customers.delete` **and** `subscriptions.delete` |
 | Phase 2: `POST /api/v2/billing/connect/onboard`, upgrade paths `GET/POST/DELETE /api/v2/billing/apps/:app/upgrades` | `billing.manage` / `billing.*` |
@@ -229,6 +240,7 @@ workspace or another app return 404.
 | `POST /api/v2/public/licenses/activate` `{pk, license_key, fingerprint_hash, app_version, name?, platform?}` | PK + licence | Uses a seat and returns a licence file |
 | `POST /api/v2/public/licenses/validate` `{pk, license_key, fingerprint_hash, app_version}` | PK + licence | Refresh. Returns a new licence file, or `license_revoked` / `license_suspended` / `not_activated` / `access_ended` |
 | `POST /api/v2/public/licenses/deactivate` `{pk, license_key, fingerprint_hash}` | PK + licence | Frees this machine's seat |
+| `POST /api/v2/public/billing/coupons/check` `{pk, code, plan_key}` | PK | Whether a coupon applies, and the price after it. Rate-limited |
 | `POST /api/v2/public/billing/access-link` `{pk, email, return_url?}` | PK | Always 202. If the email has billing records in this app, it emails a magic link |
 | `POST /api/v2/public/billing/sessions` `{token}` | the link's token | Exchanges a single-use link for a 30-minute session |
 | `GET /api/v2/public/billing/me` | Session | The customer's licences (prefix, status, plan, windows, devices), purchases and subscriptions in this app |
@@ -271,8 +283,14 @@ workspace or another app return 404.
 - emits `license.reissued`.
 
 **Email:**
-- Sent by the existing SMTP mailer (`helper/mail.lua`), called from the **outbox** (`core.billing` subscriber), so it is retried with backoff and visible when it fails.
-- The sender address is the deployment's; the display name, reply-to and colours come from the app's branding.
+- Sent by `helper/mail.lua`, called from the **outbox** (`core.billing` subscriber), so it is retried with backoff and visible when it fails.
+- **SMTP per workspace:** each workspace can set its own SMTP server, sender, reply-to and password (stored encrypted) in its settings, and send a test email. Without one, the deployment's SMTP is used.
+- **Templates:**
+  - every email has a **built-in default template**, an `etlua` file in the repo;
+  - a workspace can override the subject and body of any template;
+  - overrides use `{{placeholder}}` substitution with HTML escaping, never code, so tenant-written templates can't run anything;
+  - the variables each template can use are listed for the editor, and there is a preview.
+- The app's branding (name, logo, colour, support email) fills the layout.
 - Secrets never sit in events: the job generates the magic-link token (storing only its hash), or decrypts the delivery, at send time.
 
 ## 11. Hosted pages (no client code needed)
@@ -304,12 +322,18 @@ These are public pages in opsapi-dashboard under `{BILLING_HOSTED_BASE_URL}/b/{a
 - **Checkout:** `mode=subscription` for `recurring`; `mode=payment` for `one_time` and `fixed_term`.
   - Destination charges on the client's connected account, with `application_fee_*` from `STRIPE_PLATFORM_FEE_PERCENT`.
   - `automatic_tax` per app, idempotency keys on every Stripe call, and per-mode prices (`stripe_refs`).
-- **Upgrades: recommended `billing_plan_upgrades`.** An explicit `from → to` path with its own price:
-  - data, not code;
-  - it works the same for licences and subscriptions, and is auditable;
-  - it doesn't depend on Stripe, so manual and store sales can use the same paths.
+- **Checkout runs on Stripe's hosted Checkout page.** OpsAPI's database is updated from Stripe webhooks; the success page only reads the result.
+- **Upgrades (approved).** Admins define upgrade paths per app (`billing_plan_upgrades`, data). A customer can upgrade at any time:
+  - **Recurring:** the Stripe subscription switches price with proration.
+  - **One-time / fixed-term:** the customer pays the path's price: the `difference` between the plans, a `fixed` amount, or `free`. The buyer proves ownership with a licence key or a session.
 
-  The buyer proves ownership with a licence key or a session. Stripe promotion codes stay available for **discounts** (`allow_promotion_codes`), but promotion codes alone can't express "owners of Pro pay £X for Pro+".
+  Every change is recorded in `billing_plan_changes`. Admins can also upgrade a customer by hand from the dashboard; it is recorded the same way.
+- **Discount coupons (approved).** Admins create coupons per workspace or per app (`billing_coupons`):
+  - percent or fixed amount off;
+  - limited to some plans, with dates and redemption limits;
+  - for recurring plans: once, for N months, or forever.
+
+  Customers enter a code on the hosted pricing page, or pass it to checkout. OpsAPI validates it, then applies it as a Stripe coupon on the connected account. Every use is recorded in `billing_coupon_redemptions`.
 - **Refunds** (`charge.refunded`):
   - a full refund applies the app's `refund_policy`: `revoke` marks the purchase refunded, revokes the licence and ends any subscription; `keep` only records it;
   - partial refunds keep access;
@@ -434,19 +458,17 @@ then breaks. So the recommendation is to **extend #694 rather than merge it firs
 - **End to end, data only:** an app configured purely through the API (settings, features, plans), a manual lifetime sale, a licence, activation through the public endpoint, offline verification with the reference verifier, then revoke and refresh.
 - **Regressions:** the tax-app regression sandbox is re-run; a fresh `PROJECT_CODE=billing` install.
 
-## 21. Decisions needed
+## 21. Decisions (approved 2026-10-08)
 
-My recommendation is listed first in each row.
-
-| # | Question | Recommendation |
-|---|---|---|
-| 1 | Merge #694 as it is, or extend it? | **Extend #694** with v2 Phase 1 before merging: nothing ships with a format we then break (§19) |
-| 2 | Upgrades: a table, or promotion codes? | **`billing_plan_upgrades`**, plus optional promotion codes for discounts (§13) |
-| 3 | Email | The **existing SMTP mailer through the outbox**: one sender address per deployment, per-app name and reply-to. Per-app sending domains later |
-| 4 | Where hosted pages live | **On the dashboard** at `{BILLING_HOSTED_BASE_URL}/b/{app_id}/…`. Custom domains per app later |
-| 5 | Rate limits and lockouts across pods | **Redis when configured, else per pod** (documented) |
-| 6 | Idempotency keys | Accepted on every mutating call, **required on checkout**, replayed for 24 h |
-| 7 | Per-kind defaults | §4. Desktop: `fail_closed`, refresh every 7 days, 30 days of grace, 3 devices, email optional. Web: `fail_closed`, 15-minute tokens, 3 days of grace, email required |
-| 8 | Access link and session lifetime | Links last 15 minutes and are single-use; sessions last 30 minutes |
-| 9 | Retention after delete | Accounting rows are kept, anonymised; the client decides the legal period. Activations are kept for 90 days after release |
-| 10 | Phase split | **Phase 1** (no payments), added to #694: settings; purchase types, purchases and windows; `released_at`; format v1 and test vectors; hardened publishable licence endpoints; access links and the "my licences" page; manual sales; the store data model, record endpoint and verifier stubs; privacy export and delete; configurable rate limits and lockout; the entitlement cache; SDK v1. **Phase 2** (payments, new PR): Connect; checkout for all three purchase types; fulfilment and key delivery; the pricing and success pages; refunds; upgrades and promotion codes; automatic tax; the Customer Portal |
+| # | Decision |
+|---|---|
+| 1 | **Everything goes on PR #694**, Phase 1 and then Phase 2 |
+| 2 | **Upgrades** are admin-defined paths (data). Customers upgrade at any time, and every plan change is recorded. **Discount coupons** are managed by admins and applied at checkout (§13) |
+| 3 | **Email:** each workspace can set its own SMTP, falling back to the deployment's. Every email has a built-in default template that a workspace can override (§10) |
+| 4 | **Hosted pages** on the dashboard at `{BILLING_HOSTED_BASE_URL}/b/{app_id}/…`. **Checkout is Stripe's hosted page**, and Stripe webhooks update the database |
+| 5 | **Rate limits and lockouts** use shared Redis counters (atomic increment with expiry) when Redis is configured, and fall back to per-pod shared memory |
+| 6 | Idempotency keys: accepted on every mutating call, required on checkout, replayed for 24 h |
+| 7 | Per-kind defaults as in §4 |
+| 8 | Access links last 15 minutes and are single-use; sessions last 30 minutes |
+| 9 | After a delete, accounting rows are kept (anonymised); activations are kept for 90 days after release |
+| 10 | **Phase 1** (no payments): settings; purchase types, purchases and windows; `released_at`; format v1; hardened publishable licence endpoints; access links and the "my licences" page; manual sales; upgrade paths, coupons and plan-change history (managed, and applied to manual sales and upgrades); workspace SMTP and templates; the store data model, record endpoint and verifier stubs; privacy export and delete; rate limits and lockout; the entitlement cache; SDK v1. **Phase 2** (payments): Connect; Stripe Checkout for all three purchase types, with coupons and upgrades; webhook fulfilment and key delivery; the pricing and success pages; refunds; automatic tax; the Customer Portal |
