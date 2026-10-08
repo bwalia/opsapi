@@ -2,6 +2,11 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## 0.1.1
+
+- Fixed: `auth.login()`, `auth.verify2fa()`, `auth.refresh()` and `auth.logout()` now send form fields, which is what OpsAPI reads on `/auth/*`. In 0.1.0 sign-in failed with "identifier required".
+- README: what OpsAPI is, how to run your own server from Docker Hub (local trial and production checklist), first sign-in, creating an API key, and troubleshooting.
+
 ## 0.1.0
 
 First public release.

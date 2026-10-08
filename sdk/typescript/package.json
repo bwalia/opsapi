@@ -1,6 +1,6 @@
 {
   "name": "@opsapi/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Typed client for the OpsAPI REST API: auth (incl. 2FA), workspaces, typed requests for every endpoint, pagination, retries, webhook verification.",
   "license": "MIT",
   "homepage": "https://github.com/bwalia/opsapi/tree/main/sdk/typescript#readme",

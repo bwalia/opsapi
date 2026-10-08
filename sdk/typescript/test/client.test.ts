@@ -161,7 +161,9 @@ describe('auth', () => {
     const opsapi = createClient({ baseUrl: BASE, fetch });
     const res = await opsapi.auth.login({ username: 'a@b.test', password: 'pw' });
     expect(res).toMatchObject({ status: 'signed_in', token: 'jwt1', refreshToken: 'r1', currentNamespace: ns });
-    expect(await calls[0]!.json()).toEqual({ username: 'a@b.test', password: 'pw' });
+    // The server reads form fields on /auth/* (JSON there is ignored -> "identifier required").
+    expect(calls[0]!.headers.get('content-type')).toBe('application/x-www-form-urlencoded');
+    expect(Object.fromEntries(new URLSearchParams(await calls[0]!.text()))).toEqual({ username: 'a@b.test', password: 'pw' });
     await opsapi.GET('/api/v2/customers');
     expect(calls[1]!.headers.get('authorization')).toBe('Bearer jwt1');
     expect(calls[1]!.headers.get('x-namespace-id')).toBe(NS_UUID);
@@ -177,7 +179,7 @@ describe('auth', () => {
     expect(challenge).toMatchObject({ status: 'needs_2fa', sessionToken: 's1' });
     const done = await opsapi.auth.verify2fa({ sessionToken: 's1', code: '123456' });
     expect(done.token).toBe('jwt2');
-    expect(await calls[1]!.json()).toEqual({ session_token: 's1', code: '123456' });
+    expect(Object.fromEntries(new URLSearchParams(await calls[1]!.text()))).toEqual({ session_token: 's1', code: '123456' });
   });
 
   it('wrong password -> OpsApiError 401', async () => {
@@ -192,6 +194,7 @@ describe('auth', () => {
       new URL(req.url).pathname === '/auth/refresh' ? json({ token: 'jwt3', refresh_token: 'r2' }) : json({}));
     const opsapi = createClient({ baseUrl: BASE, token: 'old', fetch });
     expect(await opsapi.auth.refresh('r1')).toEqual({ token: 'jwt3', refreshToken: 'r2' });
+    expect(new URLSearchParams(await calls[0]!.text()).get('refresh_token')).toBe('r1');
     await opsapi.GET('/api/v2/customers');
     expect(calls[1]!.headers.get('authorization')).toBe('Bearer jwt3');
     await opsapi.auth.logout('r2');

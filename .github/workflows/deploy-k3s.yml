@@ -142,7 +142,7 @@ jobs:
           tag_on_sha() {
             git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}" 2>/dev/null \
               | awk -v sha="${SHA}" '$1 == sha { print $2 }' \
-              | sed 's#refs/tags/##; s#\^{}##' | head -n1
+              | sed 's#refs/tags/##; s#\^{}##' | grep -v '^sdk-v' | head -n1
           }
 
           EXISTING=$(tag_on_sha || true)
@@ -257,7 +257,8 @@ jobs:
           # `git describe`-derived string when built from the same commit.
           # This is the whole point of the "constant across environments"
           # requirement — the version should reflect the CODE, not the env.
-          APP_VERSION=$(git describe --tags --always 2>/dev/null || echo 'dev')
+          # SDK release tags (sdk-v*) version the npm package, not the server.
+          APP_VERSION=$(git describe --tags --always --exclude 'sdk-v*' 2>/dev/null || echo 'dev')
           BUILD_NUMBER="${GITHUB_RUN_NUMBER:-local}"
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
           echo "APP_VERSION=$APP_VERSION" >> $GITHUB_OUTPUT
