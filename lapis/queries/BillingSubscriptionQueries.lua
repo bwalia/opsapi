@@ -106,4 +106,152 @@ function BillingSubscriptionQueries.upsert(fields)
     return BillingSubscriptionModel:create(set, { returning = "*" })
 end
 
+-- ===========================================================================
+-- Apps (Billing & Entitlements): subscriptions per app + manual grants.
+-- Every function is scoped to the caller's namespace_id.
+-- ===========================================================================
+
+local Common = require("queries.FieldServiceCommon")
+local Apps = require("queries.BillingAppQueries")
+
+local SUB_SELECT = [[
+    SELECT s.uuid, s.status, s.provider, s.current_period_start, s.current_period_end, s.cancel_at_period_end,
+           s.canceled_at, s.trial_end, s.created_at, s.updated_at,
+           a.uuid AS app_uuid, a.name AS app_name, p.uuid AS plan_uuid, p.plan_key, p.name AS plan_name,
+           c.uuid AS customer_uuid, c.external_id AS customer_external_id, c.email AS customer_email
+    FROM billing_subscriptions s
+    JOIN billing_apps a ON a.id = s.app_id
+    LEFT JOIN billing_plans p ON p.id = s.plan_id
+    LEFT JOIN customers c ON c.id = s.customer_id
+]]
+
+-- WHERE clause for the app/customer/status filters shared by lists.
+local function filters(alias, namespace_id, params)
+    local where, vals = { alias .. ".namespace_id = ?" }, { namespace_id }
+    if Common.nilify(params.app) then
+        where[#where + 1] = "(a.uuid = ? OR a.slug = ?)"
+        vals[#vals + 1], vals[#vals + 2] = params.app, params.app
+    end
+    if Common.nilify(params.customer) then
+        where[#where + 1] = "c.uuid = ?"
+        vals[#vals + 1] = params.customer
+    end
+    return where, vals
+end
+
+function BillingSubscriptionQueries.listForApps(namespace_id, params)
+    local where, vals = filters("s", namespace_id, params)
+    if Common.nilify(params.status) then
+        where[#where + 1] = "s.status = ?"
+        vals[#vals + 1] = params.status
+    end
+    local page, per_page, offset = Common.paging(params)
+    local sql = SUB_SELECT .. " WHERE " .. table.concat(where, " AND ")
+    local total = db.query("SELECT count(*) AS n FROM (" .. sql .. ") x", unpack(vals))[1].n
+    vals[#vals + 1], vals[#vals + 2] = per_page, offset
+    local rows = db.query(sql .. " ORDER BY s.created_at DESC LIMIT ? OFFSET ?", unpack(vals))
+    return Common.arr(rows), Common.meta(total, page, per_page)
+end
+
+function BillingSubscriptionQueries.findForApps(namespace_id, uuid)
+    return db.query(SUB_SELECT .. " WHERE s.namespace_id = ? AND s.uuid = ?", namespace_id, uuid)[1]
+end
+
+-- ---------------------------------------------------------------------------
+-- Grants: access without payment (comped plan, extra feature, trial
+-- extension). A grant gives a whole plan of the app and/or feature values.
+-- ---------------------------------------------------------------------------
+
+local GRANT_SELECT = [[
+    SELECT g.uuid, g.features, g.reason, g.starts_at, g.expires_at, g.granted_by, g.revoked_at, g.created_at,
+           a.uuid AS app_uuid, a.name AS app_name, p.uuid AS plan_uuid, p.plan_key, p.name AS plan_name,
+           c.uuid AS customer_uuid, c.external_id AS customer_external_id, c.email AS customer_email
+    FROM billing_grants g
+    JOIN billing_apps a ON a.id = g.app_id
+    JOIN customers c ON c.id = g.customer_id
+    LEFT JOIN billing_plans p ON p.id = g.plan_id
+]]
+
+function BillingSubscriptionQueries.listGrants(namespace_id, params)
+    local where, vals = filters("g", namespace_id, params)
+    if not Common.to_bool(params.include_revoked, false) then
+        where[#where + 1] = "g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > NOW())"
+    end
+    local page, per_page, offset = Common.paging(params)
+    local sql = GRANT_SELECT .. " WHERE " .. table.concat(where, " AND ")
+    local total = db.query("SELECT count(*) AS n FROM (" .. sql .. ") x", unpack(vals))[1].n
+    vals[#vals + 1], vals[#vals + 2] = per_page, offset
+    local rows = db.query(sql .. " ORDER BY g.created_at DESC LIMIT ? OFFSET ?", unpack(vals))
+    return Common.arr(rows), Common.meta(total, page, per_page)
+end
+
+--- A workspace's customer by uuid.
+function BillingSubscriptionQueries.customer(namespace_id, uuid)
+    if type(uuid) ~= "string" or uuid == "" then return nil end
+    return db.query("SELECT id, uuid, external_id, email FROM customers WHERE namespace_id = ? AND uuid = ?",
+        namespace_id, uuid)[1]
+end
+
+--- A plan of this app (not deleted), by uuid or plan_key.
+function BillingSubscriptionQueries.appPlan(app_id, ref)
+    if type(ref) ~= "string" or ref == "" then return nil end
+    return db.query([[SELECT * FROM billing_plans WHERE app_id = ? AND deleted_at IS NULL
+        AND (uuid = ? OR plan_key = ?) LIMIT 1]], app_id, ref, ref)[1]
+end
+
+local function timestamp(v, name)
+    v = Common.nilify(v)
+    if v == nil then return nil end
+    if type(v) ~= "string" or not v:match("^%d%d%d%d%-%d%d%-%d%d") then
+        return nil, name .. " must be an ISO-8601 date/time"
+    end
+    return v
+end
+
+function BillingSubscriptionQueries.createGrant(namespace_id, actor, b)
+    local app = Apps.find(namespace_id, b.app)
+    if not app then return nil, "App not found" end
+    local customer = BillingSubscriptionQueries.customer(namespace_id, b.customer)
+    if not customer then return nil, "Customer not found" end
+    local plan
+    if Common.nilify(b.plan) then
+        plan = BillingSubscriptionQueries.appPlan(app.id, b.plan)
+        if not plan then return nil, "Plan not found in this app" end
+    end
+    local features, ferr = Apps.checkFeatureValues(app.id, b.features)
+    if not features then return nil, ferr end
+    if not plan and next(features) == nil then return nil, "grant a plan, some features, or both" end
+    local starts_at, serr = timestamp(b.starts_at, "starts_at")
+    if serr then return nil, serr end
+    local expires_at, eerr = timestamp(b.expires_at, "expires_at")
+    if eerr then return nil, eerr end
+    local reason = Common.nilify(b.reason)
+    if reason ~= nil and (type(reason) ~= "string" or #reason > 500) then
+        return nil, "reason must be text (max 500)"
+    end
+
+    local uuid = Common.uuid()
+    local ok, err = pcall(db.query, [[
+        INSERT INTO billing_grants (uuid, namespace_id, app_id, customer_id, plan_id, features, reason,
+            starts_at, expires_at, granted_by)
+        VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, COALESCE(?::timestamptz, NOW()), ?::timestamptz, ?)]],
+        uuid, namespace_id, app.id, customer.id, plan and plan.id or db.NULL,
+        require("lib.billing-signing").encode(features), reason or db.NULL,
+        starts_at or db.NULL, expires_at or db.NULL, actor or db.NULL)
+    if not ok then
+        if tostring(err):find("invalid input syntax", 1, true) or tostring(err):find("out of range", 1, true) then
+            return nil, "starts_at / expires_at must be valid ISO-8601 dates"
+        end
+        error(err)
+    end
+    return db.query(GRANT_SELECT .. " WHERE g.uuid = ?", uuid)[1]
+end
+
+function BillingSubscriptionQueries.revokeGrant(namespace_id, uuid)
+    local res = db.query([[UPDATE billing_grants SET revoked_at = NOW(), updated_at = NOW()
+        WHERE namespace_id = ? AND uuid = ? AND revoked_at IS NULL]], namespace_id, uuid)
+    if (res.affected_rows or 0) == 0 then return nil, "Grant not found" end
+    return true
+end
+
 return BillingSubscriptionQueries

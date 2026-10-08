@@ -47,9 +47,11 @@ return function(app)
 
     -- Billing management is a namespace-admin action: the owner, a platform
     -- admin, or anyone holding the namespace.manage permission. (hasPermission
-    -- already returns true for owners and platform admins.)
-    local function is_manager(self)
+    -- already returns true for owners and platform admins.) Where the Billing &
+    -- Entitlements module is deployed, its `billing.<action>` permission works too.
+    local function is_manager(self, action)
         return NamespaceMiddleware.hasPermission(self, "namespace", "manage")
+            or NamespaceMiddleware.hasPermission(self, "billing", action)
     end
 
     -- Public projection — never leak Stripe ids or internal columns.
@@ -85,7 +87,7 @@ return function(app)
     -- ----------------------------------------------------------------------
     app:post("/api/v2/billing/plans", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            if not is_manager(self) then
+            if not is_manager(self, "create") then
                 return api_response(403, nil, "Only a namespace owner can manage plans")
             end
             local body = parse_json_body()
@@ -94,8 +96,12 @@ return function(app)
             if not ok then
                 return api_response(400, nil, verr)
             end
+            local extra, aerr = BillingPlanQueries.appFields(self.namespace.id, body, nil)
+            if not extra then
+                return api_response(400, nil, aerr)
+            end
 
-            local plan = BillingPlanQueries.create({
+            local params = {
                 namespace_id = self.namespace.id,
                 name = body.name,
                 description = body.description,
@@ -109,12 +115,24 @@ return function(app)
                 active = (body.active ~= false),
                 sort_order = tonumber(body.sort_order) or 0,
                 metadata = body.metadata,
-            })
+            }
+            for k, v in pairs(extra) do params[k] = v end
+            if extra.is_default then BillingPlanQueries.clearDefault(extra.app_id) end
+            local created, plan = pcall(BillingPlanQueries.create, params)
+            if not created then
+                if tostring(plan):find("duplicate key", 1, true) then
+                    return api_response(409, nil, "this app already has a plan with that plan_key")
+                end
+                error(plan)
+            end
             if not plan then
                 return api_response(500, nil, "Failed to create plan")
             end
 
-            local synced, sync_error = try_sync(plan)
+            -- App plans sell through the client's own Stripe account (Connect,
+            -- phase 2), never the platform's: no platform sync for them.
+            local synced, sync_error
+            if not plan.app_id then synced, sync_error = try_sync(plan) end
             local row = BillingPlanQueries.decode_row(synced or BillingPlanQueries.getByUuid(plan.uuid))
             return {
                 status = 201,
@@ -128,9 +146,16 @@ return function(app)
     -- ----------------------------------------------------------------------
     app:get("/api/v2/billing/plans", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
+            local app_id
+            if self.params.app and self.params.app ~= "" then
+                local app_row = require("queries.BillingAppQueries").find(self.namespace.id, self.params.app)
+                if not app_row then return api_response(404, nil, "App not found") end
+                app_id = app_row.id
+            end
             local plans = BillingPlanQueries.listByNamespace(self.namespace.id, {
                 include_inactive = self.params.include_inactive == "true",
                 plan_type = self.params.plan_type,
+                app_id = app_id,
             })
             return api_response(200, plans)
         end)
@@ -157,7 +182,7 @@ return function(app)
     -- ----------------------------------------------------------------------
     app:put("/api/v2/billing/plans/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            if not is_manager(self) then
+            if not is_manager(self, "update") then
                 return api_response(403, nil, "Only a namespace owner can manage plans")
             end
             local plan = BillingPlanQueries.getByUuid(self.params.uuid)
@@ -169,6 +194,10 @@ return function(app)
             end
 
             local body = parse_json_body()
+            local extra, aerr = BillingPlanQueries.appFields(self.namespace.id, body, plan)
+            if not extra then
+                return api_response(400, nil, aerr)
+            end
 
             -- Validate the merged result so partial updates stay consistent.
             local merged = {
@@ -197,9 +226,18 @@ return function(app)
                 if body[f] ~= nil then fields[f] = body[f] end
             end
             if body.active ~= nil then fields.active = (body.active == true) end
+            for k, v in pairs(extra) do fields[k] = v end
+            fields.app_id = nil
+            if extra.is_default then BillingPlanQueries.clearDefault(plan.app_id, plan.uuid) end
 
             local sync_error
-            local updated = BillingPlanQueries.update(self.params.uuid, fields)
+            local saved, updated = pcall(BillingPlanQueries.update, self.params.uuid, fields)
+            if not saved then
+                if tostring(updated):find("duplicate key", 1, true) then
+                    return api_response(409, nil, "this app already has a plan with that plan_key")
+                end
+                error(updated)
+            end
             if not updated then
                 return api_response(500, nil, "Failed to update plan")
             end
@@ -207,7 +245,7 @@ return function(app)
             -- Reconcile Stripe (best-effort): update the product, and when a
             -- price-affecting field changed, archive the old (immutable) price
             -- and let ensureStripeSync create a fresh one.
-            if PaymentProvider.stripe_configured() then
+            if not plan.app_id and PaymentProvider.stripe_configured() then
                 local stripe = PaymentProvider.get_stripe()
                 if stripe then
                     if plan.stripe_product_id and plan.stripe_product_id ~= ""
@@ -235,7 +273,7 @@ return function(app)
     -- ----------------------------------------------------------------------
     app:delete("/api/v2/billing/plans/:uuid", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            if not is_manager(self) then
+            if not is_manager(self, "delete") then
                 return api_response(403, nil, "Only a namespace owner can manage plans")
             end
             local plan = BillingPlanQueries.getByUuid(self.params.uuid)
@@ -269,7 +307,7 @@ return function(app)
     -- ----------------------------------------------------------------------
     app:post("/api/v2/billing/plans/:uuid/sync", AuthMiddleware.requireAuth(
         NamespaceMiddleware.requireNamespace(function(self)
-            if not is_manager(self) then
+            if not is_manager(self, "update") then
                 return api_response(403, nil, "Only a namespace owner can manage plans")
             end
             local plan = BillingPlanQueries.getByUuid(self.params.uuid)
@@ -278,6 +316,10 @@ return function(app)
             end
             if tonumber(plan.namespace_id) ~= tonumber(self.namespace.id) then
                 return api_response(403, nil, "Access denied")
+            end
+            if plan.app_id then
+                return api_response(409, nil,
+                    "App plans sync to the workspace's own Stripe account (coming with Connect)")
             end
             if not PaymentProvider.stripe_configured() then
                 return api_response(503, nil, "Billing is not configured")
@@ -303,7 +345,7 @@ return function(app)
         if not namespace then
             return api_response(404, nil, "Namespace not found")
         end
-        local plans = BillingPlanQueries.listByNamespace(namespace.id, { include_inactive = false })
+        local plans = BillingPlanQueries.listByNamespace(namespace.id, { include_inactive = false, app_id = false })
         local out = {}
         for i = 1, #plans do
             out[i] = public_plan(plans[i])

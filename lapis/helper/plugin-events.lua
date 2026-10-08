@@ -83,6 +83,29 @@ local BATCH = 20
 -- (values are the tables' CHECK-constrained statuses).
 PluginEvents.CATALOG = {
     { entity = "customer", table = "customers", module = "customers", verbs = { disabled = { state = "disabled" } } },
+    -- Billing & Entitlements. Entitlements are computed from these rows, so an
+    -- app's SDK drops its cached token on subscription.* / billing.grant.* /
+    -- billing.plan.* instead of a separate computed "entitlements.changed".
+    {
+        entity = "subscription", table = "billing_subscriptions", module = "subscriptions",
+        verbs = {
+            activated = { status = "active" }, trialing = { status = "trialing" }, past_due = { status = "past_due" },
+            canceled = { status = { "canceled", "incomplete_expired" } },
+        },
+    },
+    { entity = "billing.plan", table = "billing_plans", module = "billing" },
+    { entity = "billing.grant", table = "billing_grants", module = "subscriptions" },
+    {
+        entity = "license", table = "billing_licenses", module = "licenses", hide = "key_hash",
+        verbs = {
+            suspended = { status = "suspended" }, revoked = { status = "revoked" }, expired = { status = "expired" },
+        },
+    },
+    {
+        entity = "license.activation", table = "billing_license_activations", module = "licenses",
+        hide = "fingerprint_hash", ns_key = "license_id",
+        ns_sql = "SELECT namespace_id FROM billing_licenses WHERE id = $1::bigint",
+    },
     {
         entity = "invoice", table = "invoices", module = "invoices",
         verbs = {

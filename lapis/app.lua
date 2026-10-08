@@ -396,12 +396,20 @@ local function safe_load_routes(route_name)
     return true
 end
 
--- Load routes only when their required feature is enabled
+-- Load routes only when their required feature is enabled. A list means
+-- "any of these" (e.g. {"tax_copilot", "billing"}), like migrations' gating.
 local function load_if(feature, route_name)
-    if ProjectConfig.isFeatureEnabled(feature) then
+    local enabled
+    if type(feature) == "table" then
+        enabled = ProjectConfig.isAnyFeatureEnabled(feature)
+    else
+        enabled = ProjectConfig.isFeatureEnabled(feature)
+    end
+    if enabled then
         return safe_load_routes(route_name)
     else
-        ngx.log(ngx.NOTICE, "Skipped (feature '", feature, "' disabled): ", route_name)
+        ngx.log(ngx.NOTICE, "Skipped (feature '", type(feature) == "table" and table.concat(feature, "|") or feature,
+            "' disabled): ", route_name)
         return false
     end
 end
@@ -477,7 +485,7 @@ load_if("ecommerce", "routes.cart")
 load_if("ecommerce", "routes.payments")
 load_if("ecommerce", "routes.stores")
 load_if("ecommerce", "routes.storeproducts")
-load_if("ecommerce", "routes.customers")
+load_if({ "ecommerce", "billing" }, "routes.customers")
 load_if("ecommerce", "routes.orderitems")
 load_if("ecommerce", "routes.checkout")
 load_if("ecommerce", "routes.variants")
@@ -629,11 +637,19 @@ load_if("tax_copilot", "routes.tax-admin-form-sections")
 -- dashboard. Same admin-role gate as the other tax-admin routes; every
 -- endpoint is scoped by an explicit namespace_slug.
 load_if("tax_copilot", "routes.tax-admin-cmi")
--- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout)
-load_if("tax_copilot", "routes.billing-plans")
+-- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout).
+-- Plans are shared with the Billing & Entitlements module; checkout/account/
+-- webhook stay the tax app's single-merchant flow (the billing module's own
+-- Stripe Connect checkout comes in phase 2 — docs/BILLING_ENTITLEMENTS.md).
+load_if({ "tax_copilot", "billing" }, "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")
 load_if("tax_copilot", "routes.billing-webhook")
 load_if("tax_copilot", "routes.billing-account")
+-- Billing & Entitlements (docs/BILLING_ENTITLEMENTS.md): apps, subscriptions +
+-- runtime entitlements, licences. URL family = RBAC module = API-key scope.
+load_if("billing", "routes.billing-apps")
+load_if("billing", "routes.billing-subscriptions")
+load_if("billing", "routes.billing-licenses")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines, Leads)

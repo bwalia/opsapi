@@ -35,6 +35,9 @@ local VALID_CUSTOMER_FIELDS = {
     tax_exempt = true,
     state = true,
     user_id = true,
+    -- The client's own user id (Billing & Entitlements); the column exists
+    -- only where the billing feature is enabled.
+    external_id = require("helper.project-config").isFeatureEnabled("billing") or nil,
 }
 
 function CustomerQueries.create(params)
@@ -150,8 +153,68 @@ function CustomerQueries.destroy(id)
     return record:delete()
 end
 
-function CustomerQueries.findByEmail(email)
-    return CustomerModel:find({ email = email })
+-- Email is unique per workspace (not across workspaces), so a lookup must say which.
+function CustomerQueries.findByEmail(namespace_id, email)
+    return CustomerModel:find({ namespace_id = namespace_id, email = email })
+end
+
+--- Billing runtime: the workspace customer the client's app knows as
+-- `external_id` (its own user id). Created on first sight; an existing
+-- customer with the same email (and no external_id yet) is adopted.
+-- b = { email, first_name, last_name } (email is required to create).
+-- @return row | nil, err
+function CustomerQueries.upsertExternal(namespace_id, external_id, b)
+    local db = require("lapis.db")
+    if type(external_id) ~= "string" or not external_id:match("^[%w%-_.:@|]+$") or #external_id > 255 then
+        return nil, "external_id must be 1-255 characters: letters, digits and - _ . : @ |"
+    end
+    local email = b.email ~= nil and b.email ~= cjson.null and tostring(b.email) or nil
+    if email and (#email > 254 or not email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$")) then
+        return nil, "email is not a valid address"
+    end
+    local set = {}
+    for _, f in ipairs({ "first_name", "last_name" }) do
+        local v = b[f]
+        if v ~= nil and v ~= cjson.null then
+            if type(v) ~= "string" or #v > 120 then return nil, f .. " must be text (max 120)" end
+            set[f] = v
+        end
+    end
+    if email then set.email = email end
+
+    local function by_external()
+        return db.query("SELECT * FROM customers WHERE namespace_id = ? AND external_id = ?",
+            namespace_id, external_id)[1]
+    end
+    local row = by_external()
+    if not row and email then
+        row = db.query([[SELECT * FROM customers WHERE namespace_id = ? AND lower(email) = lower(?)
+            AND external_id IS NULL LIMIT 1]], namespace_id, email)[1]
+        if row then set.external_id = external_id end
+    end
+    if not row then
+        if not email then return nil, "email is required to create a customer" end
+        set.uuid, set.namespace_id, set.external_id = Global.generateUUID(), namespace_id, external_id
+        set.created_at, set.updated_at = db.raw("NOW()"), db.raw("NOW()")
+        local ok, res = pcall(db.insert, "customers", set, { returning = "*" })
+        if ok then return res[1] end
+        if not tostring(res):find("duplicate key", 1, true) then error(res) end
+        row = by_external() -- a concurrent call created it
+        if not row then return nil, "another customer already uses this email" end
+        return row
+    end
+    if next(set) ~= nil then
+        set.updated_at = db.raw("NOW()")
+        local ok, err = pcall(db.update, "customers", set, { id = row.id })
+        if not ok then
+            if tostring(err):find("duplicate key", 1, true) then
+                return nil, "another customer already uses this email"
+            end
+            error(err)
+        end
+        row = db.query("SELECT * FROM customers WHERE id = ?", row.id)[1]
+    end
+    return row
 end
 
 return CustomerQueries

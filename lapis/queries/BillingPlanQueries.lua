@@ -110,6 +110,13 @@ function BillingPlanQueries.listByNamespace(namespace_id, opts)
     if not opts.include_inactive then
         table.insert(where, "active = TRUE")
     end
+    -- Billing & Entitlements: one app's plans (id), or only the app-less ones (false).
+    if opts.app_id == false then
+        table.insert(where, "app_id IS NULL")
+    elseif opts.app_id then
+        table.insert(where, "app_id = ?")
+        table.insert(vals, opts.app_id)
+    end
     if opts.plan_type and VALID_TYPES[opts.plan_type] then
         table.insert(where, "plan_type = ?")
         table.insert(vals, opts.plan_type)
@@ -119,6 +126,56 @@ function BillingPlanQueries.listByNamespace(namespace_id, opts)
     local rows = db.query(sql, unpack(vals))
     for i = 1, #rows do decode_row(rows[i]) end
     return rows
+end
+
+--- Billing & Entitlements: the app-plan fields of a create/update body —
+-- app (uuid/slug, create only), plan_key (unique per app), is_default,
+-- is_public, and features checked against the app's catalogue. `current` =
+-- the plan being updated (nil on create). Plans without an app (the tax
+-- app's) accept none of these and keep their free-form features.
+-- @return fields to write (maybe empty) | nil, err
+function BillingPlanQueries.appFields(namespace_id, body, current)
+    local Apps = require("queries.BillingAppQueries")
+    local f = {}
+    local app_id = current and current.app_id
+    if body.app ~= nil then
+        local app = Apps.find(namespace_id, body.app)
+        if not app then return nil, "App not found" end
+        if current and tonumber(app.id) ~= tonumber(current.app_id) then
+            return nil, "a plan can't move to another app"
+        end
+        f.app_id, app_id = app.id, app.id
+    end
+    if not app_id then
+        if body.plan_key ~= nil or body.is_default ~= nil or body.is_public ~= nil then
+            return nil, "plan_key, is_default and is_public are for app plans: send `app`"
+        end
+        return f
+    end
+    if body.plan_key ~= nil or not current then
+        local key = body.plan_key
+        if key == nil then
+            key = tostring(body.name or ""):lower():gsub("[^a-z0-9]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+        end
+        if type(key) ~= "string" or not key:match("^[a-z0-9][a-z0-9_-]*$") or #key > 64 then
+            return nil, "plan_key must be lowercase letters, digits, - and _ (max 64)"
+        end
+        f.plan_key = key
+    end
+    if body.is_default ~= nil then f.is_default = body.is_default == true end
+    if body.is_public ~= nil then f.is_public = body.is_public == true end
+    if body.features ~= nil then
+        local features, err = Apps.checkFeatureValues(app_id, body.features)
+        if not features then return nil, err end
+        f.features = require("lib.billing-signing").encode(features) -- {} stays an object
+    end
+    return f
+end
+
+--- Before making a plan an app's default: the previous default steps down.
+function BillingPlanQueries.clearDefault(app_id, except_uuid)
+    db.query([[UPDATE billing_plans SET is_default = FALSE, updated_at = NOW()
+        WHERE app_id = ? AND is_default AND uuid <> ?]], app_id, except_uuid or "")
 end
 
 -- Update a plan by uuid. Returns the updated model or nil.
