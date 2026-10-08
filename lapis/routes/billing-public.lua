@@ -100,8 +100,8 @@ local function public_plans(app)
     return Common.arr(plans)
 end
 
-return function(app_routes)
-    app_routes:get("/api/v2/public/billing/apps/:app", public(function(self, app)
+return function(app)
+    app:get("/api/v2/public/billing/apps/:app", public(function(self, app)
         local etag = ('"%s-%s"'):format(app.uuid:sub(1, 8), app.cache_generation or 1)
         ngx.header["Cache-Control"] = "public, max-age=300"
         ngx.header["ETag"] = etag
@@ -114,7 +114,7 @@ return function(app_routes)
         return Http.ok(info)
     end))
 
-    app_routes:get("/api/v2/public/billing/jwks.json", function()
+    app:get("/api/v2/public/billing/jwks.json", function()
         local allowed, _, retry = require("middleware.rate-limit").check("billing_jwks:" .. Guard.ip(), 120, 60)
         if not allowed then return Guard.fail(429, "rate_limited", "Too many requests", { retry_after = retry }) end
         ngx.header["Access-Control-Allow-Origin"] = "*"
@@ -144,13 +144,13 @@ return function(app_routes)
             end)
         end)
     end
-    app_routes:post("/api/v2/public/licenses/activate", licence_call("activate"))
-    app_routes:post("/api/v2/public/licenses/validate", licence_call("validate"))
-    app_routes:post("/api/v2/public/licenses/deactivate", licence_call("deactivate"))
+    app:post("/api/v2/public/licenses/activate", licence_call("activate"))
+    app:post("/api/v2/public/licenses/validate", licence_call("validate"))
+    app:post("/api/v2/public/licenses/deactivate", licence_call("deactivate"))
 
     -- Coupons ----------------------------------------------------------------
 
-    app_routes:post("/api/v2/public/billing/coupons/check", public(function(_, app, body, ip, r)
+    app:post("/api/v2/public/billing/coupons/check", public(function(_, app, body, ip, r)
         local limited = Guard.limit(app, { { "coupon_ip", ip, r.checkout_per_ip_per_hour * 3, 3600 } })
         if limited then return limited end
         local plan = Subs.appPlan(app.id, tostring(body.plan_key or ""))
@@ -163,7 +163,7 @@ return function(app_routes)
 
     -- Access links + sessions ------------------------------------------------
 
-    app_routes:post("/api/v2/public/billing/access-link", public(function(self, app, body, ip, r)
+    app:post("/api/v2/public/billing/access-link", public(function(self, app, body, ip, r)
         if Settings.resolve(app).email_collection == "none" then
             return Guard.fail(400, "access_links_disabled", "This app doesn't collect email addresses")
         end
@@ -200,7 +200,7 @@ return function(app_routes)
         end)
     end))
 
-    app_routes:post("/api/v2/public/billing/sessions", public(function(_, app, body, ip)
+    app:post("/api/v2/public/billing/sessions", public(function(_, app, body, ip)
         local limited = Guard.limit(app, { { "session_ip", ip, 30, 600 } })
         if limited then return limited end
         if type(body.token) ~= "string" or #body.token < 20 or #body.token > 200 then
@@ -217,7 +217,7 @@ return function(app_routes)
         return Http.ok({ session = raw, expires_in = SESSION_MINUTES * 60 }, 201)
     end))
 
-    app_routes:get("/api/v2/public/billing/me", with_session(function(_, app, _, s)
+    app:get("/api/v2/public/billing/me", with_session(function(_, app, _, s)
         local purchases, subscriptions = Purchases.forCustomer(app, s.customer_id)
         return Http.ok({
             customer = { email = s.email },
@@ -228,7 +228,7 @@ return function(app_routes)
         })
     end))
 
-    app_routes:post("/api/v2/public/billing/me/licenses/:uuid/reissue", with_session(function(self, app, body, s)
+    app:post("/api/v2/public/billing/me/licenses/:uuid/reissue", with_session(function(self, app, body, s)
         return Guard.idempotent(self, ("app:%s:reissue:%s"):format(app.id, s.customer_id), body, function()
             local res, err = Licenses.reissue(app.namespace_id, self.params.uuid, s.customer_id)
             if not res then return Guard.fail(404, "not_found", err) end
@@ -237,7 +237,7 @@ return function(app_routes)
         end)
     end))
 
-    app_routes:delete("/api/v2/public/billing/me/licenses/:uuid/activations/:activation", with_session(
+    app:delete("/api/v2/public/billing/me/licenses/:uuid/activations/:activation", with_session(
         function(self, app, _, s)
             local ok, err = Licenses.removeActivation(app.namespace_id, self.params.uuid, self.params.activation,
                 s.customer_id)
@@ -245,7 +245,7 @@ return function(app_routes)
             return Http.ok({ freed = true })
         end))
 
-    app_routes:post("/api/v2/public/billing/me/logout", with_session(function(_, _, _, s)
+    app:post("/api/v2/public/billing/me/logout", with_session(function(_, _, _, s)
         db.query("DELETE FROM billing_customer_sessions WHERE id = ?", s.id)
         return Http.ok({ signed_out = true })
     end))

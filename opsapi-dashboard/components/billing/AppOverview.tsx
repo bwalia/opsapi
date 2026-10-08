@@ -4,18 +4,12 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { Button, Card, ConfirmDialog, Input, Select, Switch, Textarea } from '@/components/ui';
+import { Button, Card, ConfirmDialog, Input, Select, Switch } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiError } from '@/components/field-service/shared';
 import { CopyButton, KIND_LABELS } from '@/components/billing/shared';
-import {
-  billingService,
-  formatMinor,
-  type AppKind,
-  type AppReport,
-  type BillingApp,
-  type OfflinePolicy,
-} from '@/services/billing.service';
+import AppSettingsForm from '@/components/billing/AppSettingsForm';
+import { billingService, formatMinor, type AppKind, type AppReport, type BillingApp } from '@/services/billing.service';
 
 function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
@@ -39,32 +33,24 @@ export default function AppOverview({
   const { canUpdate, canDelete } = usePermissions();
   const editable = canUpdate('billing');
   const [report, setReport] = useState<AppReport | null>(null);
-  const [form, setForm] = useState(() => toForm(app));
+  const [name, setName] = useState(app.name);
+  const [kind, setKind] = useState<AppKind>(app.kind);
+  const [mode, setMode] = useState(app.mode);
+  const [active, setActive] = useState(app.active);
   const [saving, setSaving] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => setForm(toForm(app)), [app]);
   useEffect(() => {
     billingService.report(app.uuid).then(setReport).catch(() => setReport(null));
   }, [app.uuid]);
 
-  const save = async (e: React.FormEvent) => {
+  const saveBasics = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const updated = await billingService.updateApp(app.uuid, {
-        name: form.name.trim(),
-        kind: form.kind,
-        mode: form.mode,
-        offline_policy: form.offline_policy,
-        offline_grace_seconds: Math.round(Number(form.grace_hours) * 3600),
-        entitlement_ttl_seconds: Math.round(Number(form.ttl_minutes) * 60),
-        past_due_grace_days: Math.round(Number(form.past_due_days)),
-        allowed_return_urls: form.return_urls.split('\n').map((u) => u.trim()).filter(Boolean),
-        active: form.active,
-      });
+      const updated = await billingService.updateApp(app.uuid, { name: name.trim(), kind, mode, active });
       if (updated.publishable_key !== app.publishable_key) {
         toast('Mode changed: the app has a new publishable key', { icon: '🔑' });
       }
@@ -102,9 +88,6 @@ export default function AppOverview({
     }
   };
 
-  const set = <K extends keyof ReturnType<typeof toForm>>(k: K, v: ReturnType<typeof toForm>[K]) =>
-    setForm((f) => ({ ...f, [k]: v }));
-
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -115,17 +98,17 @@ export default function AppOverview({
         />
         <Stat label="Past due" value={report?.past_due ?? '—'} hint={report ? `${report.churned_30d} cancelled in 30 days` : undefined} />
         <Stat
-          label="Access without payment"
-          value={report?.active_grants ?? '—'}
-          hint={report ? `${report.active_licenses} licences · ${report.active_activations} devices` : undefined}
+          label="Licences"
+          value={report?.active_licenses ?? '—'}
+          hint={report ? `${report.active_activations} devices · ${report.active_grants} grants` : undefined}
         />
       </div>
 
       <Card className="shadow-sm">
         <h2 className="text-base font-semibold text-secondary-900">Keys</h2>
         <p className="mt-1 text-sm text-secondary-500">
-          The publishable key only identifies this app on public endpoints (pricing page, licence activation). It is
-          safe in browsers and desktop builds. Your server calls the entitlement API with a{' '}
+          The publishable key only identifies this app on public endpoints (pricing, licence activation, account links).
+          It is safe in browsers and desktop builds. Your server calls the entitlement API with a{' '}
           <Link href="/dashboard/namespace/api-keys" className="text-primary-600 hover:underline">
             workspace API key
           </Link>{' '}
@@ -161,12 +144,12 @@ export default function AppOverview({
         </dl>
       </Card>
 
-      <form onSubmit={save}>
+      <form onSubmit={saveBasics}>
         <Card className="shadow-sm">
-          <h2 className="text-base font-semibold text-secondary-900 mb-4">Settings</h2>
+          <h2 className="text-base font-semibold text-secondary-900 mb-4">App</h2>
           <fieldset disabled={!editable} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} required maxLength={120} />
-            <Select label="Kind" value={form.kind} onChange={(e) => set('kind', e.target.value as AppKind)}>
+            <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} />
+            <Select label="Kind" value={kind} onChange={(e) => setKind(e.target.value as AppKind)} helperText="Desktop and self-hosted apps use licence keys.">
               {Object.entries(KIND_LABELS).map(([v, l]) => (
                 <option key={v} value={v}>
                   {l}
@@ -175,63 +158,19 @@ export default function AppOverview({
             </Select>
             <Select
               label="Mode"
-              value={form.mode}
-              onChange={(e) => set('mode', e.target.value as 'test' | 'live')}
+              value={mode}
+              onChange={(e) => setMode(e.target.value as 'test' | 'live')}
               helperText="Switching mode issues a new publishable key."
             >
               <option value="test">Test</option>
               <option value="live">Live</option>
             </Select>
-            <Select
-              label="If OpsAPI can't be reached"
-              value={form.offline_policy}
-              onChange={(e) => set('offline_policy', e.target.value as OfflinePolicy)}
-            >
-              <option value="fail_closed">Block access (fail closed)</option>
-              <option value="fail_open">Keep last known access (fail open)</option>
-            </Select>
-            <Input
-              label="Offline grace (hours)"
-              type="number"
-              min={0}
-              max={8760}
-              value={form.grace_hours}
-              onChange={(e) => set('grace_hours', e.target.value)}
-              helperText="How long a fail-open app, or a licence file, works without checking in."
-            />
-            <Input
-              label="Entitlement token lifetime (minutes)"
-              type="number"
-              min={1}
-              max={1440}
-              value={form.ttl_minutes}
-              onChange={(e) => set('ttl_minutes', e.target.value)}
-              helperText="Apps re-check access this often."
-            />
-            <Input
-              label="Past-due grace (days)"
-              type="number"
-              min={0}
-              max={90}
-              value={form.past_due_days}
-              onChange={(e) => set('past_due_days', e.target.value)}
-              helperText="A failed renewal keeps access this long while the payment is retried."
-            />
             <div className="flex items-center justify-between rounded-lg border border-secondary-200 px-3 py-2">
               <div>
                 <p className="text-sm font-medium text-secondary-800">Active</p>
                 <p className="text-xs text-secondary-500">An inactive app&apos;s keys stop working.</p>
               </div>
-              <Switch checked={form.active} onChange={(v) => set('active', v)} aria-label="App active" />
-            </div>
-            <div className="sm:col-span-2">
-              <Textarea
-                label="Allowed checkout return URLs (one per line)"
-                value={form.return_urls}
-                onChange={(e) => set('return_urls', e.target.value)}
-                rows={3}
-                placeholder="https://app.example.com/billing/done"
-              />
+              <Switch checked={active} onChange={setActive} aria-label="App active" />
             </div>
           </fieldset>
           {editable && (
@@ -244,12 +183,14 @@ export default function AppOverview({
                 <span />
               )}
               <Button type="submit" isLoading={saving}>
-                Save settings
+                Save
               </Button>
             </div>
           )}
         </Card>
       </form>
+
+      <AppSettingsForm app={app} editable={editable} onSaved={onChange} />
 
       <ConfirmDialog
         isOpen={rotateOpen}
@@ -266,25 +207,11 @@ export default function AppOverview({
         onClose={() => setDeleteOpen(false)}
         onConfirm={remove}
         title={`Delete ${app.name}?`}
-        message="Its keys stop working at once. Plans, subscriptions and licences are kept for your records."
+        message="Its keys stop working at once. Plans, purchases, subscriptions and licences are kept for your records."
         confirmText="Delete app"
         variant="danger"
         isLoading={busy}
       />
     </div>
   );
-}
-
-function toForm(a: BillingApp) {
-  return {
-    name: a.name,
-    kind: a.kind,
-    mode: a.mode,
-    offline_policy: a.offline_policy,
-    grace_hours: String(Math.round((a.offline_grace_seconds / 3600) * 100) / 100),
-    ttl_minutes: String(Math.round((a.entitlement_ttl_seconds / 60) * 100) / 100),
-    past_due_days: String(a.past_due_grace_days),
-    return_urls: (Array.isArray(a.allowed_return_urls) ? a.allowed_return_urls : []).join('\n'),
-    active: a.active,
-  };
 }

@@ -98,7 +98,7 @@ function LicensesContent() {
         ),
       },
       { key: 'status', header: 'Status', render: (l) => <StatusPill status={l.status} /> },
-      { key: 'expires', header: 'Expires', render: (l) => (l.expires_at ? formatDate(l.expires_at) : 'Never') },
+      { key: 'access', header: 'Access until', render: (l) => (l.access_until ? formatDate(l.access_until) : 'Perpetual') },
     ],
     []
   );

@@ -9,8 +9,10 @@ import { apiError, Pill } from '@/components/field-service/shared';
 import { FeatureValuesEditor } from '@/components/billing/shared';
 import {
   billingService,
+  describePrice,
   describeValue,
-  formatMinor,
+  PURCHASE_TYPE_LABELS,
+  type PurchaseType,
   type BillingApp,
   type BillingFeature,
   type BillingPlan,
@@ -41,6 +43,12 @@ function PlanModal({
   const [currency, setCurrency] = useState('gbp');
   const [interval, setBillingInterval] = useState<Interval>('month');
   const [trialDays, setTrialDays] = useState('0');
+  const [ptype, setPtype] = useState<PurchaseType>('recurring');
+  const [termDays, setTermDays] = useState('30');
+  const [termCovers, setTermCovers] = useState<'access' | 'updates'>('access');
+  const [updatesDays, setUpdatesDays] = useState('');
+  const [appStoreId, setAppStoreId] = useState('');
+  const [playStoreId, setPlayStoreId] = useState('');
   const [values, setValues] = useState<FeatureMap>({});
   const [isDefault, setIsDefault] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
@@ -55,6 +63,12 @@ function PlanModal({
     setCurrency(plan?.currency || 'gbp');
     setBillingInterval((plan?.billing_interval as Interval) || 'month');
     setTrialDays(String(plan?.trial_days ?? 0));
+    setPtype(plan?.purchase_type || 'recurring');
+    setTermDays(String(plan?.term_days ?? 30));
+    setTermCovers(plan?.term_covers || 'access');
+    setUpdatesDays(plan?.updates_days ? String(plan.updates_days) : '');
+    setAppStoreId(plan?.store_products?.app_store || '');
+    setPlayStoreId(plan?.store_products?.play_store || '');
     // Every feature gets a value on a plan (off / 0 unless set).
     const v: FeatureMap = {};
     for (const f of features) v[f.key] = plan && f.key in plan.features ? plan.features[f.key] : f.type === 'boolean' ? false : 0;
@@ -78,8 +92,15 @@ function PlanModal({
         plan_key: planKey.trim() || undefined,
         amount,
         currency,
-        billing_interval: interval,
-        trial_days: Math.max(0, Math.floor(Number(trialDays) || 0)),
+        purchase_type: ptype,
+        ...(ptype === 'recurring'
+          ? { billing_interval: interval, trial_days: Math.max(0, Math.floor(Number(trialDays) || 0)) }
+          : {}),
+        ...(ptype === 'fixed_term' ? { term_days: Math.max(1, Math.floor(Number(termDays) || 1)), term_covers: termCovers } : {}),
+        ...(ptype === 'one_time' ? { updates_days: updatesDays.trim() ? Math.max(1, Math.floor(Number(updatesDays))) : null } : {}),
+        store_products: Object.fromEntries(
+          Object.entries({ app_store: appStoreId.trim(), play_store: playStoreId.trim() }).filter(([, v]) => v)
+        ),
         features: values,
         is_default: isDefault,
         is_public: isPublic,
@@ -109,6 +130,24 @@ function PlanModal({
             pattern="[a-z0-9][a-z0-9_\-]{0,63}"
             className="font-mono"
           />
+          <Select
+            label="Sold as"
+            value={ptype}
+            onChange={(e) => setPtype(e.target.value as PurchaseType)}
+            helperText={
+              ptype === 'recurring'
+                ? 'Renews every period until cancelled.'
+                : ptype === 'one_time'
+                  ? 'Paid once; access never ends.'
+                  : 'Paid once for a number of days; buying again adds more.'
+            }
+          >
+            {Object.entries(PURCHASE_TYPE_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </Select>
           <Input
             label="Price"
             type="number"
@@ -127,20 +166,52 @@ function PlanModal({
                 </option>
               ))}
             </Select>
-            <Select label="Billed every" value={interval} onChange={(e) => setBillingInterval(e.target.value as Interval)}>
-              <option value="month">Month</option>
-              <option value="year">Year</option>
-              <option value="week">Week</option>
-              <option value="day">Day</option>
-            </Select>
+            {ptype === 'recurring' && (
+              <Select label="Billed every" value={interval} onChange={(e) => setBillingInterval(e.target.value as Interval)}>
+                <option value="month">Month</option>
+                <option value="year">Year</option>
+                <option value="week">Week</option>
+                <option value="day">Day</option>
+              </Select>
+            )}
           </div>
-          <Input label="Free trial (days)" type="number" min={0} value={trialDays} onChange={(e) => setTrialDays(e.target.value)} />
+          {ptype === 'recurring' && (
+            <Input label="Free trial (days)" type="number" min={0} value={trialDays} onChange={(e) => setTrialDays(e.target.value)} />
+          )}
+          {ptype === 'fixed_term' && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Term (days)" type="number" min={1} value={termDays} onChange={(e) => setTermDays(e.target.value)} required />
+              <Select label="The term covers" value={termCovers} onChange={(e) => setTermCovers(e.target.value as 'access' | 'updates')}>
+                <option value="access">Access to the app</option>
+                <option value="updates">Updates (access stays)</option>
+              </Select>
+            </div>
+          )}
+          {ptype === 'one_time' && (
+            <Input
+              label="Updates included (days)"
+              type="number"
+              min={1}
+              value={updatesDays}
+              onChange={(e) => setUpdatesDays(e.target.value)}
+              helperText="Blank = every future version. Features released after this window aren't included."
+            />
+          )}
         </div>
 
         <div>
           <h3 className="text-sm font-semibold text-secondary-900 mb-2">What this plan includes</h3>
           <FeatureValuesEditor features={features} value={values} onChange={setValues} />
         </div>
+
+        <details className="rounded-lg border border-secondary-200 px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium text-secondary-800">App store product ids (optional)</summary>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input label="App Store product id" value={appStoreId} onChange={(e) => setAppStoreId(e.target.value)} placeholder="com.example.pro" />
+            <Input label="Google Play product id" value={playStoreId} onChange={(e) => setPlayStoreId(e.target.value)} placeholder="pro_yearly" />
+          </div>
+          <p className="mt-2 text-xs text-secondary-500">Store purchases your server records with these ids resolve to this plan.</p>
+        </details>
 
         <div className="grid gap-3 sm:grid-cols-3">
           {[
@@ -229,8 +300,12 @@ export default function AppPlans({ app, features }: { app: BillingApp; features:
       header: 'Price',
       render: (p) => (
         <span className="tabular-nums">
-          {p.amount === 0 ? 'Free' : `${formatMinor(p.amount, p.currency)} / ${p.billing_interval ?? 'once'}`}
-          {p.trial_days > 0 && <span className="block text-xs text-secondary-500">{p.trial_days}-day trial</span>}
+          {describePrice(p)}
+          <span className="block text-xs text-secondary-500">
+            {PURCHASE_TYPE_LABELS[p.purchase_type] ?? p.purchase_type}
+            {p.purchase_type === 'one_time' && p.updates_days ? ` · ${p.updates_days} days of updates` : ''}
+            {p.purchase_type === 'recurring' && p.trial_days > 0 ? ` · ${p.trial_days}-day trial` : ''}
+          </span>
         </span>
       ),
     },

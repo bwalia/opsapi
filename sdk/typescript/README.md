@@ -335,32 +335,76 @@ export const GET = billing.withFeature('advanced_reports', getUserId, async (req
 });
 ```
 
-**When OpsAPI can't be reached**, each app follows its own policy. With *fail closed*, `can()` returns `false` and `limit()` returns `0` once the cached answer expires. With *fail open*, the last answer keeps working for the offline grace period (72 hours by default), and `getEntitlements()` marks it `stale`. A 4xx answer always throws, so a wrong key or app id never fails quietly.
+**When OpsAPI can't be reached**, each app follows its own policy (the defaults for web apps: `fail_closed`, 15-minute tokens, 3 days of grace). With *fail closed*, `can()` returns `false` and `limit()` returns `0` once the cached answer expires. With *fail open*, the last answer keeps working for the offline grace period (72 hours by default), and `getEntitlements()` marks it `stale`. A 4xx answer always throws, so a wrong key or app id never fails quietly.
 
 To pick up changes at once, subscribe a webhook to `subscription.*`, `billing.grant.*` and `billing.plan.*` and call `billing.invalidate(userId)` (or `billing.invalidate()` for everyone).
 
-### Desktop and self-hosted apps: licence keys
+### Recording store purchases
 
-Issue keys in the dashboard (**Billing → Licences**). In the app, use the app's **publishable key**. It only identifies the app, so it is safe to ship:
+If you sell through the App Store or Google Play, verify the receipt on your own server, then record it. It
+resolves to the same entitlements as any other sale. Map store product ids to plans in the dashboard (plan →
+App store product ids):
 
 ```ts
-import { createLicensing, verifyLicenseFile } from '@opsapi/client/billing';
+await billing.recordPurchase({
+  customerExternalId: user.id,
+  source: 'app_store',
+  storeProductId: 'com.example.pro.yearly',
+  externalTransactionId: transaction.id,
+  originalTransactionId: transaction.originalId,
+  expiresAt: transaction.expiresAt, // unix seconds, for subscriptions
+});
+```
+
+### Desktop and self-hosted apps: licence keys
+
+These need no back end of your own. The app uses only the app's **publishable key**: it identifies the app,
+so it is safe to ship. The licence key is the credential. The licence file verifies offline, in any language
+(docs/LICENCE_FORMAT.md has the format, test vectors and Swift/Python verifiers).
+
+```ts
+import { createLicensing, fingerprintHash, verifyLicenseFile } from '@opsapi/client/billing';
 
 const licensing = createLicensing({ baseUrl: 'https://api.example.com', publishableKey: 'pk_live_…' });
 
+// The machine id is hashed with the app's salt on the device. Never send raw hardware ids.
+const { fingerprint_salt } = await licensing.appInfo(); // cache this
+const fp = await fingerprintHash(fingerprint_salt, machineId); // e.g. IOPlatformUUID / MachineGuid / /etc/machine-id
+
 // Once, when the customer enters their key:
-const { license_file } = await licensing.activate({ licenseKey, fingerprint: machineId, name: os.hostname() });
+const { license_file } = await licensing.activate({ licenseKey, fingerprintHash: fp, appVersion: '3.2.0', name: os.hostname() });
 saveToDisk(license_file);
 
 // On every start, offline:
-const { claims, needsCheckIn } = await verifyLicenseFile(readFromDisk(), {
+const { state, allowed, needsCheckIn, claims } = await verifyLicenseFile(readFromDisk(), {
   jwks: EMBEDDED_JWKS, // from GET /api/v2/public/billing/jwks.json, or pass baseUrl to fetch it
-  fingerprint: machineId,
+  fingerprintHash: fp,
+  app: APP_ID,
+  highWater: lastSeenTime, // persist max(now, iat): turning the clock back doesn't extend the grace period
 });
-if (needsCheckIn) saveToDisk((await licensing.validate({ licenseKey, fingerprint: machineId })).license_file);
+if (!allowed) showRenewOrActivate(state); // 'past_grace' (and fail_closed) or 'access_ended'
+if (needsCheckIn) refreshInBackground(); // licensing.validate({ licenseKey, fingerprintHash: fp, appVersion })
+if (claims.updates_until && BUILD_DATE > claims.updates_until) showUpgradeOffer(); // this version isn't covered
 ```
 
-`verifyLicenseFile` throws once the file passes its `offline_until` date (the app's offline grace), or when it was issued for another machine. Errors are `BillingError`s with a `code`: `invalid_license`, `activation_limit`, `license_suspended`, `license_revoked`, `license_expired`, `not_activated`, `wrong_machine` or `expired`. `licensing.deactivate()` gives a machine's seat back. In the dashboard you can also free a seat, suspend a licence or revoke it.
+| `state` | Meaning | `allowed` |
+|---|---|---|
+| `valid` | Within the refresh interval | yes |
+| `refresh` | Past `exp`, inside the grace period: refresh when online | yes |
+| `past_grace` | Past the grace period | only if the app's `offline_policy` is `fail_open` |
+| `access_ended` | A fixed-term pass or paid period is over | no |
+
+Errors are `BillingError`s with a `code`:
+- from OpsAPI: `invalid_license`, `activation_limit`, `license_suspended`, `license_revoked`, `access_ended`, `not_activated`, `locked_out`, `rate_limited`;
+- from offline checks: `bad_signature`, `wrong_machine`, `wrong_app`, `bad_version`.
+
+`licensing.deactivate()` gives a machine's seat back. `licensing.requestAccessLink(email)` emails the customer
+a link to the hosted "my licences" page, where they can see their licences, free devices and get a new key
+for a lost one.
+
+**Recommended settings for desktop apps:** `fail_closed`, refresh every 7 days, 30 days of grace (the
+defaults for desktop and self-hosted apps). Customers can stay offline for a month, and a revocation
+reaches them within 37 days.
 
 ## Options
 

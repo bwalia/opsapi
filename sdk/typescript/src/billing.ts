@@ -29,6 +29,10 @@ export interface Entitlements {
   policy: 'fail_open' | 'fail_closed';
   /** fail_open keeps these entitlements this long past expiresAt. */
   graceSeconds: number;
+  /** Access ends here (unix seconds); null = no end. */
+  accessUntil: number | null;
+  /** Releases covered until here (unix seconds); null = all. */
+  updatesUntil: number | null;
   /** True when served from cache because OpsAPI was unreachable (fail_open). */
   stale?: boolean;
 }
@@ -88,17 +92,16 @@ export async function verifyToken<C = Record<string, unknown>>(
   typ: string,
 ): Promise<VerifiedToken<C>> {
   const parts = typeof token === 'string' ? token.split('.') : [];
-  if (parts.length !== 3) throw new BillingError('Malformed token', 0, 'invalid_token');
+  if (parts.length !== 3) throw new BillingError('Malformed token', 0, 'malformed');
   const [head, body, sig] = parts as [string, string, string];
   let header: VerifiedToken<C>['header'];
   try {
     header = b64urlJson(head);
   } catch {
-    throw new BillingError('Malformed token', 0, 'invalid_token');
+    throw new BillingError('Malformed token', 0, 'malformed');
   }
-  if (header.alg !== 'ES256' || header.typ !== typ) {
-    throw new BillingError(`Expected an ES256 ${typ} token`, 0, 'invalid_token');
-  }
+  if (header.alg !== 'ES256') throw new BillingError('Only ES256 tokens are accepted', 0, 'bad_alg');
+  if (header.typ !== typ) throw new BillingError(`Expected a ${typ} token`, 0, 'bad_type');
   const jwk = jwks.keys.find((k) => k.kid === header.kid) ?? (header.kid ? undefined : jwks.keys[0]);
   if (!jwk) throw new BillingError(`Unknown signing key ${header.kid}`, 0, 'unknown_key');
   const key = await crypto.subtle.importKey(
@@ -108,14 +111,12 @@ export async function verifyToken<C = Record<string, unknown>>(
     false,
     ['verify'],
   );
-  const ok = await crypto.subtle.verify(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    key,
-    b64urlBytes(sig),
-    enc.encode(`${head}.${body}`),
-  );
-  if (!ok) throw new BillingError('Token signature is not valid', 0, 'invalid_token');
-  return { header, claims: b64urlJson<C>(body) };
+  const raw = b64urlBytes(sig);
+  const ok = raw.length === 64 && (await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, raw, enc.encode(`${head}.${body}`)));
+  if (!ok) throw new BillingError('Token signature is not valid', 0, 'bad_signature');
+  const claims = b64urlJson<C & { ver?: number }>(body);
+  if (claims.ver !== 1) throw new BillingError('Unknown token format version', 0, 'bad_version');
+  return { header, claims };
 }
 
 /** SHA-256 hex, as OpsAPI stores machine fingerprints. */
@@ -179,14 +180,17 @@ export interface BillingOptions {
 }
 
 interface EntitlementClaims {
+  ver: 1;
   aud: string;
   sub: string;
-  plan: string | null;
+  plan_key: string | null;
   status: string;
   features: Record<string, FeatureValue> | unknown[];
   exp: number;
-  grace: number;
-  policy: 'fail_open' | 'fail_closed';
+  grace_until: number;
+  access_until: number | null;
+  updates_until: number | null;
+  offline_policy: 'fail_open' | 'fail_closed';
 }
 
 export interface CustomerInput {
@@ -222,10 +226,10 @@ export function createBilling(opts: BillingOptions) {
     } catch (err) {
       throw new BillingError(`OpsAPI unreachable: ${(err as Error).message}`, 0, 'unreachable');
     }
-    const json = (await res.json().catch(() => ({}))) as { data?: unknown; error?: unknown };
+    const json = (await res.json().catch(() => ({}))) as { data?: unknown; error?: unknown; code?: string };
     if (!res.ok) {
       const msg = typeof json.error === 'string' ? json.error : `OpsAPI answered ${res.status}`;
-      throw new BillingError(msg, res.status);
+      throw new BillingError(msg, res.status, json.code);
     }
     return json.data;
   }
@@ -240,13 +244,15 @@ export function createBilling(opts: BillingOptions) {
     if (appId && claims.aud !== appId) throw new BillingError('Token is for another app', 0, 'invalid_token');
     appId = claims.aud;
     const ent: Entitlements = {
-      plan: claims.plan ?? null,
+      plan: claims.plan_key ?? null,
       status: claims.status,
       // OpsAPI writes an empty feature map as [].
       features: Array.isArray(claims.features) ? {} : claims.features,
       expiresAt: claims.exp,
-      policy: claims.policy,
-      graceSeconds: claims.grace ?? 0,
+      policy: claims.offline_policy,
+      graceSeconds: Math.max(0, (claims.grace_until ?? claims.exp) - claims.exp),
+      accessUntil: claims.access_until ?? null,
+      updatesUntil: claims.updates_until ?? null,
     };
     cache.set(externalId, ent);
     return ent;
@@ -319,6 +325,50 @@ export function createBilling(opts: BillingOptions) {
       return data as { uuid: string; external_id: string; email: string };
     },
 
+    /**
+     * Record a purchase your server verified itself (App Store, Google Play or any
+     * other channel). It resolves to the same entitlements as a Stripe sale.
+     * Idempotent on (source, externalTransactionId).
+     */
+    async recordPurchase(input: {
+      customerExternalId: string;
+      email?: string;
+      source: 'app_store' | 'play_store' | 'external' | 'manual';
+      externalTransactionId: string;
+      originalTransactionId?: string;
+      planKey?: string;
+      storeProductId?: string;
+      /** Unix seconds, for subscriptions. */
+      expiresAt?: number;
+      amount?: number;
+      currency?: string;
+      status?: 'active' | 'refunded' | 'canceled';
+    }) {
+      let res: Response;
+      try {
+        res = await doFetch(`${base}/api/v2/entitlements/${encodeURIComponent(opts.app)}/purchases`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${opts.apiKey}`,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `${input.source}:${input.externalTransactionId}:${input.status ?? 'active'}`,
+          },
+          body: JSON.stringify({
+            customer_external_id: input.customerExternalId, email: input.email, source: input.source,
+            external_transaction_id: input.externalTransactionId, original_transaction_id: input.originalTransactionId,
+            plan_key: input.planKey, store_product_id: input.storeProductId, expires_at: input.expiresAt,
+            amount: input.amount, currency: input.currency, status: input.status,
+          }),
+        });
+      } catch (err) {
+        throw new BillingError(`OpsAPI unreachable: ${(err as Error).message}`, 0, 'unreachable');
+      }
+      const json = (await res.json().catch(() => ({}))) as { data?: unknown; error?: string; code?: string };
+      if (!res.ok) throw new BillingError(json.error ?? `OpsAPI answered ${res.status}`, res.status, json.code);
+      cache.delete(input.customerExternalId);
+      return json.data as { purchase?: unknown; subscription?: unknown; license?: unknown; key?: string; duplicate?: boolean };
+    },
+
     /** Drop cached entitlements (all, or one customer), e.g. from a subscription.* / billing.grant.* webhook. */
     invalidate(externalId?: string) {
       if (externalId === undefined) cache.clear();
@@ -367,37 +417,62 @@ export function createBilling(opts: BillingOptions) {
 }
 
 // ---------------------------------------------------------------------------
-// Desktop / self-hosted: licences
+// Desktop / self-hosted: licences (docs/LICENCE_FORMAT.md)
 // ---------------------------------------------------------------------------
 
 export interface LicenseClaims {
+  ver: 1;
   iss: string;
   /** App id */
   aud: string;
-  /** Customer (your user id, else OpsAPI's customer uuid) */
-  sub: string;
   /** Licence id */
-  lic: string;
-  /** SHA-256 hex of the machine fingerprint */
-  fp: string;
-  plan: string | null;
-  features: Record<string, FeatureValue>;
+  sub: string;
   iat: number;
-  /** Check in with OpsAPI after this (unix seconds)… */
+  /** Refresh by (unix seconds). */
   exp: number;
-  /** …and stop working offline after this. */
-  offline_until: number;
-  policy: 'fail_open' | 'fail_closed';
+  /** Valid without a refresh until here. */
+  grace_until: number;
+  plan_key: string | null;
+  features: Record<string, FeatureValue>;
+  /** Access ends here; null = perpetual. */
+  access_until: number | null;
+  /** Releases covered until here; null = all. */
+  updates_until: number | null;
+  /** SHA-256 hex of salt + ":" + machine id. */
+  fingerprint_hash: string;
+  offline_policy: 'fail_open' | 'fail_closed';
 }
+
+/** LICENCE_FORMAT.md §5.2. */
+export type TokenState = 'valid' | 'refresh' | 'past_grace' | 'access_ended';
 
 export interface LicenseResult {
   /** Save this; verifyLicenseFile() checks it offline. */
   license_file: string;
-  license: { uuid: string; status: string; expires_at: number | null };
+  license: { uuid: string; status: string; access_until: number | null; updates_until: number | null };
   plan: { uuid: string; key?: string | null; name: string } | null;
   features: Record<string, FeatureValue>;
   expires_at: number;
-  offline_until: number;
+  grace_until: number;
+}
+
+export interface PublicAppInfo {
+  uuid: string;
+  name: string;
+  kind: string;
+  fingerprint_salt: string;
+  offline_policy: 'fail_open' | 'fail_closed';
+  refresh_interval_days: number;
+  grace_days: number;
+  display_name?: string;
+  support_email?: string;
+  plans: unknown[];
+  features: unknown[];
+}
+
+/** fingerprint_hash = hex(SHA-256(salt + ":" + lowercase(trim(machineId)))) — LICENCE_FORMAT.md §6. */
+export async function fingerprintHash(salt: string, machineId: string): Promise<string> {
+  return sha256Hex(`${salt}:${machineId.trim().toLowerCase()}`);
 }
 
 export interface LicensingOptions {
@@ -409,31 +484,30 @@ export interface LicensingOptions {
 
 export interface LicenseRequest {
   licenseKey: string;
-  /** A stable id for this machine (hashed before it is stored). 8-512 characters. */
-  fingerprint: string;
+  /** fingerprintHash(salt, machineId): never send a raw machine id. */
+  fingerprintHash: string;
+  appVersion: string;
   name?: string;
   platform?: string;
-  appVersion?: string;
 }
+
+const idempotencyKey = () =>
+  typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 export function createLicensing(opts: LicensingOptions) {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const base = trim(opts.baseUrl);
 
-  async function post<T>(action: string, r: LicenseRequest): Promise<T> {
+  async function send<T>(method: string, path: string, body?: Record<string, unknown>): Promise<T> {
     let res: Response;
     try {
-      res = await doFetch(`${base}/api/v2/public/licenses/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          pk: opts.publishableKey,
-          license_key: r.licenseKey,
-          fingerprint: r.fingerprint,
-          name: r.name,
-          platform: r.platform,
-          app_version: r.appVersion,
-        }),
+      res = await doFetch(`${base}${path}`, {
+        method,
+        headers: {
+          Accept: 'application/json',
+          ...(body ? { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey() } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
       });
     } catch (err) {
       throw new BillingError(`OpsAPI unreachable: ${(err as Error).message}`, 0, 'unreachable');
@@ -443,15 +517,45 @@ export function createLicensing(opts: LicensingOptions) {
     return json.data as T;
   }
 
+  const licenceBody = (r: Partial<LicenseRequest>) => ({
+    pk: opts.publishableKey,
+    license_key: r.licenseKey,
+    fingerprint_hash: r.fingerprintHash,
+    app_version: r.appVersion,
+    name: r.name,
+    platform: r.platform,
+  });
+
   return {
+    /** Public app info: the fingerprint salt, offline settings, branding, public plans. */
+    appInfo: () => send<PublicAppInfo>('GET', `/api/v2/public/billing/apps/${encodeURIComponent(opts.publishableKey)}`),
     /** Use a seat on this machine. Throws BillingError (code activation_limit, invalid_license, license_revoked, …). */
-    activate: (r: LicenseRequest) => post<LicenseResult>('activate', r),
+    activate: (r: LicenseRequest) => send<LicenseResult>('POST', '/api/v2/public/licenses/activate', licenceBody(r)),
     /** Re-check an activated machine and get a fresh licence file. */
-    validate: (r: Omit<LicenseRequest, 'name' | 'platform'>) => post<LicenseResult>('validate', r as LicenseRequest),
+    validate: (r: Omit<LicenseRequest, 'name' | 'platform'>) =>
+      send<LicenseResult>('POST', '/api/v2/public/licenses/validate', licenceBody(r)),
     /** Give this machine's seat back. */
-    deactivate: (r: Pick<LicenseRequest, 'licenseKey' | 'fingerprint'>) =>
-      post<{ deactivated: true }>('deactivate', r as LicenseRequest),
+    deactivate: (r: Pick<LicenseRequest, 'licenseKey' | 'fingerprintHash'>) =>
+      send<{ deactivated: true }>('POST', '/api/v2/public/licenses/deactivate', licenceBody(r)),
+    /** Email the customer a link to the hosted "my licences" page (always succeeds: no enumeration). */
+    requestAccessLink: (email: string) =>
+      send<{ message: string }>('POST', '/api/v2/public/billing/access-link', { pk: opts.publishableKey, email }),
   };
+}
+
+const SKEW = 300;
+
+/** LICENCE_FORMAT.md §5: the state of a verified token at `now` (clock may not go back past highWater). */
+export function tokenState(
+  claims: Pick<LicenseClaims, 'iat' | 'exp' | 'grace_until' | 'access_until'>,
+  now: number,
+  highWater = 0,
+): TokenState {
+  const t = Math.max(now, highWater, claims.iat - SKEW);
+  if (claims.access_until != null && t > claims.access_until + SKEW) return 'access_ended';
+  if (t <= claims.exp + SKEW) return 'valid';
+  if (t <= claims.grace_until + SKEW) return 'refresh';
+  return 'past_grace';
 }
 
 export interface VerifyLicenseOptions {
@@ -459,36 +563,39 @@ export interface VerifyLicenseOptions {
   jwks?: Jwks;
   /** …or fetch them from your OpsAPI. */
   baseUrl?: string;
-  /** This machine's fingerprint: the file must have been issued to it. */
-  fingerprint?: string;
+  /** This machine's fingerprint hash: the file must have been issued to it. */
+  fingerprintHash?: string;
   /** The app id (uuid) the file must be for. */
   app?: string;
+  /** Pin the issuer (your OpsAPI URL). */
+  iss?: string;
   /** Unix seconds (tests). */
   now?: number;
+  /** The latest time this app has seen (persist it): the clock can't be turned back past it. */
+  highWater?: number;
   fetch?: Fetch;
 }
 
 /**
- * Check a licence file offline. Returns its claims and whether it is time to
- * check in (`needsCheckIn`: past `exp`, call validate() when online). Throws
- * BillingError when it isn't genuine, isn't for this machine/app, or is past
- * `offline_until`.
+ * Check a licence file offline (LICENCE_FORMAT.md §4–5). Throws BillingError when
+ * it must not be trusted (bad_signature, wrong_machine, wrong_app, …). Otherwise
+ * returns its claims and state: `allowed` is what the app should do right now if
+ * it can't reach OpsAPI; `needsCheckIn` = call validate() when online.
  */
 export async function verifyLicenseFile(
   file: string,
   options: VerifyLicenseOptions,
-): Promise<{ claims: LicenseClaims; needsCheckIn: boolean }> {
+): Promise<{ claims: LicenseClaims; state: TokenState; allowed: boolean; needsCheckIn: boolean }> {
   if (!options.jwks && !options.baseUrl) throw new Error('verifyLicenseFile needs jwks or baseUrl');
   const verify = jwksSource(options.baseUrl ?? '', options.fetch ?? globalThis.fetch.bind(globalThis), options.jwks);
   const { claims } = await verify<LicenseClaims>(file, 'opsapi-license+jwt');
   if (options.app && claims.aud !== options.app) throw new BillingError('Licence is for another app', 0, 'wrong_app');
-  if (options.fingerprint !== undefined && claims.fp !== (await sha256Hex(options.fingerprint))) {
+  if (options.iss && claims.iss !== options.iss) throw new BillingError('Licence is from another issuer', 0, 'wrong_issuer');
+  if (options.fingerprintHash !== undefined && claims.fingerprint_hash !== options.fingerprintHash) {
     throw new BillingError('Licence was activated on another machine', 0, 'wrong_machine');
   }
-  const t = options.now ?? Math.floor(Date.now() / 1000);
-  if (t >= claims.offline_until) {
-    throw new BillingError('Licence file expired: connect to the internet to renew it', 0, 'expired');
-  }
   if (Array.isArray(claims.features)) claims.features = {};
-  return { claims, needsCheckIn: t >= claims.exp };
+  const state = tokenState(claims, options.now ?? Math.floor(Date.now() / 1000), options.highWater ?? 0);
+  const allowed = state === 'valid' || state === 'refresh' || (state === 'past_grace' && claims.offline_policy === 'fail_open');
+  return { claims, state, allowed, needsCheckIn: state !== 'valid' };
 }

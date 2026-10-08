@@ -4,7 +4,7 @@
  * Billing — /dashboard/billing
  *
  * The products this workspace sells (apps). Each app has its own features,
- * flat-tier plans, publishable key and offline policy; open one to manage it.
+ * flat-tier plans, publishable key and settings; open one to manage it.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -17,7 +17,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiError, Pill } from '@/components/field-service/shared';
 import { BillingNav, KIND_LABELS } from '@/components/billing/shared';
-import { billingService, type AppKind, type BillingApp, type OfflinePolicy } from '@/services/billing.service';
+import { billingService, type AppKind, type BillingApp } from '@/services/billing.service';
 
 const KIND_ICONS: Record<AppKind, React.ReactNode> = {
   web: <AppWindow className="w-5 h-5" />,
@@ -29,14 +29,12 @@ const KIND_ICONS: Record<AppKind, React.ReactNode> = {
 function NewAppModal({ isOpen, onClose, onCreated }: { isOpen: boolean; onClose: () => void; onCreated: (a: BillingApp) => void }) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<AppKind>('web');
-  const [policy, setPolicy] = useState<OfflinePolicy>('fail_closed');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setName('');
       setKind('web');
-      setPolicy('fail_closed');
     }
   }, [isOpen]);
 
@@ -44,7 +42,7 @@ function NewAppModal({ isOpen, onClose, onCreated }: { isOpen: boolean; onClose:
     e.preventDefault();
     setSaving(true);
     try {
-      const app = await billingService.createApp({ name: name.trim(), kind, offline_policy: policy });
+      const app = await billingService.createApp({ name: name.trim(), kind });
       toast.success('App created');
       onCreated(app);
     } catch (err) {
@@ -64,15 +62,6 @@ function NewAppModal({ isOpen, onClose, onCreated }: { isOpen: boolean; onClose:
               {l}
             </option>
           ))}
-        </Select>
-        <Select
-          label="If OpsAPI can't be reached"
-          value={policy}
-          onChange={(e) => setPolicy(e.target.value as OfflinePolicy)}
-          helperText="Fail open keeps the last known access for the offline grace period (72 hours by default)."
-        >
-          <option value="fail_closed">Block access (fail closed)</option>
-          <option value="fail_open">Keep last known access (fail open)</option>
         </Select>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose}>
@@ -170,7 +159,7 @@ function AppsContent() {
                 {KIND_LABELS[a.kind]} · <span className="font-mono">{a.slug}</span>
               </p>
               <p className="mt-3 text-xs text-secondary-500">
-                Offline: {a.offline_policy === 'fail_open' ? 'keeps last known access' : 'blocks access'}
+                Offline: {a.settings?.offline_policy === 'fail_open' ? 'keeps last known access' : 'blocks access'}
               </p>
             </button>
           ))}

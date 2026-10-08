@@ -4,12 +4,18 @@ All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](h
 
 ## 1.1.0
 
-- New subpath `@opsapi/client/billing` for OpsAPI's Billing & Entitlements module. It needs an OpsAPI server with that module and `BILLING_SIGNING_KEY` set.
-  - `createBilling()`: `getEntitlements()`, `can()`, `limit()`, `upsertCustomer()` and `invalidate()`. Answers are ES256-signed tokens, checked against the server's JWKS and cached until they expire. Each app's offline policy (fail open within a grace period, or fail closed) is followed when OpsAPI can't be reached.
+- New subpath `@opsapi/client/billing` for OpsAPI's Billing & Entitlements module. It needs an OpsAPI server with that module and `BILLING_SIGNING_KEY` set. Tokens and licence files use format v1 (docs/LICENCE_FORMAT.md).
+  - `createBilling()`: `getEntitlements()`, `can()`, `limit()`, `upsertCustomer()`, `recordPurchase()` (verified App Store, Google Play or external purchases) and `invalidate()`.
+    - Answers are ES256-signed tokens, checked against the server's JWKS and cached until they expire.
+    - When OpsAPI can't be reached, each app's offline policy applies: fail open within the grace period, or fail closed.
+    - One request is shared between concurrent checks.
   - `requireFeature()` (Express/Connect) and `withFeature()` (fetch-style handlers) answer 402 `feature_required`.
-  - `createLicensing()` (`activate`, `validate`, `deactivate`) with a publishable key, and `verifyLicenseFile()` for offline checks of signed licence files.
-  - `BillingError`, `verifyToken()` and `sha256Hex()`.
-- Typed paths for the new endpoints: `/api/v2/billing/apps*`, `/api/v2/subscriptions*`, `/api/v2/entitlements/{app}/customers/{external_id}`, `/api/v2/licenses*`, and the public pricing, JWKS and licence endpoints.
+  - `createLicensing()` for apps without a back end. It uses the publishable key: `appInfo()`, `activate()`, `validate()`, `deactivate()` and `requestAccessLink()`. Every call sends an Idempotency-Key.
+  - `fingerprintHash(salt, machineId)`.
+  - `verifyLicenseFile()` returns `state`, `allowed` and `needsCheckIn`. It is protected against the clock being turned back (`highWater`).
+  - `tokenState()`, `verifyToken()`, `BillingError` (with the server's `code`) and `sha256Hex()`.
+- Typed paths for the billing, subscriptions, entitlements, licences, workspace-email and public billing endpoints.
+- Tested against every case in docs/licence-format-vectors.json, and against a live server.
 
 ## 1.0.0
 

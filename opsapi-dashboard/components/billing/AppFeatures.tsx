@@ -35,6 +35,7 @@ function FeatureModal({
   const [type, setType] = useState<FeatureType>('boolean');
   const [unit, setUnit] = useState('');
   const [description, setDescription] = useState('');
+  const [releasedAt, setReleasedAt] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -45,13 +46,19 @@ function FeatureModal({
     setType(feature?.type || 'boolean');
     setUnit(feature?.unit || '');
     setDescription(feature?.description || '');
+    setReleasedAt(feature?.released_at ? feature.released_at.slice(0, 10) : '');
   }, [isOpen, feature]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const body = { name: name.trim(), unit: unit.trim(), description: description.trim() };
+      const body = {
+        name: name.trim(),
+        unit: unit.trim(),
+        description: description.trim(),
+        released_at: releasedAt ? `${releasedAt}T00:00:00Z` : null,
+      };
       if (feature) await billingService.updateFeature(app.uuid, feature.key, body);
       else await billingService.addFeature(app.uuid, { ...body, key, type });
       toast.success(feature ? 'Feature updated' : 'Feature added');
@@ -108,6 +115,13 @@ function FeatureModal({
         </Select>
         {type === 'limit' && <Input label="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="projects" />}
         <Input label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Input
+          label="Released on (optional)"
+          type="date"
+          value={releasedAt}
+          onChange={(e) => setReleasedAt(e.target.value)}
+          helperText="Lifetime and fixed-term buyers get it only if it was released inside their updates window."
+        />
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
@@ -163,6 +177,11 @@ export default function AppFeatures({
       ),
     },
     { key: 'key', header: 'Key', render: (f) => <code className="text-xs">{f.key}</code> },
+    {
+      key: 'released',
+      header: 'Released',
+      render: (f) => <span className="text-sm text-secondary-600">{f.released_at ? f.released_at.slice(0, 10) : '—'}</span>,
+    },
     {
       key: 'type',
       header: 'Type',

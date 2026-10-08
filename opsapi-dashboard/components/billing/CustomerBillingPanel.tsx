@@ -9,20 +9,23 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Gift, KeyRound, Trash2 } from 'lucide-react';
+import { ArrowUpCircle, Gift, KeyRound, Receipt, Trash2 } from 'lucide-react';
 import { Button, Card, ConfirmDialog } from '@/components/ui';
 import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiError } from '@/components/field-service/shared';
 import { StatusPill } from '@/components/billing/shared';
 import GrantModal from '@/components/billing/GrantModal';
+import { SaleModal, UpgradeModal } from '@/components/billing/SaleModals';
 import { IssueLicenseModal, LicenseDetailModal } from '@/components/billing/LicenseModals';
 import { formatDate } from '@/lib/utils';
+import { formatMinor } from '@/services/billing.service';
 import {
   billingService,
   type Entitlements,
   type FeatureValue,
   type Grant,
   type License,
+  type Purchase,
   type Subscription,
 } from '@/services/billing.service';
 
@@ -37,6 +40,9 @@ export default function CustomerBillingPanel({ customerUuid }: { customerUuid: s
   const [subs, setSubs] = useState<Subscription[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
   const [licenses, setLicenses] = useState<License[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [saleOpen, setSaleOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [grantOpen, setGrantOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [openLicense, setOpenLicense] = useState<string | null>(null);
@@ -45,21 +51,23 @@ export default function CustomerBillingPanel({ customerUuid }: { customerUuid: s
 
   const load = useCallback(async () => {
     const q = { customer: customerUuid, per_page: 50 };
-    const [s, g, l] = await Promise.all([
+    const [s, g, l, p] = await Promise.all([
       readSubs ? billingService.listSubscriptions(q).then((r) => r.data) : Promise.resolve([]),
       readSubs ? billingService.listGrants(q).then((r) => r.data) : Promise.resolve([]),
       readLicenses ? billingService.listLicenses(q).then((r) => r.data) : Promise.resolve([]),
-    ]).catch(() => [[], [], []] as [Subscription[], Grant[], License[]]);
+      readSubs ? billingService.listPurchases(q).then((r) => r.data) : Promise.resolve([]),
+    ]).catch(() => [[], [], [], []] as [Subscription[], Grant[], License[], Purchase[]]);
     setSubs(s);
     setGrants(g);
     setLicenses(l);
+    setPurchases(p);
     // Every app (needs billing.read), else the apps this customer appears in.
     let list: { uuid: string; name: string }[] = [];
     try {
       list = await billingService.listApps();
     } catch {
       const seen = new Map<string, string>();
-      for (const r of [...s, ...g, ...l]) seen.set(r.app_uuid, r.app_name);
+      for (const r of [...s, ...g, ...l, ...p]) seen.set(r.app_uuid, r.app_name);
       list = Array.from(seen, ([uuid, name]) => ({ uuid, name }));
     }
     setApps(list);
@@ -106,6 +114,16 @@ export default function CustomerBillingPanel({ customerUuid }: { customerUuid: s
         </div>
         <div className="flex flex-wrap gap-2">
           {canCreate('subscriptions') && (
+            <Button type="button" variant="outline" size="sm" onClick={() => setSaleOpen(true)}>
+              <Receipt className="w-4 h-4 mr-1.5" /> Record a sale
+            </Button>
+          )}
+          {canCreate('subscriptions') && (
+            <Button type="button" variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
+              <ArrowUpCircle className="w-4 h-4 mr-1.5" /> Upgrade
+            </Button>
+          )}
+          {canCreate('subscriptions') && (
             <Button type="button" variant="outline" size="sm" onClick={() => setGrantOpen(true)}>
               <Gift className="w-4 h-4 mr-1.5" /> Grant access
             </Button>
@@ -127,6 +145,7 @@ export default function CustomerBillingPanel({ customerUuid }: { customerUuid: s
             const appSubs = subs.filter((s) => s.app_uuid === a.uuid);
             const appGrants = grants.filter((g) => g.app_uuid === a.uuid);
             const appLicenses = licenses.filter((l) => l.app_uuid === a.uuid);
+            const appPurchases = purchases.filter((p) => p.app_uuid === a.uuid);
             return (
               <section key={a.uuid} className="rounded-lg border border-secondary-200 p-4" aria-label={a.name}>
                 <div className="flex flex-wrap items-center gap-2">
@@ -151,6 +170,19 @@ export default function CustomerBillingPanel({ customerUuid }: { customerUuid: s
                       <li key={s.uuid}>
                         Subscription: {s.plan_name || '—'} · <StatusPill status={s.status} />
                         {s.current_period_end && <> · until {formatDate(s.current_period_end)}</>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {appPurchases.length > 0 && (
+                  <ul className="mt-3 text-sm text-secondary-700 space-y-1">
+                    {appPurchases.map((p) => (
+                      <li key={p.uuid}>
+                        Purchase: {p.plan_name} · {formatMinor(p.amount, p.currency)}
+                        {p.coupon_code ? ` (coupon ${p.coupon_code})` : ''} · <StatusPill status={p.status} />
+                        {p.access_until ? ` · access until ${formatDate(p.access_until)}` : ''}
+                        {p.updates_until ? ` · updates until ${formatDate(p.updates_until)}` : ''}
                       </li>
                     ))}
                   </ul>
@@ -212,6 +244,8 @@ export default function CustomerBillingPanel({ customerUuid }: { customerUuid: s
           load();
         }}
       />
+      <SaleModal isOpen={saleOpen} customer={customerUuid} onClose={() => setSaleOpen(false)} onSaved={load} />
+      <UpgradeModal isOpen={upgradeOpen} customer={customerUuid} onClose={() => setUpgradeOpen(false)} onSaved={load} />
       <IssueLicenseModal isOpen={issueOpen} customer={customerUuid} onClose={() => setIssueOpen(false)} onIssued={load} />
       <LicenseDetailModal uuid={openLicense} onClose={() => setOpenLicense(null)} onChanged={load} />
       <ConfirmDialog

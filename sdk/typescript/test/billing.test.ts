@@ -1,10 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BillingError,
   createBilling,
   createLicensing,
+  fingerprintHash,
   sha256Hex,
+  tokenState,
   verifyLicenseFile,
+  verifyToken,
   type Jwks,
 } from '../src/billing';
 
@@ -30,16 +34,19 @@ let clock = 1_000_000;
 const now = () => clock;
 
 const entClaims = (over: object = {}) => ({
+  ver: 1,
   iss: BASE,
   aud: APP,
   sub: 'user_42',
-  plan: 'pro',
+  plan_key: 'pro',
   status: 'active',
   features: { reports: true, exports: false, projects: 10, seats: null },
   iat: clock,
   exp: clock + 900,
-  grace: 3600,
-  policy: 'fail_open',
+  grace_until: clock + 900 + 3600,
+  access_until: null,
+  updates_until: null,
+  offline_policy: 'fail_open',
   ...over,
 });
 
@@ -100,7 +107,7 @@ describe('entitlements', () => {
     const forged = await sign('opsapi-entitlements+jwt', entClaims({ features: { reports: true } }), 'k1', other.privateKey);
     const { fetch } = server(() => json({ success: true, data: { token: forged } }));
     const billing = createBilling({ baseUrl: BASE, apiKey: 'opsk_x', app: 'acme', fetch, now });
-    await expect(billing.can('user_42', 'reports')).rejects.toMatchObject({ code: 'invalid_token' });
+    await expect(billing.can('user_42', 'reports')).rejects.toMatchObject({ code: 'bad_signature' });
   });
 
   it('rejects a token for another customer', async () => {
@@ -123,7 +130,7 @@ describe('entitlements', () => {
   });
 
   it('fail_closed: denies as soon as the token has expired and OpsAPI is down', async () => {
-    const { fetch } = server((n) => (n === 1 ? tokenResponse({ policy: 'fail_closed' }) : json({ error: 'down' }, 503)));
+    const { fetch } = server((n) => (n === 1 ? tokenResponse({ offline_policy: 'fail_closed' }) : json({ error: 'down' }, 503)));
     const billing = createBilling({ baseUrl: BASE, apiKey: 'opsk_x', app: 'acme', fetch, now });
     expect(await billing.can('user_42', 'reports')).toBe(true);
     clock += 901;
@@ -189,55 +196,77 @@ describe('middleware', () => {
   });
 });
 
-describe('licences', () => {
+describe('licences (format v1)', () => {
   const t = 2_000_000;
-  const fp = 'machine-0001';
+  const machine = 'machine-0001';
+  const salt = 'f3a9c1d27b4e8a6055c0e1b2d3f4a5b6';
   const licClaims = async (over: object = {}) => ({
+    ver: 1,
     iss: BASE,
     aud: APP,
-    sub: 'user_42',
-    lic: 'lic-1',
-    fp: await sha256Hex(fp),
-    plan: 'pro',
-    features: { reports: true },
+    sub: 'lic-1',
     iat: t,
-    exp: t + 900,
-    offline_until: t + 259200,
-    policy: 'fail_closed',
+    exp: t + 7 * 86400,
+    grace_until: t + 37 * 86400,
+    plan_key: 'pro',
+    features: { reports: true },
+    access_until: null,
+    updates_until: null,
+    fingerprint_hash: await fingerprintHash(salt, machine),
+    offline_policy: 'fail_closed',
     ...over,
   });
 
-  it('verifies a licence file offline with embedded keys', async () => {
-    const file = await sign('opsapi-license+jwt', await licClaims());
-    const { claims, needsCheckIn } = await verifyLicenseFile(file, { jwks: JWKS, fingerprint: fp, app: APP, now: t + 10 });
-    expect(claims.features).toEqual({ reports: true });
-    expect(needsCheckIn).toBe(false);
-    // After exp it still works offline, but asks to check in.
-    expect((await verifyLicenseFile(file, { jwks: JWKS, now: t + 1000 })).needsCheckIn).toBe(true);
+  it('fingerprintHash = sha256(salt:lowercase(trim(id)))', async () => {
+    expect(await fingerprintHash(salt, '  ABC ')).toBe(await sha256Hex(`${salt}:abc`));
   });
 
-  it('refuses another machine, another app, an expired file, or an entitlement token', async () => {
+  it('valid -> refresh -> past_grace, offline policy decides past grace', async () => {
+    const fp = await fingerprintHash(salt, machine);
     const file = await sign('opsapi-license+jwt', await licClaims());
-    await expect(verifyLicenseFile(file, { jwks: JWKS, fingerprint: 'other-machine', now: t })).rejects.toMatchObject({ code: 'wrong_machine' });
+    const at = (now: number) => verifyLicenseFile(file, { jwks: JWKS, fingerprintHash: fp, app: APP, now });
+    expect(await at(t + 60)).toMatchObject({ state: 'valid', allowed: true, needsCheckIn: false });
+    expect(await at(t + 8 * 86400)).toMatchObject({ state: 'refresh', allowed: true, needsCheckIn: true });
+    expect(await at(t + 40 * 86400)).toMatchObject({ state: 'past_grace', allowed: false });
+    const open = await sign('opsapi-license+jwt', await licClaims({ offline_policy: 'fail_open' }));
+    expect((await verifyLicenseFile(open, { jwks: JWKS, now: t + 40 * 86400 })).allowed).toBe(true);
+  });
+
+  it('a fixed-term pass ends at access_until; the clock can\'t be turned back past highWater', async () => {
+    const pass = await sign('opsapi-license+jwt', await licClaims({ access_until: t + 30 * 86400 }));
+    expect((await verifyLicenseFile(pass, { jwks: JWKS, now: t + 31 * 86400 })).state).toBe('access_ended');
+    expect(tokenState({ iat: t, exp: t + 100, grace_until: t + 200, access_until: null }, t - 5000, t + 1000)).toBe('past_grace');
+  });
+
+  it('refuses another machine, another app, another issuer, an entitlement token', async () => {
+    const file = await sign('opsapi-license+jwt', await licClaims());
+    const other = await fingerprintHash(salt, 'other');
+    await expect(verifyLicenseFile(file, { jwks: JWKS, fingerprintHash: other, now: t })).rejects.toMatchObject({ code: 'wrong_machine' });
     await expect(verifyLicenseFile(file, { jwks: JWKS, app: 'another', now: t })).rejects.toMatchObject({ code: 'wrong_app' });
-    await expect(verifyLicenseFile(file, { jwks: JWKS, now: t + 259200 })).rejects.toMatchObject({ code: 'expired' });
+    await expect(verifyLicenseFile(file, { jwks: JWKS, iss: 'https://evil.test', now: t })).rejects.toMatchObject({ code: 'wrong_issuer' });
     const token = await sign('opsapi-entitlements+jwt', await licClaims());
-    await expect(verifyLicenseFile(token, { jwks: JWKS, now: t })).rejects.toMatchObject({ code: 'invalid_token' });
+    await expect(verifyLicenseFile(token, { jwks: JWKS, now: t })).rejects.toMatchObject({ code: 'bad_type' });
   });
 
-  it('activate posts the publishable key and maps error codes', async () => {
-    const bodies: unknown[] = [];
+  it('activate sends the publishable key, the fingerprint hash and an Idempotency-Key; maps error codes', async () => {
+    const calls: { body: Record<string, unknown>; key: string | null }[] = [];
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return bodies.length === 1
+      calls.push({ body: JSON.parse(String(init?.body)), key: new Headers(init?.headers).get('Idempotency-Key') });
+      return calls.length === 1
         ? json({ success: true, data: { license_file: 'x.y.z', features: {} } })
         : json({ success: false, code: 'activation_limit', error: 'This licence is already active on 1 device(s), its limit' }, 409);
     }) as unknown as typeof globalThis.fetch;
     const licensing = createLicensing({ baseUrl: BASE, publishableKey: 'pk_test_abc', fetch });
-    const r = await licensing.activate({ licenseKey: 'ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2', fingerprint: fp, name: 'Laptop' });
+    const fp = await fingerprintHash(salt, machine);
+    const r = await licensing.activate({ licenseKey: 'ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2', fingerprintHash: fp, appVersion: '3.2.0', name: 'Laptop' });
     expect(r.license_file).toBe('x.y.z');
-    expect(bodies[0]).toMatchObject({ pk: 'pk_test_abc', license_key: 'ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2', fingerprint: fp, name: 'Laptop' });
-    await expect(licensing.activate({ licenseKey: 'k', fingerprint: fp })).rejects.toMatchObject({ status: 409, code: 'activation_limit' });
+    expect(calls[0]!.body).toMatchObject({ pk: 'pk_test_abc', fingerprint_hash: fp, app_version: '3.2.0', name: 'Laptop' });
+    expect(calls[0]!.body).not.toHaveProperty('fingerprint');
+    expect(calls[0]!.key).toBeTruthy();
+    await expect(licensing.activate({ licenseKey: 'k', fingerprintHash: fp, appVersion: '1' })).rejects.toMatchObject({
+      status: 409,
+      code: 'activation_limit',
+    });
   });
 
   it('refetches the JWKS once for a rotated key', async () => {
@@ -247,7 +276,29 @@ describe('licences', () => {
     const fetch = vi.fn(async () => json(++jwksCalls === 1 ? JWKS : { keys: [...JWKS.keys, rotatedJwk] })) as unknown as typeof globalThis.fetch;
     const file = await sign('opsapi-license+jwt', await licClaims(), 'k2', rotated.privateKey);
     const { claims } = await verifyLicenseFile(file, { baseUrl: BASE, fetch, now: t });
-    expect(claims.lic).toBe('lic-1');
+    expect(claims.sub).toBe('lic-1');
     expect(jwksCalls).toBe(2);
   });
+});
+
+describe('docs/licence-format-vectors.json (every published case)', () => {
+  const v = JSON.parse(readFileSync(new URL('../../../docs/licence-format-vectors.json', import.meta.url), 'utf8'));
+  for (const c of v.cases as { name: string; token: string; typ: string; now: number; expect: string; fingerprint_hash?: string; iss?: string; high_water?: number }[]) {
+    it(c.name, async () => {
+      let got: string;
+      try {
+        if (c.typ === 'opsapi-license+jwt') {
+          got = (await verifyLicenseFile(c.token, { jwks: v.jwks, app: v.app_id, fingerprintHash: c.fingerprint_hash, iss: c.iss, now: c.now, highWater: c.high_water })).state;
+        } else {
+          const { claims } = await verifyToken<{ aud: string; iss: string; iat: number; exp: number; grace_until: number; access_until: number | null }>(c.token, v.jwks, c.typ);
+          if (claims.aud !== v.app_id) throw new BillingError('wrong app', 0, 'wrong_app');
+          if (c.iss && claims.iss !== c.iss) throw new BillingError('wrong issuer', 0, 'wrong_issuer');
+          got = tokenState(claims, c.now, c.high_water ?? 0);
+        }
+      } catch (err) {
+        got = `error:${(err as BillingError).code}`;
+      }
+      expect(got).toBe(c.expect);
+    });
+  }
 });

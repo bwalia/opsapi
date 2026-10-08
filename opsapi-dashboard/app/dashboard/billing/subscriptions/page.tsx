@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { Gift, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowUpCircle, Gift, Receipt, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, Card, ConfirmDialog, Pagination, Table } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -17,12 +17,14 @@ import { usePermissions } from '@/contexts/PermissionsContext';
 import { apiError, FilterSelect } from '@/components/field-service/shared';
 import { BillingNav, StatusPill, Tabs } from '@/components/billing/shared';
 import GrantModal from '@/components/billing/GrantModal';
+import { SaleModal, UpgradeModal } from '@/components/billing/SaleModals';
+import { Pill } from '@/components/field-service/shared';
 import { formatDate } from '@/lib/utils';
-import { billingService, type BillingApp, type Grant, type Subscription } from '@/services/billing.service';
+import { billingService, formatMinor, type BillingApp, type Grant, type PlanChange, type Purchase, type Subscription } from '@/services/billing.service';
 import type { TableColumn } from '@/types';
 
 const PER_PAGE = 20;
-type Tab = 'subscriptions' | 'grants';
+type Tab = 'subscriptions' | 'purchases' | 'grants' | 'history';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
@@ -71,12 +73,15 @@ function useList<T>(fetcher: (page: number) => Promise<{ data: T[]; meta: { tota
 }
 
 function SubscriptionsContent() {
-  const { canCreate, canDelete } = usePermissions();
+  const { canCreate, canUpdate, canDelete } = usePermissions();
   const [tab, setTab] = useState<Tab>('subscriptions');
   const [apps, setApps] = useState<BillingApp[]>([]);
   const [app, setApp] = useState('');
   const [status, setStatus] = useState('');
   const [grantOpen, setGrantOpen] = useState(false);
+  const [saleOpen, setSaleOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [revokePurchase, setRevokePurchase] = useState<Purchase | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<Grant | null>(null);
   const [revoking, setRevoking] = useState(false);
 
@@ -92,14 +97,133 @@ function SubscriptionsContent() {
     (page: number) => billingService.listGrants({ app: app || undefined, page, per_page: PER_PAGE }),
     [app]
   );
+  const purchaseFetcher = useCallback(
+    (page: number) => billingService.listPurchases({ app: app || undefined, page, per_page: PER_PAGE }),
+    [app]
+  );
+  const historyFetcher = useCallback(
+    (page: number) => billingService.planChanges({ app: app || undefined, page, per_page: PER_PAGE }),
+    [app]
+  );
   const subs = useList<Subscription>(subFetcher);
   const grants = useList<Grant>(grantFetcher);
+  const purchases = useList<Purchase>(purchaseFetcher);
+  const history = useList<PlanChange>(historyFetcher);
+  const reloadAll = () => {
+    subs.reload();
+    purchases.reload();
+    history.reload();
+  };
   const { setPage: setSubsPage } = subs;
   const { setPage: setGrantsPage } = grants;
   useEffect(() => {
     setSubsPage(1);
     setGrantsPage(1);
   }, [app, status, setSubsPage, setGrantsPage]);
+
+  const doRevokePurchase = async () => {
+    if (!revokePurchase) return;
+    try {
+      await billingService.revokePurchase(revokePurchase.uuid);
+      toast.success('Purchase revoked');
+      setRevokePurchase(null);
+      reloadAll();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not revoke'));
+    }
+  };
+
+  const purchaseColumns: TableColumn<Purchase>[] = useMemo(
+    () => [
+      { key: 'customer', header: 'Customer', render: (p) => <CustomerCell row={p} /> },
+      {
+        key: 'plan',
+        header: 'App / plan',
+        render: (p) => (
+          <div className="text-sm">
+            <p>
+              {p.app_name} · {p.plan_name}
+            </p>
+            <p className="text-xs text-secondary-500">
+              {p.purchase_type === 'one_time' ? 'One-time' : 'Fixed term'} · {p.source.replace('_', ' ')}
+            </p>
+          </div>
+        ),
+      },
+      {
+        key: 'amount',
+        header: 'Paid',
+        render: (p) => (
+          <span className="tabular-nums text-sm">
+            {formatMinor(p.amount, p.currency)}
+            {p.coupon_code && <span className="block text-xs text-secondary-500">coupon {p.coupon_code}</span>}
+          </span>
+        ),
+      },
+      {
+        key: 'window',
+        header: 'Access / updates',
+        render: (p) => (
+          <span className="text-xs text-secondary-600">
+            {p.access_until ? `until ${formatDate(p.access_until)}` : 'perpetual'} ·{' '}
+            {p.updates_until ? `updates to ${formatDate(p.updates_until)}` : 'all updates'}
+          </span>
+        ),
+      },
+      { key: 'status', header: 'Status', render: (p) => <StatusPill status={p.status} /> },
+      {
+        key: 'actions',
+        header: '',
+        width: 'w-16',
+        render: (p) =>
+          canUpdate('subscriptions') && p.status === 'active' ? (
+            <button
+              type="button"
+              onClick={() => setRevokePurchase(p)}
+              className="p-2 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg"
+              aria-label="Revoke purchase"
+              title="Revoke purchase"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          ) : null,
+      },
+    ],
+    [canUpdate]
+  );
+
+  const historyColumns: TableColumn<PlanChange>[] = useMemo(
+    () => [
+      { key: 'when', header: 'When', render: (h) => <span className="text-sm">{formatDate(h.created_at)}</span> },
+      { key: 'customer', header: 'Customer', render: (h) => <span className="text-sm break-all">{h.customer_email}</span> },
+      {
+        key: 'change',
+        header: 'Change',
+        render: (h) => (
+          <div className="text-sm">
+            <Pill className={h.kind === 'upgrade' ? 'bg-green-50 text-green-700' : h.kind === 'cancel' ? 'bg-red-50 text-red-700' : 'bg-secondary-100 text-secondary-700'}>
+              {h.kind}
+            </Pill>{' '}
+            {h.from_plan_name ? `${h.from_plan_name} → ` : ''}
+            {h.to_plan_name || ''}
+          </div>
+        ),
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        render: (h) => (
+          <span className="tabular-nums text-sm">
+            {h.amount ? formatMinor(h.amount, h.currency || 'gbp') : '—'}
+            {h.coupon_code && <span className="block text-xs text-secondary-500">coupon {h.coupon_code}</span>}
+          </span>
+        ),
+      },
+      { key: 'source', header: 'Source', render: (h) => <span className="text-sm text-secondary-600">{h.source.replace('_', ' ')}</span> },
+      { key: 'note', header: 'Note', render: (h) => <span className="text-sm text-secondary-600">{h.note || '—'}</span> },
+    ],
+    []
+  );
 
   const revoke = async () => {
     if (!revokeTarget) return;
@@ -188,13 +312,23 @@ function SubscriptionsContent() {
     <div className="space-y-6">
       <PageHeader
         title="Subscriptions"
-        description="Customers' plans, and access you've granted without payment."
+        description="Subscriptions, one-time and fixed-term purchases, grants and the full plan history."
         icon={<RefreshCw className="w-5 h-5" />}
         actions={
           canCreate('subscriptions') ? (
-            <Button onClick={() => setGrantOpen(true)}>
-              <Gift className="w-4 h-4 mr-1.5" /> Grant access
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setSaleOpen(true)}>
+                <Receipt className="w-4 h-4 mr-1.5" /> Record a sale
+              </Button>
+              {canUpdate('subscriptions') && (
+                <Button variant="outline" onClick={() => setUpgradeOpen(true)}>
+                  <ArrowUpCircle className="w-4 h-4 mr-1.5" /> Upgrade
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setGrantOpen(true)}>
+                <Gift className="w-4 h-4 mr-1.5" /> Grant access
+              </Button>
+            </div>
           ) : undefined
         }
       />
@@ -217,32 +351,58 @@ function SubscriptionsContent() {
       <Tabs
         tabs={[
           { id: 'subscriptions', label: `Subscriptions (${subs.meta.total})` },
+          { id: 'purchases', label: `Purchases (${purchases.meta.total})` },
           { id: 'grants', label: `Grants (${grants.meta.total})` },
+          { id: 'history', label: 'History' },
         ]}
         value={tab}
         onChange={setTab}
         label="Subscription views"
       />
       <div role="tabpanel">
-        {tab === 'subscriptions' ? (
+        {tab === 'subscriptions' && (
           <>
             <Table
               columns={subColumns}
               data={subs.rows}
               keyExtractor={(s) => s.uuid}
               isLoading={subs.loading}
-              emptyMessage="No subscriptions yet. They appear when customers check out (Stripe Connect is coming next); until then use grants."
+              emptyMessage="No subscriptions yet. They appear when customers subscribe (Stripe checkout), when you record a subscription sale, or from store purchases."
             />
             <Pagination currentPage={subs.page} totalPages={subs.meta.total_pages} totalItems={subs.meta.total} perPage={PER_PAGE} onPageChange={subs.setPage} />
           </>
-        ) : (
+        )}
+        {tab === 'purchases' && (
+          <>
+            <Table columns={purchaseColumns} data={purchases.rows} keyExtractor={(p) => p.uuid} isLoading={purchases.loading} emptyMessage="No one-time or fixed-term purchases yet." />
+            <Pagination currentPage={purchases.page} totalPages={purchases.meta.total_pages} totalItems={purchases.meta.total} perPage={PER_PAGE} onPageChange={purchases.setPage} />
+          </>
+        )}
+        {tab === 'grants' && (
           <>
             <Table columns={grantColumns} data={grants.rows} keyExtractor={(g) => g.uuid} isLoading={grants.loading} emptyMessage="No active grants." />
             <Pagination currentPage={grants.page} totalPages={grants.meta.total_pages} totalItems={grants.meta.total} perPage={PER_PAGE} onPageChange={grants.setPage} />
           </>
         )}
+        {tab === 'history' && (
+          <>
+            <Table columns={historyColumns} data={history.rows} keyExtractor={(h) => h.uuid} isLoading={history.loading} emptyMessage="No plan changes yet." />
+            <Pagination currentPage={history.page} totalPages={history.meta.total_pages} totalItems={history.meta.total} perPage={PER_PAGE} onPageChange={history.setPage} />
+          </>
+        )}
       </div>
 
+      <SaleModal isOpen={saleOpen} onClose={() => setSaleOpen(false)} onSaved={reloadAll} />
+      <UpgradeModal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} onSaved={reloadAll} />
+      <ConfirmDialog
+        isOpen={!!revokePurchase}
+        onClose={() => setRevokePurchase(null)}
+        onConfirm={doRevokePurchase}
+        title="Revoke this purchase?"
+        message="Its access ends and any licence it fulfilled is revoked. The record stays in the history."
+        confirmText="Revoke"
+        variant="danger"
+      />
       <GrantModal
         isOpen={grantOpen}
         onClose={() => setGrantOpen(false)}

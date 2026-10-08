@@ -32,6 +32,7 @@ const NAV = [
   { href: '/dashboard/billing', label: 'Apps & plans', module: 'billing' },
   { href: '/dashboard/billing/subscriptions', label: 'Subscriptions', module: 'subscriptions' },
   { href: '/dashboard/billing/licenses', label: 'Licences', module: 'licenses' },
+  { href: '/dashboard/billing/coupons', label: 'Coupons', module: 'billing' },
 ];
 
 export function BillingNav() {

@@ -31,6 +31,7 @@ export function IssueLicenseModal({
   const [plan, setPlan] = useState('');
   const [seats, setSeats] = useState('1');
   const [expires, setExpires] = useState('');
+  const [updatesUntil, setUpdatesUntil] = useState('');
   const [saving, setSaving] = useState(false);
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
 
@@ -40,6 +41,7 @@ export function IssueLicenseModal({
     setPlan('');
     setSeats('1');
     setExpires('');
+    setUpdatesUntil('');
     setIssuedKey(null);
     billingService
       .listApps()
@@ -66,7 +68,8 @@ export function IssueLicenseModal({
         customer,
         plan: plan || undefined,
         max_activations: seats.trim() === '' ? null : Math.max(1, Math.floor(Number(seats))),
-        expires_at: expires ? endOfDay(expires) : undefined,
+        access_until: expires ? endOfDay(expires) : undefined,
+        updates_until: updatesUntil ? endOfDay(updatesUntil) : undefined,
       });
       setIssuedKey(res.key);
       onIssued();
@@ -133,11 +136,19 @@ export function IssueLicenseModal({
             helperText="Blank = unlimited"
           />
           <Input
-            label="Expires on (optional)"
+            label="Access until (optional)"
             type="date"
             min={new Date().toISOString().slice(0, 10)}
             value={expires}
             onChange={(e) => setExpires(e.target.value)}
+            helperText="Blank = perpetual"
+          />
+          <Input
+            label="Updates until (optional)"
+            type="date"
+            value={updatesUntil}
+            onChange={(e) => setUpdatesUntil(e.target.value)}
+            helperText="Blank = all future versions"
           />
         </div>
         <div className="flex justify-end gap-2 pt-1">
@@ -167,6 +178,7 @@ export function LicenseDetailModal({
   const [lic, setLic] = useState<License | null>(null);
   const [busy, setBusy] = useState(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
+  const [newKey, setNewKey] = useState<string | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -182,6 +194,7 @@ export function LicenseDetailModal({
 
   useEffect(() => {
     setLic(null);
+    setNewKey(null);
     load();
   }, [load]);
 
@@ -231,8 +244,12 @@ export function LicenseDetailModal({
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-secondary-500">Expires</dt>
-              <dd className="mt-0.5 text-secondary-900">{lic.expires_at ? formatDate(lic.expires_at) : 'Never'}</dd>
+              <dt className="text-xs text-secondary-500">Access until</dt>
+              <dd className="mt-0.5 text-secondary-900">{lic.access_until ? formatDate(lic.access_until) : 'Perpetual'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-secondary-500">Updates until</dt>
+              <dd className="mt-0.5 text-secondary-900">{lic.updates_until ? formatDate(lic.updates_until) : 'All versions'}</dd>
             </div>
             <div>
               <dt className="text-xs text-secondary-500">Issued</dt>
@@ -274,6 +291,19 @@ export function LicenseDetailModal({
             )}
           </div>
 
+          {newKey && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
+                <p>Copy the new key now and send it to the customer. It won&apos;t be shown again. Their devices stay activated.</p>
+              </div>
+              <div className="flex items-center gap-2 rounded-lg border border-secondary-200 bg-secondary-50 px-3 py-3">
+                <code className="flex-1 break-all text-base tracking-wider text-secondary-900">{newKey}</code>
+                <CopyButton value={newKey} label="Copy new licence key" />
+              </div>
+            </div>
+          )}
+
           {canUpdate('licenses') && lic.status !== 'revoked' && (
             <div className="flex flex-wrap justify-end gap-2 border-t border-secondary-100 pt-4">
               {lic.status === 'active' ? (
@@ -293,7 +323,7 @@ export function LicenseDetailModal({
                       () =>
                         billingService.updateLicense(lic.uuid, {
                           status: 'active',
-                          ...(lic.status === 'expired' ? { expires_at: null } : {}),
+                          ...(lic.status === 'expired' ? { access_until: null } : {}),
                         }),
                       'Licence resumed'
                     )
@@ -302,6 +332,15 @@ export function LicenseDetailModal({
                   {lic.status === 'expired' ? 'Resume (remove expiry)' : 'Resume'}
                 </Button>
               )}
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  act(async () => setNewKey((await billingService.reissueLicense(lic.uuid)).key), 'New key issued; the old one stopped working')
+                }
+              >
+                Reissue key
+              </Button>
               <Button variant="danger" disabled={busy} onClick={() => setRevokeOpen(true)}>
                 Revoke
               </Button>

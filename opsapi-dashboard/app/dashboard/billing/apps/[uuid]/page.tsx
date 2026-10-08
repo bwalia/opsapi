@@ -17,13 +17,15 @@ import { BillingNav, KIND_LABELS, Tabs } from '@/components/billing/shared';
 import AppOverview from '@/components/billing/AppOverview';
 import AppFeatures from '@/components/billing/AppFeatures';
 import AppPlans from '@/components/billing/AppPlans';
+import AppUpgrades from '@/components/billing/AppUpgrades';
 import { billingService, type BillingApp } from '@/services/billing.service';
 
-type Tab = 'overview' | 'features' | 'plans';
+type Tab = 'overview' | 'features' | 'plans' | 'upgrades';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'features', label: 'Features' },
   { id: 'plans', label: 'Plans' },
+  { id: 'upgrades', label: 'Upgrades' },
 ];
 
 function AppContent() {
@@ -83,6 +85,7 @@ function AppContent() {
         )}
         {tab === 'features' && <AppFeatures app={app} features={features} onChanged={load} />}
         {tab === 'plans' && <AppPlans app={app} features={features} />}
+        {tab === 'upgrades' && <AppUpgrades app={app} />}
       </div>
     </div>
   );
