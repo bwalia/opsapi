@@ -167,6 +167,63 @@ function BillingPlanQueries.appFields(namespace_id, body, current)
     end
     if body.is_default ~= nil then f.is_default = body.is_default == true end
     if body.is_public ~= nil then f.is_public = body.is_public == true end
+
+    -- Purchase type (docs §3): it also sets the legacy plan_type, so the
+    -- existing validation (billing_interval for subscriptions) applies.
+    local ptype = body.purchase_type
+    if ptype == nil and not current then ptype = (body.plan_type == "one_time") and "one_time" or "recurring" end
+    if ptype ~= nil then
+        if ptype ~= "recurring" and ptype ~= "one_time" and ptype ~= "fixed_term" then
+            return nil, "purchase_type must be recurring, one_time or fixed_term"
+        end
+        f.purchase_type = ptype
+        body.plan_type = ptype == "recurring" and "subscription" or "one_time"
+        f.plan_type = body.plan_type
+        if ptype ~= "recurring" then
+            body.billing_interval = nil
+            f.billing_interval = db.NULL
+        end
+    end
+    local effective = ptype or (current and current.purchase_type)
+    local function days(name)
+        local v = body[name]
+        if v == nil then return nil end
+        if v == cjson.null or v == "" then return db.NULL end
+        local n = tonumber(v)
+        if not n or n ~= math.floor(n) or n < 1 or n > 36500 then
+            return nil, name .. " must be a whole number of days (1-36500)"
+        end
+        return n
+    end
+    local term, terr = days("term_days")
+    if terr then return nil, terr end
+    local updates, uerr = days("updates_days")
+    if uerr then return nil, uerr end
+    if effective == "fixed_term" then
+        if term == db.NULL or (term == nil and not (current and current.term_days)) then
+            return nil, "a fixed_term plan needs term_days"
+        end
+        local covers = body.term_covers or (current and current.term_covers) or "access"
+        if covers ~= "access" and covers ~= "updates" then return nil, "term_covers must be access or updates" end
+        f.term_covers = covers
+    end
+    if term ~= nil then f.term_days = term end
+    if updates ~= nil then
+        if effective ~= "one_time" and updates ~= db.NULL then
+            return nil, "updates_days is for one_time plans (fixed_term plans use term_days)"
+        end
+        f.updates_days = updates
+    end
+    if body.store_products ~= nil then
+        local sp = body.store_products
+        if type(sp) ~= "table" then return nil, "store_products must be an object like {\"app_store\": \"com.acme.pro\"}" end
+        for k, v in pairs(sp) do
+            if (k ~= "app_store" and k ~= "play_store" and k ~= "external") or type(v) ~= "string" or #v > 200 then
+                return nil, "store_products: app_store / play_store / external -> product id"
+            end
+        end
+        f.store_products = require("lib.billing-signing").encode(sp)
+    end
     if body.features ~= nil then
         local features, err = Apps.checkFeatureValues(app_id, body.features)
         if not features then return nil, err end

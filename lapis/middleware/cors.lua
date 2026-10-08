@@ -120,6 +120,20 @@ function CorsMiddleware.enable(app)
         -- If not allowed or no origin (non-browser client): no CORS headers set,
         -- browser will block the cross-origin request naturally
 
+        -- Billing public endpoints are called from each app's own origins
+        -- (allowed_origins in the app's settings). Preflights pass here; the
+        -- real request is checked per app by lib/billing-guard.lua (a mutating
+        -- request from another origin is refused before anything happens).
+        if self.req.method == "OPTIONS" and origin and not allowed then
+            local uri = ngx.var.uri or ""
+            if uri:find("^/api/v2/public/billing/") or uri:find("^/api/v2/public/licenses/") then
+                self.res.headers["Access-Control-Allow-Origin"] = origin
+                self.res.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+                self.res.headers["Access-Control-Allow-Headers"] = "Content-Type, Idempotency-Key, X-Billing-Session"
+                self.res.headers["Access-Control-Max-Age"] = "600"
+            end
+        end
+
         -- Handle preflight OPTIONS requests
         if self.req.method == "OPTIONS" then
             ngx.exit(204)

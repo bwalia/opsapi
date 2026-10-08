@@ -210,9 +210,14 @@ function PluginEvents.checkVerbs(verbs)
 end
 
 --- Every event of an entity: created/updated/deleted, then its verbs (sorted).
+--- Computed events of core entities: no table change behind them, emitted by
+-- core code through emitCore() (e.g. a licence key issued or reissued).
+PluginEvents.COMPUTED = { license = { "issued", "reissued" } }
+
 function PluginEvents.entityEvents(entity, verbs)
     local out = {}
     for _, a in ipairs(PluginEvents.ACTIONS) do out[#out + 1] = entity .. "." .. a end
+    for _, a in ipairs(PluginEvents.COMPUTED[entity] or {}) do out[#out + 1] = entity .. "." .. a end
     local names = {}
     for verb in pairs(verbs or {}) do names[#names + 1] = verb end
     table.sort(names)
@@ -651,11 +656,26 @@ end
 --- Publish a custom event to its subscribers (one statement: the event is
 -- only stored when someone listens). Core entity names are reserved.
 -- @return number of deliveries queued
+local insert_event
+
 function PluginEvents.emit(namespace_id, name, data)
     assert(type(name) == "string" and name:match(EVENT_KEY) and not name:find("*", 1, true),
         "event name must look like <plugin>.<entity>.<action>")
     local entity = name:match("^(.*)%.[^.]+$")
     assert(not is_core_entity(entity), "'" .. name .. "' is a core event; core events come from table changes")
+    return insert_event(namespace_id, name, entity, data)
+end
+
+--- Publish one of PluginEvents.COMPUTED (core code only).
+function PluginEvents.emitCore(namespace_id, name, data)
+    local entity, action = name:match("^(.*)%.([^.]+)$")
+    local known = false
+    for _, a in ipairs(PluginEvents.COMPUTED[entity or ""] or {}) do known = known or a == action end
+    assert(known, "'" .. tostring(name) .. "' is not a computed core event")
+    return insert_event(namespace_id, name, entity, data)
+end
+
+insert_event = function(namespace_id, name, entity, data)
     -- Audit trail (no-op unless "core.audit" subscribes and there is a workspace).
     if namespace_id and audit_function_ready() then
         pcall(db().query, "SELECT opsapi_audit(?, ?, NULL, ?, NULL, ?::jsonb)", name, entity, namespace_id,
@@ -918,6 +938,16 @@ function PluginEvents.start(projects_root)
                 table.insert(_failures, { code = manifest.code, errors = errors })
                 ngx.log(ngx.ERR, "[plugin-events] ", manifest.code, ": ", table.concat(errors, "; "))
             end
+        end
+    end
+    -- Billing & Entitlements: its emails and jobs run from this outbox.
+    if require("helper.project-config").isFeatureEnabled("billing") then
+        local ok_jobs, jobs = pcall(require, "lib.billing-jobs")
+        if ok_jobs then
+            _handlers["core.billing"] = jobs.handlers
+            if ngx.worker.id() == 0 then ngx.timer.every(300, jobs.maintain) end
+        else
+            ngx.log(ngx.ERR, "[plugin-events] billing jobs failed to load: ", tostring(jobs))
         end
     end
     -- Always poll: workspace webhooks are deliveries too, plugins or not.

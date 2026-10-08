@@ -93,13 +93,14 @@ return function(app)
             end
             local body = parse_json_body()
 
-            local ok, verr = BillingPlanQueries.validate(body)
-            if not ok then
-                return api_response(400, nil, verr)
-            end
+            -- App fields first: the purchase type decides plan_type.
             local extra, aerr = BillingPlanQueries.appFields(self.namespace.id, body, nil)
             if not extra then
                 return api_response(400, nil, aerr)
+            end
+            local ok, verr = BillingPlanQueries.validate(body)
+            if not ok then
+                return api_response(400, nil, verr)
             end
 
             local params = {
@@ -129,6 +130,7 @@ return function(app)
             if not plan then
                 return api_response(500, nil, "Failed to create plan")
             end
+            if plan.app_id then require("queries.BillingAppQueries").bump(plan.app_id) end
 
             -- App plans sell through the client's own Stripe account (Connect,
             -- phase 2), never the platform's: no platform sync for them.
@@ -199,6 +201,7 @@ return function(app)
             if not extra then
                 return api_response(400, nil, aerr)
             end
+            if plan.app_id then require("queries.BillingAppQueries").bump(plan.app_id) end
 
             -- Validate the merged result so partial updates stay consistent.
             local merged = {
@@ -207,6 +210,7 @@ return function(app)
                 amount = body.amount ~= nil and body.amount or plan.amount,
                 billing_interval = body.billing_interval ~= nil and body.billing_interval or plan.billing_interval,
             }
+            if merged.plan_type == "one_time" then merged.billing_interval = nil end
             local ok, verr = BillingPlanQueries.validate(merged)
             if not ok then
                 return api_response(400, nil, verr)
@@ -299,6 +303,7 @@ return function(app)
             end
 
             BillingPlanQueries.softDelete(self.params.uuid)
+            if plan.app_id then require("queries.BillingAppQueries").bump(plan.app_id) end
             return api_response(200, { message = "Plan deleted" })
         end)
     ))

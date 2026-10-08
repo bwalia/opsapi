@@ -464,6 +464,8 @@ safe_load_routes("routes.namespace-activity") -- workspace activity (owners/admi
 safe_load_routes("routes.email")
 safe_load_routes("routes.plugins")
 safe_load_routes("routes.namespace-webhooks")
+-- Workspace email: own SMTP + template overrides (helper/namespace-mail.lua).
+safe_load_routes("routes.namespace-mail")
 
 -- ============================================
 -- MENU SYSTEM (backend-driven navigation)
@@ -650,6 +652,8 @@ load_if("tax_copilot", "routes.billing-account")
 load_if("billing", "routes.billing-apps")
 load_if("billing", "routes.billing-subscriptions")
 load_if("billing", "routes.billing-licenses")
+load_if("billing", "routes.billing-public")
+load_if("billing", "routes.billing-privacy")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines, Leads)

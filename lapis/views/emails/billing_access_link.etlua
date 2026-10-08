@@ -1,0 +1,12 @@
+<h2>Your <%= app_name %> account</h2>
+
+<p>Someone (hopefully you) asked for a link to manage your <strong><%= app_name %></strong> licences and purchases for <%= customer_email or "your account" %>.</p>
+
+<p style="text-align: center; margin: 28px 0;">
+  <a href="<%= link %>" class="btn">Open my account</a>
+</p>
+
+<p style="font-size: 13px; color: #9ca3af;">
+  The link works once and expires in <strong><%= expires_minutes or 15 %> minutes</strong>.
+  If you didn't ask for it, you can ignore this email.
+</p>

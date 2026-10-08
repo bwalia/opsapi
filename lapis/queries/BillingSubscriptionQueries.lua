@@ -244,13 +244,15 @@ function BillingSubscriptionQueries.createGrant(namespace_id, actor, b)
         end
         error(err)
     end
+    require("helper.entitlement-service").bust(app, customer.id)
     return db.query(GRANT_SELECT .. " WHERE g.uuid = ?", uuid)[1]
 end
 
 function BillingSubscriptionQueries.revokeGrant(namespace_id, uuid)
-    local res = db.query([[UPDATE billing_grants SET revoked_at = NOW(), updated_at = NOW()
-        WHERE namespace_id = ? AND uuid = ? AND revoked_at IS NULL]], namespace_id, uuid)
-    if (res.affected_rows or 0) == 0 then return nil, "Grant not found" end
+    local g = db.query([[UPDATE billing_grants SET revoked_at = NOW(), updated_at = NOW()
+        WHERE namespace_id = ? AND uuid = ? AND revoked_at IS NULL RETURNING app_id, customer_id]], namespace_id, uuid)[1]
+    if not g then return nil, "Grant not found" end
+    require("helper.entitlement-service").bust(g.app_id, g.customer_id)
     return true
 end
 

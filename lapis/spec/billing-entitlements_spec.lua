@@ -71,7 +71,7 @@ for _, m in ipairs(ProjectConfig.PROJECT_MODULES.billing or {}) do modules[m.mac
 check("RBAC modules = route families", modules.billing and modules.subscriptions and modules.entitlements
     and modules.licenses and modules.customers)
 local app_lua = read("app.lua")
-for _, r in ipairs({ "billing-apps", "billing-subscriptions", "billing-licenses" }) do
+for _, r in ipairs({ "billing-apps", "billing-subscriptions", "billing-licenses", "billing-public", "billing-privacy" }) do
     check("routes." .. r .. " loads only under billing", app_lua:find('load_if("billing", "routes.' .. r .. '")', 1, true) ~= nil)
 end
 check("customers + plans also load for billing",
@@ -83,12 +83,19 @@ for i = 1, 8 do
     check("migration zzbe" .. i .. " gated on BILLING",
         migrations:find("%['zzbe" .. i .. "_[%w_]+'%] = conditional_array%(ProjectConfig%.FEATURES%.BILLING") ~= nil)
 end
+for i = 1, 5 do
+    check("v2 migration zzbf" .. i .. " gated on BILLING",
+        migrations:find("%['zzbf" .. i .. "_[%w_]+'%] = conditional_array%(ProjectConfig%.FEATURES%.BILLING") ~= nil)
+end
+check("workspace mail tables are core", migrations:find("%['zznm1_[%w_]+'%] = conditional_array%(ProjectConfig%.FEATURES%.CORE") ~= nil)
 
 print("URL family = RBAC module (API-key scopes)")
 for file, families in pairs({
     ["routes/billing-apps.lua"] = { billing = true },
     ["routes/billing-subscriptions.lua"] = { subscriptions = true, entitlements = true },
     ["routes/billing-licenses.lua"] = { licenses = true },
+    ["routes/billing-public.lua"] = {},
+    ["routes/billing-privacy.lua"] = { customers = true },
 }) do
     local src = read(file)
     local ok, bad = true, nil

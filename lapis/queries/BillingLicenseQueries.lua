@@ -1,19 +1,17 @@
 --[[
     Billing & Entitlements — licence keys for desktop / self-hosted apps
     ====================================================================
-    docs/BILLING_ENTITLEMENTS.md §4.2 / §6 / §7.
+    docs/BILLING_ENTITLEMENTS.md §5 / §8 / §10, docs/LICENCE_FORMAT.md.
 
     A key looks like ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2 (25 characters from a
     32-letter alphabet without 0/O/1/I: 125 random bits). Only its SHA-256 and
-    first group are stored; the key itself is shown once, at creation.
+    first group are stored; the key itself is shown once (at issue or reissue).
 
-    Each machine that uses a key is an activation, identified by the SHA-256
-    of a fingerprint the app sends. activate/validate return a signed licence
-    file (ES256) the app verifies offline with the public JWKS.
-
-    A licence's features = the customer's entitlements for the app, plus the
-    licence's own plan. A licence tied to a subscription stops working when
-    that subscription stops entitling.
+    A licence has its own access_until / updates_until windows (set by the
+    purchase that fulfilled it, or by hand). Each machine that uses it is an
+    activation, identified by the app-salted fingerprint hash the app sends.
+    activate / validate return a signed licence file (format v1) the app
+    verifies offline.
 ]]
 
 local db = require("lapis.db")
@@ -24,6 +22,7 @@ local Subs = require("queries.BillingSubscriptionQueries")
 local ApiKey = require("helper.api-key")
 local EntitlementService = require("helper.entitlement-service")
 local Signing = require("lib.billing-signing")
+local Settings = require("lib.billing-settings")
 
 local Licenses = {}
 
@@ -49,9 +48,11 @@ function Licenses.normalize(key)
     return k
 end
 
+local function key_hash(raw) return ApiKey.hash(Licenses.normalize(raw)) end
+
 local LIST_SELECT = [[
-    SELECT l.uuid, l.key_prefix, l.status, l.max_activations, l.expires_at, l.metadata, l.created_by,
-           l.revoked_at, l.created_at, l.updated_at,
+    SELECT l.uuid, l.key_prefix, l.status, l.max_activations, l.access_until, l.updates_until, l.source,
+           l.metadata, l.created_by, l.revoked_at, l.key_rotated_at, l.created_at, l.updated_at,
            a.uuid AS app_uuid, a.name AS app_name, p.uuid AS plan_uuid, p.plan_key, p.name AS plan_name,
            s.uuid AS subscription_uuid, c.uuid AS customer_uuid, c.external_id AS customer_external_id,
            c.email AS customer_email,
@@ -86,14 +87,28 @@ function Licenses.list(namespace_id, params)
     return Common.arr(rows), Common.meta(total, page, per_page)
 end
 
+local function activations(license_uuid)
+    return Common.arr(db.query([[
+        SELECT x.uuid, x.name, x.platform, x.app_version, x.first_seen_at, x.last_seen_at, x.deactivated_at
+        FROM billing_license_activations x JOIN billing_licenses l ON l.id = x.license_id
+        WHERE l.uuid = ? ORDER BY x.deactivated_at IS NOT NULL, x.last_seen_at DESC]], license_uuid))
+end
+
 function Licenses.get(namespace_id, uuid)
     local row = db.query(LIST_SELECT .. " WHERE l.namespace_id = ? AND l.uuid = ?", namespace_id, uuid)[1]
     if not row then return nil end
-    row.activations = Common.arr(db.query([[
-        SELECT x.uuid, x.name, x.platform, x.app_version, x.first_seen_at, x.last_seen_at, x.deactivated_at
-        FROM billing_license_activations x JOIN billing_licenses l ON l.id = x.license_id
-        WHERE l.uuid = ? ORDER BY x.deactivated_at IS NOT NULL, x.last_seen_at DESC]], uuid))
+    row.activations = activations(uuid)
     return row
+end
+
+-- An ISO date/time (or null) for a timestamptz column.
+local function ts_field(v, name)
+    v = Common.nilify(v)
+    if v == nil then return db.NULL end
+    if type(v) ~= "string" or not v:match("^%d%d%d%d%-%d%d%-%d%d") then
+        return nil, name .. " must be an ISO-8601 date/time, or null"
+    end
+    return db.raw(db.escape_literal(v) .. "::timestamptz")
 end
 
 local function clean(b, partial)
@@ -108,19 +123,19 @@ local function clean(b, partial)
             f.max_activations = n
         end
     end
-    if b.expires_at ~= nil then
-        local v = Common.nilify(b.expires_at)
-        if v ~= nil and (type(v) ~= "string" or not v:match("^%d%d%d%d%-%d%d%-%d%d")) then
-            return nil, "expires_at must be an ISO-8601 date/time, or null"
+    for _, k in ipairs({ "access_until", "updates_until" }) do
+        if b[k] ~= nil then
+            local v, err = ts_field(b[k], k)
+            if not v then return nil, err end
+            f[k] = v
         end
-        f.expires_at = v and db.raw(db.escape_literal(v) .. "::timestamptz") or db.NULL
     end
     if b.metadata ~= nil then
         if type(b.metadata) ~= "table" then return nil, "metadata must be an object" end
         f.metadata = db.raw(db.escape_literal(Signing.encode(b.metadata)) .. "::jsonb")
     end
     if partial and b.status ~= nil then
-        -- revoke is its own action (irreversible); expiry comes from expires_at.
+        -- revoke is its own action (irreversible); expiry comes from access_until.
         if b.status ~= "active" and b.status ~= "suspended" then
             return nil, "status can be set to active or suspended (use revoke to revoke)"
         end
@@ -135,12 +150,39 @@ local function write(fn)
     if ok then return res end
     local msg = tostring(res)
     if msg:find("invalid input syntax", 1, true) or msg:find("out of range", 1, true) then
-        return nil, "expires_at must be a valid ISO-8601 date/time"
+        return nil, "access_until / updates_until must be valid ISO-8601 dates"
     end
     error(res)
 end
 
---- Issue a licence. @return { license, key } (key shown once) | nil, err
+local function emit(namespace_id, name, lic, app, key)
+    local data = { uuid = lic.uuid, key_prefix = lic.key_prefix, app = app.uuid, plan_id = lic.plan_id,
+        customer_id = lic.customer_id }
+    -- The raw key only when the app opted in (docs §10). Phase 2 encrypts it in the outbox.
+    if key and Settings.resolve(app).webhook_include_licence_key then data.key = key end
+    pcall(require("helper.plugin-events").emitCore, namespace_id, name, data)
+end
+
+--- Issue a licence (the shared path for manual issue and purchase fulfilment).
+-- f: { plan_id?, subscription_id?, purchase_id?, max_activations?, access_until?, updates_until?,
+--      metadata?, source?, created_by? } (db values). @return row, raw key
+function Licenses.issue(app, customer, f)
+    local key = Licenses.generateKey()
+    f.uuid = Common.uuid()
+    f.namespace_id, f.app_id, f.customer_id = app.namespace_id, app.id, customer.id
+    f.key_hash = key_hash(key)
+    f.key_prefix = key:sub(1, 5)
+    f.source = f.source or "manual"
+    if f.max_activations == nil then
+        local d = Settings.resolve(app).max_activations
+        f.max_activations = d == cjson.null and db.NULL or d
+    end
+    local row = db.insert("billing_licenses", f, { returning = "*" })[1]
+    emit(app.namespace_id, "license.issued", row, app, key)
+    return row, key
+end
+
+--- Issue a licence by hand. @return { license, key } (key shown once) | nil, err
 function Licenses.create(namespace_id, actor, b)
     local app = Apps.find(namespace_id, b.app)
     if not app then return nil, "App not found" end
@@ -148,6 +190,12 @@ function Licenses.create(namespace_id, actor, b)
     if not customer then return nil, "Customer not found" end
     local f, err = clean(b, false)
     if not f then return nil, err end
+    -- v1 name for access_until.
+    if b.expires_at ~= nil and b.access_until == nil then
+        local v, terr = ts_field(b.expires_at, "expires_at")
+        if not v then return nil, terr end
+        f.access_until = v
+    end
     if Common.nilify(b.plan) then
         local plan = Subs.appPlan(app.id, b.plan)
         if not plan then return nil, "Plan not found in this app" end
@@ -160,15 +208,10 @@ function Licenses.create(namespace_id, actor, b)
         if not sub then return nil, "Subscription not found for this customer and app" end
         f.subscription_id = sub.id
     end
-    local key = Licenses.generateKey()
-    f.uuid = Common.uuid()
-    f.namespace_id, f.app_id, f.customer_id = namespace_id, app.id, customer.id
-    f.key_hash = ApiKey.hash(Licenses.normalize(key))
-    f.key_prefix = key:sub(1, 5)
     f.created_by = actor
-    local ok, werr = write(function() return db.insert("billing_licenses", f) end)
-    if not ok then return nil, werr end
-    return { license = Licenses.get(namespace_id, f.uuid), key = key }
+    local row, key = write(function() return Licenses.issue(app, customer, f) end)
+    if not row then return nil, key end
+    return { license = Licenses.get(namespace_id, row.uuid), key = key }
 end
 
 function Licenses.update(namespace_id, uuid, b)
@@ -198,18 +241,47 @@ function Licenses.revoke(namespace_id, uuid)
     end)
 end
 
+--- A lost key: a new key for the same licence. The old key stops working at
+-- once; activations are kept. @return { license, key } | nil, err
+function Licenses.reissue(namespace_id, uuid, customer_id)
+    local lic = db.query([[SELECT l.*, a.uuid AS app_uuid FROM billing_licenses l JOIN billing_apps a ON a.id = l.app_id
+        WHERE l.namespace_id = ? AND l.uuid = ? AND (?::int IS NULL OR l.customer_id = ?::int)]],
+        namespace_id, uuid, customer_id or db.NULL, customer_id or db.NULL)[1]
+    if not lic then return nil, "Licence not found" end
+    if lic.status == "revoked" then return nil, "a revoked licence can't be reissued" end
+    local key = Licenses.generateKey()
+    db.update("billing_licenses", { key_hash = key_hash(key), key_prefix = key:sub(1, 5),
+        key_rotated_at = db.raw("NOW()"), updated_at = db.raw("NOW()") }, { id = lic.id })
+    lic.key_prefix = key:sub(1, 5)
+    local app = db.query("SELECT * FROM billing_apps WHERE id = ?", lic.app_id)[1]
+    emit(namespace_id, "license.reissued", lic, app, key)
+    return { license = Licenses.get(namespace_id, uuid), key = key }
+end
+
 --- Free a seat (e.g. a lost laptop).
-function Licenses.removeActivation(namespace_id, uuid, activation_uuid)
+function Licenses.removeActivation(namespace_id, uuid, activation_uuid, customer_id)
     local res = db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW()
         FROM billing_licenses l WHERE l.id = x.license_id AND l.namespace_id = ? AND l.uuid = ?
-          AND x.uuid = ? AND x.deactivated_at IS NULL]], namespace_id, uuid, activation_uuid)
+          AND x.uuid = ? AND x.deactivated_at IS NULL AND (?::int IS NULL OR l.customer_id = ?::int)]],
+        namespace_id, uuid, activation_uuid, customer_id or db.NULL, customer_id or db.NULL)
     if (res.affected_rows or 0) == 0 then return nil, "Activation not found" end
     return true
 end
 
+--- A customer's licences in one app with their devices (the "my licences" page).
+function Licenses.forCustomer(app, customer_id)
+    local rows = db.query(LIST_SELECT .. " WHERE l.app_id = ? AND l.customer_id = ? ORDER BY l.created_at DESC",
+        app.id, customer_id)
+    for _, r in ipairs(rows) do
+        r.activations = activations(r.uuid)
+        r.customer_email, r.customer_external_id = nil, nil
+    end
+    return Common.arr(rows)
+end
+
 -- ---------------------------------------------------------------------------
 -- Public: activate / validate / deactivate (publishable key + licence key)
--- Errors are { code, message, status } so apps can branch on `code`.
+-- Errors are { status, code, message } so apps can branch on `code`.
 -- ---------------------------------------------------------------------------
 
 local function failure(status, code, message)
@@ -218,9 +290,15 @@ end
 
 local INVALID = { 404, "invalid_license", "This licence key is not valid for this app" }
 
-local function fingerprint_hash(fp)
-    if type(fp) ~= "string" or #fp < 8 or #fp > 512 then return nil end
-    return ApiKey.hash(fp)
+local function check_input(b, need_version)
+    if type(b.fingerprint_hash) ~= "string" or not b.fingerprint_hash:match("^%x+$") or #b.fingerprint_hash ~= 64 then
+        return failure(400, "invalid_fingerprint",
+            "fingerprint_hash must be the 64-character SHA-256 hex of salt + \":\" + machine id (LICENCE_FORMAT.md §6)")
+    end
+    if need_version and (type(b.app_version) ~= "string" or b.app_version == "" or #b.app_version > 40) then
+        return failure(400, "invalid_app_version", "app_version is required (max 40 characters)")
+    end
+    return true
 end
 
 -- The licence behind a key, if it may be used right now. Locks the row so
@@ -228,12 +306,16 @@ end
 local function usable(app, raw_key)
     local key = Licenses.normalize(raw_key)
     if not key then return failure(unpack(INVALID)) end
-    local lic = db.query([[SELECT l.*, extract(epoch FROM l.expires_at)::bigint AS expires_epoch
+    local lic = db.query([[SELECT l.*, extract(epoch FROM l.access_until)::bigint AS access_until_epoch,
+            extract(epoch FROM l.updates_until)::bigint AS updates_until_epoch
         FROM billing_licenses l WHERE l.key_hash = ? AND l.app_id = ? FOR UPDATE]], ApiKey.hash(key), app.id)[1]
     if not lic then return failure(unpack(INVALID)) end
-    if lic.status == "active" and lic.expires_epoch and tonumber(lic.expires_epoch) <= ngx.time() then
+    if lic.status == "active" and lic.access_until_epoch and tonumber(lic.access_until_epoch) <= ngx.time() then
         db.query("UPDATE billing_licenses SET status = 'expired', updated_at = NOW() WHERE id = ?", lic.id)
         lic.status = "expired"
+    end
+    if lic.status == "expired" then
+        return failure(403, "access_ended", "This licence's access period is over")
     end
     if lic.status ~= "active" then
         return failure(403, "license_" .. lic.status, "This licence is " .. lic.status)
@@ -247,59 +329,29 @@ local function usable(app, raw_key)
     return lic
 end
 
--- The signed licence file for an activation (docs §6).
-local function license_file(app, lic, fp_hash)
-    local customer = db.query("SELECT id, uuid, external_id FROM customers WHERE id = ?", lic.customer_id)[1]
-    local ent = EntitlementService.resolve(app, customer)
-    local plan = ent.plan
-    if lic.plan_id then
-        local p = db.query("SELECT uuid, plan_key, name, features FROM billing_plans WHERE id = ?", lic.plan_id)[1]
-        if p then
-            EntitlementService.merge(ent.features, Apps.catalog(app.id), p.features)
-            plan = { uuid = p.uuid, key = p.plan_key, name = p.name }
-        end
-    end
-    local now = ngx.time()
-    local function cap(t)
-        local e = tonumber(lic.expires_epoch)
-        return (e and e < t) and e or t
-    end
-    local claims = {
-        iss = EntitlementService.issuer(),
-        aud = app.uuid,
-        sub = customer.external_id or customer.uuid,
-        lic = lic.uuid,
-        fp = fp_hash,
-        plan = plan and (plan.key or plan.uuid) or cjson.null,
-        features = ent.features,
-        iat = now,
-        exp = cap(now + (tonumber(app.entitlement_ttl_seconds) or 900)),
-        offline_until = cap(now + (tonumber(app.offline_grace_seconds) or 0)),
-        policy = app.offline_policy,
-    }
-    local token = Signing.sign("opsapi-license+jwt", claims)
-    return {
-        license_file = token,
-        license = { uuid = lic.uuid, status = lic.status, expires_at = tonumber(lic.expires_epoch) },
-        plan = plan,
-        features = ent.features,
-        expires_at = claims.exp,
-        offline_until = claims.offline_until,
-    }
-end
-
--- Run fn(lic, fp_hash) in a transaction after the common checks.
-local function public_call(app, b, fn)
+local function file_for(app, lic, fingerprint_hash)
     if not Signing.configured() then
         return failure(503, "not_configured", "Licensing is not configured on this server")
     end
-    local fp_hash = fingerprint_hash(b.fingerprint)
-    if not fp_hash then return failure(400, "invalid_fingerprint", "fingerprint must be 8-512 characters") end
+    local customer = db.query("SELECT id, uuid, external_id FROM customers WHERE id = ?", lic.customer_id)[1]
+    local out, err = EntitlementService.licenseFile(app, lic, customer, fingerprint_hash)
+    if not out then return failure(503, "not_configured", tostring(err)) end
+    return out
+end
+
+-- Run fn(lic) in a transaction after the common checks. A bad key is
+-- reported to the caller (`bad_key = true`) so it can count it for lockout.
+local function public_call(app, b, need_version, fn)
+    if not Signing.configured() then
+        return failure(503, "not_configured", "Licensing is not configured on this server")
+    end
+    local ok_in, in_err = check_input(b, need_version)
+    if not ok_in then return nil, in_err end
     local result, err
     local ok, tx_err = Common.transaction(function()
         local lic, ferr = usable(app, b.license_key)
         if not lic then err = ferr return true end
-        result, err = fn(lic, fp_hash)
+        result, err = fn(lic)
         return true
     end)
     if not ok then return failure(500, "error", tx_err or "Request failed") end
@@ -314,56 +366,76 @@ local function info(b, field, max)
 end
 
 function Licenses.activate(app, b)
-    return public_call(app, b, function(lic, fp_hash)
+    return public_call(app, b, true, function(lic)
         local live = db.query([[SELECT id FROM billing_license_activations
-            WHERE license_id = ? AND fingerprint_hash = ? AND deactivated_at IS NULL]], lic.id, fp_hash)[1]
+            WHERE license_id = ? AND fingerprint_hash = ? AND deactivated_at IS NULL]], lic.id, b.fingerprint_hash)[1]
         if live then
             db.query([[UPDATE billing_license_activations SET last_seen_at = NOW(),
-                name = COALESCE(?, name), platform = COALESCE(?, platform), app_version = COALESCE(?, app_version)
-                WHERE id = ?]], info(b, "name", 120), info(b, "platform", 60), info(b, "app_version", 60), live.id)
+                name = COALESCE(?, name), platform = COALESCE(?, platform), app_version = ?
+                WHERE id = ?]], info(b, "name", 120), info(b, "platform", 60), info(b, "app_version", 40), live.id)
         else
             local used = db.query([[SELECT count(*)::int AS n FROM billing_license_activations
                 WHERE license_id = ? AND deactivated_at IS NULL]], lic.id)[1].n
-            if lic.max_activations and used >= tonumber(lic.max_activations) then
+            if lic.max_activations and lic.max_activations ~= db.NULL and used >= tonumber(lic.max_activations) then
                 return failure(409, "activation_limit",
                     "This licence is already active on " .. used .. " device(s), its limit")
             end
             db.insert("billing_license_activations", {
-                uuid = Common.uuid(), license_id = lic.id, fingerprint_hash = fp_hash,
+                uuid = Common.uuid(), license_id = lic.id, fingerprint_hash = b.fingerprint_hash,
                 name = info(b, "name", 120), platform = info(b, "platform", 60),
-                app_version = info(b, "app_version", 60),
+                app_version = info(b, "app_version", 40),
             })
         end
-        return license_file(app, lic, fp_hash)
+        return file_for(app, lic, b.fingerprint_hash)
     end)
 end
 
 function Licenses.validate(app, b)
-    return public_call(app, b, function(lic, fp_hash)
-        local res = db.query([[UPDATE billing_license_activations SET last_seen_at = NOW(),
-            app_version = COALESCE(?, app_version)
+    return public_call(app, b, true, function(lic)
+        local res = db.query([[UPDATE billing_license_activations SET last_seen_at = NOW(), app_version = ?
             WHERE license_id = ? AND fingerprint_hash = ? AND deactivated_at IS NULL]],
-            info(b, "app_version", 60), lic.id, fp_hash)
+            info(b, "app_version", 40), lic.id, b.fingerprint_hash)
         if (res.affected_rows or 0) == 0 then
             return failure(403, "not_activated", "This device is not activated for this licence")
         end
-        return license_file(app, lic, fp_hash)
+        return file_for(app, lic, b.fingerprint_hash)
     end)
 end
 
---- Free this device's seat. Works for any non-revoked licence (an expired
--- or suspended one may still hand its seat back).
+--- Free this device's seat. Works for any licence that isn't revoked (an
+-- expired or suspended one may still hand its seat back).
 function Licenses.deactivate(app, b)
+    local ok_in, in_err = check_input(b, false)
+    if not ok_in then return nil, in_err end
     local key = Licenses.normalize(b.license_key)
-    local fp_hash = fingerprint_hash(b.fingerprint)
-    if not key or not fp_hash then return failure(unpack(INVALID)) end
+    if not key then return failure(unpack(INVALID)) end
     local res = db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW()
         FROM billing_licenses l WHERE l.id = x.license_id AND l.key_hash = ? AND l.app_id = ?
-          AND x.fingerprint_hash = ? AND x.deactivated_at IS NULL]], ApiKey.hash(key), app.id, fp_hash)
+          AND x.fingerprint_hash = ? AND x.deactivated_at IS NULL]], ApiKey.hash(key), app.id, b.fingerprint_hash)
     if (res.affected_rows or 0) == 0 then
         return failure(404, "not_activated", "This device is not activated for this licence")
     end
     return { deactivated = true }
+end
+
+-- ---------------------------------------------------------------------------
+-- Maintenance (lib/billing-jobs.lua)
+-- ---------------------------------------------------------------------------
+
+--- Free devices not seen for an app's activation_auto_release_days, and delete
+-- freed devices past its activation_retention_days.
+function Licenses.maintain()
+    for _, app in ipairs(db.query("SELECT * FROM billing_apps WHERE deleted_at IS NULL")) do
+        local s = Settings.resolve(app)
+        if (s.activation_auto_release_days or 0) > 0 then
+            db.query([[UPDATE billing_license_activations x SET deactivated_at = NOW()
+                FROM billing_licenses l WHERE l.id = x.license_id AND l.app_id = ? AND x.deactivated_at IS NULL
+                  AND x.last_seen_at < NOW() - make_interval(days => ?)]], app.id, s.activation_auto_release_days)
+        end
+        db.query([[DELETE FROM billing_license_activations x USING billing_licenses l
+            WHERE l.id = x.license_id AND l.app_id = ? AND x.deactivated_at IS NOT NULL
+              AND x.deactivated_at < NOW() - make_interval(days => ?)]], app.id, s.activation_retention_days or 90)
+    end
 end
 
 return Licenses

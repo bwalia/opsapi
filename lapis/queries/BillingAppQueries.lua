@@ -11,17 +11,13 @@
 local db = require("lapis.db")
 local cjson = require("cjson")
 local Common = require("queries.FieldServiceCommon")
+local Settings = require("lib.billing-settings")
 
 local Apps = {}
 
 local KINDS = { web = true, desktop = true, self_hosted = true, mobile = true }
 local MODES = { test = true, live = true }
-local POLICIES = { fail_open = true, fail_closed = true }
 local FEATURE_TYPES = { boolean = true, limit = true }
-
-local PUBLIC_COLUMNS = [[uuid, name, slug, kind, mode, publishable_key, offline_policy, offline_grace_seconds,
-    entitlement_ttl_seconds, past_due_grace_days, allowed_return_urls, settings, active, created_by,
-    created_at, updated_at]]
 
 local function random_hex(n)
     local random = require("resty.random")
@@ -69,7 +65,7 @@ local function clean(b, partial)
         end
         f.slug = slug
     end
-    for field, allowed in pairs({ kind = KINDS, mode = MODES, offline_policy = POLICIES }) do
+    for field, allowed in pairs({ kind = KINDS, mode = MODES }) do
         if b[field] ~= nil then
             if not allowed[b[field]] then
                 local names = {}
@@ -80,39 +76,19 @@ local function clean(b, partial)
             f[field] = b[field]
         end
     end
-    local bounds = {
-        offline_grace_seconds = { 0, 31536000 },
-        entitlement_ttl_seconds = { 60, 86400 },
-        past_due_grace_days = { 0, 90 },
-    }
-    for field, r in pairs(bounds) do
-        if b[field] ~= nil then
-            local n, err = int_in(b[field], r[1], r[2], field)
-            if not n then return nil, err end
-            f[field] = n
-        end
-    end
-    if b.allowed_return_urls ~= nil then
-        local urls = b.allowed_return_urls
-        if type(urls) ~= "table" or #urls > 20 then return nil, "allowed_return_urls must be a list (max 20)" end
-        for _, u in ipairs(urls) do
-            if type(u) ~= "string" or not u:match("^https?://[^%s]+$") then
-                return nil, "allowed_return_urls must be http(s) URLs"
-            end
-        end
-        f.allowed_return_urls = db.raw(db.escape_literal(cjson.encode(Common.arr(urls))) .. "::jsonb")
-    end
-    if b.settings ~= nil then
-        if type(b.settings) ~= "table" then return nil, "settings must be an object" end
-        f.settings = db.raw(db.escape_literal(cjson.encode(b.settings)) .. "::jsonb")
-    end
     if b.active ~= nil then f.active = Common.to_bool(b.active, true) end
     return f
 end
 
+local function jsonb(v)
+    return db.raw(db.escape_literal(require("lib.billing-signing").encode(v)) .. "::jsonb")
+end
+
 function Apps.list(namespace_id)
-    return Common.arr(db.query("SELECT " .. PUBLIC_COLUMNS .. [[ FROM billing_apps
-        WHERE namespace_id = ? AND deleted_at IS NULL ORDER BY name]], namespace_id))
+    local rows = db.query("SELECT * FROM billing_apps WHERE namespace_id = ? AND deleted_at IS NULL ORDER BY name",
+        namespace_id)
+    for i, r in ipairs(rows) do rows[i] = Apps.present(r) end
+    return Common.arr(rows)
 end
 
 --- Full row (with id) of a workspace's app, by uuid or slug.
@@ -129,19 +105,40 @@ function Apps.byPublishableKey(pk)
         WHERE publishable_key = ? AND active AND deleted_at IS NULL LIMIT 1]], pk)[1]
 end
 
+--- An app for the management API: settings are the effective values
+-- (defaults for its kind + what was set).
 function Apps.present(row)
     if not row then return nil end
     local out = {}
     for k, v in pairs(row) do
-        if k ~= "id" and k ~= "namespace_id" and k ~= "deleted_at" then out[k] = v end
+        if k ~= "id" and k ~= "namespace_id" and k ~= "deleted_at" and k ~= "cache_generation" then out[k] = v end
     end
+    out.settings = Settings.resolve(row)
     return out
+end
+
+--- Bump the app's cache generation: every cached entitlement of the app is
+-- stale from now on (plans, features, settings, upgrade paths changed).
+function Apps.bump(app_id)
+    db.query("UPDATE billing_apps SET cache_generation = cache_generation + 1 WHERE id = ?", app_id)
+end
+
+--- A live app by uuid or publishable key, for the public endpoints.
+function Apps.findPublic(ref)
+    if type(ref) ~= "string" or ref == "" then return nil end
+    if ref:match("^pk_") then return Apps.byPublishableKey(ref) end
+    return db.query("SELECT * FROM billing_apps WHERE uuid = ? AND active AND deleted_at IS NULL LIMIT 1", ref)[1]
 end
 
 function Apps.create(namespace_id, actor, b)
     local f, err = clean(b, false)
     if not f then return nil, err end
     f.mode = f.mode or "test"
+    f.kind = f.kind or "web"
+    local settings, serr = Settings.merge({}, b.settings or {})
+    if not settings then return nil, serr end
+    settings.fingerprint_salt = Settings.newSalt()
+    f.settings = jsonb(settings)
     f.uuid = Common.uuid()
     f.namespace_id = namespace_id
     f.publishable_key = new_publishable_key(f.mode)
@@ -158,10 +155,16 @@ function Apps.update(namespace_id, ref, b)
     if not app then return nil, "App not found" end
     local f, err = clean(b, true)
     if not f then return nil, err end
+    if b.settings ~= nil then
+        local settings, serr = Settings.merge(app.settings, b.settings)
+        if not settings then return nil, serr end
+        f.settings = jsonb(settings)
+    end
     -- The key's prefix names the mode, so switching mode issues a new key.
     if f.mode and f.mode ~= app.mode then f.publishable_key = new_publishable_key(f.mode) end
     if next(f) == nil then return Apps.present(app) end
     f.updated_at = db.raw("NOW()")
+    f.cache_generation = db.raw("cache_generation + 1")
     local _, cerr = insert_or_conflict(function()
         return db.update("billing_apps", f, { id = app.id })
     end, "an app with this slug already exists")
@@ -191,7 +194,7 @@ end
 -- Feature catalogue
 -- ---------------------------------------------------------------------------
 
-local FEATURE_COLUMNS = "uuid, key, name, description, type, unit, sort_order, created_at, updated_at"
+local FEATURE_COLUMNS = "uuid, key, name, description, type, unit, sort_order, released_at, created_at, updated_at"
 
 function Apps.features(app_id)
     return Common.arr(db.query("SELECT " .. FEATURE_COLUMNS ..
@@ -203,6 +206,16 @@ function Apps.catalog(app_id)
     local out = {}
     for _, r in ipairs(db.query("SELECT key, type FROM billing_features WHERE app_id = ?", app_id)) do
         out[r.key] = r.type
+    end
+    return out
+end
+
+--- { [key] = { type, released (unix seconds or nil) } } for resolution.
+function Apps.catalogWithReleases(app_id)
+    local out = {}
+    for _, r in ipairs(db.query([[SELECT key, type, extract(epoch FROM released_at)::bigint AS released
+        FROM billing_features WHERE app_id = ?]], app_id)) do
+        out[r.key] = { type = r.type, released = tonumber(r.released) }
     end
     return out
 end
@@ -237,6 +250,13 @@ local function clean_feature(b, partial)
         if not n then return nil, err end
         f.sort_order = n
     end
+    if b.released_at ~= nil then
+        local v = Common.nilify(b.released_at)
+        if v ~= nil and (type(v) ~= "string" or not v:match("^%d%d%d%d%-%d%d%-%d%d")) then
+            return nil, "released_at must be an ISO-8601 date, or null"
+        end
+        f.released_at = v and db.raw(db.escape_literal(v) .. "::timestamptz") or db.NULL
+    end
     return f
 end
 
@@ -249,6 +269,7 @@ function Apps.addFeature(app, b)
         return db.insert("billing_features", f, { returning = "*" })[1]
     end, "this app already has a feature with that key")
     if not row then return nil, cerr end
+    Apps.bump(app.id)
     row.id, row.app_id = nil, nil
     return row
 end
@@ -259,6 +280,7 @@ function Apps.updateFeature(app, key, b)
     if next(f) ~= nil then
         f.updated_at = db.raw("NOW()")
         db.update("billing_features", f, { app_id = app.id, key = key })
+        Apps.bump(app.id)
     end
     local row = db.query("SELECT " .. FEATURE_COLUMNS .. " FROM billing_features WHERE app_id = ? AND key = ?",
         app.id, key)[1]
@@ -272,6 +294,7 @@ function Apps.deleteFeature(app, key)
         local res = db.query("DELETE FROM billing_features WHERE app_id = ? AND key = ?", app.id, key)
         if (res.affected_rows or 0) == 0 then return nil, "Feature not found" end
         db.query("UPDATE billing_plans SET features = features - ?, updated_at = NOW() WHERE app_id = ?", key, app.id)
+        Apps.bump(app.id)
         -- A grant left with no features and no plan would grant nothing: revoke it.
         db.query([[UPDATE billing_grants SET features = features - ?, updated_at = NOW(),
             revoked_at = CASE WHEN plan_id IS NULL AND (features - ?) = '{}'::jsonb THEN NOW() ELSE revoked_at END

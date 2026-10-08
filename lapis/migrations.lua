@@ -370,6 +370,7 @@ local audit_trail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "mig
 local namespace_module_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-module") or {}
 local user_activity_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.user-activity") or {}
 local billing_ent_migrations = load_if_enabled(ProjectConfig.FEATURES.BILLING, "migrations.billing-entitlements") or {}
+local namespace_mail_migrations = load_if_enabled(ProjectConfig.FEATURES.CORE, "migrations.namespace-mail") or {}
 local field_service_request_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests") or {}
 local field_service_request_menu_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-requests-menu") or {}
 local field_service_parts_migrations = load_if_enabled(ProjectConfig.FEATURES.FIELD_SERVICE, "migrations.field-service-parts") or {}
@@ -2527,6 +2528,15 @@ local _migrations = {
     ['zzbe6_billing_grants'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 6),
     ['zzbe7_billing_licenses'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 7),
     ['zzbe8_billing_modules_menu'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 8),
+    -- Billing & Entitlements v2 (zzbf* sorts after zzbe*; keys sort as strings).
+    ['zzbf1_billing_app_settings'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 9),
+    ['zzbf2_billing_purchase_types'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 10),
+    ['zzbf3_billing_purchases'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 11),
+    ['zzbf4_billing_upgrades_coupons'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 12),
+    ['zzbf5_billing_access_links'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 13),
+    -- Workspace SMTP + email templates (core).
+    ['zznm1_namespace_mail_settings'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 1),
+    ['zznm2_namespace_email_templates'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 2),
 
     ['zzwh1_outbound_webhooks_tables'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 1),
     ['zzwh2_outbound_webhooks_module_menu'] = conditional_array(ProjectConfig.FEATURES.CORE, outbound_webhooks_migrations, 2),

@@ -129,6 +129,7 @@ local function resolve(host)
     if #ips == 0 then return nil, "host has no IPv4 address" end
     return ips
 end
+Webhooks.resolve = resolve -- also used for workspace SMTP hosts (helper/namespace-mail.lua)
 
 -- ---------------------------------------------------------------------------
 -- Signing + sending
