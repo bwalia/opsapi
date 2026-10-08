@@ -296,6 +296,72 @@ export async function POST(req: Request) {
 
 With Express, use `express.raw({ type: 'application/json' })` and pass `req.body` (a Buffer) and `req.headers`. Deliveries can arrive more than once, so use `event.id` to skip duplicates.
 
+## Billing & entitlements
+
+`@opsapi/client/billing` checks what your customers may use, on a server running the Billing & Entitlements module (`PROJECT_CODE=billing`, or `all`). In the dashboard, under **Billing**, you create an app, its features (on/off like `advanced_reports`, or limits like `projects`) and flat-tier plans. Customers get access from the app's default (free) plan, from a subscription, or from a grant you give them by hand.
+
+The server needs `BILLING_SIGNING_KEY`, an EC P-256 key that signs every answer. The SDK checks the signature against the server's public keys.
+
+### In your web app's server
+
+Create a workspace API key scoped to `entitlements` (read + create). Keep it on the server.
+
+```ts
+import { createBilling } from '@opsapi/client/billing';
+
+const billing = createBilling({
+  baseUrl: 'https://api.example.com',
+  apiKey: process.env.OPSAPI_BILLING_KEY!, // opsk_…, scoped to `entitlements`
+  app: 'acme', // the app's id or slug
+});
+
+// When someone signs up (email is required the first time):
+await billing.upsertCustomer(user.id, { email: user.email, first_name: user.firstName });
+
+if (await billing.can(user.id, 'advanced_reports')) showReports();
+const maxProjects = await billing.limit(user.id, 'projects'); // a number; null = unlimited
+const { plan, status, features } = await billing.getEntitlements(user.id);
+```
+
+Answers are cached until their token expires (15 minutes by default, set per app). An unknown user id isn't an error: it gets the default plan.
+
+Gate routes with `requireFeature` (Express/Connect) or `withFeature` (Next.js route handlers, Hono, Bun, Deno). Both answer **402** `{ code: 'feature_required', feature }` when the plan doesn't include the feature:
+
+```ts
+app.get('/reports', billing.requireFeature('advanced_reports', (req) => req.user?.id), sendReports);
+
+export const GET = billing.withFeature('advanced_reports', getUserId, async (req) => Response.json(await reports()), {
+  upgradeUrl: '/pricing',
+});
+```
+
+**When OpsAPI can't be reached**, each app follows its own policy. With *fail closed*, `can()` returns `false` and `limit()` returns `0` once the cached answer expires. With *fail open*, the last answer keeps working for the offline grace period (72 hours by default), and `getEntitlements()` marks it `stale`. A 4xx answer always throws, so a wrong key or app id never fails quietly.
+
+To pick up changes at once, subscribe a webhook to `subscription.*`, `billing.grant.*` and `billing.plan.*` and call `billing.invalidate(userId)` (or `billing.invalidate()` for everyone).
+
+### Desktop and self-hosted apps: licence keys
+
+Issue keys in the dashboard (**Billing → Licences**). In the app, use the app's **publishable key**. It only identifies the app, so it is safe to ship:
+
+```ts
+import { createLicensing, verifyLicenseFile } from '@opsapi/client/billing';
+
+const licensing = createLicensing({ baseUrl: 'https://api.example.com', publishableKey: 'pk_live_…' });
+
+// Once, when the customer enters their key:
+const { license_file } = await licensing.activate({ licenseKey, fingerprint: machineId, name: os.hostname() });
+saveToDisk(license_file);
+
+// On every start, offline:
+const { claims, needsCheckIn } = await verifyLicenseFile(readFromDisk(), {
+  jwks: EMBEDDED_JWKS, // from GET /api/v2/public/billing/jwks.json, or pass baseUrl to fetch it
+  fingerprint: machineId,
+});
+if (needsCheckIn) saveToDisk((await licensing.validate({ licenseKey, fingerprint: machineId })).license_file);
+```
+
+`verifyLicenseFile` throws once the file passes its `offline_until` date (the app's offline grace), or when it was issued for another machine. Errors are `BillingError`s with a `code`: `invalid_license`, `activation_limit`, `license_suspended`, `license_revoked`, `license_expired`, `not_activated`, `wrong_machine` or `expired`. `licensing.deactivate()` gives a machine's seat back. In the dashboard you can also free a seat, suspend a licence or revoke it.
+
 ## Options
 
 | Option | Default | |

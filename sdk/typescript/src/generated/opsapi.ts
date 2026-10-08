@@ -2446,6 +2446,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/billing/apps": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List apps */
+        get: operations["get__api_v2_billing_apps"];
+        put?: never;
+        /** Create apps */
+        post: operations["post__api_v2_billing_apps"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/billing/apps/{app}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get apps */
+        get: operations["get__api_v2_billing_apps_app"];
+        /** Update apps */
+        put: operations["put__api_v2_billing_apps_app"];
+        post?: never;
+        /** Delete apps */
+        delete: operations["delete__api_v2_billing_apps_app"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/billing/apps/{app}/features": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get features */
+        get: operations["get__api_v2_billing_apps_app_features"];
+        put?: never;
+        /** Features features */
+        post: operations["post__api_v2_billing_apps_app_features"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/billing/apps/{app}/features/{key}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update features */
+        put: operations["put__api_v2_billing_apps_app_features_key"];
+        post?: never;
+        /** Delete features */
+        delete: operations["delete__api_v2_billing_apps_app_features_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/billing/apps/{app}/reports": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get reports */
+        get: operations["get__api_v2_billing_apps_app_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/billing/apps/{app}/rotate-key": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create rotate key */
+        post: operations["post__api_v2_billing_apps_app_rotate_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/billing/checkout": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -5039,6 +5146,24 @@ export interface paths {
         post?: never;
         /** Delete enquiries */
         delete: operations["delete__api_v2_enquiries_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/entitlements/{app}/customers/{external_id}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get customers */
+        get: operations["get__api_v2_entitlements_app_customers_external_id"];
+        /** Update customers */
+        put: operations["put__api_v2_entitlements_app_customers_external_id"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -8102,6 +8227,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/licenses": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List licenses */
+        get: operations["get__api_v2_licenses"];
+        put?: never;
+        /** Create licenses */
+        post: operations["post__api_v2_licenses"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/licenses/{uuid}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get licenses */
+        get: operations["get__api_v2_licenses_uuid"];
+        /** Update licenses */
+        put: operations["put__api_v2_licenses_uuid"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/licenses/{uuid}/activations/{activation}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete activations */
+        delete: operations["delete__api_v2_licenses_uuid_activations_activation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/licenses/{uuid}/revoke": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke revoke */
+        post: operations["post__api_v2_licenses_uuid_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/menu": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -10466,6 +10661,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/public/billing/jwks.json": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List jwks.json */
+        get: operations["get__api_v2_public_billing_jwks.json"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/public/billing/plans": {
         parameters: {
             query?: { [key: string]: unknown };
@@ -10475,6 +10687,23 @@ export interface paths {
         };
         /** List plans */
         get: operations["get__api_v2_public_billing_plans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/billing/pricing": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List pricing */
+        get: operations["get__api_v2_public_billing_pricing"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10630,6 +10859,57 @@ export interface paths {
         put?: never;
         /** Create leads */
         post: operations["post__api_v2_public_leads_namespace_slug"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/licenses/activate": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create activate */
+        post: operations["post__api_v2_public_licenses_activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/licenses/deactivate": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create deactivate */
+        post: operations["post__api_v2_public_licenses_deactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/public/licenses/validate": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create validate */
+        post: operations["post__api_v2_public_licenses_validate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11175,6 +11455,92 @@ export interface paths {
         /** Create products */
         post: operations["post__api_v2_stores_store_id_products"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/subscriptions": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List subscriptions */
+        get: operations["get__api_v2_subscriptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/subscriptions/{uuid}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get subscriptions */
+        get: operations["get__api_v2_subscriptions_uuid"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/subscriptions/entitlements": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List entitlements */
+        get: operations["get__api_v2_subscriptions_entitlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/subscriptions/grants": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List grants */
+        get: operations["get__api_v2_subscriptions_grants"];
+        put?: never;
+        /** Create grants */
+        post: operations["post__api_v2_subscriptions_grants"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/subscriptions/grants/{uuid}": {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete grants */
+        delete: operations["delete__api_v2_subscriptions_grants_uuid"];
         options?: never;
         head?: never;
         patch?: never;
@@ -24222,6 +24588,513 @@ export interface operations {
             };
         };
     };
+    get__api_v2_billing_apps: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_billing_apps: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_billing_apps_app: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put__api_v2_billing_apps_app: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete__api_v2_billing_apps_app: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successfully deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_billing_apps_app_features: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_billing_apps_app_features: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put__api_v2_billing_apps_app_features_key: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+                /** @description Key */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete__api_v2_billing_apps_app_features_key: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+                /** @description Key */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successfully deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_billing_apps_app_reports: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_billing_apps_app_rotate_key: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post__api_v2_billing_checkout: {
         parameters: {
             query?: { [key: string]: unknown };
@@ -33908,6 +34781,101 @@ export interface operations {
                         /** @example true */
                         success?: boolean;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_entitlements_app_customers_external_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+                /** @description External id */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put__api_v2_entitlements_app_customers_external_id: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description App */
+                app: string;
+                /** @description External id */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Unauthorized */
@@ -45900,6 +46868,277 @@ export interface operations {
             };
         };
     };
+    get__api_v2_licenses: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_licenses: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_licenses_uuid: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put__api_v2_licenses_uuid: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete__api_v2_licenses_uuid_activations_activation: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Activation */
+                activation: string;
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successfully deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_licenses_uuid_revoke: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post__api_v2_menu: {
         parameters: {
             query?: { [key: string]: unknown };
@@ -55345,7 +56584,101 @@ export interface operations {
             };
         };
     };
+    "get__api_v2_public_billing_jwks.json": {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get__api_v2_public_billing_plans: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_public_billing_pricing: {
         parameters: {
             query?: {
 [key: string]: unknown;
@@ -55784,6 +57117,144 @@ export interface operations {
                 /** @description Namespace slug */
                 namespace_slug: string;
             };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_public_licenses_activate: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_public_licenses_deactivate: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_public_licenses_validate: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody: {
@@ -58006,6 +59477,271 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_subscriptions: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_subscriptions_uuid: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_subscriptions_entitlements: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get__api_v2_subscriptions_grants: {
+        parameters: {
+            query?: {
+[key: string]: unknown;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                per_page?: number;
+                /** @description Search query string */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        meta?: {
+                            page?: number;
+                            per_page?: number;
+                            total?: number;
+                            total_pages?: number;
+                        };
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post__api_v2_subscriptions_grants: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful operation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
+                };
+            };
+            /** @description Bad request / validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete__api_v2_subscriptions_grants_uuid: {
+        parameters: {
+            query?: { [key: string]: unknown };
+            header?: never;
+            path: {
+                /** @description Unique identifier (UUID) */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successfully deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                        /** @example true */
+                        success?: boolean;
+                    };
                 };
             };
             /** @description Unauthorized */

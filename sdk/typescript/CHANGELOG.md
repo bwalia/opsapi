@@ -2,6 +2,15 @@
 
 All notable changes to `@opsapi/client`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/). Until 1.0, a minor version may contain breaking changes; they are listed here.
 
+## 1.1.0
+
+- New subpath `@opsapi/client/billing` for OpsAPI's Billing & Entitlements module. It needs an OpsAPI server with that module and `BILLING_SIGNING_KEY` set.
+  - `createBilling()`: `getEntitlements()`, `can()`, `limit()`, `upsertCustomer()` and `invalidate()`. Answers are ES256-signed tokens, checked against the server's JWKS and cached until they expire. Each app's offline policy (fail open within a grace period, or fail closed) is followed when OpsAPI can't be reached.
+  - `requireFeature()` (Express/Connect) and `withFeature()` (fetch-style handlers) answer 402 `feature_required`.
+  - `createLicensing()` (`activate`, `validate`, `deactivate`) with a publishable key, and `verifyLicenseFile()` for offline checks of signed licence files.
+  - `BillingError`, `verifyToken()` and `sha256Hex()`.
+- Typed paths for the new endpoints: `/api/v2/billing/apps*`, `/api/v2/subscriptions*`, `/api/v2/entitlements/{app}/customers/{external_id}`, `/api/v2/licenses*`, and the public pricing, JWKS and licence endpoints.
+
 ## 1.0.0
 
 The first stable release. From here the client follows [SemVer](https://semver.org/): breaking changes come only in a new major version.
