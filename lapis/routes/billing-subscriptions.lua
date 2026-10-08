@@ -15,6 +15,11 @@
       POST   /api/v2/subscriptions/purchases/:uuid/revoke            subscriptions.update
       POST   /api/v2/subscriptions/upgrade[?quote=1]                 subscriptions.update (admin upgrade)
       GET    /api/v2/subscriptions/plan-changes?app=&customer=&kind= subscriptions.read
+      POST   /api/v2/subscriptions/purchases/:uuid/refund            subscriptions.update { amount? } (Stripe purchases)
+      POST   /api/v2/subscriptions/checkout                          subscriptions.create -> Stripe Checkout URL
+               { app, plan, customer | customer_external_id?, email?, coupon?, success_url?, cancel_url? }
+      POST   /api/v2/subscriptions/portal                            subscriptions.create -> Stripe Customer Portal URL
+               { app, customer | customer_external_id, return_url? }
 
       PUT    /api/v2/entitlements/:app/customers/:external_id        entitlements.create (upsert customer)
       GET    /api/v2/entitlements/:app/customers/:external_id        entitlements.read  (+ signed token)
@@ -32,6 +37,8 @@ local EntitlementService = require("helper.entitlement-service")
 local Signing = require("lib.billing-signing")
 local Guard = require("lib.billing-guard")
 local db = require("lapis.db")
+local Pay = require("lib.billing-stripe")
+local Common = require("queries.FieldServiceCommon")
 
 local function customer_view(c)
     return c and { uuid = c.uuid, external_id = c.external_id, email = c.email } or nil
@@ -100,6 +107,65 @@ return function(app)
         local quote = self.params.quote == "1" or self.params.quote == "true"
         local res, err, code = Purchases.upgrade(self.namespace.id, Http.actor(self), body, quote)
         return result(res, err, code)
+    end))
+
+    app:post("/api/v2/subscriptions/purchases/:uuid/refund", Http.guard("subscriptions", "update", function(self)
+        local body = Http.json_body() or {}
+        local res, err = Pay.refund(self.namespace.id, self.params.uuid, body.amount)
+        if not res then return Guard.fail(err.status, err.code, err.message) end
+        return Http.ok(res)
+    end))
+
+    -- The customer a server-side checkout / portal is for: uuid, or the app's own user id.
+    local function payer(a, body, required)
+        if Common.nilify(body.customer) then
+            local c = Subs.customer(a.namespace_id, body.customer)
+            if not c then return nil, Guard.fail(404, "not_found", "Customer not found") end
+            return c
+        end
+        if Common.nilify(body.customer_external_id) then
+            local c, cerr = CustomerQueries.upsertExternal(a.namespace_id, tostring(body.customer_external_id),
+                { email = body.email })
+            if not c then return nil, Guard.fail(422, "invalid_customer", cerr) end
+            return c
+        end
+        if required then return nil, Guard.fail(422, "customer_required", "Send customer or customer_external_id") end
+        return nil
+    end
+
+    local function url_ok(u)
+        return u == nil or (type(u) == "string" and #u <= 2000 and u:match("^https?://[^%s]+$") ~= nil)
+    end
+
+    app:post("/api/v2/subscriptions/checkout", body_guard("subscriptions", "create", function(self, body)
+        local a = Apps.find(self.namespace.id, body.app)
+        if not a or a.active == false then return Http.fail(404, "App not found") end
+        local plan = Subs.appPlan(a.id, tostring(body.plan or ""))
+        if not plan or not plan.active then return Guard.fail(404, "unknown_plan", "Plan not found in this app") end
+        local success, cancel = Common.nilify(body.success_url), Common.nilify(body.cancel_url)
+        if not url_ok(success) or not url_ok(cancel) then
+            return Guard.fail(422, "invalid_url", "success_url and cancel_url must be http(s) URLs")
+        end
+        local customer, cfail = payer(a, body, false)
+        if cfail then return cfail end
+        return Guard.idempotent(self, ("ns:%s:checkout"):format(self.namespace.id), body, function()
+            local res, err = Pay.start(a, plan, customer, { email = Common.nilify(body.email),
+                coupon = Common.nilify(body.coupon), success_url = success, cancel_url = cancel,
+                idempotency_key = self.req.headers["idempotency-key"] })
+            if not res then return Guard.fail(err.status, err.code, err.message) end
+            return Http.ok(res, res.url and 201 or 200)
+        end, true)
+    end))
+
+    app:post("/api/v2/subscriptions/portal", body_guard("subscriptions", "create", function(self, body)
+        local a = Apps.find(self.namespace.id, body.app)
+        if not a then return Http.fail(404, "App not found") end
+        if not url_ok(Common.nilify(body.return_url)) then return Guard.fail(422, "invalid_url", "return_url must be an http(s) URL") end
+        local customer, cfail = payer(a, body, true)
+        if not customer then return cfail end
+        local res, err = Pay.portal(a, customer.id, Common.nilify(body.return_url))
+        if not res then return Guard.fail(err.status, err.code, err.message) end
+        return Http.ok(res)
     end))
 
     app:get("/api/v2/subscriptions/plan-changes", Http.guard("subscriptions", "read", function(self)

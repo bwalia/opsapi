@@ -16,6 +16,11 @@
       POST   /api/v2/public/billing/me/licenses/:uuid/reissue   X-Billing-Session
       DELETE /api/v2/public/billing/me/licenses/:uuid/activations/:activation   X-Billing-Session
       POST   /api/v2/public/billing/me/logout                   X-Billing-Session
+      POST   /api/v2/public/billing/checkout                    { pk, plan_key, email?, coupon?, success_url?, cancel_url?,
+                                                                  license_key? } (+ X-Billing-Session) -> Stripe Checkout URL
+      GET    /api/v2/public/billing/checkout/:session_id?pk=    order status; a new licence key is shown once
+      POST   /api/v2/public/billing/me/upgrade                  { to_plan, success_url?, cancel_url? }  X-Billing-Session
+      POST   /api/v2/public/billing/me/portal                   { return_url? }  X-Billing-Session -> Stripe Customer Portal
 
     Every call: CORS from the app's allowed_origins, rate limits from its
     settings, Idempotency-Key on mutating calls; licence calls also lock out an
@@ -34,6 +39,7 @@ local Settings = require("lib.billing-settings")
 local Guard = require("lib.billing-guard")
 local ApiKey = require("helper.api-key")
 local Common = require("queries.FieldServiceCommon")
+local Pay = require("lib.billing-stripe")
 
 local SESSION_MINUTES = 30
 
@@ -100,9 +106,44 @@ local function public_plans(app)
     return Common.arr(plans)
 end
 
+-- The upgrades a customer on `current` can buy, priced (admin-defined paths to public plans).
+local function upgrades_for(app, current)
+    local out = {}
+    if not current then return Common.arr(out) end
+    for _, t in ipairs(db.query([[SELECT p.* FROM billing_plan_upgrades u JOIN billing_plans p ON p.id = u.to_plan_id
+            WHERE u.app_id = ? AND u.from_plan_id = ? AND u.active AND p.active AND p.is_public AND p.deleted_at IS NULL
+            ORDER BY p.sort_order, p.amount]], app.id, current.id)) do
+        local price = Offers.upgradePrice(app, current, t)
+        if price then
+            out[#out + 1] = { plan_key = t.plan_key, name = t.name, purchase_type = t.purchase_type,
+                billing_interval = t.billing_interval, currency = price.currency,
+                amount = t.purchase_type == "recurring" and tonumber(t.amount) or price.amount }
+        end
+    end
+    return Common.arr(out)
+end
+
+local EMAIL = "^[^%s@]+@[^%s@]+%.[^%s@]+$"
+
+-- success_url / cancel_url / return_url: only the app's allowed redirect URLs.
+local function redirects(app, body, keys)
+    for _, k in ipairs(keys) do
+        local u = Common.nilify(body[k])
+        if u and (type(u) ~= "string" or not Guard.redirectAllowed(app, u)) then
+            return Guard.fail(422, "redirect_not_allowed", k .. " isn't one of this app's allowed redirect URLs")
+        end
+    end
+end
+
+local function buyable(app, ref)
+    local plan = Subs.appPlan(app.id, tostring(ref or ""))
+    if plan and plan.is_public and plan.active then return plan end
+end
+
 return function(app)
     app:get("/api/v2/public/billing/apps/:app", public(function(self, app)
-        local etag = ('"%s-%s"'):format(app.uuid:sub(1, 8), app.cache_generation or 1)
+        local payments = Pay.ready(app.namespace_id)
+        local etag = ('"%s-%s-%s"'):format(app.uuid:sub(1, 8), app.cache_generation or 1, payments and 1 or 0)
         ngx.header["Cache-Control"] = "public, max-age=300"
         ngx.header["ETag"] = etag
         if self.req.headers["if-none-match"] == etag then return { status = 304, layout = false, "" } end
@@ -111,6 +152,7 @@ return function(app)
         info.publishable_key = app.publishable_key
         info.features = Apps.features(app.id)
         info.plans = public_plans(app)
+        info.payments = payments
         return Http.ok(info)
     end))
 
@@ -219,7 +261,12 @@ return function(app)
 
     app:get("/api/v2/public/billing/me", with_session(function(_, app, _, s)
         local purchases, subscriptions = Purchases.forCustomer(app, s.customer_id)
+        local current = Purchases.currentPlan(app, s.customer_id)
         return Http.ok({
+            current_plan = current and { key = current.plan_key, name = current.name } or nil,
+            upgrades = upgrades_for(app, current),
+            payments = Pay.ready(app.namespace_id),
+            can_manage_billing = Pay.stripeSubscription(app, s.customer_id) ~= nil,
             customer = { email = s.email },
             app = { uuid = app.uuid, name = app.name, kind = app.kind, branding = Settings.public(app) },
             licences = Licenses.forCustomer(app, s.customer_id),
@@ -248,5 +295,86 @@ return function(app)
     app:post("/api/v2/public/billing/me/logout", with_session(function(_, _, _, s)
         db.query("DELETE FROM billing_customer_sessions WHERE id = ?", s.id)
         return Http.ok({ signed_out = true })
+    end))
+
+    -- Payments (Stripe Checkout) ---------------------------------------------
+
+    app:post("/api/v2/public/billing/checkout", public(function(self, app, body, ip, r)
+        local limited = Guard.limit(app, { { "checkout_ip", ip, r.checkout_per_ip_per_hour, 3600 } })
+        if limited then return limited end
+        local plan = buyable(app, body.plan_key)
+        if not plan then return Guard.fail(404, "unknown_plan", "Unknown plan") end
+        local bad = redirects(app, body, { "success_url", "cancel_url" })
+        if bad then return bad end
+        local email = Common.nilify(body.email)
+        if email and (type(email) ~= "string" or #email > 254 or not email:match(EMAIL)) then
+            return Guard.fail(422, "invalid_email", "Enter a valid email address")
+        end
+        -- A known buyer (a session, or a licence key as proof) can upgrade along a path.
+        local customer
+        local s = session(self, app)
+        if s then
+            customer = { id = s.customer_id, uuid = s.uuid, email = s.email }
+        elseif Common.nilify(body.license_key) then
+            local locked = Guard.lockedOut(app, ip)
+            if locked then return locked end
+            customer = Licenses.customerForKey(app, body.license_key)
+            if not customer then
+                Guard.badKey(app, ip)
+                return Guard.fail(404, "invalid_license", "This licence key is not valid for this app")
+            end
+        end
+        return Guard.idempotent(self, ("app:%s:checkout"):format(app.id), body, function()
+            local res, err = Pay.start(app, plan, customer, { email = email, coupon = Common.nilify(body.coupon),
+                success_url = Common.nilify(body.success_url), cancel_url = Common.nilify(body.cancel_url),
+                idempotency_key = self.req.headers["idempotency-key"] })
+            if not res then return Guard.fail(err.status, err.code, err.message) end
+            return Http.ok(res, 201)
+        end, true)
+    end))
+
+    app:get("/api/v2/public/billing/checkout/:session_id", public(function(self, app)
+        local sid = self.params.session_id
+        if type(sid) ~= "string" or #sid > 255 or not sid:match("^cs_[%w_]+$") then
+            return Guard.fail(404, "not_found", "Unknown order")
+        end
+        return Http.ok(Pay.order(app, sid))
+    end))
+
+    app:post("/api/v2/public/billing/me/upgrade", with_session(function(self, app, body, s)
+        local plan = buyable(app, body.to_plan)
+        if not plan then return Guard.fail(404, "unknown_plan", "Unknown plan") end
+        local bad = redirects(app, body, { "success_url", "cancel_url" })
+        if bad then return bad end
+        local current = Purchases.currentPlan(app, s.customer_id)
+        if not current or not Offers.upgradePrice(app, current, plan) then
+            return Guard.fail(422, "no_upgrade_path", "There is no upgrade to this plan")
+        end
+        return Guard.idempotent(self, ("app:%s:upgrade:%s"):format(app.id, s.customer_id), body, function()
+            if plan.purchase_type == "recurring" and Pay.stripeSubscription(app, s.customer_id) then
+                local res, uerr, code = Purchases.upgrade(app.namespace_id, "customer",
+                    { app = app.uuid, customer = s.uuid, to_plan = plan.uuid })
+                if not res then return Guard.fail(422, code or "upgrade_failed", uerr) end
+                res.upgraded = true
+                return Http.ok(res)
+            end
+            if plan.purchase_type == "recurring" and db.query([[SELECT 1 FROM billing_subscriptions WHERE app_id = ?
+                AND customer_id = ? AND status IN ('active', 'trialing', 'past_due')]], app.id, s.customer_id)[1] then
+                return Guard.fail(409, "contact_seller", "Your subscription is managed by the seller: contact them to change it")
+            end
+            local res, err = Pay.start(app, plan, { id = s.customer_id, uuid = s.uuid, email = s.email }, {
+                success_url = Common.nilify(body.success_url), cancel_url = Common.nilify(body.cancel_url),
+                idempotency_key = self.req.headers["idempotency-key"] })
+            if not res then return Guard.fail(err.status, err.code, err.message) end
+            return Http.ok(res, res.url and 201 or 200)
+        end, true)
+    end))
+
+    app:post("/api/v2/public/billing/me/portal", with_session(function(_, app, body, s)
+        local bad = redirects(app, body, { "return_url" })
+        if bad then return bad end
+        local res, err = Pay.portal(app, s.customer_id, Common.nilify(body.return_url))
+        if not res then return Guard.fail(err.status, err.code, err.message) end
+        return Http.ok(res)
     end))
 end

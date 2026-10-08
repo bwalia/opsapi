@@ -279,7 +279,8 @@ end
 --- Record a use (atomic against max_redemptions). refs = { purchase_id?, subscription_id? }.
 function Offers.redeem(coupon, customer_id, discount, currency, refs)
     local claimed = db.query([[UPDATE billing_coupons SET redemptions_count = redemptions_count + 1, updated_at = NOW()
-        WHERE id = ? AND (max_redemptions IS NULL OR redemptions_count < max_redemptions) RETURNING id]], coupon.id)[1]
+        WHERE id = ? AND (? OR max_redemptions IS NULL OR redemptions_count < max_redemptions) RETURNING id]],
+        coupon.id, refs.force == true)[1]
     if not claimed then return nil, "coupon_exhausted" end
     db.insert("billing_coupon_redemptions", {
         uuid = Common.uuid(), coupon_id = coupon.id, namespace_id = coupon.namespace_id, customer_id = customer_id,

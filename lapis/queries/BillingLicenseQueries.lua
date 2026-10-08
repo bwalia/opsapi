@@ -269,6 +269,14 @@ function Licenses.removeActivation(namespace_id, uuid, activation_uuid, customer
 end
 
 --- A customer's licences in one app with their devices (the "my licences" page).
+--- The customer holding a licence key in this app (proof of ownership for an upgrade).
+function Licenses.customerForKey(app, raw_key)
+    local key = Licenses.normalize(raw_key)
+    if not key then return nil end
+    return db.query([[SELECT c.id, c.uuid, c.email FROM billing_licenses l JOIN customers c ON c.id = l.customer_id
+        WHERE l.key_hash = ? AND l.app_id = ? AND l.status <> 'revoked']], ApiKey.hash(key), app.id)[1]
+end
+
 function Licenses.forCustomer(app, customer_id)
     local rows = db.query(LIST_SELECT .. " WHERE l.app_id = ? AND l.customer_id = ? ORDER BY l.created_at DESC",
         app.id, customer_id)

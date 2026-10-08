@@ -7,7 +7,8 @@
     is generated here, at send time, and only its hash is stored.
 
     maintain(): every 5 minutes on worker 0, one pod at a time (advisory lock):
-    expired links / sessions / idempotency rows, device auto-release + retention.
+    expired links / sessions / idempotency rows / key deliveries, device
+    auto-release + retention.
 ]]
 
 local db = require("lapis.db")
@@ -66,6 +67,32 @@ Jobs.handlers = {
         if not ok then return false, err end
         return true
     end,
+
+    -- A licence key bought through checkout: decrypted here, at send time (lib/billing-delivery.lua).
+    ["billing.licence_key.requested"] = function(event)
+        local lic = db.query([[
+            SELECT l.id, l.status, p.name AS plan_name, c.email AS customer_email,
+                   a.id AS app_id, a.uuid, a.name, a.kind, a.settings, a.namespace_id
+            FROM billing_licenses l JOIN customers c ON c.id = l.customer_id JOIN billing_apps a ON a.id = l.app_id
+            LEFT JOIN billing_plans p ON p.id = l.plan_id
+            WHERE l.uuid = ?]], event.data and event.data.license or "")[1]
+        if not lic or lic.status == "revoked" then return true end
+        local Delivery = require("lib.billing-delivery")
+        local key, derr = Delivery.forEmail(lic.id)
+        if not key then
+            if derr then return false, derr end
+            return true -- already emailed, or expired
+        end
+        local app = { id = lic.app_id, uuid = lic.uuid, name = lic.name, kind = lic.kind, settings = lic.settings }
+        local brand = Jobs.brand(app)
+        local ok, err = require("helper.namespace-mail").send(lic.namespace_id, "billing.licence_key", lic.customer_email,
+            { app_name = brand.app_name, customer_email = lic.customer_email, licence_key = key,
+              plan_name = lic.plan_name ~= db.NULL and lic.plan_name or "", account_link = Jobs.accountUrl(app) or "",
+              support_email = brand.support_email }, brand)
+        if not ok then return false, err end
+        Delivery.emailed(lic.id)
+        return true
+    end,
 }
 
 Jobs.LINK_MINUTES = LINK_MINUTES
@@ -78,6 +105,7 @@ function Jobs.maintain(premature)
             db.query("DELETE FROM billing_access_links WHERE expires_at < NOW() - interval '1 day'")
             db.query("DELETE FROM billing_customer_sessions WHERE expires_at < NOW()")
             db.query("DELETE FROM billing_idempotency WHERE expires_at < NOW()")
+            require("lib.billing-delivery").purge()
             require("queries.BillingLicenseQueries").maintain()
         end
         db.query("COMMIT")

@@ -641,8 +641,8 @@ load_if("tax_copilot", "routes.tax-admin-form-sections")
 load_if("tax_copilot", "routes.tax-admin-cmi")
 -- Billing (single-merchant Stripe: admin plans + subscription/one-time checkout).
 -- Plans are shared with the Billing & Entitlements module; checkout/account/
--- webhook stay the tax app's single-merchant flow (the billing module's own
--- Stripe Connect checkout comes in phase 2 — docs/BILLING_ENTITLEMENTS.md).
+-- webhook stay the tax app's single-merchant flow (the billing module has its
+-- own Stripe Connect checkout and webhook: routes/billing-payments.lua).
 load_if({ "tax_copilot", "billing" }, "routes.billing-plans")
 load_if("tax_copilot", "routes.billing-checkout")
 load_if("tax_copilot", "routes.billing-webhook")
@@ -654,6 +654,7 @@ load_if("billing", "routes.billing-subscriptions")
 load_if("billing", "routes.billing-licenses")
 load_if("billing", "routes.billing-public")
 load_if("billing", "routes.billing-privacy")
+load_if("billing", "routes.billing-payments")
 
 -- ============================================
 -- CRM (Accounts, Contacts, Deals, Pipelines, Leads)

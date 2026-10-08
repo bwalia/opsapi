@@ -157,6 +157,10 @@ if require("helper.project-config").isFeatureEnabled("billing") then
         { entity = "billing.plan", table = "billing_plans", module = "billing" },
         { entity = "billing.grant", table = "billing_grants", module = "subscriptions" },
         {
+            entity = "purchase", table = "billing_purchases", module = "subscriptions",
+            verbs = { refunded = { status = "refunded" }, revoked = { status = "revoked" } },
+        },
+        {
             entity = "license", table = "billing_licenses", module = "licenses", hide = "key_hash",
             verbs = {
                 suspended = { status = "suspended" }, revoked = { status = "revoked" },
@@ -525,7 +529,8 @@ end
 --- Core subscribers that are code, not plugins: Billing & Entitlements
 -- emails and jobs (lib/billing-jobs.lua). Synced on every migrate.
 local CORE_SUBSCRIPTIONS = {
-    { feature = "billing", subscriber = "core.billing", events = { "billing.access_link.requested" } },
+    { feature = "billing", subscriber = "core.billing",
+      events = { "billing.access_link.requested", "billing.licence_key.requested" } },
 }
 function PluginEvents.syncCore()
     local ProjectConfig = require("helper.project-config")

@@ -25,6 +25,9 @@
       [11] billing_purchases (one_time / fixed_term, any source)
       [12] upgrade paths, coupons + redemptions, plan-change history
       [13] access links (magic links), customer sessions, idempotency keys
+      phase 2 (payments, §10 / §13):
+      [14] Stripe Connect accounts, per-mode Stripe prices on plans, the payment
+           behind a purchase, and once-only licence key deliveries
 
     Additive and idempotent. Existing tax billing rows are untouched.
 ]]
@@ -487,5 +490,45 @@ return {
         ]])
         db.query("CREATE UNIQUE INDEX IF NOT EXISTS billing_idempotency_key_uidx ON billing_idempotency (scope, idem_key)")
         db.query("CREATE INDEX IF NOT EXISTS billing_idempotency_expiry_idx ON billing_idempotency (expires_at)")
+    end,
+
+    [14] = function()
+        -- One Stripe Express account per workspace and mode (test / live).
+        db.query([[
+            CREATE TABLE IF NOT EXISTS billing_connect_accounts (
+                id BIGSERIAL PRIMARY KEY,
+                namespace_id BIGINT NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+                mode TEXT NOT NULL CHECK (mode IN ('test', 'live')),
+                stripe_account_id TEXT NOT NULL UNIQUE,
+                charges_enabled BOOLEAN NOT NULL DEFAULT false,
+                payouts_enabled BOOLEAN NOT NULL DEFAULT false,
+                details_submitted BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (namespace_id, mode)
+            )
+        ]])
+        -- { "<mode>": { product, price, amount, currency, interval, interval_count } } (recurring plans).
+        db.query("ALTER TABLE billing_plans ADD COLUMN IF NOT EXISTS stripe_refs JSONB NOT NULL DEFAULT '{}'")
+        db.query("ALTER TABLE billing_purchases ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT")
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS billing_purchases_stripe_pi_uidx ON billing_purchases (stripe_payment_intent_id)
+            WHERE stripe_payment_intent_id IS NOT NULL]])
+        -- A new licence key bought through checkout, AES-256-GCM encrypted, for at most 24 hours.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS billing_key_deliveries (
+                license_id BIGINT PRIMARY KEY REFERENCES billing_licenses(id) ON DELETE CASCADE,
+                checkout_session_id TEXT NOT NULL UNIQUE,
+                ciphertext TEXT NOT NULL,
+                nonce TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                key_id TEXT NOT NULL,
+                email BOOLEAN NOT NULL DEFAULT false,
+                revealed_at TIMESTAMPTZ,
+                emailed_at TIMESTAMPTZ,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
+        db.query("CREATE INDEX IF NOT EXISTS billing_key_deliveries_expiry_idx ON billing_key_deliveries (expires_at)")
     end,
 }
