@@ -516,7 +516,8 @@ local function smtp_send(opts)
         send_opts.bcc = type(opts.bcc) == "string" and { opts.bcc } or opts.bcc
     end
     if opts.reply_to then
-        send_opts["reply-to"] = opts.reply_to
+        -- lua-resty-mail reads `reply_to` (a "reply-to" key was silently ignored).
+        send_opts.reply_to = opts.reply_to
     end
 
     if opts.html then
