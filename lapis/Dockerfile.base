@@ -43,7 +43,7 @@ RUN luarocks install luaossl \
     && luarocks install lua-resty-openidc \
     && luarocks install lua-resty-string \
     && luarocks install base64 \
-    && luarocks install lua-resty-jwt \
+    && luarocks install lua-resty-jwt 0.3.2-1 \
     && luarocks install payments \
     && luarocks install lua-resty-mail
 

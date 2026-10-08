@@ -1,12 +1,25 @@
 local config = require("lapis.config")
 
+-- Lapis signs its session cookie with this. Only local development may run
+-- without JWT_SECRET_KEY (a fixed, public fallback would let anyone forge
+-- sessions); every deployed environment refuses to start without it.
+local function session_secret()
+  local secret = os.getenv("JWT_SECRET_KEY")
+  if secret and secret ~= "" then return secret end
+  local env = os.getenv("LAPIS_ENVIRONMENT") or "development"
+  if env ~= "development" and env ~= "local" then
+    error("JWT_SECRET_KEY must be set (LAPIS_ENVIRONMENT=" .. env .. "): refusing to start with a default session secret")
+  end
+  return "local-development-only-session-secret"
+end
+
 config("development", {
   port = 80,
   server = "nginx",
   code_cache = "on", -- Required for Prometheus metrics to work properly
   num_workers = "1",
   session_name = "opsapi_session",
-  secret = "your-secret-key-here-change-in-production",
+  secret = session_secret(),
   session_options = {
     lifetime = 3600 * 24 * 7, -- 7 days
     regen = 900, -- 15 minutes
@@ -52,7 +65,7 @@ config("production", {
     server = true
   },
   session_name = "opsapi_session",
-  secret = os.getenv("JWT_SECRET_KEY") or "change-me-in-production",
+  secret = session_secret(),
   postgres = {
     host = os.getenv("POSTGRES_HOST") or "127.0.0.1",
     user = os.getenv("POSTGRES_USER") or "pguser",
@@ -85,7 +98,7 @@ for _, env_name in ipairs(non_prod_envs) do
     code_cache = "on",
     num_workers = "1",
     session_name = "opsapi_session",
-    secret = os.getenv("JWT_SECRET_KEY") or "your-secret-key-here-change-in-production",
+    secret = session_secret(),
     session_options = {
       lifetime = 3600 * 24 * 7,
       regen = 900,

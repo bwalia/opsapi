@@ -96,7 +96,7 @@ local function verify_token(token)
     if not token or token == "" then return nil end
     local secret = Global.getEnvVar("JWT_SECRET_KEY")
     if not secret then return nil end
-    local obj = jwt:verify(secret, token)
+    local obj = require("helper.jwt-verify")(secret, token)
     if not obj or not obj.verified then return nil end
     local ui = obj.payload and obj.payload.userinfo
     if not ui or (not ui.uuid and not ui.sub) then return nil end

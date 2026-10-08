@@ -38,7 +38,7 @@ check("exports broadcast + handler",
     ws:match("function _M%.broadcast") ~= nil and ws:match("function _M%.handler") ~= nil)
 check("uses resty.websocket.server", has(ws, 'require("resty.websocket.server")'))
 check("uses ngx.semaphore for cross-request handoff", has(ws, 'require("ngx.semaphore")'))
-check("verifies the JWT itself (runs outside Lapis auth)", has(ws, "jwt:verify"))
+check("verifies the JWT itself (runs outside Lapis auth)", has(ws, "helper.jwt-verify"))
 check("authorizes via project membership", has(ws, "KanbanProjectQueries.isMember"))
 -- The fanout must never touch a socket from the mutation's coroutine: broadcast
 -- only enqueues + posts the semaphore; the writer coroutine does the send.

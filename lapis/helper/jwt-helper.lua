@@ -192,7 +192,7 @@ end
 -- @return table|nil Verification result { valid, payload, reason }
 function JWTHelper.verifyToken(token)
     local secret = getSecretKey()
-    local jwt_obj = jwt:verify(secret, token)
+    local jwt_obj = require("helper.jwt-verify")(secret, token)
 
     return {
         valid = jwt_obj.verified,
@@ -248,7 +248,7 @@ function JWTHelper.refreshToken(token, expiration)
     if not result.valid then
         -- Use resty.jwt to decode and check signature without exp validation
         local secret = getSecretKey()
-        local jwt_obj = jwt:verify(secret, token, {
+        local jwt_obj = require("helper.jwt-verify")(secret, token, {
             lifetime_grace_period = REFRESH_GRACE_PERIOD
         })
 
