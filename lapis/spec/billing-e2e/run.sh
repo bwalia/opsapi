@@ -36,7 +36,7 @@ docker run -d --name e2e-api-$$ --network "$NET" --network-alias e2e-api -v "$W/
   -e OPSAPI_PUBLIC_URL=https://billing.e2e.test -e BILLING_HOSTED_BASE_URL=https://hosted.e2e.test -e REDIS_HOST=e2e-redis \
   -e REDIS_ENABLED=true -e OPSAPI_MAIL_ALLOW_PRIVATE=true -e OPENSSL_SECRET_KEY="$(openssl rand -hex 8)" \
   -e OPENSSL_SECRET_IV="$(openssl rand -hex 8)" -e STRIPE_SECRET_KEY=sk_test_e2e -e STRIPE_PLATFORM_FEE_PERCENT=10 \
-  -e STRIPE_CONNECT_WEBHOOK_SECRET=whsec_e2e_platform,whsec_e2e_connect -e LICENCE_DELIVERY_KEY="$(openssl rand -base64 32)" \
+  -e STRIPE_SSL_VERIFY=false -e STRIPE_CONNECT_WEBHOOK_SECRET=whsec_e2e_platform,whsec_e2e_connect -e LICENCE_DELIVERY_KEY="$(openssl rand -base64 32)" \
   -e LICENCE_DELIVERY_KEY_ID=e2e-1 lapis-lapis >/dev/null
 sleep 6; docker exec -w /app e2e-api-$$ lapis migrate >/dev/null; docker exec e2e-api-$$ sh -c 'kill -HUP $(cat /app/logs/nginx.pid)'; sleep 2
 docker exec e2e-pg-$$ psql -U postgres -d e2e -qc "INSERT INTO users (uuid, first_name, last_name, email, username, password, active, created_at, updated_at) VALUES ('11111111-2222-4333-8444-555555555555','E2E','Owner','owner@e2e.invalid','e2eowner','x',true,now(),now())"

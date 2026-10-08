@@ -26,6 +26,9 @@ local Pay = {}
 local function stripe()
     local client, err = PaymentProvider.get_stripe()
     if not client then return nil, err end
+    -- Verified TLS unless explicitly turned off (STRIPE_SSL_VERIFY=false, e.g. against stripe-mock):
+    -- every call carries the platform's secret key.
+    client.ssl_verify = os.getenv("STRIPE_SSL_VERIFY") ~= "false"
     return client
 end
 

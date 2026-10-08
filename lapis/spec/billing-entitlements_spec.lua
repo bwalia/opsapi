@@ -187,6 +187,9 @@ check("every Stripe write is idempotent", (function()
     return true
 end)())
 check("fulfilment runs once per checkout session", pay:find("pg_advisory_xact_lock", 1, true) ~= nil)
+check("billing's Stripe calls verify TLS unless STRIPE_SSL_VERIFY=false (they carry the secret key)",
+    pay:find('client.ssl_verify = os.getenv("STRIPE_SSL_VERIFY") ~= "false"', 1, true) ~= nil
+        and read("nginx.conf"):find("env STRIPE_SSL_VERIFY;", 1, true) ~= nil)
 local delivery = read("lib/billing-delivery.lua")
 check("keys wait encrypted (AES-256-GCM, licence id as AAD) for at most 24 h",
     delivery:find('"aes-256-gcm"', 1, true) and delivery:find("tostring(license_id)", 1, true)
