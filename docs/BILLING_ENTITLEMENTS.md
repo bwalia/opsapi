@@ -92,6 +92,7 @@ Changing settings bumps the app's cache generation (§15).
 | | `grace_days` | 0–365. `grace_until = exp + grace` | 3 / 30 |
 | | `past_due_grace_days` | 0–90. How long a failed renewal keeps access | 7 / 7 |
 | Licences | `max_activations` | 1–10000, or `null` (unlimited). Default for new licences; each licence can override it | `null` / 3 |
+| | `released_seat_hold_days` | 0–3650, or `null`. A device the customer or the device itself releases keeps its seat this long, so a licence can't be shared by activating and releasing machines in turn. `null` = `refresh_interval_days` + `grace_days` (as long as the released machine's licence file keeps working); seats an admin frees never count | `null` |
 | | `activation_auto_release_days` | 0–3650; 0 = never. Frees activations not seen for N days | 0 / 90 |
 | | `fingerprint_salt` | Generated, read-only, public | random 32 hex |
 | Public endpoints | `allowed_origins` | List of origins (`https://…`; `http://localhost:*` allowed) for browser CORS | `[]` |
@@ -105,7 +106,6 @@ Changing settings bumps the app's cache generation (§15).
 | | `webhook_include_licence_key` | bool. Put the raw key in the `license.issued` webhook. **Off unless the client opts in** | false |
 | Payments | `refund_policy` | `revoke` \| `keep`. What a **full** refund does; partial refunds always keep access | `revoke` |
 | | `automatic_tax` | bool. Stripe Tax on checkout | false |
-| | `allow_promotion_codes` | bool. Stripe promotion codes on checkout | false |
 
 The app row keeps only its identity in columns: `name`, `slug`, `kind`, `mode`, `publishable_key`,
 `active`, `cache_generation`.
@@ -161,7 +161,7 @@ deactivated activations past their retention.
 | # | Source | Features it contributes | Window |
 |---|---|---|---|
 | 1 | The app's **default plan** | all its features | none |
-| 2 | The newest **recurring subscription** that entitles (`active`, `trialing`, or `past_due` within `past_due_grace_days`) | **all** features in its plan, including ones released later | `access_until` = period end |
+| 2 | The newest **recurring subscription** that entitles: `active` / `trialing` until its period ends (Stripe subscriptions get one more day for the renewal webhook), or `past_due` for `past_due_grace_days` counted from when the payment failed (`past_due_since`) | **all** features in its plan, including ones released later | `access_until` = period end |
 | 3 | Every **active purchase** (`access_until` null or in the future) | its plan's features **released on or before `updates_until`** (no `released_at`, or `updates_until` null → included) | the purchase's |
 | 4 | Active **grants** | the granted plan's features, then the granted values | `access_until` = the grant's expiry |
 | 5 | For licence files: the **licence's own plan** | as for a purchase, with the licence's `updates_until` | the licence's |
@@ -171,13 +171,18 @@ Combining them:
 - For a limit, the largest wins, and `null` (unlimited) beats any number.
 - Only features in the app's catalogue are returned; each gets a value (`false` / `0` when no source sets it).
 - `plan_key`, `status`, `access_until` and `updates_until` in the answer come from the deciding source. The order is subscription, then purchase (newest), then plan grant, then the default plan.
+- A **licence file's features are the union** of everything the customer has in that app (sources 1–4) plus the licence's own plan (5), not only the licence's plan.
+- The entitlement token's `sub` is the customer's `external_id`, or their OpsAPI uuid when the app never sent one (e.g. a buyer who came through checkout).
+- Manual, store and external subscriptions end with their paid period: the maintenance job marks them `canceled` (`subscription.canceled`). Stripe's come from its webhooks.
 
 **Fixed-term stacking:**
 - Buying a `fixed_term` plan again extends from `max(now, current end) + term_days` on the covered dimension (`access` or `updates`).
 - "Current end" is the latest end among the customer's active purchases of that plan in that app.
 - With licences, the customer's licence for that plan takes the new window, so the same key keeps working.
 
-**Upgrades** create a purchase of the target plan whose windows start at the upgrade date (§13).
+**Upgrades** create a purchase of the target plan whose windows start at the upgrade date (§13). Extending a licence never shortens it: each window keeps the later end.
+
+**Refunds and revokes** undo exactly what that purchase granted: each purchase records its licence (`license_id`), and the licence falls back to the newest purchase still active on it, or is revoked when none is left (unless a live subscription backs it).
 
 ## 7. Signed tokens and licence files
 
@@ -232,7 +237,7 @@ workspace or another app return 404.
 | `GET /api/v2/entitlements/:app/customers/:external_id` → entitlements and a signed token. An unknown id gets the default plan | `entitlements.read` |
 | `POST /api/v2/entitlements/:app/purchases`: record a **verified external purchase** (`source`, `external_transaction_id`, `original_transaction_id`, `plan_key` or a store product id, `customer` external_id, `purchased_at`, `expires_at` for subscriptions). Idempotent on `(source, transaction id)` | `entitlements.create` |
 | `POST /api/v2/entitlements/:app/purchases/verify` `{source, payload}`: runs the source's **verifier** (§12). `app_store` / `play_store` return 501 `not_implemented` | `entitlements.create` |
-| `POST /api/v2/subscriptions/checkout` `{app, plan, customer \| customer_external_id?, email?, coupon?, success_url?, cancel_url?}` → a Stripe Checkout URL (Idempotency-Key required); `POST /api/v2/subscriptions/portal` `{app, customer \| customer_external_id, return_url?}` → Customer Portal URL | `subscriptions.create` |
+| `POST /api/v2/subscriptions/checkout` `{app, plan, customer \| customer_external_id?, email?, coupon?, success_url?, cancel_url?}` → a Stripe Checkout URL (Idempotency-Key required). The caller holds a secret key, so its redirect URLs aren't checked against `allowed_redirect_urls` (any http(s) URL); the public checkout's are; `POST /api/v2/subscriptions/portal` `{app, customer \| customer_external_id, return_url?}` → Customer Portal URL | `subscriptions.create` |
 
 ### 8.3 Public: for apps with no back end, and for hosted pages
 
@@ -339,7 +344,7 @@ These are public pages in opsapi-dashboard under `{BILLING_HOSTED_BASE_URL}/b/{a
   - limited to some plans, with dates and redemption limits;
   - for recurring plans: once, for N months, or forever.
 
-  Customers enter a code on the hosted pricing page, or pass it to checkout. OpsAPI validates it, then applies it as a Stripe coupon on the platform account (made on first use, per mode and terms). Every use is recorded in `billing_coupon_redemptions`.
+  Customers enter a code on the hosted pricing page, or pass it to checkout. OpsAPI validates it, then applies it as a Stripe coupon on the platform account (made on first use, per mode and terms, carrying `max_redemptions` and `redeem_by`). Each checkout **reserves** a use when the session is created (so parallel checkouts can't exceed the limit), fulfilment confirms it, and `checkout.session.expired` (or the maintenance job, an hour after expiry) gives it back. Sessions expire after 31 minutes, the shortest Stripe allows. Per-customer limits count buyers who aren't customers yet by their (normalised) email, which is then fixed on Stripe's page; a coupon with a per-customer limit needs an email. Every use is recorded in `billing_coupon_redemptions`.
 - **Refunds** are made by the platform (destination charges): `POST /api/v2/subscriptions/purchases/:uuid/refund` (dashboard: Subscriptions → Purchases) reverses the transfer and the fee. Then `charge.refunded`:
   - a full refund applies the app's `refund_policy`: `revoke` marks the purchase refunded and revokes the licence, and a full refund of a subscription payment cancels the subscription at Stripe; `keep` only records it;
   - partial refunds keep access;
@@ -378,9 +383,10 @@ Payloads never include `key_hash` or `fingerprint_hash`. There is no computed `e
 - **IP addresses:** never stored. They exist only as rate-limit and lockout counters that expire with their window.
 - **Export:** `GET /api/v2/customers/:uuid/billing-export` returns JSON of the customer, their subscriptions, purchases, grants, licences (prefix only) and activations.
 - **Delete:** `DELETE /api/v2/customers/:uuid/billing-data`:
-  - revokes licences; cancels recurring subscriptions at once, at Stripe first (if Stripe can't be reached, nothing is erased);
+  - revokes licences; cancels recurring subscriptions at once, at Stripe first (if Stripe can't be reached: 502, and nothing is erased);
   - deletes activations, access links, sessions, key deliveries and grants;
-  - anonymises the customer (email → `deleted+{uuid}@invalid`, names, phone, addresses and `external_id` cleared);
+  - anonymises the customer (email → `deleted+{uuid}@invalid`, names, phone, addresses and `external_id` cleared), and clears its Stripe customer links (`stripe_customer_id` on the customer and its subscriptions) and `user_id`;
+  - **recommended:** also delete the customer in Stripe (the seller's or platform's Stripe dashboard → Customers → Delete). OpsAPI doesn't do this automatically: Stripe keeps payment records for its own obligations, and deleting a Stripe customer removes their saved payment methods, which is the seller's call;
   - **keeps** purchases and payments (amounts, dates, plan, currency) against the anonymised customer, because accounting law requires them. How long to keep them is the client's legal call. OpsAPI doesn't delete them automatically.
 
 ### What a client must disclose
@@ -482,6 +488,24 @@ then breaks. So the recommendation is to **extend #694 rather than merge it firs
 - **Specs and builds:** `spec/billing-entitlements_spec.lua` 77 checks; SDK 69 unit tests and 932 typed paths; dashboard `tsc`, eslint and `next build` pass; a Cypress smoke of the Payments page and the hosted pricing, success and account pages passes (5 of 5).
 - **Found and fixed on the way:** billing's Stripe calls ran without TLS verification (`STRIPE_SSL_VERIFY` never reached nginx workers); a privacy delete left Stripe subscriptions charging.
 
+**Security and billing review fixes (2026-10-08, B1–B19):**
+- `spec/billing-entitlements_spec.lua`: 115 checks. The new ones fail on the code before the fixes (85892cc3) and pass now.
+- `run.sh` on the final commit: **167 checks, 0 failures**. Phase 1 (`run.py`) 54; payments (`pay.py`) 98, including the review cases; SDK 15. The review cases:
+  - coupon reservations under parallel checkouts, and their release on expiry;
+  - per-email coupon limits;
+  - lapsed manual subscriptions, and the past-due grace counted from the failed payment;
+  - out-of-order and late subscription events;
+  - redacted replays of a reissue;
+  - the seat hold, and an admin release;
+  - `billing.read` on app plans;
+  - per-app transaction ids;
+  - account pages limited to their app;
+  - redirect tricks; live/test mismatches; lost disputes;
+  - a 409 on deleting a customer with purchases;
+  - refunds undoing exactly one purchase.
+- **A refund that arrives before fulfilment:** stripe-mock can't return OpsAPI's metadata on a PaymentIntent, so this was checked by hand in the sandbox. The refund was recorded, then the checkout webhook created the purchase already refunded.
+- **Tax app (`tax_copilot,services`), `main` vs this branch:** the same 4 expected differences as before (the workspace email routes), over 1,762 requests; the same error messages.
+
 **Phase 1 results (2026-10-08):**
 - **Tax app (`tax_copilot,services`), `main` vs this branch,** each server migrating an empty DB in a no-internet sandbox:
   - Schema: identical, apart from the two new core email tables. Migrations differ only by `zznm1` and `zznm2`. Modules, menu and webhook subscriptions are identical.
@@ -514,3 +538,13 @@ then breaks. So the recommendation is to **extend #694 rather than merge it firs
 | 12 | *For review:* refunds are made from OpsAPI (destination charges belong to the platform, so a seller can't refund from their Express dashboard) |
 | 13 | *For review:* the success page doesn't fulfil an order itself; it waits up to a minute for the webhook, then points to the account page and the emailed key |
 | 14 | *For review:* customers can't switch a subscription the seller sold by hand (409 `contact_seller`); they can switch Stripe subscriptions along upgrade paths |
+| 15 | *Review fix (B1):* coupon uses are **reserved** per checkout and given back when it expires; buyers not yet known are counted by email, so a per-customer coupon needs an email |
+| 16 | *Review fix (B2):* Stripe subscriptions keep entitling for **one day** past the period end while the renewal webhook lands; manual/store/external ones end exactly at the period end |
+| 17 | *Review fix (B5):* subscription events are applied in order (by event `created`, older ones skipped; an ended subscription never revives) rather than re-reading Stripe on every event |
+| 18 | *Review fix (B9):* a Stripe plan switch is invoiced at once and applied only when paid (`always_invoice` + `pending_if_incomplete`); the plan changes when the webhook confirms it |
+| 19 | *Review fix (B10):* Stripe promotion codes are not offered (`allow_promotion_codes` removed); OpsAPI coupons are the discount mechanism |
+| 20 | *Review fix (B11):* `released_seat_hold_days` defaults to refresh interval + grace (how long a released machine's licence file still works); admin releases are free at once |
+| 21 | *Review fix (B12):* app plans need `billing.read`; the tax app's plans keep their current access rules (including the 403 for another workspace's plan) |
+| 22 | *Review fix (B15):* a privacy delete clears the Stripe customer links; deleting the Stripe customer itself is left to the seller (recommended, §16) |
+| 23 | *Review fix (B18):* signing requires `BILLING_SIGNING_KEY_ID` and `OPSAPI_PUBLIC_URL` (no issuer from the Host header) |
+| 24 | *Review fix (B19):* server-side checkout (secret key) does not check `allowed_redirect_urls`; the public checkout does |
