@@ -196,7 +196,19 @@ export interface Purchase extends CustomerRef {
   currency: string;
   coupon_code?: string | null;
   external_transaction_id?: string | null;
+  refunded_amount?: number;
   created_at: string;
+}
+
+/** The workspace's Stripe account (Stripe Connect Express). */
+export interface ConnectStatus {
+  connected: boolean;
+  mode: 'test' | 'live';
+  account?: string;
+  charges_enabled?: boolean;
+  payouts_enabled?: boolean;
+  details_submitted?: boolean;
+  platform_fee_percent?: number;
 }
 
 export interface PlanChange {
@@ -397,6 +409,17 @@ export const billingService = {
   /** Record a sale by hand; a licensed app returns the new licence key once. */
   sell: async (input: SaleInput) => data<SaleResult>(await apiClient.post('/api/v2/subscriptions/purchases', input)),
   revokePurchase: async (uuid: string) => apiClient.post(`/api/v2/subscriptions/purchases/${enc(uuid)}/revoke`),
+  /** Refund a Stripe purchase (all of it, or `amount` in minor units); Stripe's webhook applies it. */
+  refundPurchase: async (uuid: string, amount?: number) =>
+    data<{ refund: string; status: string; amount: number }>(
+      await apiClient.post(`/api/v2/subscriptions/purchases/${enc(uuid)}/refund`, amount ? { amount } : {})
+    ),
+
+  // ---- Payments: Stripe Connect (billing) ----
+  connectStatus: async () => data<ConnectStatus>(await apiClient.get('/api/v2/billing/connect')),
+  /** Start or resume Stripe onboarding: returns the Stripe-hosted URL to send the admin to. */
+  connectOnboard: async (country?: string) =>
+    data<{ url: string }>(await apiClient.post('/api/v2/billing/connect/onboard', country ? { country } : {})),
   upgrade: async (input: { app: string; customer: string; to_plan: string; coupon?: string; note?: string }, quote = false) =>
     data<SaleResult>(await apiClient.post('/api/v2/subscriptions/upgrade', input, { params: quote ? { quote: 1 } : {} })),
   planChanges: async (params: ListParams = {}) =>

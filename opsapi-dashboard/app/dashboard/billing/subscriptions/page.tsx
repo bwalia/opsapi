@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { ArrowUpCircle, Gift, Receipt, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowUpCircle, Gift, Receipt, RefreshCw, Trash2, Undo2 } from 'lucide-react';
 import { Button, Card, ConfirmDialog, Pagination, Table } from '@/components/ui';
 import { ProtectedPage } from '@/components/permissions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -82,6 +82,7 @@ function SubscriptionsContent() {
   const [saleOpen, setSaleOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [revokePurchase, setRevokePurchase] = useState<Purchase | null>(null);
+  const [refundTarget, setRefundTarget] = useState<Purchase | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<Grant | null>(null);
   const [revoking, setRevoking] = useState(false);
 
@@ -133,6 +134,18 @@ function SubscriptionsContent() {
     }
   };
 
+  const doRefund = async () => {
+    if (!refundTarget) return;
+    try {
+      await billingService.refundPurchase(refundTarget.uuid);
+      toast.success('Refund sent to Stripe. The purchase updates when Stripe confirms it.');
+      setRefundTarget(null);
+      setTimeout(reloadAll, 3000);
+    } catch (err) {
+      toast.error(apiError(err, 'Could not refund'));
+    }
+  };
+
   const purchaseColumns: TableColumn<Purchase>[] = useMemo(
     () => [
       { key: 'customer', header: 'Customer', render: (p) => <CustomerCell row={p} /> },
@@ -157,6 +170,9 @@ function SubscriptionsContent() {
           <span className="tabular-nums text-sm">
             {formatMinor(p.amount, p.currency)}
             {p.coupon_code && <span className="block text-xs text-secondary-500">coupon {p.coupon_code}</span>}
+            {!!p.refunded_amount && (
+              <span className="block text-xs text-secondary-500">refunded {formatMinor(p.refunded_amount, p.currency)}</span>
+            )}
           </span>
         ),
       },
@@ -174,18 +190,31 @@ function SubscriptionsContent() {
       {
         key: 'actions',
         header: '',
-        width: 'w-16',
+        width: 'w-24',
         render: (p) =>
           canUpdate('subscriptions') && p.status === 'active' ? (
-            <button
-              type="button"
-              onClick={() => setRevokePurchase(p)}
-              className="p-2 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg"
-              aria-label="Revoke purchase"
-              title="Revoke purchase"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <div className="flex justify-end">
+              {p.source === 'stripe' && !p.refunded_amount && (
+                <button
+                  type="button"
+                  onClick={() => setRefundTarget(p)}
+                  className="p-2 text-secondary-500 hover:text-secondary-900 hover:bg-secondary-100 rounded-lg"
+                  aria-label="Refund purchase"
+                  title="Refund through Stripe"
+                >
+                  <Undo2 className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setRevokePurchase(p)}
+                className="p-2 text-secondary-500 hover:text-error-500 hover:bg-error-50 rounded-lg"
+                aria-label="Revoke purchase"
+                title="Revoke purchase"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           ) : null,
       },
     ],
@@ -394,6 +423,15 @@ function SubscriptionsContent() {
 
       <SaleModal isOpen={saleOpen} onClose={() => setSaleOpen(false)} onSaved={reloadAll} />
       <UpgradeModal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} onSaved={reloadAll} />
+      <ConfirmDialog
+        isOpen={!!refundTarget}
+        onClose={() => setRefundTarget(null)}
+        onConfirm={doRefund}
+        title="Refund this purchase in full?"
+        message={`${refundTarget ? formatMinor(refundTarget.amount, refundTarget.currency) : ''} goes back to the customer through Stripe. Their access then follows the app's refund policy.`}
+        confirmText="Refund"
+        variant="danger"
+      />
       <ConfirmDialog
         isOpen={!!revokePurchase}
         onClose={() => setRevokePurchase(null)}

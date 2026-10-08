@@ -144,6 +144,41 @@ export default function AppOverview({
         </dl>
       </Card>
 
+      <Card className="shadow-sm">
+        <h2 className="text-base font-semibold text-secondary-900">Hosted pages</h2>
+        <p className="mt-1 text-sm text-secondary-500">
+          Link to these from your site or app. Payments need a connected{' '}
+          <Link href="/dashboard/billing/payments" className="text-primary-600 hover:underline">
+            Stripe account
+          </Link>
+          .
+        </p>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 [&>div]:min-w-0">
+          {[
+            { label: 'Pricing (buy a plan)', path: 'pricing' },
+            { label: 'My account (licences, upgrades, billing)', path: 'account' },
+          ].map((page) => {
+            const url = `${window.location.origin}/b/${app.uuid}/${page.path}`;
+            return (
+              <div key={page.path}>
+                <dt className="text-xs font-medium text-secondary-500">{page.label}</dt>
+                <dd className="mt-1 flex flex-wrap items-center gap-1 min-w-0">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 max-w-full truncate rounded bg-secondary-100 px-2 py-1 text-xs text-primary-700 hover:underline"
+                  >
+                    {url}
+                  </a>
+                  <CopyButton value={url} label={`Copy ${page.path} page link`} />
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </Card>
+
       <form onSubmit={saveBasics}>
         <Card className="shadow-sm">
           <h2 className="text-base font-semibold text-secondary-900 mb-4">App</h2>
