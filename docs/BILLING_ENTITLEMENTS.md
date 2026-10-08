@@ -1,7 +1,7 @@
 # Billing & Entitlements — design
 
-Status: **DRAFT for owner approval.** No implementation code is written until this
-is approved. Open questions are in §16.
+Status: **Phase 1 implemented** (no payments). The owner approved every proposal
+in §16 on 2026-10-08. Phase 2 (Stripe Connect) follows once Phase 1 is merged.
 
 ## 1. What we are building
 
@@ -205,7 +205,9 @@ subscriptions, grants or plans emit `entitlements.changed` (§9).
 - **Licence file** (`typ: opsapi-license+jwt`):
   - claims: `lic`, `aud`, `sub`, `fp` (fingerprint hash), `features`, `exp` (the earlier of the licence expiry and the next check-in), `offline_until`;
   - desktop and self-hosted apps verify it offline with the public key embedded in the app or fetched from JWKS.
-- Without `BILLING_SIGNING_KEY`, the token and licence-file endpoints return **503 "not configured"**. Nothing silently uses a weak key.
+- Without `BILLING_SIGNING_KEY`, nothing is signed and nothing silently uses a weak key:
+  - the licence endpoints return **503** `not_configured`;
+  - the runtime entitlement check still returns the entitlements, but with `"token": null` and a `meta.token` hint. The SDK refuses unsigned answers.
 
 ## 7. APIs
 
@@ -223,7 +225,8 @@ Lists use `Global.pageParam` / `perPageParam` and `meta.total_pages`.
 | Plans: the **existing** `/api/v2/billing/plans*`, plus `?app=` and the new fields | `billing.*` **or** `namespace.manage` (the existing check, kept so the tax app works unchanged) |
 | `GET /api/v2/billing/apps/:uuid/reports` (active subscriptions, MRR, trials, churn in the last 30 days) | `billing.read` |
 | `GET /api/v2/subscriptions?app=&customer=&status=`, `GET /api/v2/subscriptions/:uuid` | `subscriptions.read` |
-| `POST /api/v2/subscriptions/:uuid/cancel`, `…/change-plan` | `subscriptions.update` |
+| `POST /api/v2/subscriptions/:uuid/cancel`, `…/change-plan` (**Phase 2**, with checkout) | `subscriptions.update` |
+| `GET /api/v2/subscriptions/entitlements?app=&customer=` (a customer's effective entitlements, for the dashboard; no token) | `subscriptions.read` |
 | `GET/POST /api/v2/subscriptions/grants`, `DELETE …/grants/:uuid` | `subscriptions.create/delete` |
 | `GET/POST /api/v2/licenses`, `GET/PUT /api/v2/licenses/:uuid` | `licenses.read/create/update` |
 | `POST /api/v2/licenses/:uuid/revoke`, `DELETE /api/v2/licenses/:uuid/activations/:id` | `licenses.update/delete` |
@@ -234,7 +237,7 @@ Lists use `Global.pageParam` / `perPageParam` and `meta.total_pages`.
 | Route | Module.action |
 |---|---|
 | `PUT /api/v2/entitlements/:app/customers/:external_id` (upsert email and names) | `entitlements.create` |
-| `GET /api/v2/entitlements/:app/customers/:external_id` → entitlements plus a signed `token` | `entitlements.read` |
+| `GET /api/v2/entitlements/:app/customers/:external_id` → entitlements plus a signed `token`. An unknown `external_id` gets the default plan, not a 404 | `entitlements.read` |
 | `POST /api/v2/subscriptions/checkout` → Stripe Checkout URL (Phase 2) | `subscriptions.create` |
 | `POST /api/v2/subscriptions/portal` → Stripe Customer Portal URL (Phase 2) | `subscriptions.create` |
 
@@ -267,10 +270,15 @@ New modules, in `PROJECT_MODULES.billing` and the `modules` table:
 
 ## 9. Webhooks to the client
 
-- **Catalogue:** add `billing_subscriptions` and `billing_licenses` to `PluginEvents.CATALOG`, so table triggers feed the existing signed and retried delivery. This gives:
-  - verbs: `subscription.activated`, `subscription.canceled`, `subscription.past_due`, `license.revoked`, `license.activated`;
-  - plus `created/updated/deleted`.
-- **`entitlements.changed`:** registered as a source and emitted by the entitlement service whenever a customer's resolved entitlements change. The SDK uses it to drop its cache. Implementation will confirm the cleanest way to register a computed (non-table) source.
+- **Catalogue (as built):** `PluginEvents.CATALOG` gains these entities, only where the billing feature is deployed. Table triggers feed the existing signed and retried delivery:
+  - `subscription` (`billing_subscriptions`): verbs `activated`, `trialing`, `past_due`, `canceled`;
+  - `billing.plan` (`billing_plans`);
+  - `billing.grant` (`billing_grants`);
+  - `license` (`billing_licenses`, `key_hash` hidden): verbs `suspended`, `revoked`, `expired`;
+  - `license.activation` (`billing_license_activations`, fingerprint hidden).
+
+  Each also has `created/updated/deleted`.
+- **No computed `entitlements.changed`.** Entitlements are computed from exactly these rows, so an app drops its cache on `subscription.*`, `billing.grant.*` or `billing.plan.*` (SDK: `billing.invalidate()`). Tokens also expire within the app's TTL, 15 minutes by default.
 - **Subscribing:** clients subscribe through the existing Webhooks page. Event visibility follows RBAC read on the entity's module.
 
 ## 10. Stripe Connect (Phase 2)
@@ -300,7 +308,8 @@ New modules, in `PROJECT_MODULES.billing` and the `modules` table:
   - billing-system keys 700–709 → `conditional_array({TAX_COPILOT, BILLING}, …)`;
   - `customers` keys (15, 31, 71–75, 166) → `{ECOMMERCE, BILLING}` (the same OR pattern as keys 54/55);
   - the new `zzbe*` keys → `BILLING`.
-- **Routes:** `app.lua` gets an OR-capable loader (`load_if_any({…}, "routes.x")` using `isAnyFeatureEnabled`). Existing billing routes → `{tax_copilot, billing}`; `routes/customers.lua` → `{ecommerce, billing}`; new routes → `billing`.
+- **Routes:** `load_if` in `app.lua` accepts a list (OR). `routes/billing-plans.lua` → `{tax_copilot, billing}`; `routes/customers.lua` → `{ecommerce, billing}`; the new `billing-apps`, `billing-subscriptions` and `billing-licenses` → `billing`. The tax app's checkout, webhook and account routes stay `tax_copilot` only.
+- **Without the billing feature** no new column or table is referenced: app-plan fields, `?app=` and the webhook catalogue entries are all behind `isFeatureEnabled("billing")`.
 - **`PROJECT_CODE=all`** (workstation int/prod) gets everything; diy (`tax_copilot,services`) is unchanged.
 - **Hosted deployment** (Helm values, DNS, the Ring Promoter app) is a follow-up, once the hostname is confirmed.
 
@@ -326,8 +335,9 @@ effective entitlements). Built with the existing UI components and services.
 | `createBilling({ baseUrl, apiKey, app })` | Server-side helper with the secret key |
 | `getEntitlements(externalId)` | Cached until the token expires, verified against JWKS, honours `policy` / `grace` when OpsAPI is unreachable |
 | `can(externalId, feature)`, `limit(externalId, feature)` | Simple checks |
-| `requireFeature(feature, getCustomerId)` | Middleware for Express, Next.js route handlers and plain `fetch` handlers; 402 with an upgrade hint |
-| `upsertCustomer(…)` | |
+| `requireFeature(feature, getCustomerId)` | Express/Connect middleware; 402 `feature_required` with an optional upgrade URL |
+| `withFeature(feature, getCustomerId, handler)` | The same for fetch-style handlers (Next.js route handlers, Hono, Bun, Deno) |
+| `upsertCustomer(…)`, `invalidate(externalId?)` | Register a customer; drop cached answers (from a webhook) |
 | `checkout(…)`, `portal(…)` | Phase 2 |
 | `licenses.activate/validate/deactivate({ publishableKey, licenseKey, fingerprint })` and `verifyLicenseFile(file, jwks)` | Desktop and self-hosted; offline verification |
 
@@ -363,6 +373,29 @@ Ships in the same package (a new tsup entry plus an `exports["./billing"]` block
 - **Fresh install** with `PROJECT_CODE=billing`: migrates cleanly and serves only core plus billing.
 - **Phase 2:** an end-to-end run on Stripe **test mode** with a test connected account.
 
+**Phase 1 results (2026-10-08)**
+- **Tax app untouched:** in a no-internet sandbox, `main` and this branch each migrated an empty database under `PROJECT_CODE=tax_copilot,services`. The results matched:
+  - schemas: identical;
+  - migration list, modules, menu and webhook sources: identical.
+- **Request sweep:** 1,674 requests compared main against the branch, with **0 differences**:
+  - every GET path in either spec (562) as anonymous, as a non-member and as the workspace owner;
+  - the tax plan flow (25 steps, bodies compared), covering create (also with app fields sent), list, `?app=`, update, sync, public plans, subscription, entitlements, payments, checkout, member 403, the webhook event list and delete;
+  - the new route families, which are 404 on both.
+- **Fresh `PROJECT_CODE=billing` install:** migrates cleanly, and a re-run only repeats the always-run migrations. Checked on it:
+  - the menu shows Billing, Subscriptions, Licences and Customers;
+  - an owner can create an app, a feature and a default plan;
+  - an `entitlements`-scoped key can upsert a customer and read entitlements, and gets 403 on `billing`;
+  - JWKS is empty and licensing returns 503 without a key;
+  - tax, kanban, CRM, invoices and orders are 404.
+- **Live on `PROJECT_CODE=all`:**
+  - the API flows for apps, features, plans (validation and the default switch), grants (merge and expiry), licences (seat limit, suspend, expiry, revoke), reports, tenant isolation and API-key scopes;
+  - ES256 tokens and licence files verified against the JWKS, and a server-signed token verified by the SDK;
+  - dashboard pages checked in Cypress, desktop and mobile.
+- **Specs:**
+  - `spec/billing-entitlements_spec.lua`: 34 checks;
+  - SDK `test/billing.test.ts`: 16 tests;
+  - the existing plugin-platform, openapi-coverage, quality-fixes and tenant-isolation specs still pass.
+
 ## 15. Phases
 
 | PR | Contents |
@@ -371,7 +404,7 @@ Ships in the same package (a new tsup entry plus an `exports["./billing"]` block
 | **Phase 2** (after Phase 1 merges) | Stripe Connect: onboarding, product and price sync, checkout, portal, Connect webhooks, fees, modes, TLS verification on, end-to-end test-mode run |
 | **Later** | Mobile store purchases (an extension point: `billing_subscriptions.provider` gains `apple` / `google`); usage reporting; the hosted deployment; using it for OpsAPI's own AI plans |
 
-## 16. Open questions for the owner
+## 16. Owner decisions (approved 2026-10-08, all as proposed)
 
 1. **`customers.email` is unique across all workspaces.** OK to change it to unique **per workspace** (and scope `findByEmail` to the workspace)? Without this, reusing `customers` can't work for more than one client.
 2. **Several apps per workspace** (proposed), or exactly one app per workspace?
