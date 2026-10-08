@@ -2535,6 +2535,7 @@ local _migrations = {
     ['zzbf4_billing_upgrades_coupons'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 12),
     ['zzbf5_billing_access_links'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 13),
     ['zzbf6_billing_payments'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 14),
+    ['zzbf7_billing_review_fixes'] = conditional_array(ProjectConfig.FEATURES.BILLING, billing_ent_migrations, 15),
     -- Workspace SMTP + email templates (core).
     ['zznm1_namespace_mail_settings'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 1),
     ['zznm2_namespace_email_templates'] = conditional_array(ProjectConfig.FEATURES.CORE, namespace_mail_migrations, 2),

@@ -28,6 +28,11 @@
       phase 2 (payments, §10 / §13):
       [14] Stripe Connect accounts, per-mode Stripe prices on plans, the payment
            behind a purchase, and once-only licence key deliveries
+      review fixes (2026-10-08):
+      [15] coupon reservations (redemptions get a status), past_due_since,
+           the licence a purchase granted, per-app transaction uniqueness,
+           refunds that arrive before fulfilment, who released a device,
+           key deliveries for webhooks, missing indexes / FK
 
     Additive and idempotent. Existing tax billing rows are untouched.
 ]]
@@ -48,6 +53,10 @@ return {
         -- Email: unique per workspace (case-insensitive) instead of globally.
         -- Customers without a workspace (the legacy marketplace checkout) keep
         -- their own global uniqueness.
+        -- Note: a plain CREATE INDEX locks `customers` against writes while it
+        -- builds (seconds on today's tables). Lapis migrations can't use
+        -- CONCURRENTLY; on a very large table build it by hand first, with
+        -- CONCURRENTLY and this name, and this becomes a no-op.
         local ok = pcall(db.query, [[
             CREATE UNIQUE INDEX IF NOT EXISTS customers_ns_email_uidx
             ON customers (namespace_id, lower(email)) WHERE namespace_id IS NOT NULL
@@ -530,5 +539,72 @@ return {
             )
         ]])
         db.query("CREATE INDEX IF NOT EXISTS billing_key_deliveries_expiry_idx ON billing_key_deliveries (expires_at)")
+    end,
+
+    [15] = function()
+        -- Coupons: a checkout reserves a use (released if the session expires),
+        -- fulfilment confirms it. Anonymous buyers are counted by email.
+        db.query("ALTER TABLE billing_coupon_redemptions ALTER COLUMN customer_id DROP NOT NULL")
+        for _, c in ipairs({ "status TEXT NOT NULL DEFAULT 'redeemed' CHECK (status IN ('reserved', 'redeemed', 'released'))",
+            "checkout_session_id TEXT", "email_norm TEXT", "expires_at TIMESTAMPTZ" }) do
+            db.query("ALTER TABLE billing_coupon_redemptions ADD COLUMN IF NOT EXISTS " .. c)
+        end
+        db.query([[CREATE INDEX IF NOT EXISTS billing_coupon_redemptions_session_idx
+            ON billing_coupon_redemptions (checkout_session_id) WHERE checkout_session_id IS NOT NULL]])
+        db.query([[CREATE INDEX IF NOT EXISTS billing_coupon_redemptions_email_idx
+            ON billing_coupon_redemptions (coupon_id, email_norm) WHERE email_norm IS NOT NULL]])
+        db.query([[CREATE INDEX IF NOT EXISTS billing_coupon_redemptions_reserved_idx
+            ON billing_coupon_redemptions (expires_at) WHERE status = 'reserved']])
+
+        -- past_due grace counts from when the payment failed, not from the period end.
+        db.query("ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS past_due_since TIMESTAMP")
+        db.query([[UPDATE billing_subscriptions SET past_due_since = updated_at
+            WHERE status = 'past_due' AND past_due_since IS NULL AND app_id IS NOT NULL]])
+
+        -- The licence a purchase created or extended (refunds undo exactly that).
+        db.query("ALTER TABLE billing_purchases ADD COLUMN IF NOT EXISTS license_id BIGINT REFERENCES billing_licenses(id) ON DELETE SET NULL")
+        db.query("UPDATE billing_purchases p SET license_id = l.id FROM billing_licenses l WHERE l.purchase_id = p.id AND p.license_id IS NULL")
+        db.query("CREATE INDEX IF NOT EXISTS billing_purchases_license_idx ON billing_purchases (license_id) WHERE license_id IS NOT NULL")
+        db.query("CREATE INDEX IF NOT EXISTS billing_licenses_subscription_idx ON billing_licenses (subscription_id) WHERE subscription_id IS NOT NULL")
+        db.query("CREATE INDEX IF NOT EXISTS billing_licenses_purchase_idx ON billing_licenses (purchase_id) WHERE purchase_id IS NOT NULL")
+        db.query("UPDATE billing_licenses l SET purchase_id = NULL WHERE purchase_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing_purchases p WHERE p.id = l.purchase_id)")
+        if not db.query("SELECT 1 FROM pg_constraint WHERE conname = 'billing_licenses_purchase_fk'")[1] then
+            db.query([[ALTER TABLE billing_licenses ADD CONSTRAINT billing_licenses_purchase_fk
+                FOREIGN KEY (purchase_id) REFERENCES billing_purchases(id) ON DELETE SET NULL]])
+        end
+
+        -- Transaction ids are unique per app (two apps may see the same store id).
+        db.query("DROP INDEX IF EXISTS billing_purchases_source_txn_uidx")
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS billing_purchases_app_source_txn_uidx
+            ON billing_purchases (app_id, source, external_transaction_id) WHERE external_transaction_id IS NOT NULL]])
+        db.query("DROP INDEX IF EXISTS billing_subscriptions_source_txn_uidx")
+        db.query([[CREATE UNIQUE INDEX IF NOT EXISTS billing_subscriptions_app_source_txn_uidx
+            ON billing_subscriptions (namespace_id, app_id, source, original_transaction_id)
+            WHERE original_transaction_id IS NOT NULL]])
+
+        -- A Stripe refund seen before its checkout was fulfilled.
+        db.query([[
+            CREATE TABLE IF NOT EXISTS billing_stripe_refunds (
+                payment_intent_id TEXT PRIMARY KEY,
+                amount_refunded BIGINT NOT NULL,
+                full_refund BOOLEAN NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        ]])
+
+        -- Who released a device: released seats count against the limit for a while.
+        db.query("ALTER TABLE billing_license_activations ADD COLUMN IF NOT EXISTS released_by TEXT")
+        db.query([[CREATE INDEX IF NOT EXISTS billing_license_activations_released_idx
+            ON billing_license_activations (license_id, deactivated_at) WHERE deactivated_at IS NOT NULL]])
+
+        -- Access links: the request only records the email; the job finds the
+        -- customer, so known and unknown emails cost the same.
+        db.query("ALTER TABLE billing_access_links ALTER COLUMN customer_id DROP NOT NULL")
+        db.query("ALTER TABLE billing_access_links ADD COLUMN IF NOT EXISTS email_norm TEXT")
+
+        -- Key deliveries also serve webhooks (decrypted at send time), not only checkout.
+        db.query("ALTER TABLE billing_key_deliveries ALTER COLUMN checkout_session_id DROP NOT NULL")
+        db.query("ALTER TABLE billing_key_deliveries ADD COLUMN IF NOT EXISTS webhook BOOLEAN NOT NULL DEFAULT false")
+        db.query("ALTER TABLE billing_key_deliveries ADD COLUMN IF NOT EXISTS webhooked_at TIMESTAMPTZ")
     end,
 }
