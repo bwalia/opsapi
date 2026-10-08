@@ -30,13 +30,14 @@ local STATUS_KEY, STATUS_LOCK = "ai:status", "ai:status:probe"
 local PROBE_TIMEOUT_MS = 20000
 local SLOW_MS = 3000
 
--- One real 1-token request to the configured model: the latency users of the
--- agent actually get (gateway + queue + model). It also keeps the model loaded.
-local function probe()
+-- One real 1-token request to one model (never its fallback): the latency
+-- users of the agent actually get (gateway + queue + model). It also keeps the
+-- model loaded.
+local function probe(cfg)
     ngx.update_time()
     local started = ngx.now()
-    local msg, err, status = Llm.chat({ { role = "user", content = "ping" } }, nil,
-        { max_tokens = 1, timeout_ms = PROBE_TIMEOUT_MS, usage = { feature = "health_check", system = true } })
+    local msg, err, status = Llm.chat({ { role = "user", content = "ping" } }, nil, { cfg = cfg, no_fallback = true,
+        max_tokens = 1, timeout_ms = PROBE_TIMEOUT_MS, usage = { feature = "health_check", system = true } })
     ngx.update_time()
     local ms = math.floor((ngx.now() - started) * 1000)
     if msg then
@@ -46,7 +47,7 @@ local function probe()
         return { status = "down", reason = "The model provider rejected the credentials (AI_API_KEY)" }
     end
     if status == 404 then
-        return { status = "down", reason = Llm.model .. " isn't available from " .. Llm.provider }
+        return { status = "down", reason = cfg.model .. " isn't available from " .. cfg.provider }
     end
     if status then
         return { status = "down", reason = "The model server answered HTTP " .. status }
@@ -57,30 +58,44 @@ local function probe()
 end
 
 --- The model's health: { provider, model, status = ok|slow|down|checking|off,
--- latency_ms?, reason?, checked_at? }. Shared by every worker and refreshed
--- every 60s (30s while down); one worker probes at a time and the rest return
--- the last result, so dashboards polling it never pile load onto the model.
+-- latency_ms?, reason?, checked_at?, fallback? }. Shared by every worker and
+-- refreshed every 60s (30s while down); one worker probes at a time and the
+-- rest return the last result, so dashboards polling it never pile load onto
+-- the model. While the main model is down and the fallback answers, it reports
+-- the fallback as "slow" (amber) with fallback = true and the reason.
 function Agent.status()
     local base = { provider = Llm.provider, model = Llm.model }
-    if not Llm.configured() then
+    if not Llm.configured() and not Llm.fallback then
         base.status, base.reason = "off", "No AI model is configured on this server (AI_PROVIDER / AI_API_KEY)"
         return base
     end
     local cache, locks = ngx.shared.cache, ngx.shared.locks
     local last = cache and cache:get(STATUS_KEY)
     last = last and cjson.decode(last)
-    if last and last.model == Llm.model and ngx.time() - (last.checked_at or 0) < (last.status == "down" and 30 or 60) then
+    if last and last.primary_model == Llm.model
+        and ngx.time() - (last.checked_at or 0) < (last.status == "down" and 30 or 60) then
         return last
     end
-    if locks and not locks:add(STATUS_LOCK, true, PROBE_TIMEOUT_MS / 1000 + 5) then
+    -- Long enough for the main probe plus the fallback probe.
+    if locks and not locks:add(STATUS_LOCK, true, 2 * PROBE_TIMEOUT_MS / 1000 + 5) then
         if last then return last end
         base.status = "checking"
         return base
     end
-    local ok, result = pcall(probe)
-    if locks then locks:delete(STATUS_LOCK) end
+    local ok, result = pcall(probe, Llm.default)
     if not ok then result = { status = "down", reason = "Health check failed: " .. tostring(result) } end
     for k, v in pairs(base) do result[k] = v end
+    local fb = Llm.fallback
+    if result.status == "down" and fb then
+        local fok, fres = pcall(probe, fb)
+        if fok and fres.status ~= "down" then
+            result = { status = "slow", fallback = true, provider = fb.provider, model = fb.model,
+                latency_ms = fres.latency_ms, reason = Llm.model .. " is unavailable (" .. tostring(result.reason)
+                    .. "), so the fallback " .. fb.model .. " is answering" }
+        end
+    end
+    if locks then locks:delete(STATUS_LOCK) end
+    result.primary_model = Llm.model
     result.checked_at = ngx.time()
     if cache then cache:set(STATUS_KEY, cjson.encode(result), 600) end
     return result

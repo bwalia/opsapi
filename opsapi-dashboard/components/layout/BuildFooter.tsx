@@ -45,6 +45,8 @@ interface AiStatus {
   latency_ms?: number;
   reason?: string;
   checked_at?: number;
+  /** The main model is down and this (fallback) model is answering. */
+  fallback?: boolean;
 }
 
 const AI_DOT: Record<AiStatus['status'], string> = {
@@ -93,7 +95,8 @@ function AiStatusBadge() {
 
   if (!ai) return null;
   const up = ai.status === 'ok' || ai.status === 'slow';
-  const detail = up ? `answered in ${ai.latency_ms} ms` : (ai.reason ?? ai.status);
+  const answered = `answered in ${ai.latency_ms} ms`;
+  const detail = up ? (ai.fallback ? `${ai.reason}; ${answered}` : answered) : (ai.reason ?? ai.status);
   const checked = ai.checked_at ? ` · checked ${formatRelativeTime(new Date(ai.checked_at * 1000))}` : '';
 
   return (
@@ -107,6 +110,7 @@ function AiStatusBadge() {
         <span className={`h-2 w-2 rounded-full ${AI_DOT[ai.status]}`} aria-hidden />
         <span className="text-secondary-400">AI</span>
         <span className="font-mono text-secondary-700">{ai.model}</span>
+        {ai.fallback && <span className="text-amber-600">fallback</span>}
         <span className={ai.status === 'down' ? 'font-medium text-error-600' : 'font-mono text-secondary-500'}>
           {aiLabel(ai)}
         </span>
