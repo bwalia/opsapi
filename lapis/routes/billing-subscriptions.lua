@@ -17,6 +17,7 @@
     from the app's default plan and grants.
 ]]
 
+local cjson = require("cjson")
 local Http = require("helper.field-service-http")
 local Apps = require("queries.BillingAppQueries")
 local Subs = require("queries.BillingSubscriptionQueries")
@@ -99,7 +100,7 @@ return function(app)
         return Http.ok({
             customer = customer_view(c),
             entitlements = ent,
-            token = token,
+            token = token or cjson.null,
         }, 200, not Signing.configured() and { token = "not configured: set BILLING_SIGNING_KEY" } or nil)
     end))
 end
