@@ -39,7 +39,7 @@ on:
           - deploy
           - build-and-deploy
       IMAGE_TAG:
-        description: "Image to DEPLOY (deploy-only): a release version from 1.0.184 on (e.g. 1.0.184, what Ring Promoter sends) or a full build tag (e.g. 1.0.183-431). Blank → this run's build tag / latest."
+        description: "Image to DEPLOY (deploy-only): a release version (e.g. 1.0.185, what Ring Promoter sends) or a full build tag (e.g. 1.0.183-431). Blank → this run's build tag / latest."
         required: false
         default: ""
         type: string
@@ -660,7 +660,7 @@ jobs:
           # and 503s the whole API (this happened on int). Fail fast instead.
           IMAGE_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${TAG}"
           if ! docker manifest inspect "$IMAGE_REF" >/dev/null 2>&1; then
-            echo "::error::Image '$IMAGE_REF' not found in the registry — refusing to deploy a non-existent tag (it would ImagePullBackOff and take the API down). Pass a release version from 1.0.184 on (e.g. 1.0.184, what Ring Promoter sends), a full build tag with its -<runNumber> suffix (e.g. 1.0.183-431), or omit IMAGE_TAG to use this run's freshly-built image."
+            echo "::error::Image '$IMAGE_REF' not found in the registry — refusing to deploy a non-existent tag (it would ImagePullBackOff and take the API down). Pass a release version built after Ring Promoter support was added (e.g. 1.0.185, what Ring Promoter sends), a full build tag with its -<runNumber> suffix (e.g. 1.0.183-431), or omit IMAGE_TAG to use this run's freshly-built image."
             exit 1
           fi
 

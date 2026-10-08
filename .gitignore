@@ -27,3 +27,5 @@ firebase-service-account.json
 
 # APNs Keys (Apple Push Notifications)
 AuthKey_*.p8
+
+mcp/node_modules
