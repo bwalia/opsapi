@@ -319,6 +319,16 @@ app:before_filter(function(self)
         ["/auth/logout"] = true,         -- Logout (revokes refresh token)
     }
 
+    -- /api/v2/<code>/public/... is public only for a registered plugin whose
+    -- own prefix that is (PLUGINS.md), never for a core route family.
+    local function plugin_public(path)
+        local code = path:match("^/api/v2/([^/]+)/public/")
+        if not code then return false end
+        local ok, loader = pcall(require, "helper.project-loader")
+        local m = ok and loader.getByCode(code)
+        return m ~= nil and m.api_prefix == "/api/v2/" .. code
+    end
+
     -- Skip auth for public routes
     if uri == "/" or uri == "/health" or uri == "/ready" or uri == "/live" or
         uri == "/swagger" or uri == "/api-docs" or uri == "/openapi.json" or
@@ -326,9 +336,9 @@ app:before_filter(function(self)
         uri == "/api/v2/system/info" or public_auth_routes[uri] or
         uri:match("^/api/v2/public/") or
         uri:match("^/api/v2/themes/active/styles%.css$") or
-        uri:match("^/api/v2/[^/]+/public/") or
+        plugin_public(uri) or
         uri:match("^/plugin%-ui/") or -- plugin pages' static files (routes/plugins.lua)
-        uri:match("^/api/v2/delivery/fee%-estimate") or uri:match("^/api/v2/delivery/pricing%-config$") then
+        uri == "/api/v2/delivery/fee-estimate" or uri == "/api/v2/delivery/pricing-config" then
         ngx.log(ngx.DEBUG, "Skipping auth for: ", uri)
         return
     end
