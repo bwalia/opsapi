@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Card, Badge, Button, ConfirmDialog } from '@/components/ui';
 import { customersService } from '@/services/customers.service';
+import CustomerBillingPanel from '@/components/billing/CustomerBillingPanel';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type {
   Customer,
@@ -255,7 +256,8 @@ export default function CustomerDetailPage() {
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-5 sm:space-y-6 pb-4">
+    <div className="space-y-5 sm:space-y-6 pb-4">
+    <form onSubmit={handleSave} className="space-y-5 sm:space-y-6">
       {/* Top bar */}
       <div className="flex items-center justify-between gap-3">
         <button
@@ -461,5 +463,8 @@ export default function CustomerDetailPage() {
         isLoading={isDeleting}
       />
     </form>
+    {/* Outside the form: its modals have forms of their own. */}
+    <CustomerBillingPanel customerUuid={uuid} />
+    </div>
   );
 }

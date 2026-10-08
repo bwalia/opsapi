@@ -95,6 +95,18 @@ function CustomerQueries.all(params)
         where_clause = "where namespace_id = " .. tonumber(namespace_id)
     end
 
+    -- ?search= matches email, names and (with billing) the app's external_id.
+    local search = type(params.search) == "string" and params.search:match("^%s*(.-)%s*$") or ""
+    if search ~= "" and where_clause ~= "" then
+        local db = require("lapis.db")
+        local like = db.escape_literal("%" .. search:sub(1, 100):gsub("[%%_\\]", "\\%0") .. "%")
+        local cols = { "email", "first_name", "last_name" }
+        if VALID_CUSTOMER_FIELDS.external_id then cols[#cols + 1] = "external_id" end
+        local ors = {}
+        for i, c in ipairs(cols) do ors[i] = c .. " ILIKE " .. like end
+        where_clause = where_clause .. " and (" .. table.concat(ors, " or ") .. ")"
+    end
+
     local paginated = CustomerModel:paginated(where_clause .. order_clause, {
         per_page = perPage
     })
