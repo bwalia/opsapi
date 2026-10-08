@@ -39,7 +39,7 @@ on:
           - deploy
           - build-and-deploy
       IMAGE_TAG:
-        description: "Image tag to DEPLOY (deploy-only). Blank → this run's build tag / latest."
+        description: "Image to DEPLOY (deploy-only): a release version (e.g. 1.0.185, what Ring Promoter sends) or a full build tag (e.g. 1.0.183-431). Blank → this run's build tag / latest."
         required: false
         default: ""
         type: string
@@ -270,6 +270,12 @@ jobs:
           SAFE_VERSION=$(echo "$APP_VERSION" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/-\+$//')
           IMAGE_TAG="${SAFE_VERSION}-${BUILD_NUMBER}"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          # A build of a release commit (describe is exactly x.y.z) is ALSO
+          # tagged with the bare version: Ring Promoter promotes releases by
+          # their git tag, so bwalia/opsapi:1.0.183 must name that build.
+          if [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "RELEASE_REF=${IMAGE_REGISTRY}/${IMAGE_NAME}:${APP_VERSION}" >> $GITHUB_OUTPUT
+          fi
           echo "IMAGE_REF=${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "Build: v$APP_VERSION #$BUILD_NUMBER at $BUILD_TIME (tag: $IMAGE_TAG)"
 
@@ -285,6 +291,7 @@ jobs:
           tags: |
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ steps.version.outputs.IMAGE_REF }}
+            ${{ steps.version.outputs.RELEASE_REF }}
           # `TAG=latest` retained for existing consumers. New APP_VERSION /
           # BUILD_NUMBER / BUILD_TIME args are what app.lua reads via
           # os.getenv() so `/`, `/health`, `/metrics` surface the same
@@ -653,7 +660,7 @@ jobs:
           # and 503s the whole API (this happened on int). Fail fast instead.
           IMAGE_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${TAG}"
           if ! docker manifest inspect "$IMAGE_REF" >/dev/null 2>&1; then
-            echo "::error::Image '$IMAGE_REF' not found in the registry — refusing to deploy a non-existent tag (it would ImagePullBackOff and take the API down). Pass the FULL tag including its -<runNumber> suffix (e.g. ${TAG%-*}-<run>), or omit the IMAGE_TAG input to use this run's freshly-built image."
+            echo "::error::Image '$IMAGE_REF' not found in the registry — refusing to deploy a non-existent tag (it would ImagePullBackOff and take the API down). Pass a release version built after Ring Promoter support was added (e.g. 1.0.185, what Ring Promoter sends), a full build tag with its -<runNumber> suffix (e.g. 1.0.183-431), or omit IMAGE_TAG to use this run's freshly-built image."
             exit 1
           fi
 

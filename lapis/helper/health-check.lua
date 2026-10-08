@@ -7,6 +7,10 @@ local http = require("resty.http")
 
 local HealthCheck = {}
 
+-- The build's release version (git describe, baked into the image), the same
+-- string `/`, `/ready` and /metrics report.
+local APP_VERSION = os.getenv("APP_VERSION") or "dev"
+
 -- ── DNS resolution helper (mirrors minio.lua logic) ──────────────────────────
 -- In K8s, resty.http can't resolve .svc.cluster.local hostnames via the nginx
 -- resolver. This helper uses resty.dns.resolver to query CoreDNS directly,
@@ -504,7 +508,7 @@ function HealthCheck.getSystemInfo()
             lapis_environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
             deploy_env = os.getenv("OPSAPI_DEPLOY_ENV"),
             project_code = os.getenv("PROJECT_CODE"),
-            app_version = os.getenv("VERSION") or "1.0.0",
+            app_version = APP_VERSION,
             stack = os.getenv("STACK"),
             deployment_time = os.getenv("VITE_DEPLOYMENT_TIME"),
         },
@@ -569,7 +573,7 @@ function HealthCheck.getFullStatus()
         status = overall_status,
         timestamp = ngx.time(),
         timestamp_iso = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        version = "1.0.0",
+        version = APP_VERSION,
         environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
         system_info = HealthCheck.getSystemInfo(),
         total_checks = #checks,
@@ -600,7 +604,7 @@ function HealthCheck.getQuickStatus()
         status = overall,
         timestamp = ngx.time(),
         timestamp_iso = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        version = "1.0.0",
+        version = APP_VERSION,
         environment = os.getenv("LAPIS_ENVIRONMENT") or "development",
         system_info = HealthCheck.getSystemInfo(),
         services = {

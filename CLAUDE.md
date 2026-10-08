@@ -68,6 +68,15 @@ See `routes/crm-accounts.lua` for the canonical CRUD example (note the explicit 
 - Routes typically compose them: `AuthMiddleware.requireAuth(NamespaceMiddleware.requireNamespace(fn))`.
 - The global `before_filter` in `app.lua` keeps an explicit allow-list of public URIs and URI patterns (e.g. `^/api/v2/[^/]+/public/`). Adding a new public endpoint means updating that list.
 
+### Namespace access model — restricting a tenant to certain modules
+There are three layers, and only one is a hard block. **Know the difference before promising a customer "this tenant only has modules X, Y".**
+- **`PROJECT_CODE` (per *deployment*, hard) — the only true boundary.** It's a process-level env var; a disabled feature's routes are never `require`d, so requesting them returns **404 for everyone, including namespace owners and platform admins**, and their tables don't exist. Two namespaces in the *same* deployment/DB **cannot** have different API-accessible module sets — `PROJECT_CODE` is global to the process. To hard-restrict a tenant (owner included), give it its **own deployment/DB with a narrower `PROJECT_CODE`** (e.g. `core_only`, `field_service`, `crm,invoicing`).
+- **Per-namespace RBAC (soft, members only).** A non-owner member lacking `module.action` gets **403** "Permission denied". **Namespace owners (`is_owner`) and platform admins (`administrative` role) bypass RBAC entirely** — they can hit any *loaded* route. New namespaces seed: owner = manage-all, admin = manage-all (except `namespace`=read), member = empty.
+- **`namespace_menu_config` (cosmetic).** Toggling a sidebar item's `is_enabled` for a namespace only hides the page; it does **not** block the API route (an owner can still `curl` it → 200). The per-namespace `namespace.project_code` column likewise only filters the menu and seeds default-role modules — it is never checked at request time.
+- **Entitlements** (`helper/entitlement-service.lua`) are Stripe billing metadata only — **not** wired into any request-time gate.
+
+Status codes: **401** = missing/invalid credentials; **403** = route exists but RBAC (or non-membership/inactive) denies — members only; **404** = module not deployed for this `PROJECT_CODE`; **400** = missing `X-Namespace-*` header.
+
 ### Migrations
 `migrations.lua` is a single large conditional migration registry: it uses `load_if_enabled(feature, "migrations.x")` so each project only creates its tables. Per-feature migration modules live in `migrations/*.lua`. There is also `schema-updates.lua`, `production-schema-upgrade.lua`, and `ecommerce-migrations.lua` for targeted upgrades. Migrations are tracked via `helper/migration-tracker.lua` (supports dry-run + skip logging).
 
